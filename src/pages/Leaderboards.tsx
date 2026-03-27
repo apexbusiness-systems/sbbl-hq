@@ -1,0 +1,136 @@
+import { useState, useMemo } from 'react';
+import { players, teams, leagues } from '@/data/mock';
+import { LeagueBadge } from '@/components/ui/LeagueBadge';
+import { LeagueId, StatLine } from '@/types';
+import { Trophy, Crown, Medal } from 'lucide-react';
+
+type StatKey = keyof StatLine;
+const categories: { key: StatKey; label: string }[] = [
+  { key: 'pts', label: 'Points' },
+  { key: 'reb', label: 'Rebounds' },
+  { key: 'ast', label: 'Assists' },
+  { key: 'stl', label: 'Steals' },
+  { key: 'blk', label: 'Blocks' },
+  { key: 'fls', label: 'Fouls' },
+  { key: 'min', label: 'Minutes' },
+];
+
+const LeaderboardsPage = () => {
+  const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>('all');
+  const [activeCategory, setActiveCategory] = useState<StatKey>('pts');
+
+  const filtered = useMemo(() => {
+    const list = leagueFilter === 'all' ? players : players.filter(p => p.leagueId === leagueFilter);
+    return [...list].sort((a, b) => b.stats[activeCategory] - a.stats[activeCategory]);
+  }, [leagueFilter, activeCategory]);
+
+  const rankIcon = (i: number) => {
+    if (i === 0) return <Crown className="w-4 h-4 text-primary" />;
+    if (i === 1) return <Medal className="w-4 h-4 text-wbl" />;
+    if (i === 2) return <Medal className="w-4 h-4 text-tgifbl" />;
+    return <span className="stat-numeral text-sm text-muted-foreground w-4 text-center">{i + 1}</span>;
+  };
+
+  return (
+    <div className="min-h-screen">
+      <div className="container py-8 md:py-12">
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="font-display text-3xl md:text-4xl font-bold">Leaderboards</h1>
+            <p className="text-sm text-muted-foreground mt-1">Top performers across leagues</p>
+          </div>
+          <Trophy className="w-5 h-5 text-primary" />
+        </div>
+
+        {/* League filter */}
+        <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit mb-6">
+          {(['all', 'sbbl', 'wbl', 'tgifbl'] as const).map(l => (
+            <button key={l} onClick={() => setLeagueFilter(l)} className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${leagueFilter === l ? 'bg-card text-foreground' : 'text-muted-foreground'}`}>
+              {l === 'all' ? 'All' : l.toUpperCase()}
+            </button>
+          ))}
+        </div>
+
+        {/* Category tabs */}
+        <div className="flex gap-2 mb-8 overflow-x-auto scrollbar-hidden pb-2">
+          {categories.map(c => (
+            <button key={c.key} onClick={() => setActiveCategory(c.key)} className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider rounded-sm whitespace-nowrap transition-colors ${activeCategory === c.key ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'}`}>
+              {c.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Leaderboard */}
+        <div className="max-w-3xl">
+          {/* Top 3 Spotlight */}
+          {filtered.length >= 3 && (
+            <div className="grid grid-cols-3 gap-4 mb-8">
+              {filtered.slice(0, 3).map((p, i) => (
+                <div key={p.id} className={`panel p-4 text-center ${i === 0 ? 'border-primary/30' : ''}`}>
+                  <div className="flex justify-center mb-2">{rankIcon(i)}</div>
+                  <img src={p.avatar} alt={p.name} className="w-16 h-16 rounded-full object-cover mx-auto mb-2" loading="lazy" />
+                  <p className="font-display font-bold text-sm">{p.name}</p>
+                  <LeagueBadge leagueId={p.leagueId} />
+                  <p className="stat-numeral text-3xl text-primary mt-2">{p.stats[activeCategory]}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{categories.find(c => c.key === activeCategory)?.label}</p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Full list */}
+          <div className="space-y-2">
+            {filtered.map((p, i) => (
+              <div key={p.id} className={`panel p-3 flex items-center gap-4 ${i < 3 ? 'border-primary/20' : ''}`}>
+                <div className="w-6 flex justify-center">{rankIcon(i)}</div>
+                <img src={p.avatar} alt={p.name} className="w-10 h-10 rounded-full object-cover" loading="lazy" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{p.name}</p>
+                  <div className="flex items-center gap-2">
+                    <LeagueBadge leagueId={p.leagueId} />
+                    <span className="text-[10px] text-muted-foreground">{p.position} · {teams.find(t => t.id === p.teamId)?.name}</span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="stat-numeral text-xl text-primary">{p.stats[activeCategory]}</p>
+                </div>
+                {/* Mini stat bar */}
+                <div className="hidden md:block w-24">
+                  <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                    <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${(p.stats[activeCategory] / filtered[0].stats[activeCategory]) * 100}%` }} />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Team Rankings Snippet */}
+          <div className="mt-12">
+            <h2 className="font-display text-xl font-bold mb-4">Team Standings</h2>
+            <div className="space-y-2">
+              {teams.filter(t => leagueFilter === 'all' || t.leagueId === leagueFilter).sort((a, b) => (b.record.wins / (b.record.wins + b.record.losses)) - (a.record.wins / (a.record.wins + a.record.losses))).map((t, i) => (
+                <div key={t.id} className="panel p-3 flex items-center gap-4">
+                  <span className="stat-numeral text-sm text-muted-foreground w-6 text-center">{i + 1}</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">{t.name}</p>
+                    <div className="flex items-center gap-2">
+                      <LeagueBadge leagueId={t.leagueId} />
+                      <span className="text-[10px] text-muted-foreground">{t.division}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="stat-numeral text-sm text-success">{t.record.wins}W</span>
+                    <span className="stat-numeral text-sm text-destructive">{t.record.losses}L</span>
+                    <span className="stat-numeral text-sm">{((t.record.wins / (t.record.wins + t.record.losses)) * 100).toFixed(0)}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default LeaderboardsPage;
