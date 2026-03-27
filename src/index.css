@@ -1,96 +1,78 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
-
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* APEX-Olympus Dark System */
+    --background: 0 0% 4%;
+    --foreground: 40 10% 92%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 0 0% 7%;
+    --card-foreground: 40 10% 92%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 8%;
+    --popover-foreground: 40 10% 92%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 40 60% 55%;
+    --primary-foreground: 0 0% 4%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 40 10% 80%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 0 0% 10%;
+    --muted-foreground: 0 0% 50%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 40 50% 45%;
+    --accent-foreground: 0 0% 4%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 0% 98%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 0 0% 14%;
+    --input: 0 0% 14%;
+    --ring: 40 60% 55%;
 
-    --radius: 0.5rem;
+    --radius: 0.25rem;
 
-    --sidebar-background: 0 0% 98%;
+    /* League accent tokens */
+    --sbbl: 30 90% 55%;
+    --sbbl-glow: 35 100% 60%;
+    --wbl: 210 60% 60%;
+    --wbl-glow: 215 70% 65%;
+    --tgifbl: 42 50% 42%;
+    --tgifbl-glow: 45 55% 48%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    /* Functional */
+    --live: 210 100% 55%;
+    --live-glow: 210 100% 65%;
+    --success: 145 60% 42%;
+    --warning: 38 92% 50%;
 
-    --sidebar-primary: 240 5.9% 10%;
+    /* Surface layers */
+    --surface-raised: 0 0% 9%;
+    --surface-overlay: 0 0% 6%;
+    --surface-glass: 0 0% 100% / 0.04;
 
-    --sidebar-primary-foreground: 0 0% 98%;
+    /* Premium */
+    --gold-gradient: linear-gradient(135deg, hsl(40 60% 55%), hsl(35 80% 65%));
+    --chrome-gradient: linear-gradient(180deg, hsl(0 0% 18%), hsl(0 0% 8%));
+    --obsidian-gradient: linear-gradient(180deg, hsl(0 0% 6%), hsl(0 0% 2%));
 
-    --sidebar-accent: 240 4.8% 95.9%;
+    --shadow-elevated: 0 8px 32px -8px hsl(0 0% 0% / 0.6);
+    --shadow-glow-gold: 0 0 24px -4px hsl(40 60% 55% / 0.15);
+    --shadow-glow-live: 0 0 20px -4px hsl(210 100% 55% / 0.2);
 
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
-  }
-
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 0 0% 5%;
+    --sidebar-foreground: 0 0% 70%;
+    --sidebar-primary: 40 60% 55%;
+    --sidebar-primary-foreground: 0 0% 4%;
+    --sidebar-accent: 0 0% 10%;
+    --sidebar-accent-foreground: 40 10% 90%;
+    --sidebar-border: 0 0% 12%;
+    --sidebar-ring: 40 60% 55%;
   }
 }
 
@@ -100,6 +82,88 @@ All colors MUST be HSL.
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Space Grotesk', 'Inter', sans-serif;
+    @apply tracking-tight font-bold;
+  }
+}
+
+@layer components {
+  .panel {
+    @apply bg-card border border-border rounded-sm;
+    box-shadow: var(--shadow-elevated);
+  }
+
+  .panel-glass {
+    @apply rounded-sm border border-border;
+    background: hsl(var(--surface-glass));
+    backdrop-filter: blur(12px);
+  }
+
+  .stat-numeral {
+    font-family: 'Space Grotesk', monospace;
+    @apply font-bold tracking-tighter tabular-nums;
+  }
+
+  .league-badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-semibold uppercase tracking-wider;
+  }
+
+  .league-badge-sbbl {
+    @apply league-badge;
+    background: hsl(var(--sbbl) / 0.15);
+    color: hsl(var(--sbbl));
+    border: 1px solid hsl(var(--sbbl) / 0.3);
+  }
+
+  .league-badge-wbl {
+    @apply league-badge;
+    background: hsl(var(--wbl) / 0.15);
+    color: hsl(var(--wbl));
+    border: 1px solid hsl(var(--wbl) / 0.3);
+  }
+
+  .league-badge-tgifbl {
+    @apply league-badge;
+    background: hsl(var(--tgifbl) / 0.15);
+    color: hsl(var(--tgifbl));
+    border: 1px solid hsl(var(--tgifbl) / 0.3);
+  }
+
+  .gold-accent {
+    color: hsl(var(--primary));
+  }
+
+  .gold-bg {
+    background: var(--gold-gradient);
+    color: hsl(var(--primary-foreground));
+  }
+
+  .live-pulse {
+    @apply relative;
+  }
+
+  .live-pulse::before {
+    content: '';
+    @apply absolute inset-0 rounded-full;
+    background: hsl(var(--live));
+    animation: pulse-live 2s ease-in-out infinite;
+  }
+
+  @keyframes pulse-live {
+    0%, 100% { opacity: 0.4; transform: scale(1); }
+    50% { opacity: 0; transform: scale(2); }
+  }
+
+  .scrollbar-hidden {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hidden::-webkit-scrollbar {
+    display: none;
   }
 }
