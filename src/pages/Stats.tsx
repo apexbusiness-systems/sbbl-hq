@@ -2,13 +2,15 @@ import { useState, useMemo } from 'react';
 import { players, teams, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LeagueId, StatLine } from '@/types';
-import { ArrowUpDown, BarChart3 } from 'lucide-react';
+import { ArrowUpDown, BarChart3, Lock } from 'lucide-react';
+import { useApp } from '@/contexts/AppContext';
 
 type StatKey = keyof StatLine;
 const statKeys: StatKey[] = ['pts', 'reb', 'ast', 'stl', 'blk', 'fls', 'min'];
 const statLabels: Record<StatKey, string> = { pts: 'PTS', reb: 'REB', ast: 'AST', stl: 'STL', blk: 'BLK', fls: 'FLS', min: 'MIN' };
 
 const StatsPage = () => {
+  const { hasPremiumPlayerAccess } = useApp();
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>('all');
   const [sortBy, setSortBy] = useState<StatKey>('pts');
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
@@ -17,6 +19,7 @@ const StatsPage = () => {
     const list = leagueFilter === 'all' ? players : players.filter(p => p.leagueId === leagueFilter);
     return [...list].sort((a, b) => b.stats[sortBy] - a.stats[sortBy]);
   }, [leagueFilter, sortBy]);
+  const visibleRows = hasPremiumPlayerAccess ? filtered : filtered.slice(0, 3);
 
   const detail = selectedPlayer ? players.find(p => p.id === selectedPlayer) : null;
 
@@ -64,7 +67,7 @@ const StatsPage = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.map((p, i) => (
+                    {visibleRows.map((p, i) => (
                       <tr key={p.id} onClick={() => setSelectedPlayer(p.id)} className={`border-b border-border cursor-pointer transition-colors hover:bg-secondary/50 ${selectedPlayer === p.id ? 'bg-secondary' : ''}`}>
                         <td className="p-3">
                           <div className="flex items-center gap-2">
@@ -88,12 +91,20 @@ const StatsPage = () => {
                   </tbody>
                 </table>
               </div>
+              {!hasPremiumPlayerAccess && (
+                <div className="p-4 border-t border-border bg-secondary/40 flex items-center justify-between gap-3">
+                  <div className="text-xs text-muted-foreground">
+                    Showing minimal stats preview. Players with an active $7 registration tier get full sortable stats and player detail access.
+                  </div>
+                  <span className="inline-flex items-center gap-1 text-xs text-primary font-semibold"><Lock className="w-3 h-3" /> Premium Player Stats</span>
+                </div>
+              )}
             </div>
           </div>
 
           {/* Player Detail Panel */}
           <div>
-            {detail ? (
+            {detail && hasPremiumPlayerAccess ? (
               <div className="panel p-4 sticky top-24 space-y-4">
                 <div className="flex items-center gap-3">
                   <img src={detail.avatar} alt={detail.name} className="w-16 h-16 rounded-full object-cover" loading="lazy" />
@@ -128,7 +139,9 @@ const StatsPage = () => {
             ) : (
               <div className="panel p-8 text-center">
                 <BarChart3 className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">Select a player to view stat breakdown</p>
+                <p className="text-sm text-muted-foreground">
+                  {hasPremiumPlayerAccess ? 'Select a player to view stat breakdown' : 'Upgrade to active player tier to unlock full stat breakdowns and all player profiles.'}
+                </p>
               </div>
             )}
           </div>

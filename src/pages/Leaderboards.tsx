@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react';
 import { players, teams, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LeagueId, StatLine } from '@/types';
-import { Trophy, Crown, Medal } from 'lucide-react';
+import { Trophy, Crown, Medal, Lock } from 'lucide-react';
+import { useApp } from '@/contexts/AppContext';
 
 type StatKey = keyof StatLine;
 const categories: { key: StatKey; label: string }[] = [
@@ -16,6 +17,7 @@ const categories: { key: StatKey; label: string }[] = [
 ];
 
 const LeaderboardsPage = () => {
+  const { hasPremiumPlayerAccess } = useApp();
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>('all');
   const [activeCategory, setActiveCategory] = useState<StatKey>('pts');
 
@@ -23,6 +25,7 @@ const LeaderboardsPage = () => {
     const list = leagueFilter === 'all' ? players : players.filter(p => p.leagueId === leagueFilter);
     return [...list].sort((a, b) => b.stats[activeCategory] - a.stats[activeCategory]);
   }, [leagueFilter, activeCategory]);
+  const visible = hasPremiumPlayerAccess ? filtered : filtered.slice(0, 3);
 
   const rankIcon = (i: number) => {
     if (i === 0) return <Crown className="w-4 h-4 text-primary" />;
@@ -63,9 +66,9 @@ const LeaderboardsPage = () => {
         {/* Leaderboard */}
         <div className="max-w-3xl">
           {/* Top 3 Spotlight */}
-          {filtered.length >= 3 && (
+          {visible.length >= 3 && (
             <div className="grid grid-cols-3 gap-4 mb-8">
-              {filtered.slice(0, 3).map((p, i) => (
+              {visible.slice(0, 3).map((p, i) => (
                 <div key={p.id} className={`panel p-4 text-center ${i === 0 ? 'border-primary/30' : ''}`}>
                   <div className="flex justify-center mb-2">{rankIcon(i)}</div>
                   <img src={p.avatar} alt={p.name} className="w-16 h-16 rounded-full object-cover mx-auto mb-2" loading="lazy" />
@@ -80,7 +83,7 @@ const LeaderboardsPage = () => {
 
           {/* Full list */}
           <div className="space-y-2">
-            {filtered.map((p, i) => (
+            {visible.map((p, i) => (
               <div key={p.id} className={`panel p-3 flex items-center gap-4 ${i < 3 ? 'border-primary/20' : ''}`}>
                 <div className="w-6 flex justify-center">{rankIcon(i)}</div>
                 <img src={p.avatar} alt={p.name} className="w-10 h-10 rounded-full object-cover" loading="lazy" />
@@ -97,12 +100,18 @@ const LeaderboardsPage = () => {
                 {/* Mini stat bar */}
                 <div className="hidden md:block w-24">
                   <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                    <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${(p.stats[activeCategory] / filtered[0].stats[activeCategory]) * 100}%` }} />
+                    <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${(p.stats[activeCategory] / visible[0].stats[activeCategory]) * 100}%` }} />
                   </div>
                 </div>
               </div>
             ))}
           </div>
+          {!hasPremiumPlayerAccess && (
+            <div className="mt-4 panel p-4 flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">Minimal leaderboard mode is shown for fans and players without an active registration renewal.</p>
+              <span className="inline-flex items-center gap-1 text-xs text-primary font-semibold"><Lock className="w-3 h-3" /> Full rankings require active player tier</span>
+            </div>
+          )}
 
           {/* Team Rankings Snippet */}
           <div className="mt-12">
