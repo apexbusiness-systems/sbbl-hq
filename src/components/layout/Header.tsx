@@ -18,9 +18,10 @@ const mainNav = [
 ];
 
 export const Header = () => {
-  const { activeLeague, setActiveLeague, authMode, setAuthMode, isAdmin, bagItems, setBagOpen } = useApp();
+  const { activeLeague, setActiveLeague, authRole, setAuthRole, isPrototypeAuthMode, isAdmin, bagItems, setBagOpen } = useApp();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const authRoleCycle: Array<'fan' | 'player' | 'league_admin' | 'super_admin'> = ['fan', 'player', 'league_admin', 'super_admin'];
 
   const leagueAccentClass = (id: string) => {
     if (id === 'sbbl') return 'text-sbbl';
@@ -49,17 +50,23 @@ export const Header = () => {
             ))}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setAuthMode(authMode === 'fan' ? 'admin' : 'fan')}
-              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium transition-colors ${
-                isAdmin
-                  ? 'bg-primary/15 text-primary border border-primary/30'
-                  : 'bg-secondary text-secondary-foreground'
-              }`}
-            >
-              <Shield className="w-3 h-3" />
-              {isAdmin ? 'Admin' : 'Fan'}
-            </button>
+            {isPrototypeAuthMode && (
+              <button
+                onClick={() => {
+                  const currentIndex = authRoleCycle.findIndex((role) => role === authRole);
+                  const nextRole = authRoleCycle[(currentIndex + 1) % authRoleCycle.length];
+                  setAuthRole(nextRole);
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium transition-colors ${
+                  isAdmin
+                    ? 'bg-primary/15 text-primary border border-primary/30'
+                    : 'bg-secondary text-secondary-foreground'
+                }`}
+              >
+                <Shield className="w-3 h-3" />
+                {authRole.replace('_', ' ')}
+              </button>
+            )}
             <div className="hidden md:flex items-center gap-1">
               <button className="p-1.5 text-muted-foreground hover:text-foreground"><RefreshCw className="w-3.5 h-3.5" /></button>
               <button className="p-1.5 text-muted-foreground hover:text-foreground"><Share2 className="w-3.5 h-3.5" /></button>
