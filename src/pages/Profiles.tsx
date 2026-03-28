@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { players, teams, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { useApp } from '@/contexts/AppContext';
@@ -15,7 +15,10 @@ const ProfilesPage = () => {
   const filteredTeams = teams;
   const detail = selectedPlayer ? players.find(p => p.id === selectedPlayer) : null;
 
-  const views: ProfileView[] = hasPremiumPlayerAccess ? ['players', 'teams', 'leagues'] : ['teams', 'leagues'];
+  const views: ProfileView[] = useMemo(
+    () => (hasPremiumPlayerAccess ? ['players', 'teams', 'leagues'] : ['teams', 'leagues']),
+    [hasPremiumPlayerAccess],
+  );
   useEffect(() => {
     if (!views.includes(view)) {
       setView('teams');

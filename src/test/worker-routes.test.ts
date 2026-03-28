@@ -24,4 +24,25 @@ describe('worker route smoke', () => {
 
     expect(res.status).toBe(400);
   });
+
+  it('maps dynamic route params and rejects duplicate idempotency keys', async () => {
+    const headers = {
+      'x-sbbl-user-id': 'u1',
+      'x-idempotency-key': 'idempotency-key-001',
+    };
+    const first = await worker.fetch(new Request('https://local/api/orders/abc-123/pay', {
+      method: 'POST',
+      headers,
+    }), env);
+
+    expect(first.status).toBe(200);
+    const payload = await first.json() as { params: { id?: string } };
+    expect(payload.params.id).toBe('abc-123');
+
+    const second = await worker.fetch(new Request('https://local/api/orders/abc-123/pay', {
+      method: 'POST',
+      headers,
+    }), env);
+    expect(second.status).toBe(400);
+  });
 });

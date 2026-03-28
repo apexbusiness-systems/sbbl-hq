@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { LeagueId } from '@/types';
 import { AppRole } from '@/lib/auth/roles';
 import { hasPremiumPlayerAccess, isPlayerSubscriptionActive } from '@/lib/auth/subscription';
@@ -43,6 +43,22 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     now.setMonth(now.getMonth() + 1);
     setPlayerSubscriptionEndsAt(now.toISOString());
   };
+
+  useEffect(() => {
+    const stored = localStorage.getItem('sbblhq.playerSubscriptionEndsAt');
+    if (stored) {
+      setPlayerSubscriptionEndsAt(stored);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!playerSubscriptionEndsAt) {
+      localStorage.removeItem('sbblhq.playerSubscriptionEndsAt');
+      return;
+    }
+
+    localStorage.setItem('sbblhq.playerSubscriptionEndsAt', playerSubscriptionEndsAt);
+  }, [playerSubscriptionEndsAt]);
 
   const addToBag = (id: string) => {
     setBagItems(prev => [...prev, id]);

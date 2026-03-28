@@ -10,10 +10,11 @@ const clientEnvSchema = z.object({
 
 const serverEnvSchema = z.object({
   SUPABASE_URL: z.string().url(),
+  SUPABASE_PUBLISHABLE_KEY: z.string().min(10).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(16),
-  STRIPE_SECRET_KEY: z.string().min(16),
-  STRIPE_WEBHOOK_SECRET: z.string().min(16),
-  RESEND_API_KEY: z.string().min(16),
+  STRIPE_SECRET_KEY: z.string().min(16).optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().min(16).optional(),
+  RESEND_API_KEY: z.string().min(16).optional(),
   OPTIONAL_SOCIAL_API_KEYS: z.string().optional(),
   OPTIONAL_TURNSTILE_SECRET_KEY: z.string().optional(),
 });

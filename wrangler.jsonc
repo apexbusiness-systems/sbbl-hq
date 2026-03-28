@@ -9,13 +9,15 @@
     "run_worker_first": ["/api/*", "/auth/*", "/webhooks/*", "/ops/*"]
   },
   "vars": {
-    "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co"
+    "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz"
   },
   "env": {
     "staging": {
       "name": "sbbl-hq-staging",
       "vars": {
-        "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co"
+        "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz"
       }
     }
   }
