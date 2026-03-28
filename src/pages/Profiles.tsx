@@ -1,19 +1,29 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { players, teams, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { useApp } from '@/contexts/AppContext';
-import { Trophy, Award, Users, ChevronRight } from 'lucide-react';
+import { Award, Users, Lock } from 'lucide-react';
 
 type ProfileView = 'players' | 'teams' | 'leagues';
 
 const ProfilesPage = () => {
-  const { activeLeague } = useApp();
+  const { hasPremiumPlayerAccess } = useApp();
   const [view, setView] = useState<ProfileView>('players');
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
 
   const filteredPlayers = players;
   const filteredTeams = teams;
   const detail = selectedPlayer ? players.find(p => p.id === selectedPlayer) : null;
+
+  const views: ProfileView[] = useMemo(
+    () => (hasPremiumPlayerAccess ? ['players', 'teams', 'leagues'] : ['teams', 'leagues']),
+    [hasPremiumPlayerAccess],
+  );
+  useEffect(() => {
+    if (!views.includes(view)) {
+      setView('teams');
+    }
+  }, [view, views]);
 
   return (
     <div className="min-h-screen">
@@ -25,14 +35,20 @@ const ProfilesPage = () => {
 
         {/* View Toggle */}
         <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit mb-8">
-          {(['players', 'teams', 'leagues'] as ProfileView[]).map(v => (
+          {views.map(v => (
             <button key={v} onClick={() => setView(v)} className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${view === v ? 'bg-card text-foreground' : 'text-muted-foreground'}`}>
               {v}
             </button>
           ))}
         </div>
+        {!hasPremiumPlayerAccess && (
+          <div className="panel p-4 mb-6 flex items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">Player profiles and leaderboard-linked profile tabs unlock only with an active player registration renewal.</p>
+            <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary"><Lock className="w-3 h-3" /> Player tier required</span>
+          </div>
+        )}
 
-        {view === 'players' && (
+        {view === 'players' && hasPremiumPlayerAccess && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
               {filteredPlayers.map(p => (
