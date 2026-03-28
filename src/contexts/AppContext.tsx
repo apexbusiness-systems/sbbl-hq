@@ -1,14 +1,21 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { LeagueId } from '@/types';
+import { AppRole } from '@/lib/auth/roles';
+import { hasPremiumPlayerAccess, isPlayerSubscriptionActive } from '@/lib/auth/subscription';
 
-type AuthMode = 'fan' | 'admin';
+const isDevAuthPrototype = import.meta.env.DEV;
 
 interface AppState {
   activeLeague: LeagueId;
   setActiveLeague: (l: LeagueId) => void;
-  authMode: AuthMode;
-  setAuthMode: (m: AuthMode) => void;
+  authRole: AppRole;
+  setAuthRole: (m: AppRole) => void;
+  isPrototypeAuthMode: boolean;
   isAdmin: boolean;
+  playerSubscriptionEndsAt: string | null;
+  isPlayerSubscriptionActive: boolean;
+  hasPremiumPlayerAccess: boolean;
+  renewPlayerTier: () => void;
   bagItems: string[];
   addToBag: (id: string) => void;
   removeFromBag: (id: string) => void;
@@ -26,9 +33,32 @@ export const useApp = () => {
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [activeLeague, setActiveLeague] = useState<LeagueId>('sbbl');
-  const [authMode, setAuthMode] = useState<AuthMode>('fan');
+  const [authRole, setAuthRole] = useState<AppRole>('fan');
+  const [playerSubscriptionEndsAt, setPlayerSubscriptionEndsAt] = useState<string | null>(null);
   const [bagItems, setBagItems] = useState<string[]>([]);
   const [bagOpen, setBagOpen] = useState(false);
+
+  const renewPlayerTier = () => {
+    const now = new Date();
+    now.setMonth(now.getMonth() + 1);
+    setPlayerSubscriptionEndsAt(now.toISOString());
+  };
+
+  useEffect(() => {
+    const stored = localStorage.getItem('sbblhq.playerSubscriptionEndsAt');
+    if (stored) {
+      setPlayerSubscriptionEndsAt(stored);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!playerSubscriptionEndsAt) {
+      localStorage.removeItem('sbblhq.playerSubscriptionEndsAt');
+      return;
+    }
+
+    localStorage.setItem('sbblhq.playerSubscriptionEndsAt', playerSubscriptionEndsAt);
+  }, [playerSubscriptionEndsAt]);
 
   const addToBag = (id: string) => {
     setBagItems(prev => [...prev, id]);
@@ -40,13 +70,18 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <AppContext.Provider value={{
-      activeLeague,
-      setActiveLeague,
-      authMode,
-      setAuthMode,
-      isAdmin: authMode === 'admin',
-      bagItems,
+      <AppContext.Provider value={{
+        activeLeague,
+        setActiveLeague,
+        authRole,
+        setAuthRole,
+        isPrototypeAuthMode: isDevAuthPrototype,
+        isAdmin: authRole === 'league_admin' || authRole === 'super_admin',
+        playerSubscriptionEndsAt,
+        isPlayerSubscriptionActive: isPlayerSubscriptionActive(playerSubscriptionEndsAt),
+        hasPremiumPlayerAccess: hasPremiumPlayerAccess(authRole, playerSubscriptionEndsAt),
+        renewPlayerTier,
+        bagItems,
       addToBag,
       removeFromBag,
       bagOpen,

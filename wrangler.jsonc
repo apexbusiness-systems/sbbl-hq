@@ -1,0 +1,34 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sbbl-hq",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-03-27",
+  "assets": {
+    "directory": "dist",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*", "/webhooks/*", "/ops/*"]
+  },
+  "routes": [
+    {
+      "pattern": "sbbl-hq.icu/*",
+      "custom_domain": true
+    },
+    {
+      "pattern": "www.sbbl-hq.icu/*",
+      "custom_domain": true
+    }
+  ],
+  "vars": {
+    "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz"
+  },
+  "env": {
+    "staging": {
+      "name": "sbbl-hq-staging",
+      "vars": {
+        "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz"
+      }
+    }
+  }
+}
