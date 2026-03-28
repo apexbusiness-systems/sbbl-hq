@@ -1,14 +1,14 @@
 import { League, PlayerProfile, Team, Game, Product, MediaAsset, ReviewItem, Invoice } from '@/types';
 
-import player1 from '@/assets/player-1.jpg';
-import player2 from '@/assets/player-2.jpg';
-import player3 from '@/assets/player-3.jpg';
-import storeJersey from '@/assets/store-jersey.jpg';
-import storeHoodie from '@/assets/store-hoodie.jpg';
-import storeCap from '@/assets/store-cap.jpg';
-import storeTee from '@/assets/store-tee.jpg';
-import storeAccessories from '@/assets/store-accessories.jpg';
-import gameAction from '@/assets/game-action.jpg';
+import player1 from '@/assets/player-1.svg';
+import player2 from '@/assets/player-2.svg';
+import player3 from '@/assets/player-3.svg';
+import storeJersey from '@/assets/store-jersey.svg';
+import storeHoodie from '@/assets/store-hoodie.svg';
+import storeCap from '@/assets/store-cap.svg';
+import storeTee from '@/assets/store-tee.svg';
+import storeAccessories from '@/assets/store-accessories.svg';
+import gameAction from '@/assets/game-action.svg';
 
 export const leagues: League[] = [
   { id: 'sbbl', name: "Sunday's Best Basketball League", shortName: 'SBBL', fee: 1350, accentVar: '--sbbl', description: 'The flagship Sunday league with multiple Panalay divisions, strict review rules, and all-star media day events.' },

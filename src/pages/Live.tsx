@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { games, players, products } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
-import gameAction from '@/assets/game-action.jpg';
+import gameAction from '@/assets/game-action.svg';
 import { Lock, Play, MessageSquare, Share2, Scissors, Heart, ShoppingBag, AlertTriangle } from 'lucide-react';
 
 type ViewerState = 'locked' | 'preview' | 'purchased';
