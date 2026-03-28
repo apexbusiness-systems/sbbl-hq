@@ -7,6 +7,7 @@ import { AppProvider } from "@/contexts/AppContext";
 import { Header } from "@/components/layout/Header";
 import { BagDrawer } from "@/components/layout/BagDrawer";
 import { AppDownloadPill } from "@/components/marketing/AppDownloadPill";
+import { StickyMusicPlayer } from "@/components/marketing/StickyMusicPlayer";
 import Home from "./pages/Home";
 import Live from "./pages/Live";
 import Schedules from "./pages/Schedules";
@@ -33,6 +34,7 @@ const App = () => (
             <Header />
             <BagDrawer />
             <AppDownloadPill />
+            <StickyMusicPlayer />
             <main>
               <Routes>
                 <Route path="/" element={<Home />} />
