@@ -1,6 +1,8 @@
 import { invoices, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { CreditCard, FileText, Download, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import { useApp } from '@/contexts/AppContext';
+import { PLAYER_REGISTRATION_PRICE_USD } from '@/lib/auth/subscription';
 
 const statusIcon = (s: string) => {
   if (s === 'paid') return <CheckCircle className="w-3.5 h-3.5 text-success" />;
@@ -9,6 +11,8 @@ const statusIcon = (s: string) => {
 };
 
 const BillingPage = () => {
+  const { authRole, hasPremiumPlayerAccess, playerSubscriptionEndsAt, renewPlayerTier } = useApp();
+
   return (
     <div className="min-h-screen">
       <div className="container py-8 md:py-12 max-w-4xl">
@@ -47,6 +51,28 @@ const BillingPage = () => {
             <span className="text-[10px] text-success font-semibold uppercase">Default</span>
           </div>
           <button className="mt-3 text-xs text-primary font-semibold">+ Add Payment Method</button>
+        </div>
+
+        <div className="panel p-4 mb-8">
+          <h3 className="font-display font-bold text-sm mb-3">Player Registration Tier</h3>
+          <p className="text-xs text-muted-foreground">
+            Player-only tier costs ${PLAYER_REGISTRATION_PRICE_USD.toFixed(2)} / month. Active players get leaderboard/profile inclusion and free livestream access.
+          </p>
+          <div className="mt-3 p-3 bg-secondary rounded-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium">
+                {hasPremiumPlayerAccess ? 'Active' : 'Inactive'} player registration
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                {playerSubscriptionEndsAt ? `Renews / expires on ${new Date(playerSubscriptionEndsAt).toLocaleDateString()}` : 'No active registration window'}
+              </p>
+            </div>
+            {authRole === 'player' && (
+              <button onClick={renewPlayerTier} className="gold-bg px-4 py-2 text-xs font-semibold rounded-sm uppercase tracking-wider">
+                Pay ${PLAYER_REGISTRATION_PRICE_USD.toFixed(2)} & Renew
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Invoices */}

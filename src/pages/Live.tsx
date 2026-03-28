@@ -2,13 +2,13 @@ import { useState } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { games, players, products } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
-import gameAction from '@/assets/game-action.jpg';
+import gameAction from '@/assets/game-action.svg';
 import { Lock, Play, MessageSquare, Share2, Scissors, Heart, ShoppingBag, AlertTriangle } from 'lucide-react';
 
 type ViewerState = 'locked' | 'preview' | 'purchased';
 
 const LivePage = () => {
-  const { addToBag } = useApp();
+  const { addToBag, authRole, hasPremiumPlayerAccess, playerSubscriptionEndsAt } = useApp();
   const [viewerState, setViewerState] = useState<ViewerState>('preview');
   const liveGame = games.find(g => g.status === 'live') || games[0];
   const [comments] = useState([
@@ -45,12 +45,23 @@ const LivePage = () => {
               </div>
               <p className="text-sm text-muted-foreground mb-6">{liveGame.venue} · {liveGame.court} · Q4 8:42</p>
               <div className="flex flex-col items-center gap-3">
-                <button onClick={() => setViewerState('purchased')} className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
-                  <Play className="w-4 h-4" /> Purchase Access — ${liveGame.ppvPrice.toFixed(2)}
-                </button>
+                {hasPremiumPlayerAccess && authRole === 'player' ? (
+                  <button onClick={() => setViewerState('purchased')} className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                    <Play className="w-4 h-4" /> Free Player Access Unlocked
+                  </button>
+                ) : (
+                  <button onClick={() => setViewerState('purchased')} className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                    <Play className="w-4 h-4" /> Purchase Access — ${liveGame.ppvPrice.toFixed(2)}
+                  </button>
+                )}
                 <p className="text-[11px] text-muted-foreground max-w-xs">
                   Session-bound access. Do not share your stream link. Account watermark applied.
                 </p>
+                {authRole === 'player' && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Player tier: {hasPremiumPlayerAccess ? `active through ${playerSubscriptionEndsAt ? new Date(playerSubscriptionEndsAt).toLocaleDateString() : 'this cycle'}` : 'inactive (renew in Billing for free monthly livestream access)'}
+                  </p>
+                )}
               </div>
             </div>
           </div>

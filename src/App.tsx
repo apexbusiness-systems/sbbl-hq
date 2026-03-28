@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AppProvider } from "@/contexts/AppContext";
 import { Header } from "@/components/layout/Header";
 import { BagDrawer } from "@/components/layout/BagDrawer";
+import { AppDownloadPill } from "@/components/marketing/AppDownloadPill";
 import Home from "./pages/Home";
 import Live from "./pages/Live";
 import Schedules from "./pages/Schedules";
@@ -31,6 +32,7 @@ const App = () => (
           <div className="min-h-screen bg-background">
             <Header />
             <BagDrawer />
+            <AppDownloadPill />
             <main>
               <Routes>
                 <Route path="/" element={<Home />} />
