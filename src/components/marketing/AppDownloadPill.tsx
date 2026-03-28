@@ -7,42 +7,44 @@ export const AppDownloadPill = () => {
 
   if (!isVisible) return null;
 
+  const helperText = canPrompt
+    ? 'Install for faster launch and offline support.'
+    : isIOS
+      ? 'iOS: Share → Add to Home Screen.'
+      : 'Use Chrome/Edge on Android to install.';
+
   return (
     <motion.div
-      initial={{ y: 24, opacity: 0 }}
+      initial={{ y: 16, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
-      transition={{ duration: 0.4, ease: 'easeOut' }}
-      className="fixed bottom-4 right-4 left-4 md:left-auto md:w-[360px] z-[60]"
+      transition={{ duration: 0.3, ease: 'easeOut' }}
+      className="fixed bottom-4 left-4 z-[60] max-w-[220px]"
     >
-      <div className="panel-glass border border-primary/30 backdrop-blur-xl px-4 py-3 rounded-xl shadow-2xl">
-        <div className="flex items-start gap-3">
-          <div className="w-10 h-10 rounded-lg bg-primary/15 flex items-center justify-center shrink-0">
-            <Smartphone className="w-5 h-5 text-primary" />
+      <div className="panel-glass border border-primary/30 backdrop-blur-xl rounded-full shadow-xl px-2.5 py-2">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
+            <Smartphone className="w-3.5 h-3.5 text-primary" />
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs uppercase tracking-widest text-primary font-semibold">Download SBBL HQ App</p>
-            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-              {canPrompt
-                ? 'Install on this device for a full-screen Apple-grade experience with faster launch and offline caching.'
-                : isIOS
-                  ? 'On iOS: tap Share, then Add to Home Screen.'
-                  : 'Open in Chrome/Edge on Android and use Add to Home screen.'}
-            </p>
-            <div className="flex items-center gap-2 mt-3">
-              <button
-                onClick={() => void promptInstall()}
-                disabled={!canPrompt}
-                className="gold-bg px-3 py-2 text-[11px] font-semibold uppercase tracking-wider rounded-md inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Download className="w-3.5 h-3.5" /> Install App
-              </button>
-              <button onClick={dismiss} className="text-[11px] text-muted-foreground hover:text-foreground transition-colors">
-                Not now
-              </button>
-            </div>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] uppercase tracking-[0.14em] text-primary font-semibold leading-none">Get App</p>
+            <p className="text-[10px] text-muted-foreground mt-1 truncate" title={helperText}>{helperText}</p>
           </div>
-          <button onClick={dismiss} className="p-1 text-muted-foreground hover:text-foreground">
-            <X className="w-4 h-4" />
+          <button
+            type="button"
+            onClick={() => void promptInstall()}
+            disabled={!canPrompt}
+            className="w-7 h-7 rounded-full gold-bg inline-flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+            aria-label="Install app"
+          >
+            <Download className="w-3.5 h-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={dismiss}
+            className="w-6 h-6 rounded-full inline-flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors"
+            aria-label="Dismiss app install prompt"
+          >
+            <X className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
