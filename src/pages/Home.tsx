@@ -1,8 +1,8 @@
 import { useApp } from '@/contexts/AppContext';
 import { leagues, games, players, products, mediaAssets } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
-import heroImage from '@/assets/hero-basketball.jpg';
-import gameAction from '@/assets/game-action.jpg';
+import heroImage from '@/assets/hero-basketball.svg';
+import gameAction from '@/assets/game-action.svg';
 import { motion } from 'framer-motion';
 import { Play, Clock, ShoppingBag, Trophy, ChevronRight, Zap } from 'lucide-react';
 import { Link } from 'react-router-dom';
