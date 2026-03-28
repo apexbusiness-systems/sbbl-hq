@@ -21,3 +21,7 @@ SBBL HQ is a premium basketball super app for SBBL, WBL, and TGIFBL with a Cloud
 - Idempotent server mutations using `x-idempotency-key`
 
 See deployment and schema docs for production handoff.
+
+## Custom domain TLS troubleshooting
+
+If your Cloudflare zone still has legacy A/AAAA records to previous hosting, apex TLS can fail with `ERR_SSL_PROTOCOL_ERROR`. Use Worker custom domains and remove conflicting legacy proxied origin records. See `DEPLOY_CLOUDFLARE.md` for step-by-step remediation.
