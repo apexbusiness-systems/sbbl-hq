@@ -1,6 +1,6 @@
 # SBBL HQ
 
-Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alberta, Canada.
+Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alberta
 
 **Leagues:** WBL (Weekend Basketball League) · TGIF League · SBBL Spring Edition
 
