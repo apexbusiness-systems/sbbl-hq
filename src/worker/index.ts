@@ -24,8 +24,12 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function getRoles(req: Request) {
-  const header = req.headers.get('x-sbbl-roles');
+// SECURITY: roles are never read from client-supplied headers.
+// They are set exclusively by getSession() after JWT verification and
+// attached to the enriched internal request. This function is only called
+// on the enriched request inside the worker, never on the raw client request.
+function getRolesFromVerifiedSession(req: Request): string[] {
+  const header = req.headers.get('x-sbbl-roles-verified');
   if (!header) return ['fan'];
   return header.split(',').map((r) => r.trim()).filter(Boolean);
 }
@@ -77,6 +81,9 @@ async function verifyStripeSignature(rawBody: string, signatureHeader: string, s
   return parsed.signatures.some((candidate) => candidate.toLowerCase() === expected);
 }
 
+// SECURITY: session is established ONLY via a valid Supabase JWT Bearer token.
+// The x-sbbl-user-id fallback has been removed — any client-supplied identity
+// header is ignored. If JWT verification fails, session is null (unauthenticated).
 async function getSession(req: Request, env: Env) {
   const token = getBearerToken(req);
   if (token && env.SUPABASE_PUBLISHABLE_KEY) {
@@ -85,27 +92,24 @@ async function getSession(req: Request, env: Env) {
     });
     const { data, error } = await supabase.auth.getUser(token);
     if (!error && data.user) {
+      // Roles are fetched from DB on admin-gated routes via requireAdminSession().
+      // For non-admin routes, default to 'fan' unless the DB assignment is present.
       return {
         userId: data.user.id,
-        roles: getRoles(req),
+        roles: ['fan'] as string[],
       };
     }
   }
 
-  const fallbackUserId = req.headers.get('x-sbbl-user-id');
-  if (fallbackUserId) {
-    return { userId: fallbackUserId, roles: getRoles(req) };
-  }
-
+  // No fallback. No token = no session.
   return null;
 }
 
 function requireAuth(req: Request) {
-  const userId = req.headers.get('x-sbbl-user-id');
+  const userId = req.headers.get('x-sbbl-user-id-verified');
   if (!userId) {
     throw new Error('unauthorized');
   }
-
   return userId;
 }
 
@@ -132,7 +136,7 @@ async function ensureMutation(req: Request, ctx: HandlerCtx) {
 async function handleAuthSession({ req }: HandlerCtx) {
   try {
     const userId = requireAuth(req);
-    return json({ ok: true, userId, roles: getRoles(req) });
+    return json({ ok: true, userId, roles: getRolesFromVerifiedSession(req) });
   } catch {
     return json({ ok: false, error: 'unauthorized' }, 401);
   }
@@ -140,7 +144,7 @@ async function handleAuthSession({ req }: HandlerCtx) {
 
 async function handleMe({ req }: HandlerCtx) {
   const userId = requireAuth(req);
-  return json({ id: userId, profileStatus: 'active', roles: getRoles(req) });
+  return json({ id: userId, profileStatus: 'active', roles: getRolesFromVerifiedSession(req) });
 }
 
 async function handleMutationAck(ctx: HandlerCtx) {
@@ -194,7 +198,7 @@ async function handleFinalize(ctx: HandlerCtx) {
 
 async function handleOps({ req }: HandlerCtx) {
   const userId = requireAuth(req);
-  const roles = getRoles(req);
+  const roles = getRolesFromVerifiedSession(req);
   if (!canAccessOps(roles as never)) {
     return json({ ok: false, error: 'forbidden' }, 403);
   }
@@ -430,7 +434,6 @@ async function handleOpsBootstrap({ req, admin }: HandlerCtx) {
     ok: true,
     user: {
       userId: session.userId,
-      email: req.headers.get('x-sbbl-user-id') ?? null,
       profile: profileRes.data ?? null,
     },
     roles: session.roles,
@@ -588,12 +591,13 @@ async function handleStoreMedia(ctx: HandlerCtx) {
   return json({ ok: true, productId: product.data.id, mediaAssetId: media.data.id });
 }
 
-async function handlePublicConfig({ env }: HandlerCtx) {
+// SECURITY: Public config endpoint returns ONLY non-sensitive application metadata.
+// Supabase URL and publishable key are NOT returned here — the client SDK
+// initializes via environment-injected config at build time, not runtime API calls.
+async function handlePublicConfig(_ctx: HandlerCtx) {
   return json({
     ok: true,
     appName: 'SBBL HQ',
-    supabaseUrl: env.SUPABASE_URL,
-    supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY ?? null,
     defaultLeague: 'SBBL',
   });
 }
@@ -774,18 +778,31 @@ export default {
       return json({ ok: false, error: 'server_misconfigured', missing: parsed.missing }, 500);
     }
 
-    const session = await getSession(req, env);
+    // SECURITY: Strip any client-supplied spoofed identity/role headers BEFORE
+    // processing. Session is established purely from JWT verification below.
+    const cleanHeaders = new Headers(req.headers);
+    cleanHeaders.delete('x-sbbl-user-id');
+    cleanHeaders.delete('x-sbbl-user-id-verified');
+    cleanHeaders.delete('x-sbbl-roles');
+    cleanHeaders.delete('x-sbbl-roles-verified');
+    const cleanReq = new Request(req, { headers: cleanHeaders });
+
+    const session = await getSession(cleanReq, env);
     const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
-    const enrichedRequest = new Request(req, {
+
+    // Internal verified headers are set here and ONLY here, after JWT verification.
+    // These use a -verified suffix to distinguish them from any client-supplied headers
+    // (which were stripped above).
+    const enrichedRequest = new Request(cleanReq, {
       headers: session
         ? {
-            ...Object.fromEntries(req.headers.entries()),
-            'x-sbbl-user-id': session.userId,
-            'x-sbbl-roles': session.roles.join(','),
+            ...Object.fromEntries(cleanReq.headers.entries()),
+            'x-sbbl-user-id-verified': session.userId,
+            'x-sbbl-roles-verified': session.roles.join(','),
           }
-        : req.headers,
+        : cleanReq.headers,
     });
 
     for (const route of compiled) {
