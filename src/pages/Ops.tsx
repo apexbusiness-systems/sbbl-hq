@@ -1,137 +1,161 @@
-import { useApp } from '@/contexts/AppContext';
-import { reviewItems } from '@/data/mock';
-import { LeagueBadge } from '@/components/ui/LeagueBadge';
-import { Shield, AlertTriangle, CheckCircle, Eye, Radio, DollarSign, FileWarning, X } from 'lucide-react';
-import { Navigate } from 'react-router-dom';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Shield } from 'lucide-react';
+import { useAuth } from '@/hooks/use-auth';
+import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia } from '@/lib/api/ops';
+import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 
-const severityColor = { low: 'text-muted-foreground', medium: 'text-warning', high: 'text-destructive' };
+type Tab = 'overview' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'history';
+
+const tabs: Array<{ id: Tab; label: string }> = [
+  { id: 'overview', label: 'Overview' },
+  { id: 'teams', label: 'Teams' },
+  { id: 'players', label: 'Players' },
+  { id: 'schedules', label: 'Schedules' },
+  { id: 'events', label: 'Events' },
+  { id: 'store', label: 'Store Media' },
+  { id: 'history', label: 'Import History' },
+];
+
+function parseCsv(raw: string) {
+  const lines = raw.split(/\r?\n/).filter(Boolean);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map((h) => h.trim());
+  return lines.slice(1).map((line) => {
+    const values = line.split(',').map((v) => v.trim());
+    return headers.reduce<Record<string, string>>((acc, key, idx) => {
+      acc[key] = values[idx] ?? '';
+      return acc;
+    }, {});
+  });
+}
 
 const OpsPage = () => {
-  const { isAdmin } = useApp();
-  const [items, setItems] = useState(reviewItems);
+  const queryClient = useQueryClient();
+  const { user, roles } = useAuth();
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
+  const [storeForm, setStoreForm] = useState({ title: '', price: '0', category: 'apparel', publishStatus: 'draft' as 'draft' | 'published', imageFile: null as File | null });
 
-  if (!isAdmin) return <Navigate to="/" replace />;
+  const bootstrapQuery = useQuery({ queryKey: ['ops-bootstrap'], queryFn: fetchOpsBootstrap });
+  const historyQuery = useQuery({ queryKey: ['ops-import-history'], queryFn: fetchImportHistory });
 
-  const resolve = (id: string) => setItems(prev => prev.map(i => i.id === id ? { ...i, status: 'resolved' as const } : i));
+  const importMutation = useMutation({
+    mutationFn: ({ kind, rows }: { kind: 'teams' | 'players' | 'schedules' | 'events'; rows: Record<string, string>[] }) => submitCsvImport(kind, rows),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] }),
+        queryClient.invalidateQueries({ queryKey: ['ops-import-history'] }),
+      ]);
+    },
+  });
+
+  const storeMutation = useMutation({
+    mutationFn: async () => {
+      if (!storeForm.imageFile) throw new Error('Image is required');
+      const supabase = requireSupabaseClient();
+      const objectPath = `store/${crypto.randomUUID()}-${storeForm.imageFile.name}`;
+      const upload = await supabase.storage.from('media').upload(objectPath, storeForm.imageFile, { upsert: true });
+      if (upload.error) throw upload.error;
+      const imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
+      return uploadStoreMedia({
+        title: storeForm.title,
+        price: Number(storeForm.price),
+        category: storeForm.category,
+        publishStatus: storeForm.publishStatus,
+        imageUrl,
+      });
+    },
+  });
+
+  const jobs = historyQuery.data?.jobs ?? bootstrapQuery.data?.importHistory ?? [];
+  const latestSummary = useMemo(() => jobs.slice(0, 5), [jobs]);
 
   return (
-    <div className="min-h-screen">
-      <div className="container py-8 md:py-12 max-w-5xl">
-        <div className="flex items-center gap-3 mb-8">
-          <Shield className="w-6 h-6 text-primary" />
-          <div>
-            <h1 className="font-display text-3xl md:text-4xl font-bold">Operations</h1>
-            <p className="text-sm text-muted-foreground mt-1">Admin review queue and system controls</p>
-          </div>
-        </div>
-
-        {/* Summary Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <div className="panel p-4">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider">Review Queue</p>
-            <p className="stat-numeral text-2xl text-warning mt-1">{items.filter(i => i.status === 'pending').length}</p>
-          </div>
-          <div className="panel p-4">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider">Resolved</p>
-            <p className="stat-numeral text-2xl text-success mt-1">{items.filter(i => i.status === 'resolved').length}</p>
-          </div>
-          <div className="panel p-4">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider">Stream Status</p>
-            <div className="flex items-center gap-1.5 mt-1">
-              <div className="w-2 h-2 rounded-full bg-live animate-pulse" />
-              <span className="stat-numeral text-sm text-live">1 Active</span>
-            </div>
-          </div>
-          <div className="panel p-4">
-            <p className="text-xs text-muted-foreground uppercase tracking-wider">Revenue (MTD)</p>
-            <p className="stat-numeral text-2xl text-primary mt-1">₱24.5K</p>
-          </div>
-        </div>
-
-        {/* Review Queue */}
-        <div className="panel mb-8">
-          <div className="p-4 border-b border-border flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-warning" />
-            <span className="font-display font-bold text-sm">Review Queue</span>
-          </div>
-          <div className="divide-y divide-border">
-            {items.map(item => (
-              <div key={item.id} className="p-4 flex flex-col md:flex-row md:items-center gap-3">
-                <div className="flex items-center gap-2 md:w-40">
-                  <span className={`text-xs font-semibold uppercase ${severityColor[item.severity]}`}>{item.severity}</span>
-                  <LeagueBadge leagueId={item.leagueId} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{item.title}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{item.description}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {item.status === 'pending' ? (
-                    <>
-                      <button onClick={() => resolve(item.id)} className="px-3 py-1.5 bg-success/15 text-success text-xs font-semibold rounded-sm hover:bg-success/25 transition-colors">
-                        Resolve
-                      </button>
-                      <button className="px-3 py-1.5 bg-secondary text-secondary-foreground text-xs font-semibold rounded-sm">
-                        Dismiss
-                      </button>
-                    </>
-                  ) : (
-                    <span className="flex items-center gap-1 text-xs text-success font-semibold"><CheckCircle className="w-3 h-3" /> Resolved</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Stream Control */}
-        <div className="panel p-4 mb-8">
-          <h3 className="font-display font-bold text-sm mb-3 flex items-center gap-2">
-            <Radio className="w-4 h-4 text-live" /> Stream Source Control
-          </h3>
-          <div className="bg-secondary p-4 rounded-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">SBBL Game G1 — Active Stream</p>
-                <p className="text-[10px] text-muted-foreground">External ingest: rtmp://stream.sbblhq.com/live/g1-session</p>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full bg-live animate-pulse" />
-                <span className="text-xs text-live font-semibold">Live</span>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button className="px-3 py-1.5 bg-destructive/15 text-destructive text-xs font-semibold rounded-sm">End Stream</button>
-              <button className="px-3 py-1.5 bg-secondary text-secondary-foreground text-xs font-semibold rounded-sm border border-border">Refresh Source</button>
-            </div>
-          </div>
-        </div>
-
-        {/* Payout Summary */}
-        <div className="panel p-4">
-          <h3 className="font-display font-bold text-sm mb-3 flex items-center gap-2">
-            <DollarSign className="w-4 h-4 text-primary" /> Payout Summary
-          </h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-secondary p-4 rounded-sm">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">PPV Revenue</p>
-              <p className="stat-numeral text-xl text-primary mt-1">₱12,350</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">4,940 viewers × $2.50</p>
-            </div>
-            <div className="bg-secondary p-4 rounded-sm">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">Store Revenue</p>
-              <p className="stat-numeral text-xl text-primary mt-1">₱8,750</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">47 orders this month</p>
-            </div>
-            <div className="bg-secondary p-4 rounded-sm">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">Registration Fees</p>
-              <p className="stat-numeral text-xl text-primary mt-1">₱41,300</p>
-              <p className="text-[10px] text-muted-foreground mt-0.5">30 teams registered</p>
-            </div>
-          </div>
+    <div className="container py-8 md:py-12 max-w-6xl space-y-6">
+      <div className="flex items-center gap-3">
+        <Shield className="w-6 h-6 text-primary" />
+        <div>
+          <h1 className="font-display text-3xl md:text-4xl font-bold">Ops Console</h1>
+          <p className="text-xs text-muted-foreground">Signed in as {user?.email ?? 'unknown'} · roles: {roles.join(', ') || 'none'}</p>
         </div>
       </div>
+
+      <div className="flex flex-wrap gap-2">
+        {tabs.map((tab) => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded-sm text-sm border ${activeTab === tab.id ? 'border-primary text-primary bg-primary/10' : 'border-border text-muted-foreground'}`}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'overview' && (
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="panel p-4"><p className="text-xs text-muted-foreground">Import jobs</p><p className="stat-numeral text-3xl">{jobs.length}</p></div>
+          <div className="panel p-4"><p className="text-xs text-muted-foreground">Recent successful rows</p><p className="stat-numeral text-3xl">{jobs.reduce((acc, j) => acc + (j.inserted_rows || 0), 0)}</p></div>
+          <div className="panel p-4"><p className="text-xs text-muted-foreground">Failed rows</p><p className="stat-numeral text-3xl text-destructive">{jobs.reduce((acc, j) => acc + (j.failed_rows || 0), 0)}</p></div>
+          <div className="panel p-4 md:col-span-3">
+            <h2 className="font-display text-xl mb-2">Recent Actions</h2>
+            {latestSummary.length === 0 ? <p className="text-sm text-muted-foreground">No imports yet.</p> : latestSummary.map((job) => <p key={job.id} className="text-sm">{job.job_type} · {job.status} · {job.inserted_rows}/{job.total_rows}</p>)}
+          </div>
+        </div>
+      )}
+
+      {(['teams', 'players', 'schedules', 'events'] as const).includes(activeTab as never) && (
+        <div className="panel p-4 space-y-3">
+          <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
+          <input type="file" accept=".csv,text/csv" onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const raw = await file.text();
+            setCsvRows(parseCsv(raw));
+          }} />
+          <p className="text-xs text-muted-foreground">Preview rows: {csvRows.length}</p>
+          <div className="max-h-52 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">{csvRows.slice(0, 8).map((row, i) => <pre key={i}>{JSON.stringify(row)}</pre>)}</div>
+          <button
+            disabled={csvRows.length === 0 || importMutation.isPending}
+            className="gold-bg px-4 py-2 rounded-sm disabled:opacity-70"
+            onClick={() => importMutation.mutate({ kind: activeTab as 'teams' | 'players' | 'schedules' | 'events', rows: csvRows })}
+          >
+            {importMutation.isPending ? 'Importing…' : 'Submit Import'}
+          </button>
+          {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
+          {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
+        </div>
+      )}
+
+      {activeTab === 'store' && (
+        <div className="panel p-4 space-y-3 max-w-xl">
+          <h2 className="font-display text-xl">Store Media Upload</h2>
+          <input placeholder="Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.title} onChange={(e) => setStoreForm((s) => ({ ...s, title: e.target.value }))} />
+          <input placeholder="Price" className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.price} onChange={(e) => setStoreForm((s) => ({ ...s, price: e.target.value }))} />
+          <input placeholder="Category" className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.category} onChange={(e) => setStoreForm((s) => ({ ...s, category: e.target.value }))} />
+          <select className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.publishStatus} onChange={(e) => setStoreForm((s) => ({ ...s, publishStatus: e.target.value as 'draft' | 'published' }))}>
+            <option value="draft">Draft</option><option value="published">Published</option>
+          </select>
+          <input type="file" accept="image/*" onChange={(e) => setStoreForm((s) => ({ ...s, imageFile: e.target.files?.[0] ?? null }))} />
+          <button className="gold-bg px-4 py-2 rounded-sm" onClick={() => storeMutation.mutate()} disabled={storeMutation.isPending || !hasSupabaseClientConfig}>{storeMutation.isPending ? 'Uploading…' : 'Upload & Save'}</button>
+          {!hasSupabaseClientConfig && <p className="text-xs text-warning">Supabase client env missing; media uploads disabled.</p>}
+          {storeMutation.error && <p className="text-xs text-destructive">{(storeMutation.error as Error).message}</p>}
+          {storeMutation.data && <p className="text-xs text-success">Saved product {storeMutation.data.productId}</p>}
+        </div>
+      )}
+
+      {activeTab === 'history' && (
+        <div className="panel p-4">
+          <h2 className="font-display text-xl mb-3">Import History</h2>
+          {jobs.length === 0 ? <p className="text-sm text-muted-foreground">No import history.</p> : (
+            <div className="space-y-2">
+              {jobs.map((job) => (
+                <div key={job.id} className="border border-border rounded-sm p-3 text-sm">
+                  <p className="font-medium">{job.job_type} · {job.status}</p>
+                  <p className="text-xs text-muted-foreground">Rows {job.inserted_rows}/{job.total_rows} · failed {job.failed_rows}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

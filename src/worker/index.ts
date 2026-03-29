@@ -375,6 +375,238 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
     duplicate: Boolean((webhookProcess.data as { duplicate?: boolean } | null)?.duplicate),
   });
 }
+
+
+async function requireAdminSession(req: Request, admin: SupabaseClient) {
+  const userId = requireAuth(req);
+  const { data, error } = await admin.from('user_role_assignments').select('role').eq('user_id', userId);
+  if (error) throw new Error(error.message);
+  const roles = (data ?? []).map((row) => String(row.role));
+  if (!roles.some((role) => role === 'league_admin' || role === 'super_admin' || role === 'team_manager')) {
+    throw new Error('forbidden');
+  }
+  return { userId, roles };
+}
+
+async function writeImportJob(admin: SupabaseClient, job: {
+  job_type: string;
+  submitted_by: string;
+  total_rows: number;
+  inserted_rows: number;
+  failed_rows: number;
+  payload_summary: Record<string, unknown>;
+  error_summary?: string | null;
+}) {
+  const { data, error } = await admin.from('import_jobs').insert({
+    job_type: job.job_type,
+    submitted_by: job.submitted_by,
+    payload_summary: job.payload_summary,
+    status: job.failed_rows > 0 ? 'completed_with_errors' : 'completed',
+    total_rows: job.total_rows,
+    inserted_rows: job.inserted_rows,
+    failed_rows: job.failed_rows,
+    error_summary: job.error_summary ?? null,
+  }).select('*').single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+async function handleOpsBootstrap({ req, admin }: HandlerCtx) {
+  const session = await requireAdminSession(req, admin);
+  const [profileRes, leaguesRes, seasonsRes, divisionsRes, venuesRes, historyRes] = await Promise.all([
+    admin.from('profiles').select('display_name,full_name').eq('user_id', session.userId).maybeSingle(),
+    admin.from('leagues').select('id,name,code').order('name'),
+    admin.from('seasons').select('id,name,league_id').order('created_at', { ascending: false }).limit(100),
+    admin.from('divisions').select('id,name,season_id').order('name').limit(300),
+    admin.from('venues').select('id,name').order('name').limit(300),
+    admin.from('import_jobs').select('*').order('created_at', { ascending: false }).limit(25),
+  ]);
+
+  if (profileRes.error || leaguesRes.error || seasonsRes.error || divisionsRes.error || venuesRes.error || historyRes.error) {
+    throw new Error('ops_bootstrap_failed');
+  }
+
+  return json({
+    ok: true,
+    user: {
+      userId: session.userId,
+      email: req.headers.get('x-sbbl-user-id') ?? null,
+      profile: profileRes.data ?? null,
+    },
+    roles: session.roles,
+    references: {
+      leagues: leaguesRes.data ?? [],
+      seasons: seasonsRes.data ?? [],
+      divisions: divisionsRes.data ?? [],
+      venues: venuesRes.data ?? [],
+    },
+    importHistory: historyRes.data ?? [],
+  });
+}
+
+async function handleImportRoute(ctx: HandlerCtx, kind: 'teams' | 'players' | 'schedules' | 'events') {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireAdminSession(ctx.req, ctx.admin);
+  const body = await ctx.req.json().catch(() => null) as { rows?: Array<Record<string, string>> } | null;
+  const rows = body?.rows ?? [];
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return json({ ok: false, error: 'rows_required' }, 400);
+  }
+
+  let insertedRows = 0;
+  let failedRows = 0;
+  const errors: string[] = [];
+
+  for (const row of rows) {
+    try {
+      if (kind === 'teams') {
+        const { error } = await ctx.admin.from('teams').insert({
+          league_id: row.league_id,
+          season_id: row.season_id,
+          division_id: row.division_id || null,
+          name: row.name,
+          status: 'published',
+        });
+        if (error && !String(error.message).includes('duplicate key')) throw error;
+      }
+
+      if (kind === 'players') {
+        const { error } = await ctx.admin.from('players').upsert({
+          user_id: row.user_id,
+          team_id: row.team_id || null,
+          league_id: row.league_id || null,
+          jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
+          position: row.position || null,
+        }, { onConflict: 'user_id' });
+        if (error) throw error;
+      }
+
+      if (kind === 'schedules') {
+        const { error } = await ctx.admin.from('schedule_slots').insert({
+          league_id: row.league_id,
+          season_id: row.season_id,
+          venue_id: row.venue_id || null,
+          court_id: row.court_id || null,
+          starts_at: row.starts_at,
+          ends_at: row.ends_at || null,
+          status: row.status || 'upcoming',
+        });
+        if (error) throw error;
+      }
+
+      if (kind === 'events') {
+        const { error } = await ctx.admin.from('league_events').insert({
+          league_id: row.league_id || null,
+          season_id: row.season_id || null,
+          venue_id: row.venue_id || null,
+          title: row.title,
+          starts_at: row.starts_at || null,
+          metadata: row,
+        });
+        if (error) throw error;
+      }
+
+      await ctx.admin.rpc('enqueue_local_domain_event', {
+        p_event_type: `${kind}_imported`,
+        p_entity_type: kind,
+        p_entity_id: null,
+        p_league_id: row.league_id || null,
+        p_payload: row,
+        p_trace_id: crypto.randomUUID(),
+        p_available_at: new Date().toISOString(),
+      });
+      insertedRows += 1;
+    } catch (error) {
+      failedRows += 1;
+      errors.push(error instanceof Error ? error.message : 'import_failed');
+      await writeIngressFailure(ctx.admin, `${kind}_import_failed`, row, 'admin_mutation', session.userId);
+    }
+  }
+
+  const job = await writeImportJob(ctx.admin, {
+    job_type: kind,
+    submitted_by: session.userId,
+    total_rows: rows.length,
+    inserted_rows: insertedRows,
+    failed_rows: failedRows,
+    payload_summary: { sample: rows[0] ?? null },
+    error_summary: errors.slice(0, 5).join('; ') || null,
+  });
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: session.userId,
+    action: `ops_import_${kind}`,
+    ref_type: 'import_job',
+    ref_id: job.id,
+    payload: { total_rows: rows.length, inserted_rows: insertedRows, failed_rows: failedRows },
+    idempotency_key: readIdempotencyKey(ctx.req.headers),
+  });
+
+  return json({ ok: true, summary: job });
+}
+
+async function handleImportHistory({ req, admin }: HandlerCtx) {
+  await requireAdminSession(req, admin);
+  const { data, error } = await admin.from('import_jobs').select('*').order('created_at', { ascending: false }).limit(100);
+  if (error) throw new Error(error.message);
+  return json({ ok: true, jobs: data ?? [] });
+}
+
+async function handleStoreMedia(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireAdminSession(ctx.req, ctx.admin);
+  const payload = await ctx.req.json().catch(() => null) as Record<string, unknown> | null;
+  if (!payload || typeof payload.title !== 'string' || typeof payload.price !== 'number' || typeof payload.imageUrl !== 'string') {
+    return json({ ok: false, error: 'invalid_store_payload' }, 400);
+  }
+
+  const product = await ctx.admin.from('products').insert({
+    league_id: typeof payload.leagueId === 'string' ? payload.leagueId : null,
+    name: payload.title,
+    price: payload.price,
+    status: payload.publishStatus === 'published' ? 'published' : 'draft',
+  }).select('id').single();
+  if (product.error) throw new Error(product.error.message);
+
+  const media = await ctx.admin.from('media_assets').insert({
+    league_id: typeof payload.leagueId === 'string' ? payload.leagueId : null,
+    title: String(payload.title),
+    status: payload.publishStatus === 'published' ? 'published' : 'draft',
+    metadata: { image_url: payload.imageUrl, category: payload.category, product_id: product.data.id },
+  }).select('id').single();
+  if (media.error) throw new Error(media.error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: session.userId,
+    action: 'ops_store_media_upsert',
+    ref_type: 'product',
+    ref_id: product.data.id,
+    payload: { media_asset_id: media.data.id },
+    idempotency_key: readIdempotencyKey(ctx.req.headers),
+  });
+
+  return json({ ok: true, productId: product.data.id, mediaAssetId: media.data.id });
+}
+
+async function handleTeamsList({ req, admin }: HandlerCtx) {
+  const leagueId = new URL(req.url).searchParams.get('leagueId');
+  let query = admin.from('teams').select('id,name,divisions(name),seasons(name),leagues(name),team_memberships(id)').eq('status', 'published').limit(200);
+  if (leagueId) query = query.eq('league_id', leagueId);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  const teams = (data ?? []).map((row: Record<string, unknown>) => ({
+    id: String(row.id),
+    name: String(row.name),
+    league_name: String((row.leagues as { name?: string } | null)?.name ?? 'League'),
+    season_name: String((row.seasons as { name?: string } | null)?.name ?? 'Season'),
+    division_name: (row.divisions as { name?: string } | null)?.name ?? null,
+    roster_count: Array.isArray(row.team_memberships) ? row.team_memberships.length : 0,
+  }));
+
+  return json({ ok: true, teams });
+}
+
 function compilePath(path: string) {
   const keys: string[] = [];
   const pattern = path.replace(/:([^/]+)/g, (_, key: string) => {
@@ -404,6 +636,14 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'POST', path: '/api/orders/:id/pay', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'orders-pay', ...ctx.params } }) },
   { method: 'GET', path: '/api/billing/history', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'billing-history' } }) },
   { method: 'POST', path: '/api/rewards/redeem', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'rewards-redeem' } }) },
+  { method: 'GET', path: '/ops/bootstrap', handler: handleOpsBootstrap },
+  { method: 'POST', path: '/ops/imports/teams', handler: (ctx) => handleImportRoute(ctx, 'teams') },
+  { method: 'POST', path: '/ops/imports/players', handler: (ctx) => handleImportRoute(ctx, 'players') },
+  { method: 'POST', path: '/ops/imports/schedules', handler: (ctx) => handleImportRoute(ctx, 'schedules') },
+  { method: 'POST', path: '/ops/imports/events', handler: (ctx) => handleImportRoute(ctx, 'events') },
+  { method: 'GET', path: '/ops/imports/history', handler: handleImportHistory },
+  { method: 'POST', path: '/ops/store/media', handler: handleStoreMedia },
+  { method: 'GET', path: '/api/teams', handler: handleTeamsList },
   { method: 'GET', path: '/ops/review', handler: handleOps },
   { method: 'POST', path: '/ops/review/:id/resolve', handler: handleOps },
   { method: 'GET', path: '/ops/streams', handler: handleOps },
@@ -464,6 +704,8 @@ export default {
         const message = error instanceof Error ? error.message : 'internal_error';
         const status = message === 'unauthorized'
           ? 401
+          : message === 'forbidden'
+            ? 403
           : message.startsWith('Missing or invalid idempotency key') || message.startsWith('Duplicate idempotency key')
             ? 400
             : 500;
