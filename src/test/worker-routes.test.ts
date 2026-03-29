@@ -28,9 +28,11 @@ describe('worker route smoke', () => {
   it('returns public config without auth', async () => {
     const res = await worker.fetch(new Request('https://local/api/public-config'), env);
     expect(res.status).toBe(200);
-    const data = await res.json() as { ok: boolean; supabaseUrl: string; appName: string };
+    // supabaseUrl is intentionally NOT returned by this endpoint (security fix #3).
+    // The endpoint exposes only non-sensitive app metadata.
+    const data = await res.json() as { ok: boolean; supabaseUrl?: string; appName: string };
     expect(data.ok).toBe(true);
-    expect(data.supabaseUrl).toBe('https://example.supabase.co');
+    expect(data.supabaseUrl).toBeUndefined();
     expect(data.appName).toBe('SBBL HQ');
   });
 });

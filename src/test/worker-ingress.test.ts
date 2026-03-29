@@ -4,6 +4,8 @@ const rpc = vi.fn();
 const insert = vi.fn();
 const getUser = vi.fn();
 
+// Mock Supabase: getUser returns a valid user when a Bearer token is present,
+// simulating a successfully verified JWT session.
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     auth: { getUser },
@@ -37,6 +39,8 @@ describe('worker omniport ingress routes', () => {
   });
 
   it('blocks blocked-risk ingress envelopes', async () => {
+    // Must supply a valid Bearer token — x-sbbl-user-id header is stripped
+    // as part of security hardening (fix #2). Session now requires JWT only.
     const res = await worker.fetch(new Request('https://local/api/ingress', {
       method: 'POST',
       headers: {
