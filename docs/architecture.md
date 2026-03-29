@@ -1,80 +1,110 @@
-# SBBL Architecture (Cloudflare + Supabase)
+# SBBL HQ Architecture
 
-## Runtime Topology
-- **Edge API runtime:** Cloudflare Worker at `src/worker/index.ts`.
-- **Frontend runtime:** Cloudflare Pages static assets through `env.ASSETS.fetch(req)` fallback in the Worker.
-- **Database/auth:** Supabase Postgres + Supabase Auth via `@supabase/supabase-js`.
+**Version:** v1.0.1  
+**Last Updated (UTC):** 2026-03-29
 
-## Frontend Boot Sequence
-1. `index.html` loads → React app mounts.
-2. `AuthContext` calls `initSupabaseClient()` which fetches `/api/public-config` from the Worker.
-3. Runtime config cached in memory; Supabase client created with fetched URL + publishable key.
-4. Fallback: if `/api/public-config` unreachable (local dev), uses `import.meta.env.VITE_SUPABASE_URL` etc.
-5. `AuthContext` exposes `configAvailable` boolean for graceful degradation when config unavailable.
+## Stack
 
-**Key files:** `src/lib/runtime-config.ts`, `src/lib/supabase/client.ts`, `src/contexts/AuthContext.tsx`
+| Layer | Technology |
+|---|---|
+| Frontend | Vite + React + TypeScript (strict) |
+| Styling | Tailwind CSS — dark-first, gold accent |
+| Database | Supabase (PostgreSQL + Realtime + Auth + Storage) |
+| Hosting | **Cloudflare Workers** (FE static assets + API Worker) |
+| Payments | Stripe (checkout + webhooks) |
+| Animation | Framer Motion |
+| Testing | Vitest + Playwright |
+| CI/CD | GitHub Actions |
+| Errors | Sentry |
+| Uptime | UptimeRobot |
 
-## Canonical League Model
-Single source of truth: `src/lib/leagues.ts`
-- `LEAGUE_CONFIGS[]` — id, code, name, tagline, color for SBBL, WBL, TGIFBL
-- Helpers: `getLeagueConfig()`, `leagueIdFromCode()`, `persistLeague()`, `loadPersistedLeague()`
-- Consumed by: `AppContext`, `Header`, `LeagueBadge`, `Home`, `Login`
+> **Hosting is Cloudflare Workers — NOT Vercel.** Do not suggest or configure Vercel. Do not add `vercel.json`. The deployment target is `wrangler.jsonc` → `npm run cf:deploy`.
 
-## Request Lifecycle
-1. Worker validates required environment via `safeServerEnv`.
-2. **Public routes** (`/api/public-config`, `/api/public/home`) skip auth and return shaped DTOs.
-3. **Authenticated routes**: Worker resolves user session from bearer token (`supabase.auth.getUser`) or fallback headers.
-4. Route matching is done from explicit route table (`method + regex` compiled from static path patterns).
-5. Handlers call either:
-   - RPC functions (`get_stats_dashboard`, `get_leaderboards`, `save_stat_draft`, `finalize_game_stats`), or
-   - mutation acknowledgment path with idempotency recording (`api_idempotency_keys`).
-6. Unmatched requests pass to static asset handler (`ASSETS`) and then return 404 JSON for missing routes.
+---
 
-## Service Boundaries
-Current implementation is centralized in `src/worker/index.ts`. Route/logic/repo layering is not yet split into `/routes`, `/services`, `/repos` folders.
+## Request Flow
 
-## Auth, Roles, and Access Control
-- Auth source: Supabase JWT (`Authorization: Bearer ...`) when publishable key exists.
-- Fallback identity: `x-sbbl-user-id` header (used for non-JWT flows/tests).
-- Role parsing: `x-sbbl-roles` comma-separated header; default role is `fan` when absent.
-- Ops authorization uses `canAccessOps(...)` to gate `/ops/*` endpoints.
-- Write idempotency enforced on mutating methods through `readIdempotencyKey(...)` + insert into `api_idempotency_keys`.
+```
+Browser → Cloudflare Edge
+  ├── /api/*, /auth/*, /webhooks/*, /ops/*  → Worker (src/worker/index.ts)
+  └── Everything else                       → Static assets (dist/)
+```
 
-## Data Layer
-- Admin DB client uses Supabase service role key in Worker context.
-- Data access patterns in current Worker:
-  - RPC reads: stats + leaderboards.
-  - RPC writes: game draft + finalize.
-  - Table insert: `api_idempotency_keys`.
+The Worker handles all API routes. Static assets are served from the `dist/` folder built by Vite.
 
-## Reliability & Error Handling
-- Explicit JSON error responses used at route dispatch boundary:
-  - `401` unauthorized
-  - `400` idempotency key errors
-  - `500` internal or misconfiguration errors
-  - `404` not found
-- Duplicate idempotency-key fallback protection uses in-memory transient map for 5 minutes.
+---
 
-## Environment Variables
-- Required:
-  - `SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY`
-  - `STRIPE_SECRET_KEY`
-  - `STRIPE_WEBHOOK_SECRET`
-  - `RESEND_API_KEY`
-- Optional:
-  - `SUPABASE_PUBLISHABLE_KEY`
-  - `OPTIONAL_SOCIAL_API_KEYS`
-  - `OPTIONAL_TURNSTILE_SECRET_KEY`
-- Asset binding:
-  - `ASSETS`
+## ⚠️ ENV VAR SYSTEM — TWO SEPARATE LAYERS
 
-## Deployment Configuration
-- Worker entrypoint: `src/worker/index.ts`.
-- Compatibility date: `2026-03-27`.
-- Worker-first routing for `/api/*`, `/auth/*`, `/webhooks/*`, `/ops/*`.
-- Staging env configured as `sbbl-hq-staging`.
+This is the #1 source of agent mistakes. There are two completely separate env systems.
 
-## Observability and Queue Posture (Current State)
-- Structured logging, metrics, alerts, and queue consumers are not yet declared in the Worker source.
-- Cloudflare Queue bindings for `media-processing`, `notifications`, and `stats-aggregation` are not currently present in `wrangler.jsonc`.
+### Layer 1: Build-time (Vite)
+
+Baked into the browser bundle at `npm run build`. The Supabase **client** (browser-side) reads these.
+
+| Variable | Canonical Name | Notes |
+|---|---|---|
+| Supabase URL | `VITE_SUPABASE_URL` | Set in `.env` + GitHub Secret |
+| Supabase anon key | `VITE_SUPABASE_ANON_KEY` | Set in `.env` + GitHub Secret. **This is the `eyJ...` anon JWT from Supabase dashboard.** |
+
+**`VITE_SUPABASE_PUBLISHABLE_KEY` is a deprecated alias in `runtime-config.ts`. Never set it as primary. Always use `VITE_SUPABASE_ANON_KEY`.**
+
+If these are absent at build time → `configAvailable = false` → app shows auth error banner.
+
+### Layer 2: Worker runtime (Cloudflare)
+
+Read from `wrangler.jsonc` vars block or `wrangler secret put`. The Cloudflare **Worker** reads these — they never reach the browser.
+
+| Variable | How to set |
+|---|---|
+| `SUPABASE_URL` | `wrangler.jsonc` vars (already set) |
+| `SUPABASE_PUBLISHABLE_KEY` | `wrangler.jsonc` vars (already set) |
+| `SUPABASE_SERVICE_ROLE_KEY` | `wrangler secret put` |
+| `STRIPE_SECRET_KEY` | `wrangler secret put` |
+| `STRIPE_WEBHOOK_SECRET` | `wrangler secret put` |
+| `RESEND_API_KEY` | `wrangler secret put` |
+
+### Why `/api/public-config` does NOT return Supabase keys
+
+The `/api/public-config` worker endpoint intentionally returns only `appName` and `defaultLeague`. The Supabase client initializes from the **Vite build bundle**, not from a runtime API call. This is intentional. Do not add keys to that endpoint.
+
+---
+
+## Data Model
+
+```
+League → Season → Division → Team → Player → Game → GameStat → Standings
+```
+
+- **League:** `id, name, type (WBL|TGIF|SPRING), active`
+- **Season:** `id, league_id, start_date, end_date, status`
+- **Team:** `id, league_id, name, logo_url, captain_id`
+- **Player:** `id, team_id, user_id, name, jersey_no, position, avatar_url`
+- **Game:** `id, home_id, away_id, scheduled_at, venue, status, home_score, away_score`
+- **GameStat:** `id, game_id, player_id, pts, reb, ast, stl, blk, fgm, fga, fta, ftm, minutes, turnovers`
+- **Standings:** computed view — wins, losses, pts_for, pts_against, streak, net_rating
+
+---
+
+## Access Control
+
+| Role | Permissions |
+|---|---|
+| ADMIN | Full CRUD all |
+| COMMISSIONER | League-scoped CRUD |
+| SCOREKEEPER | Stat entry on assigned games |
+| PLAYER | Read all, edit own profile |
+| PUBLIC | Read-only |
+
+**RLS Iron Law:** Every table must have RLS enabled. No exceptions. Never defer.
+
+---
+
+## public-config Endpoint
+
+`GET /api/public-config` returns:
+```json
+{ "ok": true, "appName": "SBBL HQ", "defaultLeague": "SBBL" }
+```
+
+It does **not** return Supabase keys. By design. Do not change this.

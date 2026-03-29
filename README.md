@@ -1,37 +1,79 @@
 # SBBL HQ
 
-SBBL HQ is a premium basketball super app for SBBL, WBL, and TGIFBL with a Cloudflare Worker runtime and Supabase data/auth/storage backend.
+Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alberta, Canada.
 
-## Commands
+**Leagues:** WBL (Weekend Basketball League) · TGIF League · SBBL Spring Edition
 
-- `npm run dev` - frontend development
-- `npm run build` - production frontend build
-- `npm run typecheck` - type checks
-- `npm run test` - unit/integration smoke tests
-- `npm run cf:deploy` - Cloudflare Worker deploy
-- `npm run cf:deploy:staging` - staging deploy
-- `npm run db:migrate` - apply Supabase migrations
-- `npm run db:types` - generate TS database types
+**Live at:** [sbbl-hq.icu](https://sbbl-hq.icu)
 
-## Architecture
+---
 
-- Premium SPA UI (React + Vite + shadcn)
-- Worker-first API paths (`/api/*`, `/auth/*`, `/ops/*`, `/webhooks/*`)
-- Supabase Postgres/Auth/Storage with RLS
-- Idempotent server mutations using `x-idempotency-key`
-- Progressive Web App (manifest + service worker) with install prompt UX
-- Capacitor wrapper support for native iOS/Android packaging
+## Stack
 
-See deployment and schema docs for production handoff.
+- **Frontend:** Vite + React + TypeScript strict
+- **Styling:** Tailwind CSS (dark-first, `#C9A84C` gold accent)
+- **Database:** Supabase (PostgreSQL + Realtime + Auth + Storage)
+- **Hosting:** Cloudflare Workers — NOT Vercel
+- **Payments:** Stripe
+- **CI/CD:** GitHub Actions → Cloudflare deploy
 
-## Custom domain TLS troubleshooting
+---
 
-If your Cloudflare zone still has legacy A/AAAA records to previous hosting, apex TLS can fail with `ERR_SSL_PROTOCOL_ERROR`. Use Worker custom domains and remove conflicting legacy proxied origin records. See `DEPLOY_CLOUDFLARE.md` for step-by-step remediation.
+## ⚠️ ENV VARS — AGENTS READ THIS FIRST
 
-## PWA + Capacitor workflow
+Two separate systems. Mixing them breaks auth.
 
-- Build and sync native shells: `npm run cap:sync`
-- Copy web bundle to existing native shells: `npm run cap:copy`
-- Open iOS project (Xcode): `npm run cap:open:ios`
-- Open Android project (Android Studio): `npm run cap:open:android`
-- Detailed setup: `PWA_CAPACITOR_SETUP.md`
+### Build-time (Vite — browser bundle)
+Set in `.env` locally. Set as GitHub Actions Secrets in CI.
+
+```
+VITE_SUPABASE_URL=https://ezanilxygnpucwkwpsoc.supabase.co
+VITE_SUPABASE_ANON_KEY=eyJ...   ← anon JWT from Supabase dashboard → Project Settings → API
+```
+
+> `VITE_SUPABASE_ANON_KEY` is canonical. `VITE_SUPABASE_PUBLISHABLE_KEY` is a dead alias. Never use it.
+
+### Worker runtime (Cloudflare — never browser)
+Set in `.dev.vars` locally. Set via `wrangler secret put` in production.
+
+```
+SUPABASE_SERVICE_ROLE_KEY=...
+STRIPE_SECRET_KEY=...
+STRIPE_WEBHOOK_SECRET=...
+RESEND_API_KEY=...
+```
+
+---
+
+## Quick Start
+
+```bash
+npm install
+cp .env.example .env        # fill in VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY
+cp .dev.vars.example .dev.vars  # fill in service keys
+npm run dev
+```
+
+## Quality Gates (must all pass before merge)
+
+```bash
+npm run lint        # zero warnings
+npm run typecheck   # zero errors
+npm run test        # ≥80% coverage
+npm run build       # zero errors
+npx playwright test # smoke suite passes
+```
+
+## Deploy
+
+```bash
+npm run cf:deploy           # production
+npm run cf:deploy:staging   # staging
+```
+
+## Docs
+
+- [`docs/architecture.md`](docs/architecture.md) — stack, data model, env var system
+- [`docs/onboarding/DEVELOPER_ONBOARDING_v1.0.0.md`](docs/onboarding/DEVELOPER_ONBOARDING_v1.0.0.md) — new dev setup
+- [`docs/runbooks/OPERATIONS_RUNBOOK_v1.0.0.md`](docs/runbooks/OPERATIONS_RUNBOOK_v1.0.0.md) — deploy + ops SOP
+- [`DEPLOY_CLOUDFLARE.md`](DEPLOY_CLOUDFLARE.md) — Cloudflare-specific deploy steps + env var reference
