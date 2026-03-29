@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,34 +6,34 @@
 
 @layer base {
   :root {
-    /* APEX-Olympus Dark System */
-    --background: 0 0% 4%;
-    --foreground: 40 10% 92%;
+    /* SBBL Brand System — exact spec tokens */
+    --background: 0 0% 4%;            /* #0A0A0A */
+    --foreground: 60 14% 95%;         /* #F5F5F0 */
 
-    --card: 0 0% 7%;
-    --card-foreground: 40 10% 92%;
+    --card: 0 0% 6.7%;               /* #111111 */
+    --card-foreground: 60 14% 95%;    /* #F5F5F0 */
 
     --popover: 0 0% 8%;
-    --popover-foreground: 40 10% 92%;
+    --popover-foreground: 60 14% 95%;
 
-    --primary: 40 60% 55%;
-    --primary-foreground: 0 0% 4%;
+    --primary: 43 52% 54%;            /* #C9A84C */
+    --primary-foreground: 0 0% 4%;    /* #0A0A0A */
 
     --secondary: 0 0% 12%;
-    --secondary-foreground: 40 10% 80%;
+    --secondary-foreground: 60 10% 80%;
 
     --muted: 0 0% 10%;
-    --muted-foreground: 0 0% 50%;
+    --muted-foreground: 0 0% 54%;     /* #8A8A8A */
 
-    --accent: 40 50% 45%;
+    --accent: 43 45% 48%;
     --accent-foreground: 0 0% 4%;
 
-    --destructive: 0 72% 50%;
+    --destructive: 355 76% 56%;       /* #E63946 */
     --destructive-foreground: 0 0% 98%;
 
     --border: 0 0% 14%;
     --input: 0 0% 14%;
-    --ring: 40 60% 55%;
+    --ring: 43 52% 54%;
 
     --radius: 0.25rem;
 
@@ -48,7 +48,7 @@
     /* Functional */
     --live: 210 100% 55%;
     --live-glow: 210 100% 65%;
-    --success: 145 60% 42%;
+    --success: 138 62% 48%;           /* #2DC653 */
     --warning: 38 92% 50%;
 
     /* Surface layers */
@@ -57,22 +57,22 @@
     --surface-glass: 0 0% 100% / 0.04;
 
     /* Premium */
-    --gold-gradient: linear-gradient(135deg, hsl(40 60% 55%), hsl(35 80% 65%));
+    --gold-gradient: linear-gradient(135deg, hsl(43 52% 54%), hsl(42 73% 66%));
     --chrome-gradient: linear-gradient(180deg, hsl(0 0% 18%), hsl(0 0% 8%));
     --obsidian-gradient: linear-gradient(180deg, hsl(0 0% 6%), hsl(0 0% 2%));
 
     --shadow-elevated: 0 8px 32px -8px hsl(0 0% 0% / 0.6);
-    --shadow-glow-gold: 0 0 24px -4px hsl(40 60% 55% / 0.15);
+    --shadow-glow-gold: 0 0 24px -4px hsl(43 52% 54% / 0.15);
     --shadow-glow-live: 0 0 20px -4px hsl(210 100% 55% / 0.2);
 
     --sidebar-background: 0 0% 5%;
     --sidebar-foreground: 0 0% 70%;
-    --sidebar-primary: 40 60% 55%;
+    --sidebar-primary: 43 52% 54%;
     --sidebar-primary-foreground: 0 0% 4%;
     --sidebar-accent: 0 0% 10%;
-    --sidebar-accent-foreground: 40 10% 90%;
+    --sidebar-accent-foreground: 60 10% 90%;
     --sidebar-border: 0 0% 12%;
-    --sidebar-ring: 40 60% 55%;
+    --sidebar-ring: 43 52% 54%;
   }
 }
 
@@ -87,8 +87,8 @@
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Space Grotesk', 'Inter', sans-serif;
-    @apply tracking-tight font-bold;
+    font-family: 'Bebas Neue', Impact, 'Arial Narrow', sans-serif;
+    @apply tracking-wide font-normal uppercase;
   }
 }
 
@@ -105,8 +105,8 @@
   }
 
   .stat-numeral {
-    font-family: 'Space Grotesk', monospace;
-    @apply font-bold tracking-tighter tabular-nums;
+    font-family: 'Bebas Neue', Impact, monospace;
+    @apply font-normal tracking-tight tabular-nums;
   }
 
   .league-badge {

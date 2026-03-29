@@ -1,12 +1,12 @@
 import { LeagueId } from '@/types';
-import { leagues } from '@/data/mock';
+import { getLeagueConfig } from '@/lib/leagues';
 
 export const LeagueBadge = ({ leagueId, size = 'sm' }: { leagueId: LeagueId; size?: 'sm' | 'md' }) => {
-  const league = leagues.find(l => l.id === leagueId);
+  const league = getLeagueConfig(leagueId);
   const cls = leagueId === 'sbbl' ? 'league-badge-sbbl' : leagueId === 'wbl' ? 'league-badge-wbl' : 'league-badge-tgifbl';
   return (
     <span className={`${cls} ${size === 'md' ? 'text-sm px-3 py-1' : ''}`}>
-      {league?.shortName}
+      {league.shortName}
     </span>
   );
 };

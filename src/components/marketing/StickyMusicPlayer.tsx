@@ -13,12 +13,6 @@ export const StickyMusicPlayer = () => {
 
     audio.loop = true;
     audio.volume = 0.35;
-
-    void audio.play().then(() => {
-      setIsPlaying(true);
-    }).catch(() => {
-      setIsPlaying(false);
-    });
   }, []);
 
   const togglePlayback = async () => {

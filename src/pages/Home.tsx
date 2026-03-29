@@ -1,134 +1,141 @@
 import { useApp } from '@/contexts/AppContext';
-import { leagues, games, players, products, mediaAssets } from '@/data/mock';
+import { getLeagueConfig, leagueCodeFromId } from '@/lib/leagues';
+import { fetchPublicHome, type PublicHomeData, type PublicGame } from '@/lib/api/public';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { motion } from 'framer-motion';
-import { Play, Clock, ShoppingBag, Trophy, ChevronRight, Zap } from 'lucide-react';
+import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useEffect, useMemo, useState } from 'react';
-import { TeamCard, fetchTeams } from '@/lib/api/teams';
+import { useEffect, useState } from 'react';
+
+type LoadState = 'loading' | 'loaded' | 'error';
 
 const HomePage = () => {
-  const [heroImageFailed, setHeroImageFailed] = useState(false);
-  const [heroTeams, setHeroTeams] = useState<TeamCard[]>([]);
-  const [heroTeamsError, setHeroTeamsError] = useState<string | null>(null);
-  const { activeLeague, addToBag } = useApp();
-  const league = leagues.find(l => l.id === activeLeague)!;
-  const liveGames = games.filter(g => g.leagueId === activeLeague && g.status === 'live');
-  const upcomingGames = games.filter(g => g.leagueId === activeLeague && g.status === 'upcoming').slice(0, 3);
-  const featuredPlayers = players.filter(p => p.leagueId === activeLeague).slice(0, 3);
-  const featuredProducts = products.slice(0, 4);
-  const totalRosterCount = useMemo(
-    () => heroTeams.reduce((sum, team) => sum + (team.roster_count ?? 0), 0),
-    [heroTeams],
-  );
+  const { activeLeague } = useApp();
+  const league = getLeagueConfig(activeLeague);
+  const [state, setState] = useState<LoadState>('loading');
+  const [data, setData] = useState<PublicHomeData | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    setState('loading');
+    setErrorMsg(null);
 
-    const loadHeroTeams = async () => {
-      try {
-        const response = await fetchTeams(activeLeague);
+    fetchPublicHome(leagueCodeFromId(activeLeague))
+      .then((result) => {
         if (!cancelled) {
-          setHeroTeams(response.teams ?? []);
-          setHeroTeamsError(null);
+          setData(result);
+          setState('loaded');
         }
-      } catch (error) {
-        // Preserve graceful fallback when API is unavailable in preview/local.
+      })
+      .catch((err) => {
         if (!cancelled) {
-          setHeroTeams([]);
-          setHeroTeamsError(error instanceof Error ? error.message : 'teams_load_failed');
+          setErrorMsg(err instanceof Error ? err.message : 'Failed to load');
+          setState('error');
         }
-      }
-    };
+      });
 
-    void loadHeroTeams();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [activeLeague]);
+
+  const liveGames = data?.liveGames ?? [];
+  const upcomingGames = data?.upcomingGames ?? [];
+  const hasLive = liveGames.length > 0;
 
   return (
     <div className="min-h-screen">
       {/* Hero */}
-      <section className="relative h-[70vh] min-h-[500px] max-h-[720px] overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-        <div className="absolute inset-0 opacity-30 [background:radial-gradient(circle_at_center,rgba(245,158,11,0.18)_0%,rgba(245,158,11,0.04)_35%,transparent_70%)]" />
-        <div className="absolute right-[16%] top-1/2 h-[520px] w-[520px] -translate-y-1/2 rounded-full border-[22px] border-primary/35" />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/30" />
-        {!heroImageFailed && (
-          <img
-            src="/hero-basketball.svg"
-            alt="SBBL hero"
-            className="absolute inset-0 w-full h-full object-cover opacity-35"
-            // Hide image layer if it cannot be served by host/CDN.
-            onError={() => setHeroImageFailed(true)}
-            loading="eager"
-          />
-        )}
-        <div className="absolute inset-0 bg-gradient-to-r from-background/80 via-transparent to-transparent" />
-        <div className="relative h-full container grid md:grid-cols-[1fr,340px] gap-8 items-end pb-12 md:pb-16">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
-            <LeagueBadge leagueId={activeLeague} size="md" />
-            <h1 className="font-display text-4xl md:text-6xl lg:text-7xl font-bold mt-4 leading-[0.95] tracking-tighter">
-              {league.shortName}<br />
-              <span className="text-primary">Season Live</span>
-            </h1>
-            <p className="text-muted-foreground text-sm md:text-base max-w-md mt-4 leading-relaxed">
-              {league.description}
-            </p>
-            <div className="flex items-center gap-3 mt-6">
-              <Link to="/live" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
-                <Play className="w-4 h-4" /> Watch Live
-              </Link>
-              <Link to="/schedules" className="px-6 py-3 border border-border font-display font-medium text-sm uppercase tracking-wider rounded-sm text-foreground hover:bg-secondary transition-colors">
-                Full Schedule
-              </Link>
-            </div>
-          </motion.div>
-          <motion.aside
-            initial={{ opacity: 0, x: 16 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.5, delay: 0.15 }}
-            className="panel p-4 bg-card/70 backdrop-blur-sm border-primary/20"
-          >
-            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">League Snapshot</p>
-            <div className="grid grid-cols-2 gap-3 mt-3">
-              <div className="rounded-sm border border-border p-3">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Live</p>
-                <p className="stat-numeral text-xl">{liveGames.length}</p>
+      <section className="relative overflow-hidden bg-gradient-to-br from-[#0A0A0A] via-[#0d0d0d] to-[#0A0A0A]">
+        <div className="absolute inset-0 opacity-20 [background:radial-gradient(ellipse_at_30%_50%,rgba(201,168,76,0.15)_0%,transparent_60%)]" />
+        <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
+        <div className="relative container py-16 md:py-24 lg:py-28">
+          <div className="grid md:grid-cols-[1fr,360px] gap-8 items-start">
+            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+              <LeagueBadge leagueId={activeLeague} size="md" />
+              <h1 className="font-display text-4xl md:text-5xl lg:text-6xl font-bold mt-4 leading-[0.95] tracking-tight uppercase">
+                {league.shortName}
+                <br />
+                <span className="text-primary">
+                  {data?.season?.name ?? 'Basketball'}
+                </span>
+              </h1>
+              <p className="text-muted-foreground text-sm md:text-base max-w-md mt-4 leading-relaxed">
+                {league.name} — live scoring, standings, and team operations across every division.
+              </p>
+              <div className="flex items-center gap-3 mt-6">
+                {hasLive ? (
+                  <Link to="/teams" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                    <Play className="w-4 h-4" /> Live Now
+                  </Link>
+                ) : (
+                  <Link to="/teams" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                    <Calendar className="w-4 h-4" /> View Teams
+                  </Link>
+                )}
               </div>
-              <div className="rounded-sm border border-border p-3">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Upcoming</p>
-                <p className="stat-numeral text-xl">{upcomingGames.length}</p>
-              </div>
-              <div className="rounded-sm border border-border p-3">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Teams</p>
-                <p className="stat-numeral text-xl">{heroTeams.length || '—'}</p>
-              </div>
-              <div className="rounded-sm border border-border p-3">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Rostered</p>
-                <p className="stat-numeral text-xl">{heroTeams.length ? totalRosterCount : '—'}</p>
-              </div>
-            </div>
-            {heroTeams.length > 0 ? (
-              <div className="mt-4">
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Featured Teams</p>
-                <div className="space-y-1">
-                  {heroTeams.slice(0, 3).map((team) => (
-                    <div key={team.id} className="text-xs text-foreground/90">{team.name}</div>
+            </motion.div>
+
+            {/* League Snapshot Card */}
+            <motion.aside
+              initial={{ opacity: 0, x: 16 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.4, delay: 0.1 }}
+              className="panel p-5 bg-card/80 backdrop-blur-sm border-primary/20"
+            >
+              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary mb-3">League Snapshot</p>
+
+              {state === 'loading' && (
+                <div className="space-y-3">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="h-10 rounded-sm bg-secondary animate-pulse" />
                   ))}
                 </div>
-              </div>
-            ) : (
-              <p className="mt-4 text-xs text-muted-foreground">
-                {heroTeamsError ? 'Live team data unavailable. Showing league baseline.' : 'No teams published for this league yet.'}
-              </p>
-            )}
-          </motion.aside>
+              )}
+
+              {state === 'error' && (
+                <div className="text-sm text-muted-foreground py-4">
+                  <p>Unable to load live data.</p>
+                  <p className="text-xs mt-1 text-destructive">{errorMsg}</p>
+                </div>
+              )}
+
+              {state === 'loaded' && data && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <MetricCard label="Teams" value={data.totalTeams} icon={<Users className="w-3.5 h-3.5 text-primary" />} />
+                    <MetricCard label="Rostered" value={data.totalRostered} icon={<BarChart3 className="w-3.5 h-3.5 text-primary" />} />
+                    <MetricCard label="Games" value={data.totalGames} icon={<Calendar className="w-3.5 h-3.5 text-primary" />} />
+                    <MetricCard label="Live" value={liveGames.length} icon={<Play className="w-3.5 h-3.5 text-live" />} highlight={hasLive} />
+                  </div>
+
+                  {data.teams.length > 0 && (
+                    <div className="mt-4">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Featured Teams</p>
+                      <div className="space-y-1.5">
+                        {data.teams.slice(0, 4).map((team) => (
+                          <div key={team.id} className="flex items-center justify-between text-xs">
+                            <span className="text-foreground/90 truncate">{team.name}</span>
+                            <span className="text-muted-foreground tabular-nums">{team.roster_count} players</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {data.teams.length === 0 && (
+                    <p className="mt-4 text-xs text-muted-foreground">
+                      No teams published for this league yet.
+                    </p>
+                  )}
+                </>
+              )}
+            </motion.aside>
+          </div>
         </div>
       </section>
 
-      {/* Live Now Strip */}
-      {liveGames.length > 0 && (
+      {/* Live Games Strip */}
+      {hasLive && (
         <section className="border-b border-border">
           <div className="container py-4">
             <div className="flex items-center gap-2 mb-3">
@@ -136,21 +143,8 @@ const HomePage = () => {
               <span className="text-xs font-semibold uppercase tracking-widest text-live">Live Now</span>
             </div>
             <div className="flex gap-4 overflow-x-auto scrollbar-hidden">
-              {liveGames.map(g => (
-                <Link key={g.id} to="/live" className="panel flex-shrink-0 p-4 min-w-[280px] hover:border-live/30 transition-colors">
-                  <div className="flex items-center gap-2 mb-2">
-                    <LeagueBadge leagueId={g.leagueId} />
-                    <span className="text-xs text-muted-foreground">{g.venue}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="text-sm font-medium">{g.homeTeam.name}</div>
-                    <div className="stat-numeral text-lg text-live">{g.score?.home}</div>
-                  </div>
-                  <div className="flex items-center justify-between mt-1">
-                    <div className="text-sm font-medium">{g.awayTeam.name}</div>
-                    <div className="stat-numeral text-lg text-live">{g.score?.away}</div>
-                  </div>
-                </Link>
+              {liveGames.map((g) => (
+                <GameCard key={g.id} game={g} variant="live" />
               ))}
             </div>
           </div>
@@ -159,171 +153,109 @@ const HomePage = () => {
 
       <div className="container py-8 md:py-12 space-y-12">
         {/* Upcoming Games */}
-        <section>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="font-display text-xl md:text-2xl font-bold">Upcoming Games</h2>
-            <Link to="/schedules" className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
-              View All <ChevronRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {upcomingGames.map(g => (
-              <div key={g.id} className="panel p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <LeagueBadge leagueId={g.leagueId} />
-                  <span className="text-xs text-muted-foreground">{g.date} · {g.time}</span>
-                </div>
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{g.homeTeam.name}</span>
-                    <span className="text-xs text-muted-foreground">{g.homeTeam.record.wins}-{g.homeTeam.record.losses}</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground text-center">vs</div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-medium">{g.awayTeam.name}</span>
-                    <span className="text-xs text-muted-foreground">{g.awayTeam.record.wins}-{g.awayTeam.record.losses}</span>
-                  </div>
-                </div>
-                <div className="flex items-center justify-between mt-4 pt-3 border-t border-border">
-                  <span className="text-xs text-muted-foreground">{g.venue} · {g.court}</span>
-                  <span className="stat-numeral text-xs text-primary">PPV ${g.ppvPrice.toFixed(2)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Featured Players */}
-        <section>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="font-display text-xl md:text-2xl font-bold">Featured Players</h2>
-            <Link to="/profiles" className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
-              All Profiles <ChevronRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {featuredPlayers.map(p => (
-              <div key={p.id} className="panel overflow-hidden group">
-                <div className="relative h-48 overflow-hidden">
-                  <img src={p.avatar} alt={p.name} className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-card via-transparent to-transparent" />
-                  <div className="absolute bottom-3 left-3 right-3">
-                    <div className="flex items-center gap-2">
-                      <span className="stat-numeral text-2xl text-primary">#{p.number}</span>
-                      <div>
-                        <p className="font-display font-bold text-sm">{p.name}</p>
-                        <p className="text-xs text-muted-foreground">{p.position} · {leagues.find(l => l.id === p.leagueId)?.shortName}</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div className="p-3 grid grid-cols-4 gap-2">
-                  {[
-                    { label: 'PTS', value: p.stats.pts },
-                    { label: 'REB', value: p.stats.reb },
-                    { label: 'AST', value: p.stats.ast },
-                    { label: 'STL', value: p.stats.stl },
-                  ].map(s => (
-                    <div key={s.label} className="text-center">
-                      <p className="stat-numeral text-base">{s.value}</p>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{s.label}</p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Store Drops */}
-        <section>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="font-display text-xl md:text-2xl font-bold">Store Drops</h2>
-            <Link to="/store" className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
-              Shop All <ChevronRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {featuredProducts.map(p => (
-              <div key={p.id} className="panel overflow-hidden group cursor-pointer" onClick={() => addToBag(p.id)}>
-                <div className="relative aspect-square overflow-hidden">
-                  <img src={p.image} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-                  {p.badge && (
-                    <span className="absolute top-2 left-2 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-sm bg-primary text-primary-foreground">{p.badge}</span>
-                  )}
-                </div>
-                <div className="p-3">
-                  <p className="text-xs font-medium truncate">{p.name}</p>
-                  <p className="stat-numeral text-sm text-primary mt-0.5">{p.price > 0 ? `₱${p.price.toLocaleString()}` : 'Reward'}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        {/* Engagement Strip */}
-        <section className="panel p-6 md:p-8">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-primary/10 rounded-sm"><Zap className="w-5 h-5 text-primary" /></div>
-              <div>
-                <h3 className="font-display font-bold text-sm mb-1">Watch Streak</h3>
-                <p className="text-xs text-muted-foreground">Catch 5 consecutive live games to unlock exclusive merch discounts and reward badges.</p>
-                <div className="flex gap-1 mt-2">
-                  {[1,2,3,4,5].map(i => (
-                    <div key={i} className={`w-6 h-1.5 rounded-full ${i <= 3 ? 'bg-primary' : 'bg-secondary'}`} />
-                  ))}
-                </div>
-              </div>
+        {upcomingGames.length > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="font-display text-xl md:text-2xl font-bold uppercase tracking-tight">Upcoming Games</h2>
             </div>
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-primary/10 rounded-sm"><Trophy className="w-5 h-5 text-primary" /></div>
-              <div>
-                <h3 className="font-display font-bold text-sm mb-1">Season Rewards</h3>
-                <p className="text-xs text-muted-foreground">Earn points through purchases, watch time, and social shares. Redeem for exclusive drops.</p>
-                <p className="stat-numeral text-lg text-primary mt-1">2,450 pts</p>
-              </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {upcomingGames.map((g) => (
+                <GameCard key={g.id} game={g} variant="upcoming" />
+              ))}
             </div>
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-primary/10 rounded-sm"><ShoppingBag className="w-5 h-5 text-primary" /></div>
-              <div>
-                <h3 className="font-display font-bold text-sm mb-1">Featured Drop</h3>
-                <p className="text-xs text-muted-foreground">SBBL All-Star Media Day Collection — limited release jerseys and signed accessories.</p>
-                <Link to="/store" className="text-xs text-primary font-semibold mt-1 inline-block">Shop Now →</Link>
-              </div>
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
 
-        {/* Media Highlights */}
-        <section>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="font-display text-xl md:text-2xl font-bold">Highlights</h2>
-            <Link to="/media" className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
-              All Media <ChevronRight className="w-3.5 h-3.5" />
-            </Link>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {mediaAssets.filter(m => m.status === 'published').map(m => (
-              <div key={m.id} className="panel overflow-hidden group">
-                <div className="relative aspect-video overflow-hidden">
-                  <img src={m.thumbnail} alt={m.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-card/90 via-transparent to-transparent" />
-                  <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between">
-                    <div>
-                      <LeagueBadge leagueId={m.leagueId} />
-                      <p className="font-display font-bold text-sm mt-1">{m.title}</p>
-                    </div>
-                    <div className="p-2 bg-primary/20 rounded-full"><Play className="w-4 h-4 text-primary" /></div>
+        {/* Standings Proof */}
+        {state === 'loaded' && data && data.teams.length > 0 && (
+          <section>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="font-display text-xl md:text-2xl font-bold uppercase tracking-tight">Teams</h2>
+              <Link to="/teams" className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
+                All Teams <ChevronRight className="w-3.5 h-3.5" />
+              </Link>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {data.teams.slice(0, 6).map((team) => (
+                <div key={team.id} className="panel p-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="font-display font-bold text-sm">{team.name}</h3>
+                    <span className="text-[10px] uppercase tracking-wider text-primary font-semibold">{team.league_code}</span>
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                    {team.division_name && <span>{team.division_name}</span>}
+                    <span>{team.season_name}</span>
+                  </div>
+                  <div className="mt-3 pt-3 border-t border-border flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">{team.roster_count} rostered players</span>
+                    <Trophy className="w-3.5 h-3.5 text-primary/40" />
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        </section>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Empty state for no data */}
+        {state === 'loaded' && data && data.teams.length === 0 && upcomingGames.length === 0 && (
+          <section className="panel p-8 text-center">
+            <Calendar className="w-8 h-8 text-primary/40 mx-auto mb-3" />
+            <h2 className="font-display text-lg font-bold">Season Coming Soon</h2>
+            <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+              {league.name} is gearing up. Teams, schedules, and live scoring will appear here as the season launches.
+            </p>
+          </section>
+        )}
       </div>
     </div>
   );
 };
+
+function MetricCard({ label, value, icon, highlight }: { label: string; value: number; icon: React.ReactNode; highlight?: boolean }) {
+  return (
+    <div className={`rounded-sm border p-3 ${highlight ? 'border-live/30 bg-live/5' : 'border-border'}`}>
+      <div className="flex items-center gap-1.5 mb-1">
+        {icon}
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      </div>
+      <p className="stat-numeral text-xl">{value || '—'}</p>
+    </div>
+  );
+}
+
+function GameCard({ game, variant }: { game: PublicGame; variant: 'live' | 'upcoming' }) {
+  const isLive = variant === 'live';
+  const scheduledDate = game.scheduled_at ? new Date(game.scheduled_at) : null;
+
+  return (
+    <div className={`panel flex-shrink-0 p-4 ${isLive ? 'min-w-[280px] hover:border-live/30' : ''} transition-colors`}>
+      <div className="flex items-center gap-2 mb-2">
+        {game.venue && <span className="text-xs text-muted-foreground">{game.venue}</span>}
+        {game.court && <span className="text-xs text-muted-foreground">· {game.court}</span>}
+      </div>
+      <div className="flex items-center justify-between">
+        <div className="text-sm font-medium">{game.home_team?.name ?? 'TBD'}</div>
+        {isLive && game.home_score != null && (
+          <div className="stat-numeral text-lg text-live">{game.home_score}</div>
+        )}
+      </div>
+      <div className="flex items-center justify-between mt-1">
+        <div className="text-sm font-medium">{game.away_team?.name ?? 'TBD'}</div>
+        {isLive && game.away_score != null && (
+          <div className="stat-numeral text-lg text-live">{game.away_score}</div>
+        )}
+      </div>
+      {!isLive && scheduledDate && (
+        <div className="mt-3 pt-2 border-t border-border">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Clock className="w-3 h-3" />
+            <span>{scheduledDate.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+            <span>· {scheduledDate.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default HomePage;

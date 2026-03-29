@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
-import { leagues } from '@/data/mock';
+import { LEAGUE_CONFIGS } from '@/lib/leagues';
 import { signOut } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
 import {
@@ -10,14 +10,7 @@ import {
 
 const mainNav = [
   { label: 'Home', path: '/' },
-  { label: 'Live', path: '/live' },
-  { label: 'Schedules', path: '/schedules' },
   { label: 'Teams', path: '/teams' },
-  { label: 'Store', path: '/store' },
-  { label: 'Profiles', path: '/profiles' },
-  { label: 'Stats', path: '/stats' },
-  { label: 'Leaderboards', path: '/leaderboards' },
-  { label: 'Media', path: '/media' },
 ];
 
 export const Header = () => {
@@ -37,7 +30,7 @@ export const Header = () => {
       <div className="border-b border-border">
         <div className="container flex items-center justify-between h-10">
           <div className="flex items-center gap-1">
-            {leagues.map((l) => (
+            {LEAGUE_CONFIGS.map((l) => (
               <button
                 key={l.id}
                 onClick={() => setActiveLeague(l.id)}
@@ -55,9 +48,8 @@ export const Header = () => {
             <div className="hidden md:flex items-center gap-1">
               <button className="p-1.5 text-muted-foreground hover:text-foreground"><RefreshCw className="w-3.5 h-3.5" /></button>
               <button className="p-1.5 text-muted-foreground hover:text-foreground"><Share2 className="w-3.5 h-3.5" /></button>
-              <Link to="/billing" className="p-1.5 text-muted-foreground hover:text-foreground"><CreditCard className="w-3.5 h-3.5" /></Link>
-              <Link to="/settings" className="p-1.5 text-muted-foreground hover:text-foreground"><Settings className="w-3.5 h-3.5" /></Link>
-              {isSignedIn && <Link to="/profiles" className="p-1.5 text-muted-foreground hover:text-foreground"><User className="w-3.5 h-3.5" /></Link>}
+              {isSignedIn && <Link to="/billing" className="p-1.5 text-muted-foreground hover:text-foreground"><CreditCard className="w-3.5 h-3.5" /></Link>}
+              {isSignedIn && <Link to="/settings" className="p-1.5 text-muted-foreground hover:text-foreground"><Settings className="w-3.5 h-3.5" /></Link>}
               {isAdmin && <Link to="/ops" className="p-1.5 text-primary hover:text-primary/80"><Shield className="w-3.5 h-3.5" /></Link>}
             </div>
             {!isSignedIn ? (
@@ -106,11 +98,13 @@ export const Header = () => {
                 {item.label}
               </Link>
             ))}
-            <div className="flex items-center gap-2 px-3 pt-2 border-t border-border mt-2">
-              <Link to="/billing" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><CreditCard className="w-4 h-4" /> Billing</Link>
-              <Link to="/settings" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><Settings className="w-4 h-4" /> Settings</Link>
-              {isAdmin && <Link to="/ops" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-primary"><Shield className="w-4 h-4" /> Ops</Link>}
-            </div>
+            {isSignedIn && (
+              <div className="flex items-center gap-2 px-3 pt-2 border-t border-border mt-2">
+                <Link to="/billing" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><CreditCard className="w-4 h-4" /> Billing</Link>
+                <Link to="/settings" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><Settings className="w-4 h-4" /> Settings</Link>
+                {isAdmin && <Link to="/ops" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-primary"><Shield className="w-4 h-4" /> Ops</Link>}
+              </div>
+            )}
           </nav>
         </div>
       )}
