@@ -593,7 +593,7 @@ async function handlePublicConfig({ env }: HandlerCtx) {
     ok: true,
     appName: 'SBBL HQ',
     supabaseUrl: env.SUPABASE_URL,
-    supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY ?? env.SUPABASE_ANON_KEY ?? null,
+    supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY ?? null,
     defaultLeague: 'SBBL',
   });
 }
