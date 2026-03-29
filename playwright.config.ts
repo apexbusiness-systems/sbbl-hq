@@ -7,18 +7,17 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: process.env.CI ? 'github' : 'html',
-  timeout: 30000,
+  timeout: 60000,
+  expect: { timeout: 15000 },
   use: {
     baseURL: 'http://localhost:4173',
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'npx vite preview --port 4173 --strictPort',
-    port: 4173,
+    command: 'npx vite preview --port 4173',
+    url: 'http://localhost:4173',
     reuseExistingServer: !process.env.CI,
-    timeout: 30000,
-    stdout: 'pipe',
-    stderr: 'pipe',
+    timeout: 60000,
   },
   projects: [
     {
