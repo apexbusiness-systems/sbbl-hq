@@ -10,6 +10,7 @@ import { Header } from '@/components/layout/Header';
 import { BagDrawer } from '@/components/layout/BagDrawer';
 import { RequireAdmin, RequireAuth } from '@/components/auth/RouteGuards';
 import { StickyMusicPlayer } from '@/components/marketing/StickyMusicPlayer';
+import { AppDownloadPill } from '@/components/marketing/AppDownloadPill';
 
 const Home = lazy(() => import('./pages/Home'));
 const Teams = lazy(() => import('./pages/Teams'));
@@ -40,6 +41,7 @@ const App = () => (
               <Header />
               <BagDrawer />
               <StickyMusicPlayer />
+              <AppDownloadPill />
               <main>
                 <Suspense fallback={<RouteFallback />}>
                   <Routes>
