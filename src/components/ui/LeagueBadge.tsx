@@ -1,12 +1,26 @@
-import { LeagueId } from '@/types';
-import { leagues } from '@/data/mock';
+import type { LeagueId } from '@/types';
+import { getLeagueConfig } from '@/lib/leagues';
+import { useState } from 'react';
 
-export const LeagueBadge = ({ leagueId, size = 'sm' }: { leagueId: LeagueId; size?: 'sm' | 'md' }) => {
-  const league = leagues.find(l => l.id === leagueId);
-  const cls = leagueId === 'sbbl' ? 'league-badge-sbbl' : leagueId === 'wbl' ? 'league-badge-wbl' : 'league-badge-tgifbl';
+export const LeagueBadge = ({ leagueId, size = 'sm', showLogo = true }: { leagueId: LeagueId; size?: 'sm' | 'md'; showLogo?: boolean }) => {
+  const league = getLeagueConfig(leagueId);
+  const [logoFailed, setLogoFailed] = useState(false);
+  const imgSize = size === 'md' ? 20 : 16;
+
   return (
-    <span className={`${cls} ${size === 'md' ? 'text-sm px-3 py-1' : ''}`}>
-      {league?.shortName}
+    <span className={`${league.badgeClass} ${size === 'md' ? 'text-sm px-3 py-1' : ''}`}>
+      {showLogo && !logoFailed && (
+        <img
+          src={league.logo}
+          alt={league.logoAlt}
+          width={imgSize}
+          height={imgSize}
+          className="inline-block flex-shrink-0"
+          style={{ aspectRatio: '1/1' }}
+          onError={() => setLogoFailed(true)}
+        />
+      )}
+      <span>{league.shortName}</span>
     </span>
   );
 };
