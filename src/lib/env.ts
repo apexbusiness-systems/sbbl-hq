@@ -8,12 +8,16 @@ const clientEnvSchema = z.object({
   // Optional to avoid hard-crashing the SPA when env vars are missing in preview/prod.
   VITE_SUPABASE_URL: z.string().url().optional(),
   VITE_SUPABASE_PUBLISHABLE_KEY: z.string().min(10).optional(),
+  // Backward-compatible alias used by many Supabase/Vite templates.
+  VITE_SUPABASE_ANON_KEY: z.string().min(10).optional(),
   VITE_WORKER_API_BASE: z.string().optional(),
 });
 
 const serverEnvSchema = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_PUBLISHABLE_KEY: z.string().min(10).optional(),
+  // Backward-compatible alias used in some deployments.
+  SUPABASE_ANON_KEY: z.string().min(10).optional(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(16),
   STRIPE_SECRET_KEY: z.string().min(16).optional(),
   STRIPE_WEBHOOK_SECRET: z.string().min(16).optional(),
