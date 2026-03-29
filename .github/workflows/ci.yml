@@ -38,6 +38,11 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_APP_NAME: SBBL HQ
+          VITE_DEFAULT_LEAGUE: SBBL
 
   e2e:
     name: Playwright E2E
@@ -62,6 +67,11 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_APP_NAME: SBBL HQ
+          VITE_DEFAULT_LEAGUE: SBBL
 
       - name: Run Playwright tests
         run: npx playwright test

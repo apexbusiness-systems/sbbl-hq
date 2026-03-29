@@ -28,3 +28,34 @@
 
 ## Rollback
 - Use Cloudflare dashboard deployment history and rollback to prior Worker version.
+
+---
+
+## ⚠️ ENV VAR REFERENCE — READ THIS BEFORE TOUCHING AUTH
+
+### Build-time (Vite — baked into dist/ bundle)
+
+| Variable | Value | Where to set |
+|---|---|---|
+| `VITE_SUPABASE_URL` | `https://ezanilxygnpucwkwpsoc.supabase.co` | GitHub Secret + `.env` |
+| `VITE_SUPABASE_ANON_KEY` | `eyJ...` anon JWT from Supabase dashboard | GitHub Secret + `.env` |
+
+**`VITE_SUPABASE_ANON_KEY` is the CANONICAL variable.** `VITE_SUPABASE_PUBLISHABLE_KEY` is a deprecated alias — the fallback exists in `runtime-config.ts` but it must never be the primary.
+
+These MUST be set as **GitHub Actions secrets** (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) and injected during the `npm run build` step. If they are missing at build time, `configAvailable` will be `false` and the login page will show "Authentication temporarily unavailable."
+
+### Worker runtime (Cloudflare — NOT baked into bundle)
+
+| Variable | Where to set |
+|---|---|
+| `SUPABASE_URL` | `wrangler.jsonc` vars block (non-secret, already set) |
+| `SUPABASE_PUBLISHABLE_KEY` | `wrangler.jsonc` vars block (non-secret, already set) |
+| `SUPABASE_SERVICE_ROLE_KEY` | `wrangler secret put SUPABASE_SERVICE_ROLE_KEY` |
+| `STRIPE_SECRET_KEY` | `wrangler secret put STRIPE_SECRET_KEY` |
+| `STRIPE_WEBHOOK_SECRET` | `wrangler secret put STRIPE_WEBHOOK_SECRET` |
+| `RESEND_API_KEY` | `wrangler secret put RESEND_API_KEY` |
+
+### Why two sets?
+- **Vite vars** are for the browser bundle — Supabase client runs client-side, needs the anon key baked in.
+- **Worker vars** are for the Cloudflare Worker — service role key never goes to the browser.
+- The `/api/public-config` endpoint intentionally does NOT expose these keys (by design). The client reads them from the build bundle only.
