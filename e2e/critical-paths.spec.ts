@@ -4,8 +4,7 @@ test.describe('critical path coverage', () => {
   test('home page renders header and content', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('header')).toBeVisible({ timeout: 15000 });
-    // Apply .first() on the Locator before passing it to expect.
-    await expect(page.getByText('SBBL', { exact: false }).first()).toBeVisible();
+    await expect(page.locator('header').getByRole('button', { name: /SBBL/i })).toBeVisible();
   });
 
   test('league selector has three controls', async ({ page }) => {
