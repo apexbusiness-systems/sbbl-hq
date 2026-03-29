@@ -14,6 +14,15 @@ All mutating methods (`POST/PUT/PATCH/DELETE`) require a valid idempotency key p
 
 ## Endpoints
 
+### Public (No Auth Required)
+- `GET /api/public-config`
+  - Response: `{ supabaseUrl, supabasePublishableKey, appName, defaultLeague }`.
+  - Purpose: Runtime config bootstrap for frontend — avoids baking env vars into client bundle.
+- `GET /api/public/home?league=<code>`
+  - Query: `league` — league code (e.g. `sbbl`, `wbl`, `tgifbl`). Defaults to `sbbl`.
+  - Response: `{ ok, league, season, teams[], totalTeams, totalRostered, liveGames[], upcomingGames[], recentGames[], totalGames, leagues[] }`.
+  - Purpose: Aggregated home page data for unauthenticated visitors.
+
 ### Session & Profile
 - `GET /auth/session`
   - Response: `{ ok, userId, roles }` or `401 unauthorized`.

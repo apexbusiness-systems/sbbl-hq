@@ -3,6 +3,7 @@ import { apiFetch } from '@/lib/api/client';
 export type TeamCard = {
   id: string;
   name: string;
+  league_code: string;
   league_name: string;
   season_name: string;
   division_name: string | null;

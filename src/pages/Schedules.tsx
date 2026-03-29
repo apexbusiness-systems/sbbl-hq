@@ -1,43 +1,18 @@
-import { useState } from 'react';
-import { games, leagues } from '@/data/mock';
-import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { useApp } from '@/contexts/AppContext';
-import { LeagueId, GameStatus } from '@/types';
-import { Calendar, Filter } from 'lucide-react';
-
-const statusColors: Record<GameStatus, string> = {
-  live: 'text-live',
-  upcoming: 'text-foreground',
-  final: 'text-muted-foreground',
-  postponed: 'text-warning',
-  review_pending: 'text-warning',
-};
-
-const statusLabels: Record<GameStatus, string> = {
-  live: '● Live',
-  upcoming: 'Upcoming',
-  final: 'Final',
-  postponed: 'Postponed',
-  review_pending: 'Under Review',
-};
+import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
+import { SCHEDULE_DATA, type ScheduleDay } from '@/data/schedules';
+import { LeagueBadge } from '@/components/ui/LeagueBadge';
+import type { LeagueId } from '@/types';
+import { Calendar, MapPin, Clock } from 'lucide-react';
+import { useState } from 'react';
 
 const SchedulesPage = () => {
   const { activeLeague } = useApp();
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>('all');
-  const [statusFilter, setStatusFilter] = useState<GameStatus | 'all'>('all');
 
-  const filtered = games.filter(g => {
-    if (leagueFilter !== 'all' && g.leagueId !== leagueFilter) return false;
-    if (statusFilter !== 'all' && g.status !== statusFilter) return false;
-    return true;
-  });
-
-  const grouped = filtered.reduce((acc, g) => {
-    const key = g.date;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(g);
-    return acc;
-  }, {} as Record<string, typeof games>);
+  const filtered = leagueFilter === 'all'
+    ? SCHEDULE_DATA
+    : SCHEDULE_DATA.filter((s) => s.leagueId === leagueFilter);
 
   return (
     <div className="min-h-screen">
@@ -45,79 +20,115 @@ const SchedulesPage = () => {
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="font-display text-3xl md:text-4xl font-bold">Schedules</h1>
-            <p className="text-sm text-muted-foreground mt-1">All games across leagues</p>
+            <p className="text-sm text-muted-foreground mt-1">Game schedules across all leagues</p>
           </div>
           <Calendar className="w-5 h-5 text-muted-foreground" />
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap gap-2 mb-8">
-          <div className="flex gap-1 p-1 bg-secondary rounded-sm">
-            {(['all', 'sbbl', 'wbl', 'tgifbl'] as const).map(l => (
-              <button key={l} onClick={() => setLeagueFilter(l)} className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${leagueFilter === l ? 'bg-card text-foreground' : 'text-muted-foreground'}`}>
-                {l === 'all' ? 'All' : l.toUpperCase()}
-              </button>
-            ))}
-          </div>
-          <div className="flex gap-1 p-1 bg-secondary rounded-sm">
-            {(['all', 'live', 'upcoming', 'final'] as const).map(s => (
-              <button key={s} onClick={() => setStatusFilter(s)} className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${statusFilter === s ? 'bg-card text-foreground' : 'text-muted-foreground'}`}>
-                {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
-          </div>
+        {/* League filter */}
+        <div className="flex gap-1 p-1 bg-secondary rounded-sm mb-8 w-fit">
+          <button
+            onClick={() => setLeagueFilter('all')}
+            className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors min-h-[36px] ${leagueFilter === 'all' ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
+          >
+            All
+          </button>
+          {LEAGUE_REGISTRY.map((l) => (
+            <button
+              key={l.id}
+              onClick={() => setLeagueFilter(l.id)}
+              className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors min-h-[36px] ${leagueFilter === l.id ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
+            >
+              {l.shortName}
+            </button>
+          ))}
         </div>
 
-        {/* Schedule List */}
+        {filtered.length === 0 && (
+          <div className="panel p-8 text-center">
+            <Calendar className="w-8 h-8 text-primary/40 mx-auto mb-3" />
+            <h2 className="font-display text-lg font-bold">No Schedules Yet</h2>
+            <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+              Game schedules will appear here as leagues publish their fixtures.
+            </p>
+          </div>
+        )}
+
         <div className="space-y-8">
-          {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([date, dateGames]) => (
-            <div key={date}>
-              <div className="sticky top-[5.5rem] z-10 bg-background/95 backdrop-blur-sm py-2 mb-3">
-                <h3 className="font-display font-bold text-sm text-muted-foreground uppercase tracking-wider">
-                  {new Date(date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-                </h3>
-              </div>
-              <div className="space-y-2">
-                {dateGames.map(g => (
-                  <div key={g.id} className="panel p-4 flex flex-col md:flex-row md:items-center gap-3 md:gap-6">
-                    <div className="flex items-center gap-3 md:w-32">
-                      <LeagueBadge leagueId={g.leagueId} />
-                      <span className={`text-xs font-semibold ${statusColors[g.status]}`}>{statusLabels[g.status]}</span>
-                    </div>
-                    <div className="flex-1 flex items-center gap-3">
-                      <div className="flex-1 text-right">
-                        <p className="text-sm font-medium">{g.homeTeam.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{g.homeTeam.record.wins}-{g.homeTeam.record.losses}</p>
-                      </div>
-                      {g.score ? (
-                        <div className="flex items-center gap-2 px-3">
-                          <span className={`stat-numeral text-xl ${g.status === 'live' ? 'text-live' : 'text-foreground'}`}>{g.score.home}</span>
-                          <span className="text-xs text-muted-foreground">—</span>
-                          <span className={`stat-numeral text-xl ${g.status === 'live' ? 'text-live' : 'text-foreground'}`}>{g.score.away}</span>
-                        </div>
-                      ) : (
-                        <div className="px-3">
-                          <span className="stat-numeral text-sm text-muted-foreground">{g.time}</span>
-                        </div>
-                      )}
-                      <div className="flex-1">
-                        <p className="text-sm font-medium">{g.awayTeam.name}</p>
-                        <p className="text-[10px] text-muted-foreground">{g.awayTeam.record.wins}-{g.awayTeam.record.losses}</p>
-                      </div>
-                    </div>
-                    <div className="text-right md:w-40">
-                      <p className="text-xs text-muted-foreground">{g.venue}</p>
-                      <p className="text-[10px] text-muted-foreground">{g.court}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+          {filtered.map((day) => (
+            <ScheduleDayCard key={`${day.leagueId}-${day.date}`} day={day} />
           ))}
         </div>
       </div>
     </div>
   );
 };
+
+function ScheduleDayCard({ day }: { day: ScheduleDay }) {
+  const league = getLeagueConfig(day.leagueId);
+  const dateObj = new Date(day.date + 'T00:00:00');
+  const formattedDate = dateObj.toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  return (
+    <div className="panel overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-border bg-gradient-to-r from-card via-card to-transparent">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div className="flex items-center gap-3">
+            <img
+              src={league.logo}
+              alt={league.logoAlt}
+              width={32}
+              height={32}
+              className="flex-shrink-0"
+              style={{ aspectRatio: '1/1' }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
+            <div>
+              <div className="flex items-center gap-2">
+                <LeagueBadge leagueId={day.leagueId} size="sm" />
+                <span className="text-xs text-muted-foreground">{day.season} &middot; Week {day.week}</span>
+              </div>
+              <p className="font-display text-lg font-bold mt-0.5">{formattedDate}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <MapPin className="w-3.5 h-3.5 flex-shrink-0" />
+            <span>{day.venue}, {day.address}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Courts */}
+      <div className="divide-y divide-border">
+        {day.courts.map((court) => (
+          <div key={court.name} className="px-5 py-4">
+            <h3 className="font-display text-sm font-bold uppercase tracking-wider text-primary mb-3">{court.name}</h3>
+            <div className="space-y-2">
+              {court.games.map((game, i) => (
+                <div key={i} className="flex items-center gap-3 py-2 px-3 rounded-sm bg-secondary/50 hover:bg-secondary transition-colors">
+                  <div className="flex items-center gap-1.5 w-24 flex-shrink-0">
+                    <Clock className="w-3 h-3 text-muted-foreground" />
+                    <span className="text-xs font-medium tabular-nums text-muted-foreground">{game.time}</span>
+                  </div>
+                  <div className="flex-1 flex items-center gap-2 min-w-0">
+                    <span className="text-sm font-medium truncate">{game.home}</span>
+                    <span className="text-[10px] font-bold text-primary flex-shrink-0">VS</span>
+                    <span className="text-sm font-medium truncate">{game.away}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default SchedulesPage;

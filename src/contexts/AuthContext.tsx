@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { supabaseClient } from '@/lib/supabase/client';
+import { initSupabaseClient, getSupabaseClient } from '@/lib/supabase/client';
 import { canAccessOps, type AppRole } from '@/lib/auth/roles';
 import { fetchProfileAndRoles, type AuthProfile } from '@/lib/api/auth';
 import type { Session, User } from '@supabase/supabase-js';
@@ -13,6 +13,7 @@ type AuthState = {
   isSignedIn: boolean;
   isAdmin: boolean;
   needsOnboarding: boolean;
+  configAvailable: boolean;
   refresh: () => Promise<void>;
 };
 
@@ -24,9 +25,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<AuthProfile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
+  const [configAvailable, setConfigAvailable] = useState(true);
 
   const load = async () => {
-    if (!supabaseClient) {
+    const client = getSupabaseClient();
+    if (!client) {
       setSession(null);
       setUser(null);
       setProfile(null);
@@ -36,7 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setLoading(true);
-    const { data } = await supabaseClient.auth.getSession();
+    const { data } = await client.auth.getSession();
     setSession(data.session ?? null);
     setUser(data.session?.user ?? null);
 
@@ -52,23 +55,41 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    if (!supabaseClient) {
-      setLoading(false);
-      return;
-    }
+    let unsubscribe: (() => void) | undefined;
 
-    void load();
-    const { data } = supabaseClient.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      setUser(nextSession?.user ?? null);
-      if (!nextSession?.user) {
-        setProfile(null);
-        setRoles([]);
+    const boot = async () => {
+      try {
+        await initSupabaseClient();
+      } catch {
+        setConfigAvailable(false);
+        setLoading(false);
+        return;
       }
-      void load();
-    });
 
-    return () => data.subscription.unsubscribe();
+      const client = getSupabaseClient();
+      if (!client) {
+        setConfigAvailable(false);
+        setLoading(false);
+        return;
+      }
+
+      setConfigAvailable(true);
+      await load();
+
+      const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
+        setSession(nextSession);
+        setUser(nextSession?.user ?? null);
+        if (!nextSession?.user) {
+          setProfile(null);
+          setRoles([]);
+        }
+        void load();
+      });
+      unsubscribe = () => data.subscription.unsubscribe();
+    };
+
+    void boot();
+    return () => unsubscribe?.();
   }, []);
 
   const value = useMemo<AuthState>(() => ({
@@ -80,8 +101,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isSignedIn: Boolean(user),
     isAdmin: canAccessOps(roles),
     needsOnboarding: Boolean(user && (!profile?.display_name || !profile?.full_name || !profile?.primary_role_intent)),
+    configAvailable,
     refresh: load,
-  }), [loading, session, user, profile, roles]);
+  }), [loading, session, user, profile, roles, configAvailable]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
