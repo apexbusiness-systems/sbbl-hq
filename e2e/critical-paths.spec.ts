@@ -4,39 +4,59 @@ test.describe('critical path coverage', () => {
   test('home page renders header and content', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('header')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('header').getByRole('button', { name: /SBBL/i })).toBeVisible();
+    await expect(page.locator('header').getByRole('tab', { name: 'SBBL' })).toBeVisible();
   });
 
-  test('league selector has three controls', async ({ page }) => {
+  test('league selector has three tabs with SBBL active by default', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('button', { name: 'SBBL' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'WBL' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'TGIFBL' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'SBBL' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'WBL' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'TGIFBL' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'SBBL' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('primary nav exposes Live route', async ({ page }) => {
+  test('league switch updates active tab state', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('link', { name: 'Live' }).first()).toBeVisible();
+    await page.getByRole('tab', { name: 'WBL' }).click();
+    await expect(page.getByRole('tab', { name: 'WBL' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'SBBL' })).toHaveAttribute('aria-selected', 'false');
   });
 
-  test('home hero exposes call-to-actions', async ({ page }) => {
+  test('login route renders secure sign in without leaking raw config names', async ({ page }) => {
+    await page.goto('/login', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Secure Sign In' })).toBeVisible();
+    await expect(page.locator('body')).not.toContainText(/VITE_SUPABASE|SUPABASE_SERVICE_ROLE_KEY|SUPABASE_URL/);
+  });
+
+  test('login route renders trust bullets', async ({ page }) => {
+    await page.goto('/login', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('Three Leagues.')).toBeVisible();
+    await expect(page.getByText('Live scoring and real-time game updates')).toBeVisible();
+  });
+
+  test('release-cut navigation exposes only shipped primary routes', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('link', { name: 'Watch Live' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Full Schedule' })).toBeVisible();
+    const nav = page.locator('header nav').first();
+    await expect(nav.getByRole('link', { name: 'Home' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Teams' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Schedules' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Live' })).toHaveCount(0);
+    await expect(nav.getByRole('link', { name: 'Store' })).toHaveCount(0);
   });
 
-  test('schedules route renders heading', async ({ page }) => {
+  test('schedules and teams routes render headings', async ({ page }) => {
     await page.goto('/schedules', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Schedules' })).toBeVisible();
-  });
-
-  test('teams route renders heading', async ({ page }) => {
     await page.goto('/teams', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Teams' })).toBeVisible();
   });
 
-  test('store route renders heading', async ({ page }) => {
-    await page.goto('/store', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Official Store' })).toBeVisible();
+  test('music player is present but does not autoplay before user gesture', async ({ page }) => {
+    await page.goto('/', { waitUntil: 'domcontentloaded' });
+    const audio = page.locator('audio').first();
+    await expect(audio).toHaveCount(1);
+    const state = await audio.evaluate((node: HTMLAudioElement) => ({ paused: node.paused, autoplay: node.autoplay }));
+    expect(state.paused).toBeTruthy();
+    expect(state.autoplay).toBeFalsy();
   });
 });
