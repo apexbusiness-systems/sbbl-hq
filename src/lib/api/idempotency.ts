@@ -8,3 +8,7 @@ export function readIdempotencyKey(headers: Headers) {
 
   return key;
 }
+
+export function createIdempotencyKey(scope: string) {
+  return `${scope}-${Date.now()}-${crypto.randomUUID()}`;
+}
