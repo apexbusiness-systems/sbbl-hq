@@ -1,16 +1,12 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { LeagueId } from '@/types';
-import { AppRole } from '@/lib/auth/roles';
 import { hasPremiumPlayerAccess, isPlayerSubscriptionActive } from '@/lib/auth/subscription';
-
-const isDevAuthPrototype = import.meta.env.DEV;
+import { useAuth } from '@/hooks/use-auth';
 
 interface AppState {
   activeLeague: LeagueId;
   setActiveLeague: (l: LeagueId) => void;
-  authRole: AppRole;
-  setAuthRole: (m: AppRole) => void;
-  isPrototypeAuthMode: boolean;
+  authRole: 'fan' | 'player' | 'team_manager' | 'league_admin' | 'media_operator' | 'store_operator' | 'super_admin';
   isAdmin: boolean;
   playerSubscriptionEndsAt: string | null;
   isPlayerSubscriptionActive: boolean;
@@ -32,11 +28,13 @@ export const useApp = () => {
 };
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
+  const { roles, isAdmin } = useAuth();
   const [activeLeague, setActiveLeague] = useState<LeagueId>('sbbl');
-  const [authRole, setAuthRole] = useState<AppRole>('fan');
   const [playerSubscriptionEndsAt, setPlayerSubscriptionEndsAt] = useState<string | null>(null);
   const [bagItems, setBagItems] = useState<string[]>([]);
   const [bagOpen, setBagOpen] = useState(false);
+
+  const authRole = (roles[0] ?? 'fan') as AppState['authRole'];
 
   const renewPlayerTier = () => {
     const now = new Date();
@@ -61,27 +59,25 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   }, [playerSubscriptionEndsAt]);
 
   const addToBag = (id: string) => {
-    setBagItems(prev => [...prev, id]);
+    setBagItems((prev) => [...prev, id]);
     setBagOpen(true);
   };
 
   const removeFromBag = (id: string) => {
-    setBagItems(prev => prev.filter(i => i !== id));
+    setBagItems((prev) => prev.filter((i) => i !== id));
   };
 
   return (
-      <AppContext.Provider value={{
-        activeLeague,
-        setActiveLeague,
-        authRole,
-        setAuthRole,
-        isPrototypeAuthMode: isDevAuthPrototype,
-        isAdmin: authRole === 'league_admin' || authRole === 'super_admin',
-        playerSubscriptionEndsAt,
-        isPlayerSubscriptionActive: isPlayerSubscriptionActive(playerSubscriptionEndsAt),
-        hasPremiumPlayerAccess: hasPremiumPlayerAccess(authRole, playerSubscriptionEndsAt),
-        renewPlayerTier,
-        bagItems,
+    <AppContext.Provider value={{
+      activeLeague,
+      setActiveLeague,
+      authRole,
+      isAdmin,
+      playerSubscriptionEndsAt,
+      isPlayerSubscriptionActive: isPlayerSubscriptionActive(playerSubscriptionEndsAt),
+      hasPremiumPlayerAccess: hasPremiumPlayerAccess(authRole, playerSubscriptionEndsAt),
+      renewPlayerTier,
+      bagItems,
       addToBag,
       removeFromBag,
       bagOpen,
