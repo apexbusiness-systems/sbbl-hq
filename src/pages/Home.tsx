@@ -76,11 +76,11 @@ const HomePage = () => {
               {league.description}
             </p>
             <div className="flex items-center gap-3 mt-6">
-              <Link to="/live" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
-                <Play className="w-4 h-4" /> Watch Live
+              <Link to="/schedules" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                <Play className="w-4 h-4" /> Live Now
               </Link>
-              <Link to="/schedules" className="px-6 py-3 border border-border font-display font-medium text-sm uppercase tracking-wider rounded-sm text-foreground hover:bg-secondary transition-colors">
-                Full Schedule
+              <Link to="/teams" className="px-6 py-3 border border-border font-display font-medium text-sm uppercase tracking-wider rounded-sm text-foreground hover:bg-secondary transition-colors">
+                View Teams
               </Link>
             </div>
           </motion.div>
