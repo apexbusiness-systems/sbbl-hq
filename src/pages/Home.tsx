@@ -1,12 +1,13 @@
 import { useApp } from '@/contexts/AppContext';
 import { leagues, games, players, products, mediaAssets } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
-import gameAction from '@/assets/game-action.svg';
 import { motion } from 'framer-motion';
 import { Play, Clock, ShoppingBag, Trophy, ChevronRight, Zap } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { useState } from 'react';
 
 const HomePage = () => {
+  const [heroImageFailed, setHeroImageFailed] = useState(false);
   const { activeLeague, addToBag } = useApp();
   const league = leagues.find(l => l.id === activeLeague)!;
   const leagueGames = games.filter(g => g.leagueId === activeLeague);
@@ -27,6 +28,15 @@ const HomePage = () => {
           <div className="absolute bottom-0 top-0 left-1/2 w-[10px] -translate-x-1/2 bg-primary/15" />
         </div>
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/30" />
+        {!heroImageFailed && (
+          <img
+            src="/hero-basketball.svg"
+            alt="SBBL hero"
+            className="absolute inset-0 w-full h-full object-cover opacity-25"
+            onError={() => setHeroImageFailed(true)}
+            loading="eager"
+          />
+        )}
         <div className="absolute inset-0 bg-gradient-to-r from-background/80 via-transparent to-transparent" />
         <div className="relative h-full container flex flex-col justify-end pb-12 md:pb-16">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
