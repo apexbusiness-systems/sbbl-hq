@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Settings as SettingsIcon, Monitor, Bell, Smartphone, Link, Shield, RefreshCw, User } from 'lucide-react';
+import { LEAGUE_REGISTRY } from '@/lib/leagues';
 
 const sections = [
   { id: 'appearance', label: 'Appearance', icon: Monitor },
@@ -52,8 +53,10 @@ const SettingsPage = () => {
                   </div>
                   <div className="flex items-center justify-between py-3 border-b border-border">
                     <div><p className="text-sm font-medium">Default League</p><p className="text-xs text-muted-foreground">Set your default league view</p></div>
-                    <select className="bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs">
-                      <option>SBBL</option><option>WBL</option><option>TGIFBL</option>
+                    <select className="bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs min-h-[36px]">
+                      {LEAGUE_REGISTRY.map((l) => (
+                        <option key={l.id} value={l.code}>{l.shortName}</option>
+                      ))}
                     </select>
                   </div>
                 </div>

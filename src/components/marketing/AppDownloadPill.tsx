@@ -18,7 +18,7 @@ export const AppDownloadPill = () => {
       initial={{ y: 16, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="fixed bottom-4 left-4 z-[60] max-w-[220px]"
+      className="fixed bottom-4 left-4 z-40 max-w-[220px]"
     >
       <div className="panel-glass border border-primary/30 backdrop-blur-xl rounded-full shadow-xl px-2.5 py-2">
         <div className="flex items-center gap-2">

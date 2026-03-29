@@ -13,12 +13,6 @@ export const StickyMusicPlayer = () => {
 
     audio.loop = true;
     audio.volume = 0.35;
-
-    void audio.play().then(() => {
-      setIsPlaying(true);
-    }).catch(() => {
-      setIsPlaying(false);
-    });
   }, []);
 
   const togglePlayback = async () => {
@@ -49,7 +43,7 @@ export const StickyMusicPlayer = () => {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50">
+    <div className="fixed bottom-4 right-4 z-40">
       <audio ref={audioRef} src={trackUrl} preload="auto" />
       <div className="panel-glass border border-border/70 backdrop-blur-md rounded-full shadow-xl px-3 py-2">
         <div className="flex items-center gap-2">
