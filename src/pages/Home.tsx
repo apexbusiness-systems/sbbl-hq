@@ -7,6 +7,22 @@ import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3 } from 'l
 import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 
+function LeagueHeroLogo({ league }: { league: ReturnType<typeof getLeagueConfig> }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <img
+      src={league.logo}
+      alt={league.logoAlt}
+      width={64}
+      height={64}
+      className="w-14 h-14 md:w-16 md:h-16 flex-shrink-0"
+      style={{ aspectRatio: '1/1' }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 type LoadState = 'loading' | 'loaded' | 'error';
 
 const HomePage = () => {
@@ -51,7 +67,10 @@ const HomePage = () => {
         <div className="relative container py-16 md:py-24 lg:py-28">
           <div className="grid md:grid-cols-[1fr,360px] gap-8 items-start">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-              <LeagueBadge leagueId={activeLeague} size="md" />
+              <div className="flex items-center gap-3 mb-2">
+                <LeagueHeroLogo league={league} />
+                <LeagueBadge leagueId={activeLeague} size="md" />
+              </div>
               <h1 className="font-display text-4xl md:text-5xl lg:text-6xl font-bold mt-4 leading-[0.95] tracking-tight uppercase">
                 {league.shortName}
                 <br />

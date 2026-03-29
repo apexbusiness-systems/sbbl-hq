@@ -110,7 +110,7 @@
   }
 
   .league-badge {
-    @apply inline-flex items-center px-2 py-0.5 rounded-sm text-xs font-semibold uppercase tracking-wider;
+    @apply inline-flex items-center gap-1.5 px-2 py-0.5 rounded-sm text-xs font-semibold uppercase tracking-wider;
   }
 
   .league-badge-sbbl {

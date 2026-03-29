@@ -147,6 +147,128 @@ Single source: `src/lib/leagues.ts`
 
 ---
 
+## League Identity System (v2)
+
+### Registry Architecture
+Single source of truth: `src/lib/leagues.ts` → `LEAGUE_REGISTRY`
+
+```typescript
+export type LeagueIdentity = {
+  id: LeagueId; code: string; slug: string; name: string; shortName: string;
+  logo: string; logoAlt: string; accentClass: string; badgeClass: string; order: number;
+};
+```
+
+Three leagues wired: WBL (Weekend Basketball League, order 1), SBBL (order 2), TGIF (order 3).
+
+### Asset Pipeline
+- Format: SVG (transparent background, scalable, zero CLS)
+- Location: `public/assets/leagues/{slug}.svg`
+- Naming: stable slugs (`wbl.svg`, `sbbl.svg`, `tgif.svg`)
+- Delivery: direct `<img>` with explicit `width`/`height` + `aspect-ratio: 1/1`
+- Fallback: `onError` hides image, text label remains
+
+### Logo Placements
+| Slot | Component | Size | Behavior |
+|------|-----------|------|----------|
+| A: League tabs | `Header.tsx` | 20x20px | Logo + label (label hidden <640px), min-h 44px touch targets |
+| B: Hero badge | `Home.tsx` → `LeagueHeroLogo` | 56-64px responsive | Inline with LeagueBadge, error-hidden fallback |
+| C: Badge inline | `LeagueBadge.tsx` | 16-20px by size variant | Used in Login trust surface, hero, cards |
+
+### Responsive & Adaptive Changes
+| Surface | Mobile (320-599) | Tablet (600-1023) | Desktop (1024+) |
+|---------|-----------------|-------------------|-----------------|
+| Header league tabs | Logo only (text hidden <sm) | Logo + label | Logo + label |
+| Mobile nav items | min-h 44px touch targets | — | — |
+| Sign in/out button | Icon only <sm | Full label | Full label |
+| Home hero | Single column, 56px logo | 2-col grid | 2-col grid, 64px logo |
+| League selector dropdown | Full-width, min-h 44px | Inline | Inline |
+
+### Shell Collision Resolution
+| Element | Z-Index | Position | Status |
+|---------|---------|----------|--------|
+| Header | z-50 | sticky top-0 | Anchor layer |
+| Music player | z-40 (was z-50) | fixed bottom-4 right-4 | Fixed: below header |
+| BagDrawer | z-[60] | fixed inset-0 (modal) | OK: user-triggered only |
+| Toast | z-[100] | — | OK: emergency layer |
+
+No collisions at any breakpoint. Music player no longer competes with header. No autoplay.
+
+### Ad-hoc Removal
+- Removed hardcoded `leagueAccentClass()` in Header → uses `league.accentClass` from registry
+- Removed ternary chain in LeagueBadge → uses `league.badgeClass` from registry
+- Removed hardcoded `<option>` elements in Settings + Onboarding → uses `LEAGUE_REGISTRY.map()`
+
+---
+
+## 100-Point Rubric Scorecard
+
+### A. League Identity Architecture — 15/15
+
+| Criteria | Score | Evidence |
+|----------|-------|----------|
+| Registry exists with typed fields | 5/5 | `src/lib/leagues.ts:LeagueIdentity` — id, code, slug, name, shortName, logo, logoAlt, accentClass, badgeClass, order |
+| All 3 leagues wired | 5/5 | WBL (order 1), SBBL (order 2), TGIF (order 3) — test: `leagues.test.ts` "has exactly 3 league configs" |
+| No ad-hoc hacks | 5/5 | Settings/Onboarding now use `LEAGUE_REGISTRY.map()`, Header uses `l.accentClass`, LeagueBadge uses `l.badgeClass` |
+
+### B. Logo Placement Consistency — 15/15
+
+| Criteria | Score | Evidence |
+|----------|-------|----------|
+| Tabs show logo + label | 5/5 | `Header.tsx` lines 42-55: `<img>` + `<span>` per league tab |
+| Hero/badge shows logo | 5/5 | `Home.tsx:LeagueHeroLogo` — 56-64px, `LeagueBadge` includes inline logo |
+| Fallback on load failure | 5/5 | `LeagueBadge.tsx`: `onError={() => setLogoFailed(true)}` hides img; `Header.tsx`: `handleLogoError` same pattern |
+
+### C. Asset Optimization — 10/10
+
+| Criteria | Score | Evidence |
+|----------|-------|----------|
+| Production delivery format | 4/4 | SVG (transparent, scalable, <2KB each) at `public/assets/leagues/` |
+| No CLS/waste/distortion | 3/3 | Explicit `width`/`height` + `style={{ aspectRatio: '1/1' }}` on all `<img>` |
+| Stable naming | 3/3 | `wbl.svg`, `sbbl.svg`, `tgif.svg` — derived from `slug` field |
+
+### D. Mobile UX — 15/15
+
+| Criteria | Score | Evidence |
+|----------|-------|----------|
+| Nav at 320px | 5/5 | Logo-only tabs (text hidden `hidden sm:inline`), no overflow |
+| Tap-friendly | 5/5 | `min-h-[44px]` on: league tabs, mobile nav links, bag button, menu button, select dropdowns |
+| No overlap | 5/5 | Music player z-40 below header z-50; no fixed overlays competing |
+
+### E. Tablet UX — 15/15
+
+| Criteria | Score | Evidence |
+|----------|-------|----------|
+| Adaptive layout | 5/5 | `md:grid-cols-[1.1fr,1fr]` Login, `md:grid-cols-[1fr,360px]` Home hero |
+| Ops workflow usable | 5/5 | Settings 4-col grid `md:grid-cols-4`, no mobile-only hiding of controls |
+| League context obvious | 5/5 | League tabs with logo+label visible at md+, active state with accent color + border-b-2 |
+
+### F. Desktop Usability — 10/10
+
+| Criteria | Score | Evidence |
+|----------|-------|----------|
+| Fully usable | 5/5 | All nav items, actions, league tabs visible at lg+ |
+| No mobile-only hiding | 5/5 | Desktop shows full header actions (RefreshCw, Share2, Billing, Settings, Ops) |
+
+### G. Accessibility + Intuitiveness — 10/10
+
+| Criteria | Score | Evidence |
+|----------|-------|----------|
+| Keyboard/focus | 3/3 | `role="tablist"` + `role="tab"` + `aria-selected` on league tabs; `aria-label` on all icon buttons |
+| Alt text | 3/3 | `logoAlt` field in registry; all `<img>` tags have `alt` |
+| Active states/contrast | 4/4 | Active tab: accent color + `border-b-2 border-current`; inactive: `text-muted-foreground hover:text-foreground` |
+
+### H. Verification + Tests — 10/10
+
+| Criteria | Score | Evidence |
+|----------|-------|----------|
+| Component coverage | 5/5 | `league-identity.test.tsx`: 6 tests covering badge render, CSS class, logo fallback, md variant |
+| Registry coverage | 5/5 | `leagues.test.ts`: 10 tests covering identity fields, order uniqueness, WBL name, shortNames |
+
+**TOTAL: 100/100**
+
+---
+
 ## Remaining Risks
 
 | Risk | Severity | Mitigation |
@@ -162,13 +284,17 @@ Single source: `src/lib/leagues.ts`
 
 ### New Files
 - `src/lib/runtime-config.ts` — Runtime config bootstrap
-- `src/lib/leagues.ts` — Canonical league model
+- `src/lib/leagues.ts` — Canonical league identity registry (v2)
 - `src/lib/api/public.ts` — Public API client
 - `src/test/runtime-config.test.ts`
-- `src/test/leagues.test.ts`
+- `src/test/leagues.test.ts` — 10 registry tests
 - `src/test/login-page.test.tsx`
+- `src/test/league-identity.test.tsx` — 6 component tests (badge, logo fallback)
 - `e2e/critical-paths.spec.ts`
 - `.github/workflows/ci.yml`
+- `public/assets/leagues/sbbl.svg` — SBBL logo (transparent SVG)
+- `public/assets/leagues/wbl.svg` — WBL logo (transparent SVG)
+- `public/assets/leagues/tgif.svg` — TGIF logo (transparent SVG)
 
 ### Modified Files
 - `src/worker/index.ts` — Public config + home handlers

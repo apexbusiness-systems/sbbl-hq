@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { saveOnboarding } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
+import { LEAGUE_REGISTRY } from '@/lib/leagues';
 
 const OnboardingPage = () => {
   const { user, isSignedIn, isAdmin, refresh } = useAuth();
@@ -60,10 +61,10 @@ const OnboardingPage = () => {
             <option value="league_admin">League admin request</option>
             <option value="fan">Fan</option>
           </select>
-          <select className="bg-secondary border border-border rounded-sm px-3 py-2" value={form.preferredLeague} onChange={(e) => setForm((p) => ({ ...p, preferredLeague: e.target.value }))}>
-            <option value="SBBL">SBBL</option>
-            <option value="WBL">WBL</option>
-            <option value="TGIFBL">TGIFBL</option>
+          <select className="bg-secondary border border-border rounded-sm px-3 py-2 min-h-[44px]" value={form.preferredLeague} onChange={(e) => setForm((p) => ({ ...p, preferredLeague: e.target.value }))}>
+            {LEAGUE_REGISTRY.map((l) => (
+              <option key={l.id} value={l.code}>{l.shortName} — {l.name}</option>
+            ))}
           </select>
           <textarea className="bg-secondary border border-border rounded-sm px-3 py-2 min-h-24" placeholder="Bio (optional)" value={form.bio} onChange={(e) => setForm((p) => ({ ...p, bio: e.target.value }))} />
           <input type="file" accept="image/*" onChange={(e) => setForm((p) => ({ ...p, avatarFile: e.target.files?.[0] ?? null }))} />
