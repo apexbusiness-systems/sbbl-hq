@@ -11,7 +11,7 @@ test.describe('critical path coverage', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('tab', { name: 'SBBL' })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'WBL' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'TGIFBL' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'TGIF' })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'SBBL' })).toHaveAttribute('aria-selected', 'true');
   });
 
