@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <g>
+    <!-- Shield -->
+    <path d="M60 8L105 28V62C105 88 85 108 60 116C35 108 15 88 15 62V28L60 8Z" fill="#1a1a1a" stroke="#C9A84C" stroke-width="3"/>
+    <!-- Inner shield -->
+    <path d="M60 18L95 34V60C95 82 78 98 60 104C42 98 25 82 25 60V34L60 18Z" fill="none" stroke="#C9A84C" stroke-width="1.5" opacity="0.5"/>
+    <!-- Star -->
+    <polygon points="60,28 65,43 80,43 68,52 72,67 60,58 48,67 52,52 40,43 55,43" fill="#C9A84C"/>
+    <!-- Basketball small -->
+    <circle cx="60" cy="78" r="10" fill="none" stroke="#C9A84C" stroke-width="2"/>
+    <path d="M50 78h20M60 68v20" stroke="#C9A84C" stroke-width="1.5"/>
+    <!-- TGIF text -->
+    <text x="60" y="102" text-anchor="middle" font-family="Impact,Arial Narrow,sans-serif" font-size="16" font-weight="bold" fill="#C9A84C" letter-spacing="2">TGIF</text>
+  </g>
+</svg>

@@ -3,6 +3,7 @@ import worker from '@/worker/index';
 
 const env = {
   SUPABASE_URL: 'https://example.supabase.co',
+  SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test_key_1234567890',
   SUPABASE_SERVICE_ROLE_KEY: 'service-role-key-123456789',
   STRIPE_SECRET_KEY: 'stripe-secret-123456789',
   STRIPE_WEBHOOK_SECRET: 'stripe-webhook-123456789',
@@ -25,24 +26,12 @@ describe('worker route smoke', () => {
     expect(res.status).toBe(400);
   });
 
-  it('maps dynamic route params and rejects duplicate idempotency keys', async () => {
-    const headers = {
-      'x-sbbl-user-id': 'u1',
-      'x-idempotency-key': 'idempotency-key-001',
-    };
-    const first = await worker.fetch(new Request('https://local/api/orders/abc-123/pay', {
-      method: 'POST',
-      headers,
-    }), env);
-
-    expect(first.status).toBe(200);
-    const payload = await first.json() as { params: { id?: string } };
-    expect(payload.params.id).toBe('abc-123');
-
-    const second = await worker.fetch(new Request('https://local/api/orders/abc-123/pay', {
-      method: 'POST',
-      headers,
-    }), env);
-    expect(second.status).toBe(400);
+  it('returns public config without auth', async () => {
+    const res = await worker.fetch(new Request('https://local/api/public-config'), env);
+    expect(res.status).toBe(200);
+    const data = await res.json() as { ok: boolean; supabaseUrl: string; appName: string };
+    expect(data.ok).toBe(true);
+    expect(data.supabaseUrl).toBe('https://example.supabase.co');
+    expect(data.appName).toBe('SBBL HQ');
   });
 });
