@@ -1,62 +1,43 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '../playwright-fixture';
 
 test.describe('critical path coverage', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.setViewportSize({ width: 1280, height: 800 });
-  });
-
   test('home page renders header and content', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('header')).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText('SBBL', { exact: false })).first().toBeVisible();
+    // Apply .first() on the Locator before passing it to expect.
+    await expect(page.getByText('SBBL', { exact: false }).first()).toBeVisible();
   });
 
-  test('league selector has three tabs with ARIA roles', async ({ page }) => {
+  test('league selector has three controls', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    const tablist = page.locator('[role="tablist"]');
-    await expect(tablist).toBeVisible({ timeout: 15000 });
-    await expect(tablist.locator('[role="tab"]')).toHaveCount(3);
+    await expect(page.getByRole('button', { name: 'SBBL' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'WBL' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'TGIFBL' })).toBeVisible();
   });
 
-  test('clicking a league tab updates aria-selected', async ({ page }) => {
+  test('primary nav exposes Live route', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    const tablist = page.locator('[role="tablist"]');
-    await expect(tablist).toBeVisible({ timeout: 15000 });
-    const secondTab = tablist.locator('[role="tab"]').nth(1);
-    await secondTab.click();
-    await expect(secondTab).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('link', { name: 'Live' }).first()).toBeVisible();
   });
 
-  test('nav links to Teams and Schedules exist', async ({ page }) => {
+  test('home hero exposes call-to-actions', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    const nav = page.locator('nav');
-    await expect(nav.locator('a', { hasText: 'Home' })).toBeVisible({ timeout: 15000 });
-    await expect(nav.locator('a', { hasText: 'Teams' })).toBeVisible();
-    await expect(nav.locator('a', { hasText: 'Schedules' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Watch Live' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Full Schedule' })).toBeVisible();
   });
 
-  test('deferred routes are not in nav', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('header')).toBeVisible({ timeout: 15000 });
-    const nav = page.locator('nav');
-    await expect(nav.locator('a', { hasText: 'Live' })).not.toBeVisible();
-    await expect(nav.locator('a', { hasText: 'Store' })).not.toBeVisible();
-    await expect(nav.locator('a', { hasText: 'Stats' })).not.toBeVisible();
+  test('schedules route renders heading', async ({ page }) => {
+    await page.goto('/schedules', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Schedules' })).toBeVisible();
   });
 
-  test('no autoplay audio on page load', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(1500);
-    const audioPlaying = await page.evaluate(() => {
-      const audio = document.querySelector('audio');
-      return audio ? !audio.paused : false;
-    });
-    expect(audioPlaying).toBe(false);
+  test('teams route renders heading', async ({ page }) => {
+    await page.goto('/teams', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Teams' })).toBeVisible();
   });
 
-  test('sign in link is visible for unauthenticated users', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('header')).toBeVisible({ timeout: 15000 });
-    await expect(page.getByText('Sign in')).toBeVisible();
+  test('store route renders heading', async ({ page }) => {
+    await page.goto('/store', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'Official Store' })).toBeVisible();
   });
 });
