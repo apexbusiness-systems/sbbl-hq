@@ -9,6 +9,7 @@ const LoginPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [heroImageFailed, setHeroImageFailed] = useState(false);
   const { isSignedIn, needsOnboarding } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
@@ -37,7 +38,15 @@ const LoginPage = () => {
     <div className="container max-w-5xl py-10">
       <div className="grid gap-6 md:grid-cols-[1.2fr,1fr]">
         <div className="panel relative overflow-hidden min-h-[320px] hidden md:block">
-          <img src="/hero-basketball.svg" alt="SBBL courtside hero" className="absolute inset-0 h-full w-full object-cover opacity-30" />
+          {!heroImageFailed && (
+            <img
+              src="/hero-basketball.svg"
+              alt="SBBL courtside hero"
+              className="absolute inset-0 h-full w-full object-cover opacity-30"
+              // Hide image layer if it cannot be served by host/CDN.
+              onError={() => setHeroImageFailed(true)}
+            />
+          )}
           <div className="absolute inset-0 bg-gradient-to-r from-background via-background/70 to-background/30" />
           <div className="relative p-8 space-y-3">
             <p className="text-xs uppercase tracking-[0.18em] text-primary font-semibold">SBBL HQ</p>

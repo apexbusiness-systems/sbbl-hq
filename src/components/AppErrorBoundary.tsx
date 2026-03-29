@@ -25,7 +25,7 @@ export class AppErrorBoundary extends Component<Props, State> {
             <h1 className="font-display text-3xl text-primary">SBBL HQ</h1>
             <p className="text-sm text-muted-foreground">We hit a runtime issue and recovered safely.</p>
             <p className="text-xs text-destructive break-words">{this.state.message}</p>
-            <p className="text-xs text-muted-foreground">If login is unavailable, verify VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.</p>
+            <p className="text-xs text-muted-foreground">If login is unavailable, verify VITE_SUPABASE_URL and either VITE_SUPABASE_PUBLISHABLE_KEY or VITE_SUPABASE_ANON_KEY.</p>
           </div>
         </div>
       </div>

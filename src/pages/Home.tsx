@@ -4,41 +4,68 @@ import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { motion } from 'framer-motion';
 import { Play, Clock, ShoppingBag, Trophy, ChevronRight, Zap } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { TeamCard, fetchTeams } from '@/lib/api/teams';
 
 const HomePage = () => {
   const [heroImageFailed, setHeroImageFailed] = useState(false);
+  const [heroTeams, setHeroTeams] = useState<TeamCard[]>([]);
+  const [heroTeamsError, setHeroTeamsError] = useState<string | null>(null);
   const { activeLeague, addToBag } = useApp();
   const league = leagues.find(l => l.id === activeLeague)!;
-  const leagueGames = games.filter(g => g.leagueId === activeLeague);
-  const liveGames = games.filter(g => g.status === 'live');
-  const upcomingGames = games.filter(g => g.status === 'upcoming').slice(0, 3);
+  const liveGames = games.filter(g => g.leagueId === activeLeague && g.status === 'live');
+  const upcomingGames = games.filter(g => g.leagueId === activeLeague && g.status === 'upcoming').slice(0, 3);
   const featuredPlayers = players.filter(p => p.leagueId === activeLeague).slice(0, 3);
   const featuredProducts = products.slice(0, 4);
+  const totalRosterCount = useMemo(
+    () => heroTeams.reduce((sum, team) => sum + (team.roster_count ?? 0), 0),
+    [heroTeams],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadHeroTeams = async () => {
+      try {
+        const response = await fetchTeams(activeLeague);
+        if (!cancelled) {
+          setHeroTeams(response.teams ?? []);
+          setHeroTeamsError(null);
+        }
+      } catch (error) {
+        // Preserve graceful fallback when API is unavailable in preview/local.
+        if (!cancelled) {
+          setHeroTeams([]);
+          setHeroTeamsError(error instanceof Error ? error.message : 'teams_load_failed');
+        }
+      }
+    };
+
+    void loadHeroTeams();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeLeague]);
 
   return (
     <div className="min-h-screen">
       {/* Hero */}
       <section className="relative h-[70vh] min-h-[500px] max-h-[720px] overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
         <div className="absolute inset-0 opacity-30 [background:radial-gradient(circle_at_center,rgba(245,158,11,0.18)_0%,rgba(245,158,11,0.04)_35%,transparent_70%)]" />
-        <div className="absolute right-[18%] top-1/2 h-[520px] w-[520px] -translate-y-1/2 rounded-full border-[28px] border-primary/55" />
-        <div className="absolute right-[18%] top-1/2 h-[520px] w-[520px] -translate-y-1/2 rounded-full border border-primary/20" />
-        <div className="absolute right-[18%] top-1/2 h-[520px] w-[520px] -translate-y-1/2">
-          <div className="absolute left-0 right-0 top-1/2 h-[10px] -translate-y-1/2 bg-primary/15" />
-          <div className="absolute bottom-0 top-0 left-1/2 w-[10px] -translate-x-1/2 bg-primary/15" />
-        </div>
+        <div className="absolute right-[16%] top-1/2 h-[520px] w-[520px] -translate-y-1/2 rounded-full border-[22px] border-primary/35" />
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/30" />
         {!heroImageFailed && (
           <img
             src="/hero-basketball.svg"
             alt="SBBL hero"
-            className="absolute inset-0 w-full h-full object-cover opacity-25"
+            className="absolute inset-0 w-full h-full object-cover opacity-35"
+            // Hide image layer if it cannot be served by host/CDN.
             onError={() => setHeroImageFailed(true)}
             loading="eager"
           />
         )}
         <div className="absolute inset-0 bg-gradient-to-r from-background/80 via-transparent to-transparent" />
-        <div className="relative h-full container flex flex-col justify-end pb-12 md:pb-16">
+        <div className="relative h-full container grid md:grid-cols-[1fr,340px] gap-8 items-end pb-12 md:pb-16">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
             <LeagueBadge leagueId={activeLeague} size="md" />
             <h1 className="font-display text-4xl md:text-6xl lg:text-7xl font-bold mt-4 leading-[0.95] tracking-tighter">
@@ -57,6 +84,46 @@ const HomePage = () => {
               </Link>
             </div>
           </motion.div>
+          <motion.aside
+            initial={{ opacity: 0, x: 16 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.5, delay: 0.15 }}
+            className="panel p-4 bg-card/70 backdrop-blur-sm border-primary/20"
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary">League Snapshot</p>
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <div className="rounded-sm border border-border p-3">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Live</p>
+                <p className="stat-numeral text-xl">{liveGames.length}</p>
+              </div>
+              <div className="rounded-sm border border-border p-3">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Upcoming</p>
+                <p className="stat-numeral text-xl">{upcomingGames.length}</p>
+              </div>
+              <div className="rounded-sm border border-border p-3">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Teams</p>
+                <p className="stat-numeral text-xl">{heroTeams.length || '—'}</p>
+              </div>
+              <div className="rounded-sm border border-border p-3">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Rostered</p>
+                <p className="stat-numeral text-xl">{heroTeams.length ? totalRosterCount : '—'}</p>
+              </div>
+            </div>
+            {heroTeams.length > 0 ? (
+              <div className="mt-4">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1">Featured Teams</p>
+                <div className="space-y-1">
+                  {heroTeams.slice(0, 3).map((team) => (
+                    <div key={team.id} className="text-xs text-foreground/90">{team.name}</div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-4 text-xs text-muted-foreground">
+                {heroTeamsError ? 'Live team data unavailable. Showing league baseline.' : 'No teams published for this league yet.'}
+              </p>
+            )}
+          </motion.aside>
         </div>
       </section>
 

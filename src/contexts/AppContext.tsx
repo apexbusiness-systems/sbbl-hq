@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import { LeagueId } from '@/types';
 import { hasPremiumPlayerAccess, isPlayerSubscriptionActive } from '@/lib/auth/subscription';
 import { useAuth } from '@/hooks/use-auth';
+import { readClientEnv } from '@/lib/env';
 
 interface AppState {
   activeLeague: LeagueId;
@@ -29,7 +30,10 @@ export const useApp = () => {
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const { roles, isAdmin } = useAuth();
-  const [activeLeague, setActiveLeague] = useState<LeagueId>('sbbl');
+  const env = readClientEnv();
+  // Map env shorthand to internal lower-case ids used across app models.
+  const defaultLeagueMap: Record<typeof env.VITE_DEFAULT_LEAGUE, LeagueId> = { SBBL: 'sbbl', WBL: 'wbl', TGIFBL: 'tgifbl' };
+  const [activeLeague, setActiveLeague] = useState<LeagueId>(defaultLeagueMap[env.VITE_DEFAULT_LEAGUE]);
   const [playerSubscriptionEndsAt, setPlayerSubscriptionEndsAt] = useState<string | null>(null);
   const [bagItems, setBagItems] = useState<string[]>([]);
   const [bagOpen, setBagOpen] = useState(false);
