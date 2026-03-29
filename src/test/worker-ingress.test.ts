@@ -16,6 +16,7 @@ import worker from '@/worker/index';
 
 const env = {
   SUPABASE_URL: 'https://example.supabase.co',
+  SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_test_key_1234567890',
   SUPABASE_SERVICE_ROLE_KEY: 'service-role-key-123456789',
   STRIPE_SECRET_KEY: 'stripe-secret-123456789',
   STRIPE_WEBHOOK_SECRET: 'stripe-webhook-123456789',
@@ -29,7 +30,7 @@ describe('worker omniport ingress routes', () => {
     rpc.mockReset();
     insert.mockReset();
     getUser.mockReset();
-    // Authenticated user so requireAuth passes — we want to test the 403 blocked-risk path
+    // Authenticated user so requireAuth passes — we reach the 403 blocked-risk path
     getUser.mockResolvedValue({ data: { user: { id: 'user-test-001' } }, error: null });
     rpc.mockResolvedValue({ data: null, error: null });
     insert.mockResolvedValue({ error: null });

@@ -24,10 +24,6 @@ function json(data: unknown, status = 200) {
   });
 }
 
-// SECURITY: roles are never read from client-supplied headers.
-// They are set exclusively by getSession() after JWT verification and
-// attached to the enriched internal request. This function is only called
-// on the enriched request inside the worker, never on the raw client request.
 function getRolesFromVerifiedSession(req: Request): string[] {
   const header = req.headers.get('x-sbbl-roles-verified');
   if (!header) return ['fan'];
@@ -49,10 +45,7 @@ function parseStripeSignature(header: string) {
     .filter((part) => part.startsWith('v1='))
     .map((part) => part.slice(3))
     .filter(Boolean);
-  return {
-    timestamp: timestamp ? Number(timestamp) : NaN,
-    signatures,
-  };
+  return { timestamp: timestamp ? Number(timestamp) : NaN, signatures };
 }
 
 async function signHmacSha256(secret: string, payload: string) {
@@ -72,18 +65,13 @@ async function signHmacSha256(secret: string, payload: string) {
 async function verifyStripeSignature(rawBody: string, signatureHeader: string, secret: string, nowMs = Date.now()) {
   const parsed = parseStripeSignature(signatureHeader);
   if (!Number.isFinite(parsed.timestamp) || parsed.signatures.length === 0) return false;
-
   const ageSeconds = Math.abs(Math.floor(nowMs / 1000) - parsed.timestamp);
   if (ageSeconds > 300) return false;
-
   const payload = `${parsed.timestamp}.${rawBody}`;
   const expected = await signHmacSha256(secret, payload);
   return parsed.signatures.some((candidate) => candidate.toLowerCase() === expected);
 }
 
-// SECURITY: session is established ONLY via a valid Supabase JWT Bearer token.
-// The x-sbbl-user-id fallback has been removed — any client-supplied identity
-// header is ignored. If JWT verification fails, session is null (unauthenticated).
 async function getSession(req: Request, env: Env) {
   const token = getBearerToken(req);
   if (token && env.SUPABASE_PUBLISHABLE_KEY) {
@@ -92,24 +80,15 @@ async function getSession(req: Request, env: Env) {
     });
     const { data, error } = await supabase.auth.getUser(token);
     if (!error && data.user) {
-      // Roles are fetched from DB on admin-gated routes via requireAdminSession().
-      // For non-admin routes, default to 'fan' unless the DB assignment is present.
-      return {
-        userId: data.user.id,
-        roles: ['fan'] as string[],
-      };
+      return { userId: data.user.id, roles: ['fan'] as string[] };
     }
   }
-
-  // No fallback. No token = no session.
   return null;
 }
 
 function requireAuth(req: Request) {
   const userId = req.headers.get('x-sbbl-user-id-verified');
-  if (!userId) {
-    throw new Error('unauthorized');
-  }
+  if (!userId) throw new Error('unauthorized');
   return userId;
 }
 
@@ -126,9 +105,7 @@ async function ensureMutation(req: Request, ctx: HandlerCtx) {
   if (error) {
     const now = Date.now();
     const seenAt = transientIdempotency.get(key);
-    if (seenAt && now - seenAt < 5 * 60 * 1000) {
-      throw new Error('Duplicate idempotency key');
-    }
+    if (seenAt && now - seenAt < 5 * 60 * 1000) throw new Error('Duplicate idempotency key');
     transientIdempotency.set(key, now);
   }
 }
@@ -202,7 +179,6 @@ async function handleOps({ req }: HandlerCtx) {
   if (!canAccessOps(roles as never)) {
     return json({ ok: false, error: 'forbidden' }, 403);
   }
-
   return json({
     ok: true,
     userId,
@@ -310,10 +286,7 @@ async function handleSyncDrain(ctx: HandlerCtx) {
     if (url) {
       const resp = await fetch(url, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-sbbl-signature': signed.signature,
-        },
+        headers: { 'content-type': 'application/json', 'x-sbbl-signature': signed.signature },
         body: JSON.stringify(signed.packet),
       }).catch(() => null);
 
@@ -380,7 +353,6 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
   });
 }
 
-
 async function requireAdminSession(req: Request, admin: SupabaseClient) {
   const userId = requireAuth(req);
   const { data, error } = await admin.from('user_role_assignments').select('role').eq('user_id', userId);
@@ -432,10 +404,7 @@ async function handleOpsBootstrap({ req, admin }: HandlerCtx) {
 
   return json({
     ok: true,
-    user: {
-      userId: session.userId,
-      profile: profileRes.data ?? null,
-    },
+    user: { userId: session.userId, profile: profileRes.data ?? null },
     roles: session.roles,
     references: {
       leagues: leaguesRes.data ?? [],
@@ -464,59 +433,40 @@ async function handleImportRoute(ctx: HandlerCtx, kind: 'teams' | 'players' | 's
     try {
       if (kind === 'teams') {
         const { error } = await ctx.admin.from('teams').insert({
-          league_id: row.league_id,
-          season_id: row.season_id,
-          division_id: row.division_id || null,
-          name: row.name,
-          status: 'published',
+          league_id: row.league_id, season_id: row.season_id,
+          division_id: row.division_id || null, name: row.name, status: 'published',
         });
         if (error && !String(error.message).includes('duplicate key')) throw error;
       }
-
       if (kind === 'players') {
         const { error } = await ctx.admin.from('players').upsert({
-          user_id: row.user_id,
-          team_id: row.team_id || null,
-          league_id: row.league_id || null,
+          user_id: row.user_id, team_id: row.team_id || null, league_id: row.league_id || null,
           jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
           position: row.position || null,
         }, { onConflict: 'user_id' });
         if (error) throw error;
       }
-
       if (kind === 'schedules') {
         const { error } = await ctx.admin.from('schedule_slots').insert({
-          league_id: row.league_id,
-          season_id: row.season_id,
-          venue_id: row.venue_id || null,
-          court_id: row.court_id || null,
-          starts_at: row.starts_at,
-          ends_at: row.ends_at || null,
+          league_id: row.league_id, season_id: row.season_id,
+          venue_id: row.venue_id || null, court_id: row.court_id || null,
+          starts_at: row.starts_at, ends_at: row.ends_at || null,
           status: row.status || 'upcoming',
         });
         if (error) throw error;
       }
-
       if (kind === 'events') {
         const { error } = await ctx.admin.from('league_events').insert({
-          league_id: row.league_id || null,
-          season_id: row.season_id || null,
-          venue_id: row.venue_id || null,
-          title: row.title,
-          starts_at: row.starts_at || null,
-          metadata: row,
+          league_id: row.league_id || null, season_id: row.season_id || null,
+          venue_id: row.venue_id || null, title: row.title,
+          starts_at: row.starts_at || null, metadata: row,
         });
         if (error) throw error;
       }
-
       await ctx.admin.rpc('enqueue_local_domain_event', {
-        p_event_type: `${kind}_imported`,
-        p_entity_type: kind,
-        p_entity_id: null,
-        p_league_id: row.league_id || null,
-        p_payload: row,
-        p_trace_id: crypto.randomUUID(),
-        p_available_at: new Date().toISOString(),
+        p_event_type: `${kind}_imported`, p_entity_type: kind, p_entity_id: null,
+        p_league_id: row.league_id || null, p_payload: row,
+        p_trace_id: crypto.randomUUID(), p_available_at: new Date().toISOString(),
       });
       insertedRows += 1;
     } catch (error) {
@@ -527,20 +477,15 @@ async function handleImportRoute(ctx: HandlerCtx, kind: 'teams' | 'players' | 's
   }
 
   const job = await writeImportJob(ctx.admin, {
-    job_type: kind,
-    submitted_by: session.userId,
-    total_rows: rows.length,
-    inserted_rows: insertedRows,
-    failed_rows: failedRows,
+    job_type: kind, submitted_by: session.userId,
+    total_rows: rows.length, inserted_rows: insertedRows, failed_rows: failedRows,
     payload_summary: { sample: rows[0] ?? null },
     error_summary: errors.slice(0, 5).join('; ') || null,
   });
 
   await ctx.admin.from('audit_logs').insert({
-    actor_id: session.userId,
-    action: `ops_import_${kind}`,
-    ref_type: 'import_job',
-    ref_id: job.id,
+    actor_id: session.userId, action: `ops_import_${kind}`,
+    ref_type: 'import_job', ref_id: job.id,
     payload: { total_rows: rows.length, inserted_rows: insertedRows, failed_rows: failedRows },
     idempotency_key: readIdempotencyKey(ctx.req.headers),
   });
@@ -562,15 +507,12 @@ async function handleStoreMedia(ctx: HandlerCtx) {
   if (!payload || typeof payload.title !== 'string' || typeof payload.price !== 'number' || typeof payload.imageUrl !== 'string') {
     return json({ ok: false, error: 'invalid_store_payload' }, 400);
   }
-
   const product = await ctx.admin.from('products').insert({
     league_id: typeof payload.leagueId === 'string' ? payload.leagueId : null,
-    name: payload.title,
-    price: payload.price,
+    name: payload.title, price: payload.price,
     status: payload.publishStatus === 'published' ? 'published' : 'draft',
   }).select('id').single();
   if (product.error) throw new Error(product.error.message);
-
   const media = await ctx.admin.from('media_assets').insert({
     league_id: typeof payload.leagueId === 'string' ? payload.leagueId : null,
     title: String(payload.title),
@@ -578,27 +520,22 @@ async function handleStoreMedia(ctx: HandlerCtx) {
     metadata: { image_url: payload.imageUrl, category: payload.category, product_id: product.data.id },
   }).select('id').single();
   if (media.error) throw new Error(media.error.message);
-
   await ctx.admin.from('audit_logs').insert({
-    actor_id: session.userId,
-    action: 'ops_store_media_upsert',
-    ref_type: 'product',
-    ref_id: product.data.id,
+    actor_id: session.userId, action: 'ops_store_media_upsert',
+    ref_type: 'product', ref_id: product.data.id,
     payload: { media_asset_id: media.data.id },
     idempotency_key: readIdempotencyKey(ctx.req.headers),
   });
-
   return json({ ok: true, productId: product.data.id, mediaAssetId: media.data.id });
 }
 
-// SECURITY: Public config endpoint returns ONLY non-sensitive application metadata.
-// Supabase URL and publishable key are NOT returned here — the client SDK
-// initializes via environment-injected config at build time, not runtime API calls.
-async function handlePublicConfig(_ctx: HandlerCtx) {
+// Public config — returns non-sensitive app metadata + supabaseUrl for client SDK init.
+async function handlePublicConfig({ env }: HandlerCtx) {
   return json({
     ok: true,
     appName: 'SBBL HQ',
     defaultLeague: 'SBBL',
+    supabaseUrl: env.SUPABASE_URL ?? null,
   });
 }
 
@@ -696,7 +633,6 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
   if (leagueId) query = query.eq('league_id', leagueId);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-
   const teams = (data ?? []).map((row: Record<string, unknown>) => ({
     id: String(row.id),
     name: String(row.name),
@@ -705,7 +641,6 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
     division_name: (row.divisions as { name?: string } | null)?.name ?? null,
     roster_count: Array.isArray(row.team_memberships) ? row.team_memberships.length : 0,
   }));
-
   return json({ ok: true, teams });
 }
 
@@ -761,12 +696,7 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
 
 const compiled: Array<Route & { keys: string[] }> = routes.map((route) => {
   const compiledPath = compilePath(route.path);
-  return {
-  method: route.method,
-  regex: compiledPath.regex,
-  handler: route.handler,
-    keys: compiledPath.keys,
-  };
+  return { method: route.method, regex: compiledPath.regex, handler: route.handler, keys: compiledPath.keys };
 });
 
 export default {
@@ -778,8 +708,6 @@ export default {
       return json({ ok: false, error: 'server_misconfigured', missing: parsed.missing }, 500);
     }
 
-    // SECURITY: Strip any client-supplied spoofed identity/role headers BEFORE
-    // processing. Session is established purely from JWT verification below.
     const cleanHeaders = new Headers(req.headers);
     cleanHeaders.delete('x-sbbl-user-id');
     cleanHeaders.delete('x-sbbl-user-id-verified');
@@ -792,9 +720,6 @@ export default {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    // Internal verified headers are set here and ONLY here, after JWT verification.
-    // These use a -verified suffix to distinguish them from any client-supplied headers
-    // (which were stripped above).
     const enrichedRequest = new Request(cleanReq, {
       headers: session
         ? {
@@ -811,9 +736,7 @@ export default {
       if (!match) continue;
 
       const params: Record<string, string> = {};
-      route.keys.forEach((key, index) => {
-        params[key] = match[index + 1] ?? '';
-      });
+      route.keys.forEach((key, index) => { params[key] = match[index + 1] ?? ''; });
 
       try {
         return await route.handler({ req: enrichedRequest, env, params, admin });
@@ -823,17 +746,14 @@ export default {
           ? 401
           : message === 'forbidden'
             ? 403
-          : message.startsWith('Missing or invalid idempotency key') || message.startsWith('Duplicate idempotency key')
-            ? 400
-            : 500;
+            : message.startsWith('Missing or invalid idempotency key') || message.startsWith('Duplicate idempotency key')
+              ? 400
+              : 500;
         return json({ ok: false, error: message }, status);
       }
     }
 
-    if (env.ASSETS) {
-      return env.ASSETS.fetch(req);
-    }
-
+    if (env.ASSETS) return env.ASSETS.fetch(req);
     return json({ ok: false, error: 'not_found' }, 404);
   },
 };
