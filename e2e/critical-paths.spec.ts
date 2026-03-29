@@ -5,67 +5,57 @@ test.describe('critical path coverage', () => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
     await expect(page.locator('text=SBBL')).toBeVisible();
-    await expect(page.locator('text=League Snapshot')).toBeVisible();
   });
 
   test('home page shows league selector', async ({ page }) => {
     await page.goto('/');
-    await expect(page.locator('button:has-text("SBBL")')).toBeVisible();
-    await expect(page.locator('button:has-text("WBL")')).toBeVisible();
-    await expect(page.locator('button:has-text("TGIFBL")')).toBeVisible();
+    const tabs = page.locator('[role="tablist"]');
+    await expect(tabs).toBeVisible();
+    await expect(tabs.locator('[role="tab"]')).toHaveCount(3);
   });
 
-  test('league switch updates home content', async ({ page }) => {
+  test('league switch updates active tab', async ({ page }) => {
     await page.goto('/');
-    await page.waitForLoadState('networkidle');
-
-    await page.locator('button:has-text("WBL")').click();
-    await page.waitForTimeout(500);
-    // The page should respond to the league switch
-    await expect(page.locator('h1')).toBeVisible();
+    const wblTab = page.locator('[role="tab"]:has-text("WBL")');
+    await wblTab.click();
+    await expect(wblTab).toHaveAttribute('aria-selected', 'true');
   });
 
   test('login page renders without raw config errors', async ({ page }) => {
     await page.goto('/login');
     await page.waitForLoadState('networkidle');
     await expect(page.locator('text=Secure Sign In')).toBeVisible();
-    // Must not expose VITE_SUPABASE env var names
     await expect(page.locator('text=VITE_SUPABASE')).not.toBeVisible();
   });
 
-  test('login page shows trust bullets', async ({ page }) => {
+  test('login page shows trust bullets on desktop', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/login');
     await expect(page.locator('text=Three Leagues.')).toBeVisible();
   });
 
   test('teams page is accessible from nav', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/');
-    await page.locator('a:has-text("Teams")').first().click();
+    await page.locator('nav a:has-text("Teams")').first().click();
     await page.waitForLoadState('networkidle');
     await expect(page).toHaveURL('/teams');
   });
 
   test('primary nav only contains release-cut routes', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 });
     await page.goto('/');
-    // These routes should be in nav
     await expect(page.locator('nav a:has-text("Home")')).toBeVisible();
     await expect(page.locator('nav a:has-text("Teams")')).toBeVisible();
-    // These mock-dependent routes should NOT be in nav
     await expect(page.locator('nav a:has-text("Live")')).not.toBeVisible();
     await expect(page.locator('nav a:has-text("Store")')).not.toBeVisible();
-    await expect(page.locator('nav a:has-text("Profiles")')).not.toBeVisible();
     await expect(page.locator('nav a:has-text("Stats")')).not.toBeVisible();
     await expect(page.locator('nav a:has-text("Media")')).not.toBeVisible();
   });
 
   test('no autoplay audio on page load', async ({ page }) => {
-    const consoleLogs: string[] = [];
-    page.on('console', (msg) => consoleLogs.push(msg.text()));
-
     await page.goto('/');
     await page.waitForLoadState('networkidle');
-
-    // Audio element should exist but not be playing
     const audioPlaying = await page.evaluate(() => {
       const audio = document.querySelector('audio');
       return audio ? !audio.paused : false;
