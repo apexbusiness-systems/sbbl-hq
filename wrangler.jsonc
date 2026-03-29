@@ -10,11 +10,11 @@
   },
   "routes": [
     {
-      "pattern": "sbbl-hq.icu/*",
+      "pattern": "sbbl-hq.icu",
       "custom_domain": true
     },
     {
-      "pattern": "www.sbbl-hq.icu/*",
+      "pattern": "www.sbbl-hq.icu",
       "custom_domain": true
     }
   ],

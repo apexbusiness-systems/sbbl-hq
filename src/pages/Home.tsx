@@ -1,7 +1,6 @@
 import { useApp } from '@/contexts/AppContext';
 import { leagues, games, players, products, mediaAssets } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
-import heroImage from '@/assets/hero-basketball.svg';
 import gameAction from '@/assets/game-action.svg';
 import { motion } from 'framer-motion';
 import { Play, Clock, ShoppingBag, Trophy, ChevronRight, Zap } from 'lucide-react';
@@ -19,8 +18,14 @@ const HomePage = () => {
   return (
     <div className="min-h-screen">
       {/* Hero */}
-      <section className="relative h-[70vh] min-h-[500px] max-h-[720px] overflow-hidden">
-        <img src={heroImage} alt="SBBL HQ Basketball" className="absolute inset-0 w-full h-full object-cover" width={1920} height={1080} />
+      <section className="relative h-[70vh] min-h-[500px] max-h-[720px] overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+        <div className="absolute inset-0 opacity-30 [background:radial-gradient(circle_at_center,rgba(245,158,11,0.18)_0%,rgba(245,158,11,0.04)_35%,transparent_70%)]" />
+        <div className="absolute right-[18%] top-1/2 h-[520px] w-[520px] -translate-y-1/2 rounded-full border-[28px] border-primary/55" />
+        <div className="absolute right-[18%] top-1/2 h-[520px] w-[520px] -translate-y-1/2 rounded-full border border-primary/20" />
+        <div className="absolute right-[18%] top-1/2 h-[520px] w-[520px] -translate-y-1/2">
+          <div className="absolute left-0 right-0 top-1/2 h-[10px] -translate-y-1/2 bg-primary/15" />
+          <div className="absolute bottom-0 top-0 left-1/2 w-[10px] -translate-x-1/2 bg-primary/15" />
+        </div>
         <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/30" />
         <div className="absolute inset-0 bg-gradient-to-r from-background/80 via-transparent to-transparent" />
         <div className="relative h-full container flex flex-col justify-end pb-12 md:pb-16">
