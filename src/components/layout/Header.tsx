@@ -11,6 +11,7 @@ import {
 const mainNav = [
   { label: 'Home', path: '/' },
   { label: 'Teams', path: '/teams' },
+  { label: 'Schedules', path: '/schedules' },
 ];
 
 export const Header = () => {

@@ -50,6 +50,7 @@ test.describe('critical path coverage', () => {
     const nav = page.locator('nav');
     await expect(nav.locator('a', { hasText: 'Home' })).toBeVisible();
     await expect(nav.locator('a', { hasText: 'Teams' })).toBeVisible();
+    await expect(nav.locator('a', { hasText: 'Schedules' })).toBeVisible();
     await expect(nav.locator('a', { hasText: 'Live' })).not.toBeVisible();
     await expect(nav.locator('a', { hasText: 'Store' })).not.toBeVisible();
     await expect(nav.locator('a', { hasText: 'Stats' })).not.toBeVisible();

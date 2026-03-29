@@ -14,6 +14,7 @@ import { AppDownloadPill } from '@/components/marketing/AppDownloadPill';
 
 const Home = lazy(() => import('./pages/Home'));
 const Teams = lazy(() => import('./pages/Teams'));
+const Schedules = lazy(() => import('./pages/Schedules'));
 const Login = lazy(() => import('./pages/Login'));
 const Onboarding = lazy(() => import('./pages/Onboarding'));
 const Billing = lazy(() => import('./pages/Billing'));
@@ -49,6 +50,7 @@ const App = () => (
                     <Route path="/login" element={<Login />} />
                     <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
                     <Route path="/teams" element={<Teams />} />
+                    <Route path="/schedules" element={<Schedules />} />
                     <Route path="/billing" element={<RequireAuth><Billing /></RequireAuth>} />
                     <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
                     <Route path="/ops" element={<RequireAdmin><Ops /></RequireAdmin>} />
