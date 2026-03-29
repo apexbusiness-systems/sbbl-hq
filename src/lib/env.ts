@@ -4,6 +4,7 @@ const clientEnvSchema = z.object({
   VITE_APP_NAME: z.string().min(1).default('SBBL HQ'),
   VITE_DEFAULT_LEAGUE: z.enum(['SBBL', 'WBL', 'TGIFBL']).default('SBBL'),
   VITE_DEFAULT_PPV_PRICE: z.coerce.number().positive().default(2.5),
+  VITE_PUBLIC_BASE_URL: z.string().url().default('http://localhost:5173'),
   VITE_SUPABASE_URL: z.string().url(),
   VITE_SUPABASE_PUBLISHABLE_KEY: z.string().min(10),
 });
@@ -15,6 +16,9 @@ const serverEnvSchema = z.object({
   STRIPE_SECRET_KEY: z.string().min(16).optional(),
   STRIPE_WEBHOOK_SECRET: z.string().min(16).optional(),
   RESEND_API_KEY: z.string().min(16).optional(),
+  OMNIHUB_SYNC_URL: z.string().url().optional(),
+  OMNIHUB_SIGNING_SECRET: z.string().min(16).optional(),
+  OMNIHUB_VERIFY_KEY: z.string().min(16).optional(),
   OPTIONAL_SOCIAL_API_KEYS: z.string().optional(),
   OPTIONAL_TURNSTILE_SECRET_KEY: z.string().optional(),
 });
