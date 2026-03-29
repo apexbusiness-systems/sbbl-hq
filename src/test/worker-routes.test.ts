@@ -22,16 +22,16 @@ describe('worker route smoke', () => {
       method: 'POST',
       headers: { 'x-sbbl-user-id': 'u1' },
     }), env);
-
     expect(res.status).toBe(400);
   });
 
   it('returns public config without auth', async () => {
     const res = await worker.fetch(new Request('https://local/api/public-config'), env);
     expect(res.status).toBe(200);
-    const data = await res.json() as { ok: boolean; supabaseUrl: string; appName: string };
+    const data = await res.json() as { ok: boolean; appName: string; defaultLeague: string };
     expect(data.ok).toBe(true);
-    expect(data.supabaseUrl).toBe('https://example.supabase.co');
     expect(data.appName).toBe('SBBL HQ');
+    // supabaseUrl is not exposed in public-config for security — only appName + defaultLeague
+    expect(data.defaultLeague).toBe('SBBL');
   });
 });

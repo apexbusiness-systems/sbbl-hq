@@ -2,10 +2,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const rpc = vi.fn();
 const insert = vi.fn();
+const getUser = vi.fn();
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
-    auth: { getUser: vi.fn().mockResolvedValue({ data: { user: null }, error: new Error('no-session') }) },
+    auth: { getUser },
     rpc,
     from: () => ({ insert }),
   }),
@@ -27,7 +28,10 @@ describe('worker omniport ingress routes', () => {
   beforeEach(() => {
     rpc.mockReset();
     insert.mockReset();
-    rpc.mockResolvedValue({ data: [{ id: 'outbox-1', event_type: 'schedule_updated', entity_type: 'schedule', payload: {} }], error: null });
+    getUser.mockReset();
+    // Authenticated user so requireAuth passes — we want to test the 403 blocked-risk path
+    getUser.mockResolvedValue({ data: { user: { id: 'user-test-001' } }, error: null });
+    rpc.mockResolvedValue({ data: null, error: null });
     insert.mockResolvedValue({ error: null });
   });
 
@@ -35,7 +39,7 @@ describe('worker omniport ingress routes', () => {
     const res = await worker.fetch(new Request('https://local/api/ingress', {
       method: 'POST',
       headers: {
-        'x-sbbl-user-id': 'u1',
+        'authorization': 'Bearer test-token-001',
         'x-idempotency-key': 'idempotency-key-002',
         'content-type': 'application/json',
       },
