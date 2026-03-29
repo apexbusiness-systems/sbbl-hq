@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="Hero Basketball">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" role="img" aria-label="SBBL hero backdrop">
   <defs>
     <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
-      <stop offset="0%" stop-color="#111827"/>
-      <stop offset="100%" stop-color="#1f2937"/>
+      <stop offset="0%" stop-color="#030712"/>
+      <stop offset="100%" stop-color="#0f172a"/>
     </linearGradient>
     <linearGradient id="accent" x1="0" x2="1" y1="0" y2="1">
       <stop offset="0%" stop-color="#f59e0b"/>
@@ -10,6 +10,9 @@
     </linearGradient>
   </defs>
   <rect width="1600" height="900" fill="url(#bg)"/>
-  <circle cx="800" cy="450" r="220" fill="none" stroke="url(#accent)" stroke-width="34" opacity="0.95"/>
-  <text x="800" y="500" text-anchor="middle" fill="#f3f4f6" font-family="Inter,Arial,sans-serif" font-size="84" font-weight="700">Hero Basketball</text>
+  <circle cx="800" cy="450" r="238" fill="none" stroke="url(#accent)" stroke-width="28" opacity="0.82"/>
+  <path d="M562 450h476" stroke="#f59e0b" stroke-width="12" opacity="0.18"/>
+  <path d="M800 212v476" stroke="#f59e0b" stroke-width="12" opacity="0.18"/>
+  <path d="M646 286c78 63 78 265 0 328" fill="none" stroke="#f59e0b" stroke-width="10" opacity="0.16"/>
+  <path d="M954 286c-78 63-78 265 0 328" fill="none" stroke="#f59e0b" stroke-width="10" opacity="0.16"/>
 </svg>
