@@ -104,6 +104,41 @@ describe('stripe webhook verification', () => {
     expect(paymentAttempts).toHaveLength(0);
   });
 
+
+  it('accepts verified events without metadata.user_id when order_id is present', async () => {
+    const body = JSON.stringify({
+      id: 'evt_order_owner_fallback',
+      type: 'payment_intent.succeeded',
+      data: {
+        object: {
+          id: 'pi_123',
+          metadata: {
+            order_id: 'f0d5a7ad-a8d0-4752-96dc-56698645f81e',
+          },
+        },
+      },
+    });
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signature = await makeSignature(body, env.STRIPE_WEBHOOK_SECRET as string, timestamp);
+
+    const res = await worker.fetch(new Request('https://local/webhooks/stripe', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'stripe-signature': signature,
+      },
+      body,
+    }), env);
+
+    expect(res.status).toBe(200);
+    expect(rpc).toHaveBeenCalledWith('process_stripe_webhook', expect.objectContaining({
+      p_event_id: 'evt_order_owner_fallback',
+      p_event_type: 'payment_intent.succeeded',
+      p_order_id: 'f0d5a7ad-a8d0-4752-96dc-56698645f81e',
+      p_user_id: null,
+    }));
+  });
+
   it('persists verified checkout events idempotently', async () => {
     const body = JSON.stringify({
       id: 'evt_success',

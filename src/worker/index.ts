@@ -351,9 +351,8 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
   if (!event.id || !event.type) return json({ ok: false, error: 'invalid_stripe_event' }, 400);
 
   const object = event.data?.object ?? {};
-  const metadata = ((object.metadata as Record<string, unknown> | undefined) ?? {});
-  const userId = typeof metadata.user_id === 'string' ? metadata.user_id : ctx.req.headers.get('x-sbbl-user-id');
-  if (!userId) return json({ ok: false, error: 'stripe_event_missing_user' }, 400);
+  const metadata = (object.metadata as Record<string, unknown> | undefined) ?? {};
+  const userId = typeof metadata.user_id === 'string' ? metadata.user_id : null;
   const providerRef = typeof object.id === 'string'
     ? object.id
     : typeof object.payment_intent === 'string'
@@ -365,7 +364,7 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
     p_user_id: userId,
     p_order_id: typeof metadata.order_id === 'string' ? metadata.order_id : null,
     p_provider_ref: providerRef,
-    p_payload: { object },
+    p_payload: event,
   });
   if (webhookProcess.error) throw new Error(webhookProcess.error.message);
 
