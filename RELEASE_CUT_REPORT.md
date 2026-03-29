@@ -34,7 +34,8 @@ Critical-path Playwright now validates only intentional release-cut public surfa
 ## Handoff for PR #20 (canonical merge vehicle)
 Cherry-pick these commits from repair branch into PR #20 branch:
 1. `fd696a4` — Playwright decouple + initial critical-path/CI alignment.
-2. `latest convergence commit on this repair branch` — final convergence pass: canonical tab semantics/test ids, release nav + CTA alignment, and deterministic E2E contract updates.
+2. `1a417e3` — release-cut UI contract enforcement + deterministic critical-path suite.
+3. `HEAD` (this fix) — convergence documentation cleanup and explicit PR #20-only fold-back guidance.
 
 ### Conflict risk
 - **Low/Moderate** in:
