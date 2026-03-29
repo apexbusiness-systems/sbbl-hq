@@ -7,22 +7,6 @@ import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3 } from 'l
 import { Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 
-function LeagueHeroLogo({ league }: { league: ReturnType<typeof getLeagueConfig> }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) return null;
-  return (
-    <img
-      src={league.logo}
-      alt={league.logoAlt}
-      width={64}
-      height={64}
-      className="w-14 h-14 md:w-16 md:h-16 flex-shrink-0"
-      style={{ aspectRatio: '1/1' }}
-      onError={() => setFailed(true)}
-    />
-  );
-}
-
 type LoadState = 'loading' | 'loaded' | 'error';
 
 const HomePage = () => {
@@ -36,21 +20,9 @@ const HomePage = () => {
     let cancelled = false;
     setState('loading');
     setErrorMsg(null);
-
     fetchPublicHome(leagueCodeFromId(activeLeague))
-      .then((result) => {
-        if (!cancelled) {
-          setData(result);
-          setState('loaded');
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setErrorMsg(err instanceof Error ? err.message : 'Failed to load');
-          setState('error');
-        }
-      });
-
+      .then((result) => { if (!cancelled) { setData(result); setState('loaded'); } })
+      .catch((err) => { if (!cancelled) { setErrorMsg(err instanceof Error ? err.message : 'Failed to load'); setState('error'); } });
     return () => { cancelled = true; };
   }, [activeLeague]);
 
@@ -59,8 +31,6 @@ const HomePage = () => {
   const recentGames = data?.recentGames ?? [];
   const hasLive = liveGames.length > 0;
 
-  // Season is truly empty only when there are zero games of ANY status and zero teams.
-  // If games have already been played (status=final), totalGames > 0 — never show this banner.
   const isSeasonEmpty =
     state === 'loaded' &&
     data !== null &&
@@ -72,37 +42,74 @@ const HomePage = () => {
 
   return (
     <div className="min-h-screen">
-      {/* Hero */}
-      <section className="relative overflow-hidden bg-gradient-to-br from-[#0A0A0A] via-[#0d0d0d] to-[#0A0A0A]">
-        <div className="absolute inset-0 opacity-20 [background:radial-gradient(ellipse_at_30%_50%,rgba(201,168,76,0.15)_0%,transparent_60%)]" />
-        <div className="absolute inset-0 bg-gradient-to-t from-background via-transparent to-transparent" />
+
+      {/* ── HERO ──────────────────────────────────────────────── */}
+      <section className="relative overflow-hidden bg-[#0A0A0A]" style={{ minHeight: '480px' }}>
+
+        {/* Court line art — full bleed background texture */}
+        <div
+          className="absolute inset-0 w-full h-full"
+          style={{
+            backgroundImage: 'url(/assets/hero-court.svg)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            opacity: 1,
+          }}
+        />
+
+        {/* Gold radial glow — left anchor */}
+        <div className="absolute inset-0 [background:radial-gradient(ellipse_at_20%_60%,rgba(201,168,76,0.12)_0%,transparent_55%)]" />
+
+        {/* Bottom fade to page bg */}
+        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
+
         <div className="relative container py-16 md:py-24 lg:py-28">
           <div className="grid md:grid-cols-[1fr,360px] gap-8 items-start">
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
-              <div className="flex items-center gap-3 mb-2">
-                <LeagueHeroLogo league={league} />
-                <LeagueBadge leagueId={activeLeague} size="md" />
+
+            <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+
+              {/* League badge — small, subordinate context label */}
+              <div className="mb-4">
+                <LeagueBadge leagueId={activeLeague} size="sm" />
               </div>
-              <h1 className="font-display text-4xl md:text-5xl lg:text-6xl font-bold mt-4 leading-[0.95] tracking-tight uppercase">
-                {league.shortName}
-                <br />
-                <span className="text-primary">
+
+              {/* App + league headline — SBBL HQ is the brand, league name is the content */}
+              <h1 className="font-display leading-none uppercase">
+                <span className="block text-[clamp(3rem,8vw,6rem)] font-bold tracking-tight text-foreground">
+                  {league.shortName}
+                </span>
+                <span className="block text-[clamp(1.5rem,4vw,2.75rem)] font-bold tracking-wider text-primary mt-1">
                   {data?.season?.name ?? 'Basketball'}
                 </span>
               </h1>
-              <p className="text-muted-foreground text-sm md:text-base max-w-md mt-4 leading-relaxed">
+
+              <p className="text-muted-foreground text-sm md:text-base max-w-md mt-5 leading-relaxed">
                 {league.name} — live scoring, standings, and team operations across every division.
               </p>
-              <div className="flex items-center gap-3 mt-6">
+
+              <div className="flex items-center gap-3 mt-7">
                 {hasLive ? (
-                  <Link to="/teams" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                  <Link
+                    to="/teams"
+                    className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2"
+                  >
                     <Play className="w-4 h-4" /> Live Now
                   </Link>
                 ) : (
-                  <Link to="/teams" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                  <Link
+                    to="/teams"
+                    className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2"
+                  >
                     <Calendar className="w-4 h-4" /> View Teams
                   </Link>
                 )}
+                <Link
+                  to="/schedules"
+                  className="px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
+                >
+                  Schedule
+                </Link>
               </div>
             </motion.div>
 
@@ -110,10 +117,11 @@ const HomePage = () => {
             <motion.aside
               initial={{ opacity: 0, x: 16 }}
               animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.4, delay: 0.1 }}
-              className="panel p-5 bg-card/80 backdrop-blur-sm border-primary/20"
+              transition={{ duration: 0.4, delay: 0.15 }}
+              className="panel p-5 bg-card/90 backdrop-blur-sm border-primary/20"
+              style={{ boxShadow: '0 0 20px rgba(201,168,76,0.08)' }}
             >
-              <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-primary mb-3">League Snapshot</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary mb-3">League Snapshot</p>
 
               {state === 'loading' && (
                 <div className="space-y-3">
@@ -154,35 +162,35 @@ const HomePage = () => {
                   )}
 
                   {data.teams.length === 0 && (
-                    <p className="mt-4 text-xs text-muted-foreground">
-                      No teams published for this league yet.
-                    </p>
+                    <p className="mt-4 text-xs text-muted-foreground">No teams published for this league yet.</p>
                   )}
                 </>
               )}
             </motion.aside>
+
           </div>
         </div>
       </section>
 
-      {/* Live Games Strip */}
+      {/* ── LIVE GAMES STRIP ─────────────────────────────────── */}
       {hasLive && (
         <section className="border-b border-border">
           <div className="container py-4">
             <div className="flex items-center gap-2 mb-3">
-              <div className="relative w-2 h-2 rounded-full bg-live"><div className="absolute inset-0 rounded-full bg-live animate-ping" /></div>
+              <div className="relative w-2 h-2 rounded-full bg-live">
+                <div className="absolute inset-0 rounded-full bg-live animate-ping" />
+              </div>
               <span className="text-xs font-semibold uppercase tracking-widest text-live">Live Now</span>
             </div>
             <div className="flex gap-4 overflow-x-auto scrollbar-hidden">
-              {liveGames.map((g) => (
-                <GameCard key={g.id} game={g} variant="live" />
-              ))}
+              {liveGames.map((g) => <GameCard key={g.id} game={g} variant="live" />)}
             </div>
           </div>
         </section>
       )}
 
       <div className="container py-8 md:py-12 space-y-12">
+
         {/* Upcoming Games */}
         {upcomingGames.length > 0 && (
           <section>
@@ -190,28 +198,24 @@ const HomePage = () => {
               <h2 className="font-display text-xl md:text-2xl font-bold uppercase tracking-tight">Upcoming Games</h2>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {upcomingGames.map((g) => (
-                <GameCard key={g.id} game={g} variant="upcoming" />
-              ))}
+              {upcomingGames.map((g) => <GameCard key={g.id} game={g} variant="upcoming" />)}
             </div>
           </section>
         )}
 
-        {/* Recent Results — shown when season has started but no upcoming games yet */}
+        {/* Recent Results — visible when season started but no upcoming games */}
         {recentGames.length > 0 && upcomingGames.length === 0 && !hasLive && (
           <section>
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-display text-xl md:text-2xl font-bold uppercase tracking-tight">Recent Results</h2>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {recentGames.map((g) => (
-                <GameCard key={g.id} game={g} variant="upcoming" />
-              ))}
+              {recentGames.map((g) => <GameCard key={g.id} game={g} variant="upcoming" />)}
             </div>
           </section>
         )}
 
-        {/* Standings Proof */}
+        {/* Teams grid */}
         {state === 'loaded' && data && data.teams.length > 0 && (
           <section>
             <div className="flex items-center justify-between mb-6">
@@ -241,7 +245,7 @@ const HomePage = () => {
           </section>
         )}
 
-        {/* Empty state — ONLY when truly no data of any kind exists for this league */}
+        {/* Truly empty — zero data of any kind */}
         {isSeasonEmpty && (
           <section className="panel p-8 text-center">
             <Calendar className="w-8 h-8 text-primary/40 mx-auto mb-3" />
@@ -251,6 +255,7 @@ const HomePage = () => {
             </p>
           </section>
         )}
+
       </div>
     </div>
   );
@@ -280,15 +285,11 @@ function GameCard({ game, variant }: { game: PublicGame; variant: 'live' | 'upco
       </div>
       <div className="flex items-center justify-between">
         <div className="text-sm font-medium">{game.home_team?.name ?? 'TBD'}</div>
-        {isLive && game.home_score != null && (
-          <div className="stat-numeral text-lg text-live">{game.home_score}</div>
-        )}
+        {isLive && game.home_score != null && <div className="stat-numeral text-lg text-live">{game.home_score}</div>}
       </div>
       <div className="flex items-center justify-between mt-1">
         <div className="text-sm font-medium">{game.away_team?.name ?? 'TBD'}</div>
-        {isLive && game.away_score != null && (
-          <div className="stat-numeral text-lg text-live">{game.away_score}</div>
-        )}
+        {isLive && game.away_score != null && <div className="stat-numeral text-lg text-live">{game.away_score}</div>}
       </div>
       {!isLive && scheduledDate && (
         <div className="mt-3 pt-2 border-t border-border">

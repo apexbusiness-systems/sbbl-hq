@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 600" fill="none">
+  <!-- Court outline -->
+  <rect x="60" y="40" width="1080" height="520" rx="8" stroke="#C9A84C" stroke-width="2" stroke-opacity="0.18"/>
+  <!-- Half court line -->
+  <line x1="600" y1="40" x2="600" y2="560" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.18"/>
+  <!-- Center circle -->
+  <circle cx="600" cy="300" r="80" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.18"/>
+  <circle cx="600" cy="300" r="6" fill="#C9A84C" fill-opacity="0.18"/>
+  <!-- Left paint -->
+  <rect x="60" y="180" width="190" height="240" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.14"/>
+  <!-- Left restricted area -->
+  <rect x="60" y="220" width="110" height="160" stroke="#C9A84C" stroke-width="1" stroke-opacity="0.10"/>
+  <!-- Left free throw circle -->
+  <circle cx="250" cy="300" r="80" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.12" stroke-dasharray="8 6"/>
+  <!-- Left 3pt arc -->
+  <path d="M60 150 Q320 300 60 450" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.14" fill="none"/>
+  <!-- Right paint -->
+  <rect x="950" y="180" width="190" height="240" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.14"/>
+  <!-- Right restricted area -->
+  <rect x="1030" y="220" width="110" height="160" stroke="#C9A84C" stroke-width="1" stroke-opacity="0.10"/>
+  <!-- Right free throw circle -->
+  <circle cx="950" cy="300" r="80" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.12" stroke-dasharray="8 6"/>
+  <!-- Right 3pt arc -->
+  <path d="M1140 150 Q880 300 1140 450" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.14" fill="none"/>
+  <!-- Left basket -->
+  <circle cx="110" cy="300" r="18" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.20"/>
+  <line x1="60" y1="300" x2="128" y2="300" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.20"/>
+  <!-- Right basket -->
+  <circle cx="1090" cy="300" r="18" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.20"/>
+  <line x1="1072" y1="300" x2="1140" y2="300" stroke="#C9A84C" stroke-width="1.5" stroke-opacity="0.20"/>
+</svg>
