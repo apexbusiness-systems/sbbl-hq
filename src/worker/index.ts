@@ -92,8 +92,6 @@ async function getSession(req: Request, env: Env) {
     });
     const { data, error } = await supabase.auth.getUser(token);
     if (!error && data.user) {
-      // Roles are fetched from DB on admin-gated routes via requireAdminSession().
-      // For non-admin routes, default to 'fan' unless the DB assignment is present.
       return {
         userId: data.user.id,
         roles: ['fan'] as string[],
@@ -287,6 +285,14 @@ async function handleIngress(ctx: HandlerCtx) {
 async function handleSyncDrain(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   requireAuth(ctx.req);
+
+  // SECURITY: Fix #6 — hard-fail if OMNIHUB_SIGNING_SECRET is not configured.
+  // The previous '?? dev-signing-secret' fallback allowed production sync packets
+  // to be signed with a publicly guessable secret, enabling packet forgery.
+  if (!ctx.env.OMNIHUB_SIGNING_SECRET) {
+    return json({ ok: false, error: 'omnihub_signing_secret_not_configured' }, 503);
+  }
+
   const limit = Math.max(1, Math.min(50, Number(new URL(ctx.req.url).searchParams.get('limit') ?? '20')));
   const { data, error } = await ctx.admin.rpc('claim_outbox_events', { p_limit: limit });
   if (error) throw new Error(error.message);
@@ -304,7 +310,7 @@ async function handleSyncDrain(ctx: HandlerCtx) {
       payload: (item.payload as Record<string, unknown> | undefined) ?? {},
       emitted_at: new Date().toISOString(),
     };
-    const signed = await signSyncPacket(packet, ctx.env.OMNIHUB_SIGNING_SECRET ?? 'dev-signing-secret');
+    const signed = await signSyncPacket(packet, ctx.env.OMNIHUB_SIGNING_SECRET);
     const url = ctx.env.OMNIHUB_SYNC_URL;
 
     if (url) {
