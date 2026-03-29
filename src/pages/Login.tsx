@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { signInWithEmail } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
+import { hasSupabaseClientConfig } from '@/lib/supabase/client';
 
 const LoginPage = () => {
   const [email, setEmail] = useState('');
@@ -37,6 +38,7 @@ const LoginPage = () => {
       <div className="panel p-6 space-y-4">
         <h1 className="font-display text-3xl text-primary">Login</h1>
         <p className="text-sm text-muted-foreground">Use your email to receive a secure sign-in link.</p>
+        {!hasSupabaseClientConfig && <p className="text-xs text-warning">Supabase env missing (VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY).</p>}
         <form onSubmit={onSubmit} className="space-y-3">
           <input
             type="email"
@@ -46,7 +48,7 @@ const LoginPage = () => {
             className="w-full bg-secondary border border-border rounded-sm px-3 py-2"
             placeholder="you@sbblhq.com"
           />
-          <button disabled={submitting} className="gold-bg px-4 py-2 rounded-sm font-semibold w-full disabled:opacity-70">
+          <button disabled={submitting || !hasSupabaseClientConfig} className="gold-bg px-4 py-2 rounded-sm font-semibold w-full disabled:opacity-70">
             {submitting ? 'Sending…' : 'Send magic link'}
           </button>
         </form>

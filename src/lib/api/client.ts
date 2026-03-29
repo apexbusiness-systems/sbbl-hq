@@ -3,6 +3,7 @@ import { supabaseClient } from '@/lib/supabase/client';
 const API_BASE = import.meta.env.VITE_WORKER_API_BASE?.trim() || '';
 
 export async function getAuthToken() {
+  if (!supabaseClient) return null;
   const { data } = await supabaseClient.auth.getSession();
   return data.session?.access_token ?? null;
 }

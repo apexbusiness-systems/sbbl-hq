@@ -1,4 +1,4 @@
-import { supabaseClient } from '@/lib/supabase/client';
+import { requireSupabaseClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api/client';
 import type { AppRole } from '@/lib/auth/roles';
 
@@ -14,13 +14,15 @@ export type AuthProfile = {
 };
 
 export async function signInWithEmail(email: string) {
+  const supabase = requireSupabaseClient();
   const redirectTo = `${window.location.origin}/`;
-  const { error } = await supabaseClient.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
+  const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
   if (error) throw error;
 }
 
 export async function signOut() {
-  const { error } = await supabaseClient.auth.signOut();
+  const supabase = requireSupabaseClient();
+  const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }
 
@@ -29,13 +31,14 @@ export async function fetchSessionSummary() {
 }
 
 export async function fetchProfileAndRoles(userId: string) {
+  const supabase = requireSupabaseClient();
   const [{ data: profile, error: profileError }, { data: roleRows, error: roleError }] = await Promise.all([
-    supabaseClient
+    supabase
       .from('profiles')
       .select('id,user_id,display_name,full_name,bio,avatar_url,preferred_league,primary_role_intent')
       .eq('user_id', userId)
       .maybeSingle(),
-    supabaseClient
+    supabase
       .from('user_role_assignments')
       .select('role')
       .eq('user_id', userId),
@@ -59,19 +62,20 @@ export async function saveOnboarding(payload: {
   bio?: string;
   avatarFile?: File | null;
 }) {
+  const supabase = requireSupabaseClient();
   let avatarUrl: string | null = null;
   if (payload.avatarFile) {
     const extension = payload.avatarFile.name.split('.').pop() || 'jpg';
     const path = `avatars/${payload.userId}/${crypto.randomUUID()}.${extension}`;
-    const upload = await supabaseClient.storage.from('media').upload(path, payload.avatarFile, {
+    const upload = await supabase.storage.from('media').upload(path, payload.avatarFile, {
       cacheControl: '3600', upsert: true,
     });
     if (upload.error) throw upload.error;
-    const { data } = supabaseClient.storage.from('media').getPublicUrl(path);
+    const { data } = supabase.storage.from('media').getPublicUrl(path);
     avatarUrl = data.publicUrl;
   }
 
-  const { error } = await supabaseClient.from('profiles').upsert({
+  const { error } = await supabase.from('profiles').upsert({
     user_id: payload.userId,
     display_name: payload.displayName,
     full_name: payload.fullName,
@@ -83,7 +87,7 @@ export async function saveOnboarding(payload: {
   if (error) throw error;
 
   if (payload.primaryRoleIntent === 'player') {
-    const { error: regError } = await supabaseClient.from('player_registration_submissions').upsert({
+    const { error: regError } = await supabase.from('player_registration_submissions').upsert({
       user_id: payload.userId,
       payload: { preferred_league: payload.preferredLeague },
       idempotency_key: `onboarding-${payload.userId}`,

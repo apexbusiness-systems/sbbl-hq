@@ -26,6 +26,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<AppRole[]>([]);
 
   const load = async () => {
+    if (!supabaseClient) {
+      setSession(null);
+      setUser(null);
+      setProfile(null);
+      setRoles([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     const { data } = await supabaseClient.auth.getSession();
     setSession(data.session ?? null);
@@ -43,6 +52,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    if (!supabaseClient) {
+      setLoading(false);
+      return;
+    }
+
     void load();
     const { data } = supabaseClient.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);

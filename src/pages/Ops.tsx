@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia } from '@/lib/api/ops';
-import { supabaseClient } from '@/lib/supabase/client';
+import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 
 type Tab = 'overview' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'history';
 
@@ -53,10 +53,11 @@ const OpsPage = () => {
   const storeMutation = useMutation({
     mutationFn: async () => {
       if (!storeForm.imageFile) throw new Error('Image is required');
+      const supabase = requireSupabaseClient();
       const objectPath = `store/${crypto.randomUUID()}-${storeForm.imageFile.name}`;
-      const upload = await supabaseClient.storage.from('media').upload(objectPath, storeForm.imageFile, { upsert: true });
+      const upload = await supabase.storage.from('media').upload(objectPath, storeForm.imageFile, { upsert: true });
       if (upload.error) throw upload.error;
-      const imageUrl = supabaseClient.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
+      const imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
       return uploadStoreMedia({
         title: storeForm.title,
         price: Number(storeForm.price),
@@ -133,7 +134,8 @@ const OpsPage = () => {
             <option value="draft">Draft</option><option value="published">Published</option>
           </select>
           <input type="file" accept="image/*" onChange={(e) => setStoreForm((s) => ({ ...s, imageFile: e.target.files?.[0] ?? null }))} />
-          <button className="gold-bg px-4 py-2 rounded-sm" onClick={() => storeMutation.mutate()} disabled={storeMutation.isPending}>{storeMutation.isPending ? 'Uploading…' : 'Upload & Save'}</button>
+          <button className="gold-bg px-4 py-2 rounded-sm" onClick={() => storeMutation.mutate()} disabled={storeMutation.isPending || !hasSupabaseClientConfig}>{storeMutation.isPending ? 'Uploading…' : 'Upload & Save'}</button>
+          {!hasSupabaseClientConfig && <p className="text-xs text-warning">Supabase client env missing; media uploads disabled.</p>}
           {storeMutation.error && <p className="text-xs text-destructive">{(storeMutation.error as Error).message}</p>}
           {storeMutation.data && <p className="text-xs text-success">Saved product {storeMutation.data.productId}</p>}
         </div>
