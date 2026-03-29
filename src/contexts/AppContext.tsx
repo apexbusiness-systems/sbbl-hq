@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import { LeagueId } from '@/types';
 import { hasPremiumPlayerAccess, isPlayerSubscriptionActive } from '@/lib/auth/subscription';
 import { useAuth } from '@/hooks/use-auth';
+import { leagueIdFromCode, persistLeague, loadPersistedLeague } from '@/lib/leagues';
 import { readClientEnv } from '@/lib/env';
 
 interface AppState {
@@ -28,17 +29,30 @@ export const useApp = () => {
   return ctx;
 };
 
+function resolveDefaultLeague(): LeagueId {
+  const persisted = loadPersistedLeague();
+  if (persisted) return persisted;
+  try {
+    const env = readClientEnv();
+    return leagueIdFromCode(env.VITE_DEFAULT_LEAGUE);
+  } catch {
+    return 'sbbl';
+  }
+}
+
 export const AppProvider = ({ children }: { children: ReactNode }) => {
   const { roles, isAdmin } = useAuth();
-  const env = readClientEnv();
-  // Map env shorthand to internal lower-case ids used across app models.
-  const defaultLeagueMap: Record<typeof env.VITE_DEFAULT_LEAGUE, LeagueId> = { SBBL: 'sbbl', WBL: 'wbl', TGIFBL: 'tgifbl' };
-  const [activeLeague, setActiveLeague] = useState<LeagueId>(defaultLeagueMap[env.VITE_DEFAULT_LEAGUE]);
+  const [activeLeague, setActiveLeagueRaw] = useState<LeagueId>(resolveDefaultLeague);
   const [playerSubscriptionEndsAt, setPlayerSubscriptionEndsAt] = useState<string | null>(null);
   const [bagItems, setBagItems] = useState<string[]>([]);
   const [bagOpen, setBagOpen] = useState(false);
 
   const authRole = (roles[0] ?? 'fan') as AppState['authRole'];
+
+  const setActiveLeague = (l: LeagueId) => {
+    setActiveLeagueRaw(l);
+    persistLeague(l);
+  };
 
   const renewPlayerTier = () => {
     const now = new Date();
@@ -48,9 +62,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     const stored = localStorage.getItem('sbblhq.playerSubscriptionEndsAt');
-    if (stored) {
-      setPlayerSubscriptionEndsAt(stored);
-    }
+    if (stored) setPlayerSubscriptionEndsAt(stored);
   }, []);
 
   useEffect(() => {
@@ -58,7 +70,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       localStorage.removeItem('sbblhq.playerSubscriptionEndsAt');
       return;
     }
-
     localStorage.setItem('sbblhq.playerSubscriptionEndsAt', playerSubscriptionEndsAt);
   }, [playerSubscriptionEndsAt]);
 

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <g>
+    <!-- Shield -->
+    <path d="M60 8L105 28V62C105 88 85 108 60 116C35 108 15 88 15 62V28L60 8Z" fill="#1a2744" stroke="#E8821C" stroke-width="3"/>
+    <!-- Basketball -->
+    <circle cx="60" cy="54" r="20" fill="none" stroke="#E8821C" stroke-width="3"/>
+    <path d="M40 54h40M60 34v40" stroke="#E8821C" stroke-width="2.5"/>
+    <path d="M44 38c8 7 8 25 0 32M76 38c-8 7-8 25 0 32" stroke="#E8821C" stroke-width="2"/>
+    <!-- WBL text -->
+    <text x="60" y="96" text-anchor="middle" font-family="Impact,Arial Narrow,sans-serif" font-size="22" font-weight="bold" fill="#E8821C" letter-spacing="3">WBL</text>
+    <!-- Stars -->
+    <circle cx="38" cy="24" r="2" fill="#E8821C"/>
+    <circle cx="60" cy="18" r="2.5" fill="#E8821C"/>
+    <circle cx="82" cy="24" r="2" fill="#E8821C"/>
+  </g>
+</svg>
