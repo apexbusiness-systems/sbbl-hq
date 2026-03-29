@@ -7,6 +7,7 @@ const clientEnvSchema = z.object({
   VITE_PUBLIC_BASE_URL: z.string().url().default('http://localhost:5173'),
   VITE_SUPABASE_URL: z.string().url(),
   VITE_SUPABASE_PUBLISHABLE_KEY: z.string().min(10),
+  VITE_WORKER_API_BASE: z.string().optional(),
 });
 
 const serverEnvSchema = z.object({
