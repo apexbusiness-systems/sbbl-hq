@@ -66,7 +66,11 @@ const HomePage = () => {
         )}
         <div className="absolute inset-0 bg-gradient-to-r from-background/80 via-transparent to-transparent" />
         <div className="relative h-full container grid md:grid-cols-[1fr,340px] gap-8 items-end pb-12 md:pb-16">
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6 }}>
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.6 }}
+          >
             <LeagueBadge leagueId={activeLeague} size="md" />
             <h1 className="font-display text-4xl md:text-6xl lg:text-7xl font-bold mt-4 leading-[0.95] tracking-tighter">
               {league.shortName}<br />
@@ -76,10 +80,16 @@ const HomePage = () => {
               {league.description}
             </p>
             <div className="flex items-center gap-3 mt-6">
-              <Link to="/schedules" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+              <Link
+                to="/schedules"
+                className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2"
+              >
                 <Play className="w-4 h-4" /> Live Now
               </Link>
-              <Link to="/teams" className="px-6 py-3 border border-border font-display font-medium text-sm uppercase tracking-wider rounded-sm text-foreground hover:bg-secondary transition-colors">
+              <Link
+                to="/teams"
+                className="px-6 py-3 border border-border font-display font-medium text-sm uppercase tracking-wider rounded-sm text-foreground hover:bg-secondary transition-colors"
+              >
                 View Teams
               </Link>
             </div>
