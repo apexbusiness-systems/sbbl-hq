@@ -10,14 +10,8 @@ import {
 
 const mainNav = [
   { label: 'Home', path: '/' },
-  { label: 'Live', path: '/live' },
-  { label: 'Schedules', path: '/schedules' },
   { label: 'Teams', path: '/teams' },
-  { label: 'Store', path: '/store' },
-  { label: 'Profiles', path: '/profiles' },
-  { label: 'Stats', path: '/stats' },
-  { label: 'Leaderboards', path: '/leaderboards' },
-  { label: 'Media', path: '/media' },
+  { label: 'Schedules', path: '/schedules' },
 ];
 
 export const Header = () => {
@@ -36,11 +30,14 @@ export const Header = () => {
     <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur-md">
       <div className="border-b border-border">
         <div className="container flex items-center justify-between h-10">
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1" role="tablist" aria-label="League selector">
             {leagues.map((l) => (
               <button
                 key={l.id}
                 onClick={() => setActiveLeague(l.id)}
+                role="tab"
+                aria-selected={activeLeague === l.id}
+                data-testid={`league-tab-${l.id}`}
                 className={`px-3 py-1 text-xs font-semibold uppercase tracking-widest transition-colors ${
                   activeLeague === l.id
                     ? `${leagueAccentClass(l.id)} border-b-2 border-current`
