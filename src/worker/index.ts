@@ -36,6 +36,47 @@ function getBearerToken(req: Request) {
   return value.slice('Bearer '.length).trim();
 }
 
+const textEncoder = new TextEncoder();
+
+function parseStripeSignature(header: string) {
+  const fields = header.split(',').map((part) => part.trim());
+  const timestamp = fields.find((part) => part.startsWith('t='))?.slice(2);
+  const signatures = fields
+    .filter((part) => part.startsWith('v1='))
+    .map((part) => part.slice(3))
+    .filter(Boolean);
+  return {
+    timestamp: timestamp ? Number(timestamp) : NaN,
+    signatures,
+  };
+}
+
+async function signHmacSha256(secret: string, payload: string) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    textEncoder.encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, textEncoder.encode(payload));
+  return Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function verifyStripeSignature(rawBody: string, signatureHeader: string, secret: string, nowMs = Date.now()) {
+  const parsed = parseStripeSignature(signatureHeader);
+  if (!Number.isFinite(parsed.timestamp) || parsed.signatures.length === 0) return false;
+
+  const ageSeconds = Math.abs(Math.floor(nowMs / 1000) - parsed.timestamp);
+  if (ageSeconds > 300) return false;
+
+  const payload = `${parsed.timestamp}.${rawBody}`;
+  const expected = await signHmacSha256(secret, payload);
+  return parsed.signatures.some((candidate) => candidate.toLowerCase() === expected);
+}
+
 async function getSession(req: Request, env: Env) {
   const token = getBearerToken(req);
   if (token && env.SUPABASE_PUBLISHABLE_KEY) {
@@ -285,6 +326,56 @@ async function handleSyncDrain(ctx: HandlerCtx) {
 
   return json({ ok: true, processed: results.length, results });
 }
+
+async function handleStripeWebhook(ctx: HandlerCtx) {
+  const secret = ctx.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) return json({ ok: false, error: 'stripe_webhook_secret_missing' }, 503);
+
+  const signature = ctx.req.headers.get('stripe-signature');
+  if (!signature) return json({ ok: false, error: 'stripe_signature_missing' }, 400);
+
+  const rawBody = await ctx.req.text();
+  const verified = await verifyStripeSignature(rawBody, signature, secret);
+  if (!verified) {
+    await writeIngressFailure(ctx.admin, 'invalid_stripe_signature', { body: rawBody }, 'webhook', null);
+    return json({ ok: false, error: 'invalid_stripe_signature' }, 400);
+  }
+
+  let event: { id?: string; type?: string; data?: { object?: Record<string, unknown> } };
+  try {
+    event = JSON.parse(rawBody) as { id?: string; type?: string; data?: { object?: Record<string, unknown> } };
+  } catch {
+    await writeIngressFailure(ctx.admin, 'invalid_stripe_json', { body: rawBody }, 'webhook', null);
+    return json({ ok: false, error: 'invalid_stripe_json' }, 400);
+  }
+  if (!event.id || !event.type) return json({ ok: false, error: 'invalid_stripe_event' }, 400);
+
+  const object = event.data?.object ?? {};
+  const metadata = ((object.metadata as Record<string, unknown> | undefined) ?? {});
+  const userId = typeof metadata.user_id === 'string' ? metadata.user_id : ctx.req.headers.get('x-sbbl-user-id');
+  if (!userId) return json({ ok: false, error: 'stripe_event_missing_user' }, 400);
+  const providerRef = typeof object.id === 'string'
+    ? object.id
+    : typeof object.payment_intent === 'string'
+      ? object.payment_intent
+      : event.id;
+  const webhookProcess = await ctx.admin.rpc('process_stripe_webhook', {
+    p_event_id: event.id,
+    p_event_type: event.type,
+    p_user_id: userId,
+    p_order_id: typeof metadata.order_id === 'string' ? metadata.order_id : null,
+    p_provider_ref: providerRef,
+    p_payload: { object },
+  });
+  if (webhookProcess.error) throw new Error(webhookProcess.error.message);
+
+  return json({
+    ok: true,
+    eventId: event.id,
+    type: event.type,
+    duplicate: Boolean((webhookProcess.data as { duplicate?: boolean } | null)?.duplicate),
+  });
+}
 function compilePath(path: string) {
   const keys: string[] = [];
   const pattern = path.replace(/:([^/]+)/g, (_, key: string) => {
@@ -322,7 +413,7 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'GET', path: '/ops/headshots', handler: handleOps },
   { method: 'POST', path: '/api/ingress', handler: handleIngress },
   { method: 'POST', path: '/sync/drain', handler: handleSyncDrain },
-  { method: 'POST', path: '/webhooks/stripe', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'webhooks-stripe' } }) },
+  { method: 'POST', path: '/webhooks/stripe', handler: handleStripeWebhook },
 ];
 
 const compiled: Array<Route & { keys: string[] }> = routes.map((route) => {
