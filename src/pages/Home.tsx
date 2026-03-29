@@ -56,7 +56,19 @@ const HomePage = () => {
 
   const liveGames = data?.liveGames ?? [];
   const upcomingGames = data?.upcomingGames ?? [];
+  const recentGames = data?.recentGames ?? [];
   const hasLive = liveGames.length > 0;
+
+  // Season is truly empty only when there are zero games of ANY status and zero teams.
+  // If games have already been played (status=final), totalGames > 0 — never show this banner.
+  const isSeasonEmpty =
+    state === 'loaded' &&
+    data !== null &&
+    data.teams.length === 0 &&
+    upcomingGames.length === 0 &&
+    liveGames.length === 0 &&
+    recentGames.length === 0 &&
+    (data.totalGames ?? 0) === 0;
 
   return (
     <div className="min-h-screen">
@@ -185,6 +197,20 @@ const HomePage = () => {
           </section>
         )}
 
+        {/* Recent Results — shown when season has started but no upcoming games yet */}
+        {recentGames.length > 0 && upcomingGames.length === 0 && !hasLive && (
+          <section>
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="font-display text-xl md:text-2xl font-bold uppercase tracking-tight">Recent Results</h2>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {recentGames.map((g) => (
+                <GameCard key={g.id} game={g} variant="upcoming" />
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Standings Proof */}
         {state === 'loaded' && data && data.teams.length > 0 && (
           <section>
@@ -215,8 +241,8 @@ const HomePage = () => {
           </section>
         )}
 
-        {/* Empty state for no data */}
-        {state === 'loaded' && data && data.teams.length === 0 && upcomingGames.length === 0 && (
+        {/* Empty state — ONLY when truly no data of any kind exists for this league */}
+        {isSeasonEmpty && (
           <section className="panel p-8 text-center">
             <Calendar className="w-8 h-8 text-primary/40 mx-auto mb-3" />
             <h2 className="font-display text-lg font-bold">Season Coming Soon</h2>
