@@ -718,6 +718,110 @@ function compilePath(path: string) {
   return { regex: new RegExp(`^${pattern}$`), keys };
 }
 
+async function handleParsePotgImage(ctx: HandlerCtx) {
+  await requireAdminSession(ctx.req, ctx.admin);
+  const apiKey = ctx.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return json({ ok: false, error: 'anthropic_api_key_missing' }, 503);
+
+  const body = await ctx.req.json().catch(() => null) as { imageBase64: string; mimeType: string } | null;
+  if (!body?.imageBase64 || !body?.mimeType) return json({ ok: false, error: 'image_required' }, 400);
+
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 256,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: body.mimeType, data: body.imageBase64 } },
+          { type: 'text', text: 'Extract player of the game data from this graphic. Return ONLY a JSON object with exactly these keys: playerName (string), team (string), pts (number), rebs (number), assts (number), gameResult (string, e.g. "TEAM A 77 vs TEAM B 63"). No markdown, no explanation — raw JSON only.' },
+        ],
+      }],
+    }),
+  });
+
+  if (!resp.ok) return json({ ok: false, error: 'anthropic_error', status: resp.status }, 502);
+  const ai = await resp.json() as { content: Array<{ type: string; text: string }> };
+  const raw = ai.content.find((b) => b.type === 'text')?.text ?? '';
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return json({ ok: false, error: 'parse_failed', raw }, 422);
+  try {
+    const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+    return json({ ok: true, data: parsed });
+  } catch {
+    return json({ ok: false, error: 'invalid_json', raw }, 422);
+  }
+}
+
+async function handleSubmitPotg(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireAdminSession(ctx.req, ctx.admin);
+  const body = await ctx.req.json().catch(() => null) as {
+    playerName: string; team: string; pts: number; rebs: number; assts: number;
+    gameResult: string; leagueId: string; date?: string;
+  } | null;
+
+  if (!body?.playerName || !body?.team || !body?.leagueId) {
+    return json({ ok: false, error: 'missing_required_fields' }, 400);
+  }
+
+  // Upsert player profile by display name + team within league
+  const { data: profileData } = await ctx.admin.from('profiles')
+    .select('user_id')
+    .ilike('display_name', body.playerName.trim())
+    .maybeSingle();
+
+  // Upsert into player_game_stats via award_records table if player found,
+  // otherwise write to import_jobs as a pending manual match
+  const { data: jobData, error: jobError } = await ctx.admin.from('import_jobs').insert({
+    job_type: 'potg_award',
+    submitted_by: session.userId,
+    payload_summary: {
+      playerName: body.playerName,
+      team: body.team,
+      pts: body.pts,
+      rebs: body.rebs,
+      assts: body.assts,
+      gameResult: body.gameResult,
+      leagueId: body.leagueId,
+      date: body.date ?? new Date().toISOString().split('T')[0],
+      matched_profile_id: profileData?.user_id ?? null,
+      source: 'potg_image_parser',
+    },
+    status: profileData ? 'completed' : 'pending_match',
+    total_rows: 1,
+    inserted_rows: profileData ? 1 : 0,
+    failed_rows: profileData ? 0 : 0,
+    error_summary: profileData ? null : 'Player profile not yet in system — award queued for manual match',
+  }).select('id').single();
+
+  if (jobError) throw new Error(jobError.message);
+
+  // If player is matched, also write stat record
+  if (profileData?.user_id) {
+    await ctx.admin.from('player_game_stats').upsert({
+      player_id: profileData.user_id,
+      game_id: null, // will be linked when game record exists
+      pts: body.pts,
+      reb: body.rebs,
+      ast: body.assts,
+      stl: null, blk: null, fls: null, min: null,
+    });
+  }
+
+  await ctx.admin.rpc('log_admin_action', {
+    p_action: 'potg_submitted',
+    p_ref_type: 'import_job',
+    p_ref_id: jobData.id,
+    p_payload: body,
+    p_idempotency_key: readIdempotencyKey(ctx.req.headers),
+  }).catch(() => null);
+
+  return json({ ok: true, jobId: jobData.id, matched: !!profileData });
+}
+
 const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'GET', path: '/auth/session', handler: handleAuthSession },
   { method: 'GET', path: '/api/profile/me', handler: handleMe },
@@ -745,6 +849,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'POST', path: '/ops/imports/events', handler: (ctx) => handleImportRoute(ctx, 'events') },
   { method: 'GET', path: '/ops/imports/history', handler: handleImportHistory },
   { method: 'POST', path: '/ops/store/media', handler: handleStoreMedia },
+  { method: 'POST', path: '/ops/potg/parse', handler: handleParsePotgImage },
+  { method: 'POST', path: '/ops/potg/submit', handler: handleSubmitPotg },
   { method: 'GET', path: '/api/public-config', handler: handlePublicConfig },
   { method: 'GET', path: '/api/public/home', handler: handlePublicHome },
   { method: 'GET', path: '/api/teams', handler: handleTeamsList },

@@ -1,4 +1,4 @@
-import { League, PlayerProfile, Team, Game, Product, MediaAsset, ReviewItem, Invoice } from '@/types';
+import { League, PlayerProfile, Team, Game, Product, MediaAsset, ReviewItem, Invoice, PlayerOfTheGame } from '@/types';
 
 import player1 from '@/assets/player-1.svg';
 import player2 from '@/assets/player-2.svg';
@@ -25,6 +25,10 @@ export const teams: Team[] = [
   { id: 't6', name: 'Friday Flames', leagueId: 'tgifbl', division: 'Group 1', record: { wins: 7, losses: 3 } },
   { id: 't7', name: 'Tat Stadium Elite', leagueId: 'tgifbl', division: 'Group 2', record: { wins: 6, losses: 4 } },
   { id: 't8', name: 'Rim Rattlers', leagueId: 'sbbl', division: 'Panalay B', record: { wins: 5, losses: 5 } },
+  { id: 't9', name: 'OSY Phoenix', leagueId: 'wbl', division: 'Main', record: { wins: 4, losses: 1 } },
+  { id: 't10', name: 'Ball is Life', leagueId: 'wbl', division: 'Main', record: { wins: 3, losses: 2 } },
+  { id: 't11', name: 'Rebelde', leagueId: 'wbl', division: 'Main', record: { wins: 4, losses: 1 } },
+  { id: 't12', name: 'Splash', leagueId: 'wbl', division: 'Main', record: { wins: 3, losses: 2 } },
 ];
 
 export const players: PlayerProfile[] = [
@@ -34,6 +38,10 @@ export const players: PlayerProfile[] = [
   { id: 'p4', name: 'Carlos Mendez', number: 7, position: 'SG', teamId: 't6', leagueId: 'tgifbl', avatar: player1, badges: ['Clutch Performer'], stats: { pts: 22.1, reb: 4.5, ast: 4.2, stl: 1.5, blk: 0.5, fls: 2.4, min: 31.2 } },
   { id: 'p5', name: 'Darius Reyes', number: 5, position: 'PF', teamId: 't1', leagueId: 'sbbl', avatar: player2, badges: ['Rising Star'], stats: { pts: 16.8, reb: 8.9, ast: 2.8, stl: 1.1, blk: 1.7, fls: 2.9, min: 29.4 } },
   { id: 'p6', name: 'Rico Bautista', number: 15, position: 'SF', teamId: 't5', leagueId: 'wbl', avatar: player3, badges: ['6th Man'], stats: { pts: 15.3, reb: 5.1, ast: 3.7, stl: 2.0, blk: 0.6, fls: 1.5, min: 26.7 } },
+  { id: 'p7', name: 'Tata Ramon', number: 8, position: 'SG', teamId: 't9', leagueId: 'wbl', avatar: player1, badges: ['Player of the Game', 'Scorer'], stats: { pts: 22.0, reb: 5.0, ast: 6.0, stl: 1.5, blk: 0.5, fls: 2.0, min: 32.0 } },
+  { id: 'p8', name: 'Michael Ramos', number: 3, position: 'SF', teamId: 't10', leagueId: 'wbl', avatar: player2, badges: ['Player of the Game', 'All-Star'], stats: { pts: 24.0, reb: 7.0, ast: 6.0, stl: 1.8, blk: 0.8, fls: 1.5, min: 34.0 } },
+  { id: 'p9', name: 'Harold Casio', number: 25, position: 'PF', teamId: 't11', leagueId: 'wbl', avatar: player3, badges: ['Player of the Game', 'Rebounder'], stats: { pts: 20.0, reb: 7.0, ast: 5.0, stl: 1.2, blk: 1.0, fls: 2.5, min: 31.0 } },
+  { id: 'p10', name: 'JT Balangui', number: 10, position: 'PG', teamId: 't12', leagueId: 'wbl', avatar: player1, badges: ['Player of the Game', 'Floor General'], stats: { pts: 20.0, reb: 6.0, ast: 6.0, stl: 2.0, blk: 0.4, fls: 1.8, min: 30.0 } },
 ];
 
 export const games: Game[] = [
@@ -77,3 +85,10 @@ export const invoices: Invoice[] = [
 ];
 
 export const gameActionImage = gameAction;
+
+export const playersOfTheGame: PlayerOfTheGame[] = [
+  { id: 'potg-wbl-1', leagueId: 'wbl', playerName: 'Michael Ramos', playerId: 'p8', team: 'Ball is Life', pts: 24, rebs: 7, assts: 6, gameResult: 'NSD 82 vs Ball is Life 84', date: '2026-03-29' },
+  { id: 'potg-wbl-2', leagueId: 'wbl', playerName: 'Tata Ramon', playerId: 'p7', team: 'OSY Phoenix', pts: 22, rebs: 5, assts: 6, gameResult: 'OSY 77 vs Solid North 63', date: '2026-03-29' },
+  { id: 'potg-wbl-3', leagueId: 'wbl', playerName: 'Harold Casio', playerId: 'p9', team: 'Rebelde', pts: 20, rebs: 7, assts: 5, gameResult: 'Harina x Wild Dogs 62 vs Rebelde 79', date: '2026-03-22' },
+  { id: 'potg-wbl-4', leagueId: 'wbl', playerName: 'JT Balangui', playerId: 'p10', team: 'Splash', pts: 20, rebs: 6, assts: 6, gameResult: 'Splash 60 vs Rebelde Jrs 51', date: '2026-03-22' },
+];
