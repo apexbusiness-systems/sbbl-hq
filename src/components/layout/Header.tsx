@@ -4,18 +4,26 @@ import { useApp } from '@/contexts/AppContext';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { signOut } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
+import { AppRole } from '@/lib/auth/roles';
 import {
   RefreshCw, Share2, CreditCard, Settings, Shield, ShoppingBag, Menu, X, LogIn, LogOut
 } from 'lucide-react';
 
 const mainNav = [
   { label: 'Home', path: '/' },
-  { label: 'Teams', path: '/teams' },
+  { label: 'Live', path: '/live' },
   { label: 'Schedules', path: '/schedules' },
+  { label: 'Store', path: '/store' },
+  { label: 'Profiles', path: '/profiles' },
+  { label: 'Stats', path: '/stats' },
+  { label: 'Leaderboards', path: '/leaderboards' },
+  { label: 'Media', path: '/media' },
 ];
 
+const authRoleCycle: AppRole[] = ['fan', 'player', 'league_admin', 'super_admin'];
+
 export const Header = () => {
-  const { activeLeague, setActiveLeague, isAdmin, bagItems, setBagOpen } = useApp();
+  const { activeLeague, setActiveLeague, authRole, setAuthRole, isPrototypeAuthMode, isAdmin, bagItems, setBagOpen } = useApp();
   const { isSignedIn, user } = useAuth();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -25,25 +33,97 @@ export const Header = () => {
     setLogoErrors((prev) => ({ ...prev, [id]: true }));
   };
 
+  const cycleAuthRole = () => {
+    const currentIndex = authRoleCycle.findIndex((role) => role === authRole);
+    const nextRole = authRoleCycle[(currentIndex + 1) % authRoleCycle.length];
+    setAuthRole(nextRole);
+  };
+
   return (
     <header className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur-md">
 
-      {/* ── PRIMARY BRAND BAR ─────────────────────────────────── */}
-      <div className="container flex items-center justify-between h-14">
+      {/* ── TOP UTILITY BAR ───────────────────────────────────── */}
+      <div className="border-b border-border">
+        <div className="container flex items-center justify-between h-10">
 
-        {/* Wordmark — dominant, always left */}
+          {/* League switcher — left */}
+          <div className="flex items-center gap-0" role="tablist" aria-label="League selector">
+            {LEAGUE_REGISTRY.map((l) => {
+              const isActive = activeLeague === l.id;
+              return (
+                <button
+                  key={l.id}
+                  role="tab"
+                  aria-selected={isActive}
+                  onClick={() => setActiveLeague(l.id)}
+                  className={`relative flex items-center gap-1.5 px-3 h-10 text-[11px] font-semibold uppercase tracking-widest transition-colors ${
+                    isActive
+                      ? `${l.accentClass} border-b-2 border-current`
+                      : 'text-muted-foreground hover:text-foreground'
+                  }`}
+                >
+                  {!logoErrors[l.id] && (
+                    <img
+                      src={l.logo}
+                      alt={l.logoAlt}
+                      width={16}
+                      height={16}
+                      className="flex-shrink-0 opacity-80"
+                      style={{ aspectRatio: '1/1' }}
+                      onError={() => handleLogoError(l.id)}
+                    />
+                  )}
+                  <span className="hidden sm:inline">{l.shortName}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Right utility controls */}
+          <div className="flex items-center gap-2">
+            {/* Prototype auth role toggle — always visible */}
+            {isPrototypeAuthMode && (
+              <button
+                onClick={cycleAuthRole}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium transition-colors ${
+                  isAdmin
+                    ? 'bg-primary/15 text-primary border border-primary/30'
+                    : 'bg-secondary text-secondary-foreground'
+                }`}
+                title="Cycle auth role (prototype)"
+              >
+                <Shield className="w-3 h-3" />
+                {authRole.replace(/_/g, ' ')}
+              </button>
+            )}
+
+            <div className="hidden md:flex items-center gap-1">
+              <button className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Refresh"><RefreshCw className="w-3.5 h-3.5" /></button>
+              <button className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Share"><Share2 className="w-3.5 h-3.5" /></button>
+              {isSignedIn && <Link to="/billing" className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Billing"><CreditCard className="w-3.5 h-3.5" /></Link>}
+              {isSignedIn && <Link to="/settings" className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Settings"><Settings className="w-3.5 h-3.5" /></Link>}
+              {isAdmin && <Link to="/ops" className="p-1.5 text-primary hover:text-primary/80" aria-label="Operations"><Shield className="w-3.5 h-3.5" /></Link>}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── PRIMARY BRAND BAR ─────────────────────────────────── */}
+      <div className="container flex items-center justify-between h-12">
+
+        {/* Wordmark */}
         <Link to="/" className="flex items-center gap-1.5 flex-shrink-0">
-          <span className="font-display text-2xl font-bold tracking-widest uppercase text-foreground leading-none">SBBL</span>
-          <span className="font-display text-2xl font-bold tracking-widest uppercase text-primary leading-none">HQ</span>
+          <span className="font-display text-lg font-bold tracking-tight text-foreground">SBBL</span>
+          <span className="font-display text-lg font-bold tracking-tight text-primary">HQ</span>
         </Link>
 
-        {/* Main nav — center on desktop */}
-        <nav className="hidden lg:flex items-center gap-1 absolute left-1/2 -translate-x-1/2">
+        {/* Desktop nav */}
+        <nav className="hidden lg:flex items-center gap-1">
           {mainNav.map((item) => (
             <Link
               key={item.path}
               to={item.path}
-              className={`px-4 py-1.5 text-sm font-semibold uppercase tracking-wider transition-colors rounded-sm ${
+              className={`px-3 py-1.5 text-sm font-medium transition-colors rounded-sm ${
                 location.pathname === item.path
                   ? 'text-foreground bg-secondary'
                   : 'text-muted-foreground hover:text-foreground'
@@ -56,14 +136,6 @@ export const Header = () => {
 
         {/* Right actions */}
         <div className="flex items-center gap-2">
-          <div className="hidden md:flex items-center gap-1">
-            <button className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Refresh"><RefreshCw className="w-3.5 h-3.5" /></button>
-            <button className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Share"><Share2 className="w-3.5 h-3.5" /></button>
-            {isSignedIn && <Link to="/billing" className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Billing"><CreditCard className="w-3.5 h-3.5" /></Link>}
-            {isSignedIn && <Link to="/settings" className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Settings"><Settings className="w-3.5 h-3.5" /></Link>}
-            {isAdmin && <Link to="/ops" className="p-1.5 text-primary hover:text-primary/80" aria-label="Operations"><Shield className="w-3.5 h-3.5" /></Link>}
-          </div>
-
           {!isSignedIn ? (
             <Link
               to="/login"
@@ -104,48 +176,6 @@ export const Header = () => {
         </div>
       </div>
 
-      {/* ── LEAGUE SWITCHER SUB-BAR ───────────────────────────── */}
-      <div className="border-t border-border/50">
-        <div className="container flex items-center justify-between h-10">
-          <div className="flex items-center gap-0" role="tablist" aria-label="League selector">
-            {LEAGUE_REGISTRY.map((l) => {
-              const isActive = activeLeague === l.id;
-              return (
-                <button
-                  key={l.id}
-                  role="tab"
-                  aria-selected={isActive}
-                  onClick={() => setActiveLeague(l.id)}
-                  className={`relative flex items-center gap-1.5 px-3 h-10 text-[11px] font-semibold uppercase tracking-widest transition-colors ${
-                    isActive
-                      ? `${l.accentClass} border-b-2 border-current`
-                      : 'text-muted-foreground hover:text-foreground'
-                  }`}
-                >
-                  {!logoErrors[l.id] && (
-                    <img
-                      src={l.logo}
-                      alt={l.logoAlt}
-                      width={16}
-                      height={16}
-                      className="flex-shrink-0 opacity-80"
-                      style={{ aspectRatio: '1/1' }}
-                      onError={() => handleLogoError(l.id)}
-                    />
-                  )}
-                  <span className="hidden sm:inline">{l.shortName}</span>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Subtle league context label */}
-          <span className="hidden md:block text-[10px] uppercase tracking-[0.18em] text-muted-foreground/50 font-medium">
-            Select League
-          </span>
-        </div>
-      </div>
-
       {/* ── MOBILE NAV DRAWER ─────────────────────────────────── */}
       {mobileMenuOpen && (
         <div className="lg:hidden border-t border-border bg-background animate-fade-in">
@@ -155,20 +185,18 @@ export const Header = () => {
                 key={item.path}
                 to={item.path}
                 onClick={() => setMobileMenuOpen(false)}
-                className={`px-3 py-3 text-sm font-semibold uppercase tracking-wider rounded-sm min-h-[44px] flex items-center ${
+                className={`px-3 py-2.5 text-sm font-medium rounded-sm min-h-[44px] flex items-center ${
                   location.pathname === item.path ? 'text-foreground bg-secondary' : 'text-muted-foreground'
                 }`}
               >
                 {item.label}
               </Link>
             ))}
-            {isSignedIn && (
-              <div className="flex flex-col gap-1 px-0 pt-2 border-t border-border mt-2">
-                <Link to="/billing" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground min-h-[44px]"><CreditCard className="w-4 h-4" /> Billing</Link>
-                <Link to="/settings" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground min-h-[44px]"><Settings className="w-4 h-4" /> Settings</Link>
-                {isAdmin && <Link to="/ops" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 px-3 py-3 text-sm text-primary min-h-[44px]"><Shield className="w-4 h-4" /> Ops</Link>}
-              </div>
-            )}
+            <div className="flex items-center gap-2 px-3 pt-2 border-t border-border mt-2">
+              {isSignedIn && <Link to="/billing" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><CreditCard className="w-4 h-4" /> Billing</Link>}
+              {isSignedIn && <Link to="/settings" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><Settings className="w-4 h-4" /> Settings</Link>}
+              {isAdmin && <Link to="/ops" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-primary"><Shield className="w-4 h-4" /> Ops</Link>}
+            </div>
           </nav>
         </div>
       )}

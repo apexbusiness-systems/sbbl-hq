@@ -46,23 +46,28 @@ const HomePage = () => {
       {/* ── HERO ──────────────────────────────────────────────── */}
       <section className="relative overflow-hidden bg-[#0A0A0A]" style={{ minHeight: '480px' }}>
 
-        {/* Court line art — full bleed background texture */}
-        <div
-          className="absolute inset-0 w-full h-full"
-          style={{
-            backgroundImage: 'url(/assets/hero-court.svg)',
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            backgroundRepeat: 'no-repeat',
-            opacity: 1,
-          }}
-        />
+        {/* Photographic hero — responsive desktop/mobile */}
+        <picture className="absolute inset-0 w-full h-full">
+          <source media="(min-width: 768px)" srcSet="/assets/hero-desktop.png" />
+          <img
+            src="/assets/hero-mobile.png"
+            alt=""
+            className="w-full h-full object-cover object-center"
+            draggable={false}
+          />
+        </picture>
 
-        {/* Gold radial glow — left anchor */}
-        <div className="absolute inset-0 [background:radial-gradient(ellipse_at_20%_60%,rgba(201,168,76,0.12)_0%,transparent_55%)]" />
+        {/* Subtle scrim — barely dims so the arena shows through */}
+        <div className="absolute inset-0 bg-black/30" />
+
+        {/* Left-side gradient — text contrast anchor */}
+        <div className="absolute inset-0 [background:linear-gradient(to_right,rgba(10,10,10,0.75)_0%,transparent_60%)]" />
+
+        {/* Gold radial glow — depth warmth */}
+        <div className="absolute inset-0 [background:radial-gradient(ellipse_at_20%_60%,rgba(201,168,76,0.20)_0%,transparent_55%)]" />
 
         {/* Bottom fade to page bg */}
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
+        <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-background to-transparent" />
 
         <div className="relative container py-16 md:py-24 lg:py-28">
           <div className="grid md:grid-cols-[1fr,360px] gap-8 items-start">
