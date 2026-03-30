@@ -1,11 +1,14 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { players, teams } from '@/data/mock';
+import { players as mockPlayers, teams } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
-import { LeagueId, StatLine } from '@/types';
+import { LeagueId, StatLine, PlayerProfile } from '@/types';
 import { Trophy, Crown, Medal, Lock } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
+import { useAuth } from '@/hooks/use-auth';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api/client';
 
 type StatKey = keyof StatLine;
 const categories: { key: StatKey; label: string }[] = [
@@ -20,6 +23,7 @@ const categories: { key: StatKey; label: string }[] = [
 
 const LeaderboardsPage = () => {
   const { hasPremiumPlayerAccess, activeLeague } = useApp();
+  const { isSignedIn } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeCategory, setActiveCategory] = useState<StatKey>('pts');
 
@@ -46,10 +50,27 @@ const LeaderboardsPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fetch live leaderboard data from the worker; fall back to mock if API unavailable
+  const leaderboardsQuery = useQuery({
+    queryKey: ['leaderboards', leagueFilter],
+    queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/leaderboards'),
+    enabled: isSignedIn,
+    retry: 1,
+    staleTime: 30_000,
+  });
+
+  const players = useMemo<PlayerProfile[]>(() => {
+    const apiData = leaderboardsQuery.data?.data;
+    if (Array.isArray(apiData) && apiData.length > 0 && 'stats' in (apiData[0] ?? {})) {
+      return apiData;
+    }
+    return mockPlayers;
+  }, [leaderboardsQuery.data]);
+
   const filtered = useMemo(() => {
     const list = leagueFilter === 'all' ? players : players.filter(p => p.leagueId === leagueFilter);
     return [...list].sort((a, b) => b.stats[activeCategory] - a.stats[activeCategory]);
-  }, [leagueFilter, activeCategory]);
+  }, [leagueFilter, activeCategory, players]);
   const visible = hasPremiumPlayerAccess ? filtered : filtered.slice(0, 3);
 
   const rankIcon = (i: number) => {
