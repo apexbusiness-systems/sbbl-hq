@@ -68,32 +68,39 @@ const HomePage = () => {
         {/* Bottom fade */}
         <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
 
-        <div className="relative container py-14 md:py-20 lg:py-24">
-          <div className="grid md:grid-cols-[1fr,360px] gap-8 items-start">
+        <div className="relative container py-10 md:py-16 lg:py-20">
+          {/* Hero: centered league logo as dominant element, snapshot card beside it on desktop */}
+          <div className="flex flex-col lg:flex-row items-center lg:items-start gap-10 lg:gap-14">
 
-            <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} className="flex flex-col items-start">
-
-              {/* League logo — the hero asset */}
+            {/* Logo + headline — centered column */}
+            <motion.div
+              initial={{ opacity: 0, y: 24 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45 }}
+              className="flex flex-col items-center lg:items-center flex-1 text-center"
+            >
+              {/* League logo — the hero asset: prominent and centered */}
               <motion.img
-                initial={{ opacity: 0, scale: 0.88 }}
+                initial={{ opacity: 0, scale: 0.82 }}
                 animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.5, delay: 0.05 }}
+                transition={{ duration: 0.55, delay: 0.05 }}
                 src={league.logo}
                 alt={league.logoAlt}
-                className="w-24 h-24 md:w-32 md:h-32 object-contain mb-6 drop-shadow-[0_0_32px_hsl(var(--primary)/0.3)]"
+                className="w-40 h-40 md:w-56 md:h-56 lg:w-64 lg:h-64 object-contain mb-6
+                           drop-shadow-[0_0_48px_hsl(var(--primary)/0.35)]"
               />
 
-              <h1 className="font-display leading-none uppercase">
-                <span className="block text-[clamp(3rem,8vw,6rem)] font-bold tracking-tight text-foreground">
+              <h1 className="font-display leading-none uppercase text-center">
+                <span className="block text-[clamp(2.5rem,7vw,5rem)] font-bold tracking-tight text-foreground">
                   {league.shortName}
                 </span>
-                <span className="block text-[clamp(1.25rem,3vw,2.25rem)] font-bold tracking-wider text-primary mt-1">
+                <span className="block text-[clamp(1rem,2.5vw,1.75rem)] font-bold tracking-wider text-primary mt-1">
                   {data?.season?.name ?? 'Season'}
                 </span>
               </h1>
 
-              <p className="text-muted-foreground text-sm md:text-base max-w-md mt-4 leading-relaxed">
-                {league.name} — live scoring, standings, and team operations across every division.
+              <p className="text-muted-foreground text-sm md:text-base max-w-sm mt-3 leading-relaxed text-center">
+                {league.name}
               </p>
 
               <div className="flex items-center gap-3 mt-6">
@@ -117,7 +124,7 @@ const HomePage = () => {
               initial={{ opacity: 0, x: 16 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.4, delay: 0.15 }}
-              className="panel p-5 bg-card/90 backdrop-blur-sm border-primary/20"
+              className="panel p-5 bg-card/90 backdrop-blur-sm border-primary/20 w-full lg:w-[320px] flex-shrink-0"
               style={{ boxShadow: '0 0 20px rgba(201,168,76,0.08)' }}
             >
               <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary mb-3">League Snapshot</p>
@@ -190,10 +197,9 @@ const HomePage = () => {
 
       <div className="container py-8 md:py-12 space-y-12">
 
-        {/* Players of the Game */}
+        {/* Players of the Game — always rendered; empty state when no data for this league yet */}
         {(() => {
           const potgList = playersOfTheGame.filter(p => p.leagueId === resolvedLeague);
-          if (potgList.length === 0) return null;
           const leagueInfo = getLeagueConfig(resolvedLeague);
           return (
             <section>
@@ -209,11 +215,19 @@ const HomePage = () => {
                   Leaderboards <ChevronRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
-              <div className="flex gap-4 overflow-x-auto scrollbar-hidden pb-2">
-                {potgList.map((potg, i) => (
-                  <PotgCard key={potg.id} potg={potg} featured={i === 0} />
-                ))}
-              </div>
+              {potgList.length > 0 ? (
+                <div className="flex gap-4 overflow-x-auto scrollbar-hidden pb-2">
+                  {potgList.map((potg, i) => (
+                    <PotgCard key={potg.id} potg={potg} featured={i === 0} />
+                  ))}
+                </div>
+              ) : (
+                <div className="panel p-8 text-center border-dashed">
+                  <Trophy className="w-8 h-8 text-primary/30 mx-auto mb-3" />
+                  <p className="text-sm font-medium text-muted-foreground">No POTG results yet for {leagueInfo.shortName}</p>
+                  <p className="text-xs text-muted-foreground/60 mt-1">Upload game graphics via Ops → POTG Parser to populate this section.</p>
+                </div>
+              )}
             </section>
           );
         })()}
