@@ -720,31 +720,31 @@ function compilePath(path: string) {
 
 async function handleParsePotgImage(ctx: HandlerCtx) {
   await requireAdminSession(ctx.req, ctx.admin);
-  const apiKey = ctx.env.ANTHROPIC_API_KEY;
-  if (!apiKey) return json({ ok: false, error: 'anthropic_api_key_missing' }, 503);
+  const apiKey = ctx.env.GROQ_API_KEY;
+  if (!apiKey) return json({ ok: false, error: 'groq_api_key_missing' }, 503);
 
   const body = await ctx.req.json().catch(() => null) as { imageBase64: string; mimeType: string } | null;
   if (!body?.imageBase64 || !body?.mimeType) return json({ ok: false, error: 'image_required' }, 400);
 
-  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+  const resp = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    headers: { 'authorization': `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'llama-3.2-11b-vision-preview',
       max_tokens: 256,
       messages: [{
         role: 'user',
         content: [
-          { type: 'image', source: { type: 'base64', media_type: body.mimeType, data: body.imageBase64 } },
+          { type: 'image_url', image_url: { url: `data:${body.mimeType};base64,${body.imageBase64}` } },
           { type: 'text', text: 'Extract player of the game data from this graphic. Return ONLY a JSON object with exactly these keys: playerName (string), team (string), pts (number), rebs (number), assts (number), gameResult (string, e.g. "TEAM A 77 vs TEAM B 63"). No markdown, no explanation — raw JSON only.' },
         ],
       }],
     }),
   });
 
-  if (!resp.ok) return json({ ok: false, error: 'anthropic_error', status: resp.status }, 502);
-  const ai = await resp.json() as { content: Array<{ type: string; text: string }> };
-  const raw = ai.content.find((b) => b.type === 'text')?.text ?? '';
+  if (!resp.ok) return json({ ok: false, error: 'groq_error', status: resp.status }, 502);
+  const ai = await resp.json() as { choices: Array<{ message: { content: string } }> };
+  const raw = ai.choices[0]?.message?.content ?? '';
   const match = raw.match(/\{[\s\S]*\}/);
   if (!match) return json({ ok: false, error: 'parse_failed', raw }, 422);
   try {
