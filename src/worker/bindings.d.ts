@@ -10,5 +10,6 @@ interface Env {
   OMNIHUB_VERIFY_KEY?: string;
   OPTIONAL_SOCIAL_API_KEYS?: string;
   OPTIONAL_TURNSTILE_SECRET_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
   ASSETS: { fetch: (req: Request) => Promise<Response> };
 }

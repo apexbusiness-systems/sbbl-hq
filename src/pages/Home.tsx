@@ -2,6 +2,8 @@ import { useApp } from '@/contexts/AppContext';
 import { getLeagueConfig, leagueCodeFromId } from '@/lib/leagues';
 import { fetchPublicHome, type PublicHomeData, type PublicGame } from '@/lib/api/public';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
+import { PotgCard } from '@/components/ui/PotgCard';
+import { playersOfTheGame } from '@/data/mock';
 import { motion } from 'framer-motion';
 import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3 } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -195,6 +197,34 @@ const HomePage = () => {
       )}
 
       <div className="container py-8 md:py-12 space-y-12">
+
+        {/* Players of the Game */}
+        {(() => {
+          const potgList = playersOfTheGame.filter(p => p.leagueId === activeLeague);
+          if (potgList.length === 0) return null;
+          const league = getLeagueConfig(activeLeague);
+          return (
+            <section>
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary mb-1">Game Night Recap</p>
+                  <h2 className="font-display text-xl md:text-2xl font-bold uppercase tracking-tight flex items-center gap-2">
+                    <Trophy className="w-5 h-5 text-primary" />
+                    {league.shortName} · Players of the Game
+                  </h2>
+                </div>
+                <Link to="/leaderboards" className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
+                  Leaderboards <ChevronRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+              <div className="flex gap-4 overflow-x-auto scrollbar-hidden pb-2">
+                {potgList.map((potg, i) => (
+                  <PotgCard key={potg.id} potg={potg} featured={i === 0} />
+                ))}
+              </div>
+            </section>
+          );
+        })()}
 
         {/* Upcoming Games */}
         {upcomingGames.length > 0 && (
