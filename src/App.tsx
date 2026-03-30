@@ -27,6 +27,7 @@ const Onboarding = lazy(() => import('./pages/Onboarding'));
 const Billing = lazy(() => import('./pages/Billing'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Ops = lazy(() => import('./pages/Ops'));
+const Support = lazy(() => import('./pages/Support'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
 const queryClient = new QueryClient();
@@ -68,6 +69,7 @@ const App = () => (
                     <Route path="/billing" element={<RequireAuth><Billing /></RequireAuth>} />
                     <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
                     <Route path="/ops" element={<RequireAdmin><Ops /></RequireAdmin>} />
+                    <Route path="/support" element={<Support />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                 </Suspense>

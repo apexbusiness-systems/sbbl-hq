@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { players, teams, leagues } from '@/data/mock';
+import { players, teams as mockTeams, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { useApp } from '@/contexts/AppContext';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api/client';
+import { Team } from '@/types';
 import { Award, Users, Lock } from 'lucide-react';
 
 type ProfileView = 'players' | 'teams' | 'leagues';
@@ -10,6 +13,19 @@ const ProfilesPage = () => {
   const { hasPremiumPlayerAccess } = useApp();
   const [view, setView] = useState<ProfileView>('players');
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
+
+  const teamsQuery = useQuery({
+    queryKey: ['teams'],
+    queryFn: () => apiFetch<{ ok: boolean; teams: Team[] }>('/api/teams'),
+    retry: 1,
+    staleTime: 120_000,
+  });
+
+  const teams = useMemo<Team[]>(() => {
+    const apiData = teamsQuery.data?.teams;
+    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
+    return mockTeams;
+  }, [teamsQuery.data]);
 
   const filteredPlayers = players;
   const filteredTeams = teams;
