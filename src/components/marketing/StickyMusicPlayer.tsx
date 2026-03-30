@@ -47,7 +47,7 @@ export const StickyMusicPlayer = () => {
       <audio ref={audioRef} src={trackUrl} preload="auto" />
       <div className="panel-glass border border-border/70 backdrop-blur-md rounded-full shadow-xl px-3 py-2">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">SBBL Radio</span>
+          <span className="hidden sm:inline text-[10px] font-semibold uppercase tracking-[0.15em] text-muted-foreground">SBBL Radio</span>
           <button
             type="button"
             onClick={() => void togglePlayback()}
