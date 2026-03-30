@@ -76,9 +76,9 @@ describe('LeagueBadge component', () => {
 });
 
 describe('league identity registry completeness', () => {
-  it('all logos point to /assets/leagues/ with .svg extension', () => {
+  it('all logos point to /assets/leagues/ with .png extension', () => {
     for (const l of LEAGUE_REGISTRY) {
-      expect(l.logo).toMatch(/^\/assets\/leagues\/\w+\.svg$/);
+      expect(l.logo).toMatch(/^\/assets\/leagues\/\w+\.png$/);
     }
   });
 
