@@ -38,10 +38,14 @@ test.describe('critical path coverage', () => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     const nav = page.locator('header nav').first();
     await expect(nav.getByRole('link', { name: 'Home' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Teams' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Live' })).toBeVisible();
     await expect(nav.getByRole('link', { name: 'Schedules' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Live' })).toHaveCount(0);
-    await expect(nav.getByRole('link', { name: 'Store' })).toHaveCount(0);
+    await expect(nav.getByRole('link', { name: 'Store' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Profiles' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Stats' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Leaderboards' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Media' })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Teams' })).toHaveCount(0);
   });
 
   test('schedules and teams routes render headings', async ({ page }) => {
