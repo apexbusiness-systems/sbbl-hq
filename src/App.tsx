@@ -12,6 +12,7 @@ import { RequireAdmin, RequireAuth } from '@/components/auth/RouteGuards';
 import { StickyMusicPlayer } from '@/components/marketing/StickyMusicPlayer';
 import { AppDownloadPill } from '@/components/marketing/AppDownloadPill';
 
+const AppHome = lazy(() => import('./pages/AppHome'));
 const Home = lazy(() => import('./pages/Home'));
 const Live = lazy(() => import('./pages/Live'));
 const Schedules = lazy(() => import('./pages/Schedules'));
@@ -52,7 +53,8 @@ const App = () => (
               <main>
                 <Suspense fallback={<RouteFallback />}>
                   <Routes>
-                    <Route path="/" element={<Home />} />
+                    <Route path="/" element={<AppHome />} />
+                    <Route path="/league/:leagueId" element={<Home />} />
                     <Route path="/live" element={<Live />} />
                     <Route path="/schedules" element={<Schedules />} />
                     <Route path="/store" element={<Store />} />
