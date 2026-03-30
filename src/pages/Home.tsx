@@ -1,19 +1,32 @@
 import { useApp } from '@/contexts/AppContext';
-import { getLeagueConfig, leagueCodeFromId } from '@/lib/leagues';
+import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY } from '@/lib/leagues';
 import { fetchPublicHome, type PublicHomeData, type PublicGame } from '@/lib/api/public';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { PotgCard } from '@/components/ui/PotgCard';
 import { playersOfTheGame } from '@/data/mock';
 import { motion } from 'framer-motion';
 import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
+import type { LeagueId } from '@/types';
 
 type LoadState = 'loading' | 'loaded' | 'error';
 
 const HomePage = () => {
-  const { activeLeague } = useApp();
-  const league = getLeagueConfig(activeLeague);
+  const { activeLeague, setActiveLeague } = useApp();
+  const { leagueId: leagueParam } = useParams<{ leagueId?: string }>();
+
+  // Sync URL param → context
+  useEffect(() => {
+    if (leagueParam && LEAGUE_REGISTRY.some(l => l.id === leagueParam)) {
+      setActiveLeague(leagueParam as LeagueId);
+    }
+  }, [leagueParam, setActiveLeague]);
+
+  const resolvedLeague = (leagueParam && LEAGUE_REGISTRY.some(l => l.id === leagueParam))
+    ? leagueParam as LeagueId
+    : activeLeague;
+  const league = getLeagueConfig(resolvedLeague);
   const [state, setState] = useState<LoadState>('loading');
   const [data, setData] = useState<PublicHomeData | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -22,11 +35,11 @@ const HomePage = () => {
     let cancelled = false;
     setState('loading');
     setErrorMsg(null);
-    fetchPublicHome(leagueCodeFromId(activeLeague))
+    fetchPublicHome(leagueCodeFromId(resolvedLeague))
       .then((result) => { if (!cancelled) { setData(result); setState('loaded'); } })
       .catch((err) => { if (!cancelled) { setErrorMsg(err instanceof Error ? err.message : 'Failed to load'); setState('error'); } });
     return () => { cancelled = true; };
-  }, [activeLeague]);
+  }, [resolvedLeague]);
 
   const liveGames = data?.liveGames ?? [];
   const upcomingGames = data?.upcomingGames ?? [];
@@ -45,76 +58,55 @@ const HomePage = () => {
   return (
     <div className="min-h-screen">
 
-      {/* ── HERO ──────────────────────────────────────────────── */}
-      <section className="relative overflow-hidden bg-[#0A0A0A]" style={{ minHeight: '480px' }}>
+      {/* ── LEAGUE LOGO HERO ──────────────────────────────────── */}
+      <section className="relative overflow-hidden bg-[#0A0A0A]" style={{ minHeight: '420px' }}>
 
-        {/* Photographic hero — responsive desktop/mobile */}
-        <picture className="absolute inset-0 w-full h-full">
-          <source media="(min-width: 768px)" srcSet="/assets/hero-desktop.png" />
-          <img
-            src="/assets/hero-mobile.png"
-            alt=""
-            className="w-full h-full object-cover object-center"
-            draggable={false}
-          />
-        </picture>
+        {/* League radial glow centred on logo */}
+        <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 50% 60%, hsl(var(--${league.id}) / 0.18) 0%, transparent 60%)` }} />
+        {/* Subtle grid texture */}
+        <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.4) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,0.4) 1px,transparent 1px)', backgroundSize: '48px 48px' }} />
+        {/* Bottom fade */}
+        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
 
-        {/* Subtle scrim — barely dims so the arena shows through */}
-        <div className="absolute inset-0 bg-black/30" />
-
-        {/* Left-side gradient — text contrast anchor */}
-        <div className="absolute inset-0 [background:linear-gradient(to_right,rgba(10,10,10,0.75)_0%,transparent_60%)]" />
-
-        {/* Gold radial glow — depth warmth */}
-        <div className="absolute inset-0 [background:radial-gradient(ellipse_at_20%_60%,rgba(201,168,76,0.20)_0%,transparent_55%)]" />
-
-        {/* Bottom fade to page bg */}
-        <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-background to-transparent" />
-
-        <div className="relative container py-16 md:py-24 lg:py-28">
+        <div className="relative container py-14 md:py-20 lg:py-24">
           <div className="grid md:grid-cols-[1fr,360px] gap-8 items-start">
 
-            <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
+            <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.45 }} className="flex flex-col items-start">
 
-              {/* League badge — small, subordinate context label */}
-              <div className="mb-4">
-                <LeagueBadge leagueId={activeLeague} size="sm" />
-              </div>
+              {/* League logo — the hero asset */}
+              <motion.img
+                initial={{ opacity: 0, scale: 0.88 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.5, delay: 0.05 }}
+                src={league.logo}
+                alt={league.logoAlt}
+                className="w-24 h-24 md:w-32 md:h-32 object-contain mb-6 drop-shadow-[0_0_32px_hsl(var(--primary)/0.3)]"
+              />
 
-              {/* App + league headline — SBBL HQ is the brand, league name is the content */}
               <h1 className="font-display leading-none uppercase">
                 <span className="block text-[clamp(3rem,8vw,6rem)] font-bold tracking-tight text-foreground">
                   {league.shortName}
                 </span>
-                <span className="block text-[clamp(1.5rem,4vw,2.75rem)] font-bold tracking-wider text-primary mt-1">
-                  {data?.season?.name ?? 'Basketball'}
+                <span className="block text-[clamp(1.25rem,3vw,2.25rem)] font-bold tracking-wider text-primary mt-1">
+                  {data?.season?.name ?? 'Season'}
                 </span>
               </h1>
 
-              <p className="text-muted-foreground text-sm md:text-base max-w-md mt-5 leading-relaxed">
+              <p className="text-muted-foreground text-sm md:text-base max-w-md mt-4 leading-relaxed">
                 {league.name} — live scoring, standings, and team operations across every division.
               </p>
 
-              <div className="flex items-center gap-3 mt-7">
+              <div className="flex items-center gap-3 mt-6">
                 {hasLive ? (
-                  <Link
-                    to="/teams"
-                    className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2"
-                  >
-                    <Play className="w-4 h-4" /> Live Now
+                  <Link to="/live" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                    <Play className="w-4 h-4" /> Watch Live
                   </Link>
                 ) : (
-                  <Link
-                    to="/teams"
-                    className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2"
-                  >
+                  <Link to="/teams" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
                     <Calendar className="w-4 h-4" /> View Teams
                   </Link>
                 )}
-                <Link
-                  to="/schedules"
-                  className="px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors"
-                >
+                <Link to="/schedules" className="px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
                   Schedule
                 </Link>
               </div>
@@ -200,7 +192,7 @@ const HomePage = () => {
 
         {/* Players of the Game */}
         {(() => {
-          const potgList = playersOfTheGame.filter(p => p.leagueId === activeLeague);
+          const potgList = playersOfTheGame.filter(p => p.leagueId === resolvedLeague);
           if (potgList.length === 0) return null;
           const league = getLeagueConfig(activeLeague);
           return (
