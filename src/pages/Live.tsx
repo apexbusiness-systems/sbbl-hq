@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { games, players, products } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
-import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag } from 'lucide-react';
+import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check } from 'lucide-react';
+import { toast } from 'sonner';
 
 type ViewerState = 'locked' | 'preview' | 'purchased';
 
@@ -11,13 +12,44 @@ const LivePage = () => {
   const { addToBag, authRole, hasPremiumPlayerAccess, playerSubscriptionEndsAt } = useApp();
   const [viewerState, setViewerState] = useState<ViewerState>('preview');
   const liveGame = games.find(g => g.status === 'live') || games[0];
-  const [comments] = useState([
+  const [comments, setComments] = useState([
     { user: 'CourtSide_Fan', text: 'Rivera is on fire tonight!' },
     { user: 'HoopHead23', text: 'That crossover was nasty 🔥' },
     { user: 'SBBL_Official', text: 'Kings lead entering Q4' },
     { user: 'DunkMaster', text: 'Block party at the rim!' },
   ]);
+  const [chatInput, setChatInput] = useState('');
   const [reactions, setReactions] = useState({ fire: 142, heart: 89, clap: 67 });
+  const [clipSaved, setClipSaved] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  const handleShare = async () => {
+    const shareData = {
+      title: `${liveGame.homeTeam.name} vs ${liveGame.awayTeam.name} — Live on SBBL HQ`,
+      text: `Watch the game live: ${liveGame.score?.home}–${liveGame.score?.away} in Q4`,
+      url: window.location.href,
+    };
+    if (navigator.share) {
+      try { await navigator.share(shareData); } catch { /* user cancelled */ }
+    } else {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success('Link copied to clipboard');
+    }
+  };
+
+  const handleClip = () => {
+    setClipSaved(true);
+    toast.success('Clip saved to your Media library');
+    setTimeout(() => setClipSaved(false), 2500);
+  };
+
+  const handleSendChat = () => {
+    const text = chatInput.trim();
+    if (!text) return;
+    setComments(prev => [...prev, { user: 'You', text }]);
+    setChatInput('');
+    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+  };
 
   return (
     <div className="min-h-screen">
@@ -106,8 +138,19 @@ const LivePage = () => {
             <button onClick={() => setReactions(r => ({ ...r, clap: r.clap + 1 }))} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
               👏 <span className="stat-numeral">{reactions.clap}</span>
             </button>
-            <button className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors"><Scissors className="w-3.5 h-3.5" /> Clip</button>
-            <button className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors"><Share2 className="w-3.5 h-3.5" /> Share</button>
+            <button
+              onClick={handleClip}
+              className={`panel px-3 py-2 text-xs flex items-center gap-1.5 transition-colors ${clipSaved ? 'border-primary/50 text-primary' : 'hover:border-primary/30'}`}
+            >
+              {clipSaved ? <Check className="w-3.5 h-3.5" /> : <Scissors className="w-3.5 h-3.5" />}
+              {clipSaved ? 'Saved' : 'Clip'}
+            </button>
+            <button
+              onClick={handleShare}
+              className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors"
+            >
+              <Share2 className="w-3.5 h-3.5" /> Share
+            </button>
           </div>
 
           {/* State toggle for prototype */}
@@ -131,13 +174,28 @@ const LivePage = () => {
             <div className="p-4 space-y-3 max-h-[300px] overflow-y-auto">
               {comments.map((c, i) => (
                 <div key={i} className="flex gap-2">
-                  <span className="text-xs font-semibold text-primary shrink-0">{c.user}</span>
+                  <span className={`text-xs font-semibold shrink-0 ${c.user === 'You' ? 'text-primary' : 'text-primary'}`}>{c.user}</span>
                   <span className="text-xs text-foreground">{c.text}</span>
                 </div>
               ))}
+              <div ref={chatEndRef} />
             </div>
-            <div className="p-3 border-t border-border">
-              <input type="text" placeholder="Send a message..." className="w-full bg-secondary px-3 py-2 text-xs rounded-sm border border-border focus:outline-none focus:border-primary/50" />
+            <div className="p-3 border-t border-border flex gap-2">
+              <input
+                type="text"
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleSendChat(); }}
+                placeholder="Send a message..."
+                className="flex-1 bg-secondary px-3 py-2 text-xs rounded-sm border border-border focus:outline-none focus:border-primary/50"
+              />
+              <button
+                onClick={handleSendChat}
+                disabled={!chatInput.trim()}
+                className="px-3 py-2 text-xs bg-primary text-primary-foreground rounded-sm font-medium disabled:opacity-40 transition-opacity"
+              >
+                Send
+              </button>
             </div>
           </div>
         </div>
