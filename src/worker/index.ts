@@ -372,13 +372,16 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
   });
   if (webhookProcess.error) throw new Error(webhookProcess.error.message);
 
-  // For completed player-registration checkout sessions, stamp subscription_ends_at (+30 days)
+  // Best-effort: stamp subscription_ends_at on player registration checkout completion.
+  // Wrapped in try/catch so a profile update failure never blocks the 200 response.
   if (event.type === 'checkout.session.completed' && userId) {
-    const now = new Date();
-    now.setDate(now.getDate() + 30);
-    await ctx.admin.from('profiles')
-      .update({ subscription_ends_at: now.toISOString() })
-      .eq('user_id', userId);
+    try {
+      const now = new Date();
+      now.setDate(now.getDate() + 30);
+      await ctx.admin.from('profiles')
+        .update({ subscription_ends_at: now.toISOString() })
+        .eq('user_id', userId);
+    } catch { /* non-critical — subscription sync will retry via billing reconcile job */ }
   }
 
   return json({
