@@ -1,6 +1,8 @@
-import { useState, useMemo } from 'react';
-import { players, teams, leagues } from '@/data/mock';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { players, teams } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
+import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine } from '@/types';
 import { Trophy, Crown, Medal, Lock } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
@@ -17,9 +19,32 @@ const categories: { key: StatKey; label: string }[] = [
 ];
 
 const LeaderboardsPage = () => {
-  const { hasPremiumPlayerAccess } = useApp();
-  const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>('all');
+  const { hasPremiumPlayerAccess, activeLeague } = useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeCategory, setActiveCategory] = useState<StatKey>('pts');
+
+  // Initialise from URL param; fall back to current active league
+  const paramLeague = searchParams.get('league');
+  const initialFilter: LeagueId | 'all' =
+    paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))
+      ? (paramLeague as LeagueId | 'all')
+      : activeLeague;
+
+  const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(initialFilter);
+
+  // Keep URL in sync when filter changes
+  const handleFilterChange = (val: LeagueId | 'all') => {
+    setLeagueFilter(val);
+    setSearchParams(val === 'all' ? {} : { league: val }, { replace: true });
+  };
+
+  // If the user navigates here from a league page, pick up the param on mount
+  useEffect(() => {
+    if (paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))) {
+      setLeagueFilter(paramLeague as LeagueId | 'all');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = useMemo(() => {
     const list = leagueFilter === 'all' ? players : players.filter(p => p.leagueId === leagueFilter);
@@ -34,22 +59,43 @@ const LeaderboardsPage = () => {
     return <span className="stat-numeral text-sm text-muted-foreground w-4 text-center">{i + 1}</span>;
   };
 
+  const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
+
   return (
     <div className="min-h-screen">
       <div className="container py-8 md:py-12">
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="font-display text-3xl md:text-4xl font-bold">Leaderboards</h1>
-            <p className="text-sm text-muted-foreground mt-1">Top performers across leagues</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {leagueFilter === 'all'
+                ? 'Top performers across all three leagues'
+                : `${activeLeagueObj?.name ?? leagueFilter.toUpperCase()} — league leaders`}
+            </p>
           </div>
           <Trophy className="w-5 h-5 text-primary" />
         </div>
 
-        {/* League filter */}
-        <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit mb-6">
-          {(['all', 'sbbl', 'wbl', 'tgifbl'] as const).map(l => (
-            <button key={l} onClick={() => setLeagueFilter(l)} className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${leagueFilter === l ? 'bg-card text-foreground' : 'text-muted-foreground'}`}>
-              {l === 'all' ? 'All' : l.toUpperCase()}
+        {/* League filter — LEAGUE_REGISTRY driven with logos */}
+        <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit mb-6 overflow-x-auto">
+          <button
+            onClick={() => handleFilterChange('all')}
+            className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors whitespace-nowrap ${leagueFilter === 'all' ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            All Org
+          </button>
+          {LEAGUE_REGISTRY.map(l => (
+            <button
+              key={l.id}
+              onClick={() => handleFilterChange(l.id)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors whitespace-nowrap ${
+                leagueFilter === l.id
+                  ? `bg-card ${l.accentClass} border border-current/20`
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              <img src={l.logo} alt="" width={14} height={14} className="flex-shrink-0 opacity-80" style={{ aspectRatio: '1/1' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              {l.shortName}
             </button>
           ))}
         </div>
@@ -113,27 +159,41 @@ const LeaderboardsPage = () => {
             </div>
           )}
 
-          {/* Team Rankings Snippet */}
+          {/* Team Standings */}
           <div className="mt-12">
-            <h2 className="font-display text-xl font-bold mb-4">Team Standings</h2>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-xl font-bold">Team Standings</h2>
+              {leagueFilter !== 'all' && activeLeagueObj && (
+                <div className="flex items-center gap-1.5 text-xs font-semibold">
+                  <img src={activeLeagueObj.logo} alt="" width={16} height={16} className="opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  <span className={activeLeagueObj.accentClass}>{activeLeagueObj.shortName}</span>
+                </div>
+              )}
+              {leagueFilter === 'all' && (
+                <span className="text-xs text-muted-foreground">All leagues combined</span>
+              )}
+            </div>
             <div className="space-y-2">
-              {teams.filter(t => leagueFilter === 'all' || t.leagueId === leagueFilter).sort((a, b) => (b.record.wins / (b.record.wins + b.record.losses)) - (a.record.wins / (a.record.wins + a.record.losses))).map((t, i) => (
-                <div key={t.id} className="panel p-3 flex items-center gap-4">
-                  <span className="stat-numeral text-sm text-muted-foreground w-6 text-center">{i + 1}</span>
-                  <div className="flex-1">
-                    <p className="text-sm font-medium">{t.name}</p>
-                    <div className="flex items-center gap-2">
-                      <LeagueBadge leagueId={t.leagueId} />
-                      <span className="text-[10px] text-muted-foreground">{t.division}</span>
+              {teams
+                .filter(t => leagueFilter === 'all' || t.leagueId === leagueFilter)
+                .sort((a, b) => (b.record.wins / (b.record.wins + b.record.losses)) - (a.record.wins / (a.record.wins + a.record.losses)))
+                .map((t, i) => (
+                  <div key={t.id} className="panel p-3 flex items-center gap-4">
+                    <span className="stat-numeral text-sm text-muted-foreground w-6 text-center">{i + 1}</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium">{t.name}</p>
+                      <div className="flex items-center gap-2">
+                        <LeagueBadge leagueId={t.leagueId} />
+                        <span className="text-[10px] text-muted-foreground">{t.division}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className="stat-numeral text-sm text-success">{t.record.wins}W</span>
+                      <span className="stat-numeral text-sm text-destructive">{t.record.losses}L</span>
+                      <span className="stat-numeral text-sm">{((t.record.wins / (t.record.wins + t.record.losses)) * 100).toFixed(0)}%</span>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className="stat-numeral text-sm text-success">{t.record.wins}W</span>
-                    <span className="stat-numeral text-sm text-destructive">{t.record.losses}L</span>
-                    <span className="stat-numeral text-sm">{((t.record.wins / (t.record.wins + t.record.losses)) * 100).toFixed(0)}%</span>
-                  </div>
-                </div>
-              ))}
+                ))}
             </div>
           </div>
         </div>
