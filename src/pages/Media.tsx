@@ -1,15 +1,43 @@
 import { useState } from 'react';
-import { mediaAssets, leagues } from '@/data/mock';
+import { mediaAssets } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
-import { Play, Share2, Upload, Eye, Clock } from 'lucide-react';
+import { Play, Share2, Upload, Eye, Clock, Check } from 'lucide-react';
+import { toast } from 'sonner';
 
 const statusColors = { draft: 'text-muted-foreground', ready: 'text-warning', published: 'text-success' };
 
 const MediaPage = () => {
   const [filter, setFilter] = useState<'all' | 'highlight' | 'clip' | 'poster' | 'photo'>('all');
   const [shareModal, setShareModal] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const filtered = filter === 'all' ? mediaAssets : mediaAssets.filter(m => m.type === filter);
+  const shareAsset = shareModal ? mediaAssets.find(m => m.id === shareModal) : null;
+
+  const handleCopyLink = async () => {
+    const url = `${window.location.origin}/media#${shareModal}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopied(true);
+      setTimeout(() => { setCopied(false); setShareModal(null); }, 1500);
+    } catch {
+      toast.error('Could not copy link');
+    }
+  };
+
+  const handleNativeShare = async () => {
+    if (!shareAsset) return;
+    const shareData = {
+      title: shareAsset.title,
+      text: `${shareAsset.title} — SBBL HQ`,
+      url: `${window.location.origin}/media#${shareModal}`,
+    };
+    if (navigator.share) {
+      try { await navigator.share(shareData); setShareModal(null); } catch { /* cancelled */ }
+    } else {
+      await handleCopyLink();
+    }
+  };
 
   return (
     <div className="min-h-screen">
@@ -55,7 +83,7 @@ const MediaPage = () => {
               </div>
               <div className="p-3 flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">{m.type}</span>
-                <button onClick={() => setShareModal(m.id)} className="p-1.5 text-muted-foreground hover:text-foreground"><Share2 className="w-3.5 h-3.5" /></button>
+                <button onClick={() => { setShareModal(m.id); setCopied(false); }} className="p-1.5 text-muted-foreground hover:text-foreground"><Share2 className="w-3.5 h-3.5" /></button>
               </div>
             </div>
           ))}
@@ -66,11 +94,29 @@ const MediaPage = () => {
           <div className="fixed inset-0 z-50 flex items-center justify-center">
             <div className="absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={() => setShareModal(null)} />
             <div className="relative panel p-6 w-full max-w-sm animate-fade-in">
-              <h3 className="font-display font-bold text-lg mb-4">Share Content</h3>
+              <h3 className="font-display font-bold text-lg mb-1">Share Content</h3>
+              {shareAsset && <p className="text-xs text-muted-foreground mb-4 truncate">{shareAsset.title}</p>}
               <div className="space-y-3">
-                <button className="w-full p-3 bg-secondary rounded-sm text-sm text-left hover:bg-secondary/80 transition-colors">Copy Share Link</button>
-                <button className="w-full p-3 bg-secondary rounded-sm text-sm text-left hover:bg-secondary/80 transition-colors">Download Card</button>
-                <button className="w-full p-3 bg-secondary rounded-sm text-sm text-left hover:bg-secondary/80 transition-colors">Share to Feed</button>
+                <button
+                  onClick={handleCopyLink}
+                  className="w-full p-3 bg-secondary rounded-sm text-sm text-left hover:bg-secondary/80 transition-colors flex items-center gap-2"
+                >
+                  {copied ? <Check className="w-4 h-4 text-primary" /> : null}
+                  {copied ? 'Link Copied!' : 'Copy Share Link'}
+                </button>
+                <button
+                  onClick={handleNativeShare}
+                  className="w-full p-3 bg-secondary rounded-sm text-sm text-left hover:bg-secondary/80 transition-colors"
+                >
+                  Share to Feed
+                </button>
+                <a
+                  href={shareAsset?.thumbnail}
+                  download={shareAsset?.title ?? 'media'}
+                  className="block w-full p-3 bg-secondary rounded-sm text-sm text-left hover:bg-secondary/80 transition-colors"
+                >
+                  Download Card
+                </a>
               </div>
               <button onClick={() => setShareModal(null)} className="w-full mt-4 py-2 text-xs text-muted-foreground hover:text-foreground">Cancel</button>
             </div>

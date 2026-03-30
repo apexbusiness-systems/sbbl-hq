@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { Settings as SettingsIcon, Monitor, Bell, Smartphone, Link, Shield, RefreshCw, User } from 'lucide-react';
+import { Monitor, Bell, Smartphone, Link, Shield, RefreshCw, User, LogOut } from 'lucide-react';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
+import { useAuth } from '@/hooks/use-auth';
+import { signOut } from '@/lib/api/auth';
 
 const sections = [
   { id: 'appearance', label: 'Appearance', icon: Monitor },
@@ -14,6 +16,7 @@ const sections = [
 
 const SettingsPage = () => {
   const [activeSection, setActiveSection] = useState('appearance');
+  const { user } = useAuth();
 
   return (
     <div className="min-h-screen">
@@ -94,14 +97,22 @@ const SettingsPage = () => {
                 <div className="space-y-4">
                   <div className="py-3 border-b border-border">
                     <p className="text-sm font-medium">Email</p>
-                    <p className="text-xs text-muted-foreground">player@sbblhq.com</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{user?.email ?? '—'}</p>
+                    <p className="text-[10px] text-muted-foreground/60 mt-1">Sign-in uses a magic link sent to this address. No password required.</p>
                   </div>
                   <div className="py-3 border-b border-border">
-                    <p className="text-sm font-medium">Password</p>
-                    <button className="text-xs text-primary font-semibold mt-1">Change Password</button>
+                    <p className="text-sm font-medium">Sign Out</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Sign out of your account on this device.</p>
+                    <button
+                      onClick={() => void signOut()}
+                      className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border text-muted-foreground rounded-sm hover:text-foreground transition-colors"
+                    >
+                      <LogOut className="w-3 h-3" /> Sign Out
+                    </button>
                   </div>
                   <div className="py-3">
-                    <button className="text-xs text-destructive font-semibold">Delete Account</button>
+                    <p className="text-sm font-medium text-destructive/80">Danger Zone</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">Contact support to delete your account and all associated data.</p>
                   </div>
                 </div>
               </>
