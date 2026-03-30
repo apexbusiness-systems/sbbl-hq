@@ -1,6 +1,8 @@
-import { useState, useMemo } from 'react';
-import { players, teams, leagues } from '@/data/mock';
+import { useState, useMemo, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { players, teams } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
+import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine } from '@/types';
 import { ArrowUpDown, BarChart3, Lock } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
@@ -10,10 +12,32 @@ const statKeys: StatKey[] = ['pts', 'reb', 'ast', 'stl', 'blk', 'fls', 'min'];
 const statLabels: Record<StatKey, string> = { pts: 'PTS', reb: 'REB', ast: 'AST', stl: 'STL', blk: 'BLK', fls: 'FLS', min: 'MIN' };
 
 const StatsPage = () => {
-  const { hasPremiumPlayerAccess } = useApp();
-  const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>('all');
+  const { hasPremiumPlayerAccess, activeLeague } = useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [sortBy, setSortBy] = useState<StatKey>('pts');
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
+
+  // Initialise from URL param; fall back to current active league
+  const paramLeague = searchParams.get('league');
+  const initialFilter: LeagueId | 'all' =
+    paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))
+      ? (paramLeague as LeagueId | 'all')
+      : activeLeague;
+
+  const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(initialFilter);
+
+  const handleFilterChange = (val: LeagueId | 'all') => {
+    setLeagueFilter(val);
+    setSelectedPlayer(null);
+    setSearchParams(val === 'all' ? {} : { league: val }, { replace: true });
+  };
+
+  useEffect(() => {
+    if (paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))) {
+      setLeagueFilter(paramLeague as LeagueId | 'all');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const filtered = useMemo(() => {
     const list = leagueFilter === 'all' ? players : players.filter(p => p.leagueId === leagueFilter);
@@ -25,23 +49,44 @@ const StatsPage = () => {
 
   const maxStat = (key: StatKey) => Math.max(...filtered.map(p => p.stats[key]));
 
+  const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
+
   return (
     <div className="min-h-screen">
       <div className="container py-8 md:py-12">
         <div className="flex items-center justify-between mb-8">
           <div>
             <h1 className="font-display text-3xl md:text-4xl font-bold">Stats</h1>
-            <p className="text-sm text-muted-foreground mt-1">Player statistics across all leagues</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {leagueFilter === 'all'
+                ? 'Player statistics across all leagues'
+                : `${activeLeagueObj?.name ?? leagueFilter.toUpperCase()} player statistics`}
+            </p>
           </div>
           <BarChart3 className="w-5 h-5 text-muted-foreground" />
         </div>
 
-        {/* Filters */}
+        {/* Filters — LEAGUE_REGISTRY driven with logos */}
         <div className="flex flex-wrap gap-4 mb-8">
-          <div className="flex gap-1 p-1 bg-secondary rounded-sm">
-            {(['all', 'sbbl', 'wbl', 'tgifbl'] as const).map(l => (
-              <button key={l} onClick={() => setLeagueFilter(l)} className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${leagueFilter === l ? 'bg-card text-foreground' : 'text-muted-foreground'}`}>
-                {l === 'all' ? 'All' : l.toUpperCase()}
+          <div className="flex gap-1 p-1 bg-secondary rounded-sm overflow-x-auto">
+            <button
+              onClick={() => handleFilterChange('all')}
+              className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors whitespace-nowrap ${leagueFilter === 'all' ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+            >
+              All Org
+            </button>
+            {LEAGUE_REGISTRY.map(l => (
+              <button
+                key={l.id}
+                onClick={() => handleFilterChange(l.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors whitespace-nowrap ${
+                  leagueFilter === l.id
+                    ? `bg-card ${l.accentClass} border border-current/20`
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                <img src={l.logo} alt="" width={14} height={14} className="flex-shrink-0 opacity-80" style={{ aspectRatio: '1/1' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                {l.shortName}
               </button>
             ))}
           </div>

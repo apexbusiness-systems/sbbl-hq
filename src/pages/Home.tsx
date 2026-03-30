@@ -194,7 +194,7 @@ const HomePage = () => {
         {(() => {
           const potgList = playersOfTheGame.filter(p => p.leagueId === resolvedLeague);
           if (potgList.length === 0) return null;
-          const league = getLeagueConfig(activeLeague);
+          const leagueInfo = getLeagueConfig(resolvedLeague);
           return (
             <section>
               <div className="flex items-center justify-between mb-6">
@@ -202,10 +202,10 @@ const HomePage = () => {
                   <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary mb-1">Game Night Recap</p>
                   <h2 className="font-display text-xl md:text-2xl font-bold uppercase tracking-tight flex items-center gap-2">
                     <Trophy className="w-5 h-5 text-primary" />
-                    {league.shortName} · Players of the Game
+                    {leagueInfo.shortName} · Players of the Game
                   </h2>
                 </div>
-                <Link to="/leaderboards" className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
+                <Link to={`/leaderboards?league=${resolvedLeague}`} className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1">
                   Leaderboards <ChevronRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
