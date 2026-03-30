@@ -13,10 +13,10 @@ CREATE INDEX IF NOT EXISTS profiles_subscription_ends_at_idx
 -- only service role can write it (via worker webhook handler).
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "users_read_own_profile"
-  ON profiles FOR SELECT
+drop policy if exists "users_read_own_profile" on profiles;
+create policy "users_read_own_profile" on profiles FOR SELECT
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "service_role_write_profile"
-  ON profiles FOR ALL
+drop policy if exists "service_role_write_profile" on profiles;
+create policy "service_role_write_profile" on profiles FOR ALL
   USING (auth.role() = 'service_role');
