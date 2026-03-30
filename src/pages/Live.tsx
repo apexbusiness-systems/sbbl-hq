@@ -1,16 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/contexts/AppContext';
+import { useAuth } from '@/hooks/use-auth';
 import { games, players, products } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
-import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
+import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag, LogIn } from 'lucide-react';
 import { toast } from 'sonner';
+import { Link } from 'react-router-dom';
 
 type ViewerState = 'locked' | 'preview' | 'purchased';
 
 const LivePage = () => {
-  const { addToBag, authRole, hasPremiumPlayerAccess, playerSubscriptionEndsAt } = useApp();
-  const [viewerState, setViewerState] = useState<ViewerState>('preview');
+  const { isSignedIn } = useAuth();
+  const { addToBag, authRole, hasPremiumPlayerAccess, isAdmin, playerSubscriptionEndsAt } = useApp();
   const liveGame = games.find(g => g.status === 'live') || games[0];
   const [comments, setComments] = useState([
     { user: 'CourtSide_Fan', text: 'Rivera is on fire tonight!' },
@@ -26,6 +28,21 @@ const LivePage = () => {
   const featuredProducts = products.filter(p => p.sale);
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselProduct = featuredProducts[carouselIdx] ?? products[0];
+
+  // Derive access level from real auth — no prototype toggle
+  const deriveViewerState = (): ViewerState => {
+    if (!isSignedIn) return 'locked';
+    if (isAdmin || hasPremiumPlayerAccess) return 'purchased';
+    return 'preview';
+  };
+
+  const [viewerState, setViewerState] = useState<ViewerState>(deriveViewerState);
+
+  // Re-derive when auth state loads/changes
+  useEffect(() => {
+    setViewerState(deriveViewerState());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn, isAdmin, hasPremiumPlayerAccess]);
 
   useEffect(() => {
     if (featuredProducts.length <= 1) return;
@@ -59,6 +76,11 @@ const LivePage = () => {
     setComments(prev => [...prev, { user: 'You', text }]);
     setChatInput('');
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+  };
+
+  // TODO: replace with POST /api/streams/:gameId/purchase → Stripe checkout
+  const handlePurchaseAccess = () => {
+    toast.info('Payment integration coming soon. Contact league admin for access.');
   };
 
   const sidebar = (
@@ -154,13 +176,18 @@ const LivePage = () => {
             {/* Broadcast Area */}
             <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
               {viewerState === 'locked' ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-background">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-background px-4 text-center">
                   <Lock className="w-12 h-12 text-muted-foreground mb-4" />
-                  <h2 className="font-display text-2xl font-bold mb-2">Pay-Per-View Access Required</h2>
-                  <p className="text-sm text-muted-foreground mb-4">Unlock this live game for just ${liveGame.ppvPrice.toFixed(2)}</p>
-                  <button onClick={() => setViewerState('preview')} className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm">
-                    Preview Game
-                  </button>
+                  <h2 className="font-display text-2xl font-bold mb-2">Sign In to Watch</h2>
+                  <p className="text-sm text-muted-foreground mb-6 max-w-xs">
+                    Create a free account or sign in to access live games, PPV events, and exclusive content.
+                  </p>
+                  <Link
+                    to="/login"
+                    className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2"
+                  >
+                    <LogIn className="w-4 h-4" /> Sign In
+                  </Link>
                 </div>
               ) : viewerState === 'preview' ? (
                 <div className="absolute inset-0">
@@ -180,7 +207,7 @@ const LivePage = () => {
                           <Play className="w-4 h-4" /> Free Player Access Unlocked
                         </button>
                       ) : (
-                        <button onClick={() => setViewerState('purchased')} className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                        <button onClick={handlePurchaseAccess} className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
                           <Play className="w-4 h-4" /> Purchase Access — ${liveGame.ppvPrice.toFixed(2)}
                         </button>
                       )}
@@ -243,18 +270,6 @@ const LivePage = () => {
                 <button onClick={handleShare} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   <Share2 className="w-3.5 h-3.5" /> Share
                 </button>
-              </div>
-
-              {/* Prototype state toggle */}
-              <div className="panel p-3">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-2">Prototype: Entitlement State</p>
-                <div className="flex gap-2">
-                  {(['locked', 'preview', 'purchased'] as ViewerState[]).map(s => (
-                    <button key={s} onClick={() => setViewerState(s)} className={`px-3 py-1.5 text-xs font-medium rounded-sm transition-colors ${viewerState === s ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'}`}>
-                      {s.charAt(0).toUpperCase() + s.slice(1)}
-                    </button>
-                  ))}
-                </div>
               </div>
 
               {/* Live Chat */}
