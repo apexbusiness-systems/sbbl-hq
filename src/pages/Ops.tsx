@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Shield, Upload, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
+import { PotgCard } from '@/components/ui/PotgCard';
 import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord } from '@/lib/api/ops';
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
@@ -309,6 +310,29 @@ const OpsPage = () => {
               </div>
             </div>
           </div>
+
+          {/* Live card preview — shown once fields are populated */}
+          {(potgParseState === 'parsed' || potgParseState === 'error') && potgForm.playerName && (
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">
+                <Trophy className="w-3 h-3 text-primary" /> Card Preview
+              </p>
+              <PotgCard
+                potg={{
+                  id: 'preview',
+                  leagueId: potgForm.leagueId as import('@/types').LeagueId,
+                  playerName: potgForm.playerName,
+                  team: potgForm.team,
+                  pts: Number(potgForm.pts) || 0,
+                  rebs: Number(potgForm.rebs) || 0,
+                  assts: Number(potgForm.assts) || 0,
+                  gameResult: potgForm.gameResult,
+                  date: potgForm.date,
+                }}
+                featured
+              />
+            </div>
+          )}
 
           <button
             disabled={potgMutation.isPending || !potgForm.playerName || !potgForm.team}
