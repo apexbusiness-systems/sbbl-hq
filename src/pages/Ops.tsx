@@ -38,6 +38,7 @@ const OpsPage = () => {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
   const [storeForm, setStoreForm] = useState({ title: '', price: '0', category: 'apparel', publishStatus: 'draft' as 'draft' | 'published', imageFile: null as File | null, sale: false });
+  const [csvLeagueId, setCsvLeagueId] = useState<string>('wbl');
   const potgFileRef = useRef<HTMLInputElement>(null);
   const [potgParseState, setPotgParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
   const [potgParseError, setPotgParseError] = useState<string | null>(null);
@@ -78,7 +79,8 @@ const OpsPage = () => {
   const historyQuery = useQuery({ queryKey: ['ops-import-history'], queryFn: fetchImportHistory });
 
   const importMutation = useMutation({
-    mutationFn: ({ kind, rows }: { kind: 'teams' | 'players' | 'schedules' | 'events'; rows: Record<string, string>[] }) => submitCsvImport(kind, rows),
+    mutationFn: ({ kind, rows }: { kind: 'teams' | 'players' | 'schedules' | 'events'; rows: Record<string, string>[] }) =>
+      submitCsvImport(kind, rows.map(r => ({ ...r, league_id: csvLeagueId }))),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] }),
@@ -159,6 +161,24 @@ const OpsPage = () => {
       {(['teams', 'players', 'schedules', 'events'] as const).includes(activeTab as never) && (
         <div className="panel p-4 space-y-3">
           <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
+          {/* League tag — every imported row gets this league_id */}
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Target League</label>
+            <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
+              {LEAGUE_REGISTRY.map(l => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setCsvLeagueId(l.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${csvLeagueId === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  <img src={l.logo} alt="" width={12} height={12} className="flex-shrink-0 opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  {l.shortName}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">All imported rows will be tagged with this league.</p>
+          </div>
           <input type="file" accept=".csv,text/csv" onChange={async (e) => {
             const file = e.target.files?.[0];
             if (!file) return;
