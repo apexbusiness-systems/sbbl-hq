@@ -3,6 +3,7 @@ import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY } from '@/lib/league
 import { fetchPublicHome, type PublicHomeData, type PublicGame } from '@/lib/api/public';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { PotgCard } from '@/components/ui/PotgCard';
+import flyer1v1 from '/assets/events/1v1-fred-vs-karl.jpg';
 import { playersOfTheGame } from '@/data/mock';
 import { motion } from 'framer-motion';
 import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3 } from 'lucide-react';
@@ -196,6 +197,64 @@ const HomePage = () => {
       )}
 
       <div className="container py-8 md:py-12 space-y-12">
+
+        {/* ── FEATURED EVENT — SBBL 1V1 ───────────────────────── */}
+        {resolvedLeague === 'sbbl' && (
+          <motion.section
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45 }}
+            className="relative overflow-hidden rounded-sm border border-primary/30"
+            style={{ boxShadow: '0 0 32px hsl(var(--sbbl) / 0.12)' }}
+          >
+            <div className="flex flex-col md:flex-row">
+              {/* Flyer image */}
+              <div className="md:w-[340px] lg:w-[400px] flex-shrink-0">
+                <img
+                  src={flyer1v1}
+                  alt="SBBL 1v1: Fred vs Karl — Thursday April 3, 2026 at Crawford School"
+                  className="w-full h-full object-cover object-top"
+                  style={{ maxHeight: '480px' }}
+                />
+              </div>
+
+              {/* Event details */}
+              <div className="flex-1 bg-card/95 backdrop-blur-sm p-6 md:p-8 flex flex-col justify-center gap-5">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary mb-2">Special Event · SBBL</p>
+                  <h2 className="font-display text-4xl md:text-5xl lg:text-6xl font-bold uppercase tracking-tight leading-none">
+                    1<span className="text-primary">V</span>1
+                  </h2>
+                  <p className="font-display text-lg md:text-xl font-bold uppercase tracking-widest text-foreground/80 mt-2">
+                    Fred <span className="text-primary/60 mx-2">vs</span> Karl
+                  </p>
+                </div>
+
+                <div className="space-y-2.5 text-sm">
+                  <div className="flex items-center gap-3">
+                    <Calendar className="w-4 h-4 text-primary flex-shrink-0" />
+                    <span className="font-semibold text-foreground">Thursday, April 3, 2026</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Clock className="w-4 h-4 text-primary flex-shrink-0" />
+                    <span className="text-muted-foreground">6:30 PM</span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <Users className="w-4 h-4 text-primary flex-shrink-0" />
+                    <span className="text-muted-foreground">Crawford School · 531 Finch Ave W</span>
+                  </div>
+                </div>
+
+                <Link
+                  to="/schedules"
+                  className="gold-bg self-start px-5 py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded-sm inline-flex items-center gap-2"
+                >
+                  <Calendar className="w-3.5 h-3.5" /> View Full Schedule
+                </Link>
+              </div>
+            </div>
+          </motion.section>
+        )}
 
         {/* Players of the Game — always rendered; empty state when no data for this league yet */}
         {(() => {
