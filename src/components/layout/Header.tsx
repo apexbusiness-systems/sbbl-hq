@@ -9,16 +9,21 @@ import {
   RefreshCw, Share2, CreditCard, Settings, Shield, ShoppingBag, Menu, X, LogIn, LogOut
 } from 'lucide-react';
 
-const mainNav = [
+const staticNav = [
   { label: 'Home', path: '/' },
   { label: 'Live', path: '/live' },
   { label: 'Schedules', path: '/schedules' },
   { label: 'Store', path: '/store' },
   { label: 'Profiles', path: '/profiles' },
-  { label: 'Stats', path: '/stats' },
-  { label: 'Leaderboards', path: '/leaderboards' },
-  { label: 'Media', path: '/media' },
 ];
+// These pages accept ?league= to pre-filter — injected dynamically in the component
+const leagueAwareNav = ['Stats', 'Leaderboards', 'Media'] as const;
+type LeagueAwareLabel = typeof leagueAwareNav[number];
+const leagueAwarePaths: Record<LeagueAwareLabel, string> = {
+  Stats: '/stats',
+  Leaderboards: '/leaderboards',
+  Media: '/media',
+};
 
 const authRoleCycle: AppRole[] = ['fan', 'player', 'league_admin', 'super_admin'];
 
@@ -120,7 +125,7 @@ export const Header = () => {
 
         {/* Desktop nav */}
         <nav className="hidden lg:flex items-center gap-1">
-          {mainNav.map((item) => (
+          {staticNav.map((item) => (
             <Link
               key={item.path}
               to={item.path}
@@ -133,6 +138,23 @@ export const Header = () => {
               {item.label}
             </Link>
           ))}
+          {leagueAwareNav.map((label) => {
+            const base = leagueAwarePaths[label];
+            const to = `${base}?league=${activeLeague}`;
+            return (
+              <Link
+                key={base}
+                to={to}
+                className={`px-3 py-1.5 text-sm font-medium transition-colors rounded-sm ${
+                  location.pathname === base
+                    ? 'text-foreground bg-secondary'
+                    : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {label}
+              </Link>
+            );
+          })}
         </nav>
 
         {/* Right actions */}
@@ -181,7 +203,7 @@ export const Header = () => {
       {mobileMenuOpen && (
         <div className="lg:hidden border-t border-border bg-background animate-fade-in">
           <nav className="container py-3 flex flex-col gap-1">
-            {mainNav.map((item) => (
+            {staticNav.map((item) => (
               <Link
                 key={item.path}
                 to={item.path}
@@ -193,6 +215,21 @@ export const Header = () => {
                 {item.label}
               </Link>
             ))}
+            {leagueAwareNav.map((label) => {
+              const base = leagueAwarePaths[label];
+              return (
+                <Link
+                  key={base}
+                  to={`${base}?league=${activeLeague}`}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`px-3 py-2.5 text-sm font-medium rounded-sm min-h-[44px] flex items-center ${
+                    location.pathname === base ? 'text-foreground bg-secondary' : 'text-muted-foreground'
+                  }`}
+                >
+                  {label}
+                </Link>
+              );
+            })}
             <div className="flex items-center gap-2 px-3 pt-2 border-t border-border mt-2">
               {isSignedIn && <Link to="/billing" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><CreditCard className="w-4 h-4" /> Billing</Link>}
               {isSignedIn && <Link to="/settings" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><Settings className="w-4 h-4" /> Settings</Link>}
