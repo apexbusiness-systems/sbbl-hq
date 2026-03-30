@@ -54,8 +54,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   // Effective role: prototype toggle overrides JWT role when set
   const authRole: AppRole = authRoleOverride ?? ((roles[0] ?? 'fan') as AppRole);
 
-  // isAdmin: either JWT says so, or prototype toggle is set to an admin role
-  const isAdmin = jwtIsAdmin || authRole === 'league_admin' || authRole === 'super_admin';
+  // isAdmin: real JWT only — the prototype toggle never grants admin access
+  const isAdmin = jwtIsAdmin;
 
   const setActiveLeague = (l: LeagueId) => {
     setActiveLeagueRaw(l);
@@ -100,7 +100,7 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       setActiveLeague,
       authRole,
       setAuthRole,
-      isPrototypeAuthMode: true,
+      isPrototypeAuthMode: import.meta.env.DEV,
       isAdmin,
       playerSubscriptionEndsAt,
       isPlayerSubscriptionActive: isPlayerSubscriptionActive(playerSubscriptionEndsAt),
