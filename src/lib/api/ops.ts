@@ -60,6 +60,7 @@ export async function uploadStoreMedia(payload: {
   price: number;
   category: string;
   publishStatus: 'draft' | 'published';
+  sale?: boolean;
   imageUrl: string;
   leagueId?: string | null;
 }) {

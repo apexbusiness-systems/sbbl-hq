@@ -559,7 +559,7 @@ async function handleStoreMedia(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireAdminSession(ctx.req, ctx.admin);
   const payload = await ctx.req.json().catch(() => null) as Record<string, unknown> | null;
-  if (!payload || typeof payload.title !== 'string' || typeof payload.price !== 'number' || typeof payload.imageUrl !== 'string') {
+  if (!payload || typeof payload.title !== 'string' || typeof payload.price !== 'number' || typeof payload.imageUrl !== 'string') { // sale flag is optional boolean
     return json({ ok: false, error: 'invalid_store_payload' }, 400);
   }
 
@@ -575,7 +575,7 @@ async function handleStoreMedia(ctx: HandlerCtx) {
     league_id: typeof payload.leagueId === 'string' ? payload.leagueId : null,
     title: String(payload.title),
     status: payload.publishStatus === 'published' ? 'published' : 'draft',
-    metadata: { image_url: payload.imageUrl, category: payload.category, product_id: product.data.id },
+    metadata: { image_url: payload.imageUrl, category: payload.category, product_id: product.data.id, sale: payload.sale === true },
   }).select('id').single();
   if (media.error) throw new Error(media.error.message);
 

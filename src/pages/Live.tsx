@@ -1,9 +1,9 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { games, players, products } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
-import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check } from 'lucide-react';
+import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 
 type ViewerState = 'locked' | 'preview' | 'purchased';
@@ -22,6 +22,17 @@ const LivePage = () => {
   const [reactions, setReactions] = useState({ fire: 142, heart: 89, clap: 67 });
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Featured merch carousel — sale items only
+  const featuredProducts = products.filter(p => p.sale);
+  const [carouselIdx, setCarouselIdx] = useState(0);
+  const carouselProduct = featuredProducts[carouselIdx] ?? products[0];
+
+  useEffect(() => {
+    if (featuredProducts.length <= 1) return;
+    const id = setInterval(() => setCarouselIdx(i => (i + 1) % featuredProducts.length), 4000);
+    return () => clearInterval(id);
+  }, [featuredProducts.length]);
 
   const handleShare = async () => {
     const shareData = {
@@ -202,6 +213,68 @@ const LivePage = () => {
 
         {/* Sidebar */}
         <div className="space-y-4">
+
+          {/* Featured Merch Carousel — sale items, eye-level with chat */}
+          {featuredProducts.length > 0 && (
+            <div className="panel overflow-hidden">
+              {/* Image with nav arrows */}
+              <div className="relative aspect-square overflow-hidden bg-secondary">
+                <img
+                  key={carouselProduct.id}
+                  src={carouselProduct.image}
+                  alt={carouselProduct.name}
+                  className="w-full h-full object-cover animate-fade-in"
+                  loading="lazy"
+                />
+                {/* Sale badge */}
+                <span className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 bg-primary text-primary-foreground text-[9px] font-bold uppercase tracking-wider rounded-sm">
+                  <Tag className="w-2.5 h-2.5" /> Sale
+                </span>
+                {/* Carousel controls */}
+                {featuredProducts.length > 1 && (
+                  <>
+                    <button
+                      onClick={() => setCarouselIdx(i => (i - 1 + featuredProducts.length) % featuredProducts.length)}
+                      className="absolute left-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-background/70 backdrop-blur-sm flex items-center justify-center hover:bg-background/90 transition-colors"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setCarouselIdx(i => (i + 1) % featuredProducts.length)}
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-background/70 backdrop-blur-sm flex items-center justify-center hover:bg-background/90 transition-colors"
+                    >
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </button>
+                    {/* Dot indicators */}
+                    <div className="absolute bottom-2 left-0 right-0 flex justify-center gap-1">
+                      {featuredProducts.map((_, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setCarouselIdx(i)}
+                          className={`w-1.5 h-1.5 rounded-full transition-all ${i === carouselIdx ? 'bg-primary w-3' : 'bg-foreground/30'}`}
+                        />
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="p-4">
+                <p className="text-[9px] text-muted-foreground uppercase tracking-widest font-semibold">Featured Merch · {carouselIdx + 1}/{featuredProducts.length}</p>
+                <p className="font-display font-bold text-sm mt-1 truncate">{carouselProduct.name}</p>
+                {carouselProduct.colors && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">{carouselProduct.colors[0]}</p>
+                )}
+                <button
+                  onClick={() => addToBag(carouselProduct.id)}
+                  className="mt-3 w-full gold-bg py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded-sm inline-flex items-center justify-center gap-2"
+                >
+                  <ShoppingBag className="w-3.5 h-3.5" />
+                  {carouselProduct.price > 0 ? `Add to Bag — ₱${carouselProduct.price.toLocaleString()}` : 'Claim Reward'}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Top Performers */}
           <div className="panel p-4">
             <h3 className="font-display font-bold text-sm mb-3">Top Performers</h3>
@@ -217,17 +290,6 @@ const LivePage = () => {
             ))}
           </div>
 
-          {/* Merch CTA */}
-          <div className="panel overflow-hidden">
-            <img src={products[0].image} alt={products[0].name} className="w-full aspect-square object-cover" loading="lazy" />
-            <div className="p-4">
-              <p className="text-xs text-muted-foreground uppercase tracking-wider">Featured Merch</p>
-              <p className="font-display font-bold text-sm mt-1">{products[0].name}</p>
-              <button onClick={() => addToBag(products[0].id)} className="mt-3 w-full gold-bg py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded-sm inline-flex items-center justify-center gap-2">
-                <ShoppingBag className="w-3.5 h-3.5" /> Add to Bag — ₱{products[0].price.toLocaleString()}
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     </div>
