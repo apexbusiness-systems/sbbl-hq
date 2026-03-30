@@ -811,13 +811,15 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     });
   }
 
-  await ctx.admin.rpc('log_admin_action', {
-    p_action: 'potg_submitted',
-    p_ref_type: 'import_job',
-    p_ref_id: jobData.id,
-    p_payload: body,
-    p_idempotency_key: readIdempotencyKey(ctx.req.headers),
-  }).catch(() => null);
+  try {
+    await ctx.admin.rpc('log_admin_action', {
+      p_action: 'potg_submitted',
+      p_ref_type: 'import_job',
+      p_ref_id: jobData.id,
+      p_payload: body,
+      p_idempotency_key: readIdempotencyKey(ctx.req.headers),
+    });
+  } catch { /* non-critical audit log — suppress */ }
 
   return json({ ok: true, jobId: jobData.id, matched: !!profileData });
 }

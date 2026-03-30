@@ -66,7 +66,7 @@ const OpsPage = () => {
         }));
         setPotgParseState('parsed');
       } else {
-        setPotgParseError((e instanceof Error && e.message.includes('groq_api_key_missing')) ? 'GROQ_API_KEY not set in Workers env — fill in manually' : 'Parse failed — fill in manually');
+        setPotgParseError('Parse failed — fill in manually');
         setPotgParseState('error');
       }
     } catch (e) {
