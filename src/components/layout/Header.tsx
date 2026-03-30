@@ -234,6 +234,14 @@ export const Header = () => {
               {isSignedIn && <Link to="/billing" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><CreditCard className="w-4 h-4" /> Billing</Link>}
               {isSignedIn && <Link to="/settings" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><Settings className="w-4 h-4" /> Settings</Link>}
               {isAdmin && <Link to="/ops" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-primary"><Shield className="w-4 h-4" /> Ops</Link>}
+              {isSignedIn && (
+                <button
+                  onClick={() => { setMobileMenuOpen(false); void signOut(); }}
+                  className="flex items-center gap-2 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors ml-auto"
+                >
+                  <LogOut className="w-4 h-4" /> Sign out
+                </button>
+              )}
             </div>
           </nav>
         </div>

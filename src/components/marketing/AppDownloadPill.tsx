@@ -18,14 +18,14 @@ export const AppDownloadPill = () => {
       initial={{ y: 16, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="fixed bottom-4 left-4 z-40 max-w-[220px]"
+      className="fixed bottom-4 left-4 z-40 max-w-[110px] sm:max-w-[220px]"
     >
       <div className="panel-glass border border-primary/30 backdrop-blur-xl rounded-full shadow-xl px-2.5 py-2">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-full bg-primary/15 flex items-center justify-center shrink-0">
             <Smartphone className="w-3.5 h-3.5 text-primary" />
           </div>
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 hidden sm:block">
             <p className="text-[10px] uppercase tracking-[0.14em] text-primary font-semibold leading-none">Get App</p>
             <p className="text-[10px] text-muted-foreground mt-1 truncate" title={helperText}>{helperText}</p>
           </div>
