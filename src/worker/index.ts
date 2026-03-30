@@ -372,6 +372,15 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
   });
   if (webhookProcess.error) throw new Error(webhookProcess.error.message);
 
+  // For completed player-registration checkout sessions, stamp subscription_ends_at (+30 days)
+  if (event.type === 'checkout.session.completed' && userId) {
+    const now = new Date();
+    now.setDate(now.getDate() + 30);
+    await ctx.admin.from('profiles')
+      .update({ subscription_ends_at: now.toISOString() })
+      .eq('user_id', userId);
+  }
+
   return json({
     ok: true,
     eventId: event.id,
@@ -824,6 +833,72 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
   return json({ ok: true, jobId: jobData.id, matched: !!profileData });
 }
 
+async function handlePublicProducts({ req, admin }: HandlerCtx) {
+  const url = new URL(req.url);
+  const leagueId = url.searchParams.get('leagueId');
+  let query = admin.from('products').select('id,name,price,status,league_id,metadata').eq('status', 'published').limit(100);
+  if (leagueId) query = query.eq('league_id', leagueId);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return json({ ok: true, data: data ?? [] });
+}
+
+async function handlePublicMedia({ req, admin }: HandlerCtx) {
+  const url = new URL(req.url);
+  const leagueId = url.searchParams.get('leagueId');
+  let query = admin.from('media_assets').select('id,title,status,league_id,metadata,created_at').eq('status', 'published').order('created_at', { ascending: false }).limit(50);
+  if (leagueId) query = query.eq('league_id', leagueId);
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return json({ ok: true, data: data ?? [] });
+}
+
+async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
+  await ensureMutation(req, { req, env, admin, params: {} });
+  const userId = requireAuth(req);
+  if (!env.STRIPE_SECRET_KEY) return json({ ok: false, error: 'payments_not_configured' }, 503);
+  const body = await req.json().catch(() => null) as { successUrl?: string; cancelUrl?: string } | null;
+  const successUrl = body?.successUrl ?? 'https://sbbl-hq.icu/billing?success=1';
+  const cancelUrl = body?.cancelUrl ?? 'https://sbbl-hq.icu/billing';
+
+  const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'POST',
+    headers: {
+      'authorization': `Bearer ${env.STRIPE_SECRET_KEY}`,
+      'content-type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      'payment_method_types[]': 'card',
+      'line_items[0][price_data][currency]': 'usd',
+      'line_items[0][price_data][product_data][name]': 'SBBL HQ Player Registration',
+      'line_items[0][price_data][unit_amount]': '700',
+      'line_items[0][quantity]': '1',
+      'mode': 'payment',
+      'success_url': successUrl,
+      'cancel_url': cancelUrl,
+      'metadata[user_id]': userId,
+    }),
+  });
+
+  if (!stripeRes.ok) {
+    const err = await stripeRes.json() as { error?: { message?: string } };
+    return json({ ok: false, error: err?.error?.message ?? 'stripe_error' }, 502);
+  }
+  const checkout = await stripeRes.json() as { url: string; id: string };
+  return json({ ok: true, url: checkout.url, sessionId: checkout.id });
+}
+
+async function handleBillingHistory({ req, admin }: HandlerCtx) {
+  const userId = requireAuth(req);
+  const { data, error } = await admin.from('orders')
+    .select('id,created_at,total_amount,status,metadata')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(50);
+  if (error) throw new Error(error.message);
+  return json({ ok: true, data: data ?? [] });
+}
+
 const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'GET', path: '/auth/session', handler: handleAuthSession },
   { method: 'GET', path: '/api/profile/me', handler: handleMe },
@@ -842,7 +917,10 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'POST', path: '/api/cart/items', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'cart-items' } }) },
   { method: 'POST', path: '/api/orders', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'orders' } }) },
   { method: 'POST', path: '/api/orders/:id/pay', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'orders-pay', ...ctx.params } }) },
-  { method: 'GET', path: '/api/billing/history', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'billing-history' } }) },
+  { method: 'GET', path: '/api/billing/history', handler: handleBillingHistory },
+  { method: 'GET', path: '/api/public/products', handler: handlePublicProducts },
+  { method: 'GET', path: '/api/public/media', handler: handlePublicMedia },
+  { method: 'POST', path: '/api/player/checkout', handler: handlePlayerCheckout },
   { method: 'POST', path: '/api/rewards/redeem', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'rewards-redeem' } }) },
   { method: 'GET', path: '/ops/bootstrap', handler: handleOpsBootstrap },
   { method: 'POST', path: '/ops/imports/teams', handler: (ctx) => handleImportRoute(ctx, 'teams') },

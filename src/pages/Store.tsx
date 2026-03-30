@@ -1,6 +1,9 @@
-import { useState } from 'react';
-import { products } from '@/data/mock';
+import { useState, useMemo } from 'react';
+import { products as mockProducts } from '@/data/mock';
 import { useApp } from '@/contexts/AppContext';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api/client';
+import { Product } from '@/types';
 import { ShoppingBag, Filter } from 'lucide-react';
 
 type Category = 'all' | 'tees' | 'hoodies' | 'jerseys' | 'caps' | 'accessories' | 'rewards';
@@ -11,6 +14,19 @@ const StorePage = () => {
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>('M');
   const [selectedColor, setSelectedColor] = useState<string>('');
+
+  const productsQuery = useQuery({
+    queryKey: ['public-products'],
+    queryFn: () => apiFetch<{ ok: boolean; data: Product[] }>('/api/public/products'),
+    retry: 1,
+    staleTime: 60_000,
+  });
+
+  const products = useMemo<Product[]>(() => {
+    const apiData = productsQuery.data?.data;
+    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
+    return mockProducts;
+  }, [productsQuery.data]);
 
   const filtered = category === 'all' ? products : products.filter(p => p.category === category);
   const detail = selectedProduct ? products.find(p => p.id === selectedProduct) : null;
