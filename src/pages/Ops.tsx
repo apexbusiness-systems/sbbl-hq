@@ -1,11 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Shield } from 'lucide-react';
+import { Shield, Upload, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
-import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia } from '@/lib/api/ops';
+import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord } from '@/lib/api/ops';
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
+import { LEAGUE_REGISTRY } from '@/lib/leagues';
 
-type Tab = 'overview' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'history';
+type Tab = 'overview' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Overview' },
@@ -14,6 +15,7 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'schedules', label: 'Schedules' },
   { id: 'events', label: 'Events' },
   { id: 'store', label: 'Store Media' },
+  { id: 'potg', label: 'POTG Parser' },
   { id: 'history', label: 'Import History' },
 ];
 
@@ -36,6 +38,41 @@ const OpsPage = () => {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
   const [storeForm, setStoreForm] = useState({ title: '', price: '0', category: 'apparel', publishStatus: 'draft' as 'draft' | 'published', imageFile: null as File | null });
+  const potgFileRef = useRef<HTMLInputElement>(null);
+  const [potgParseState, setPotgParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
+  const [potgParseError, setPotgParseError] = useState<string | null>(null);
+  const [potgForm, setPotgForm] = useState({ playerName: '', team: '', pts: '', rebs: '', assts: '', gameResult: '', leagueId: 'wbl', date: new Date().toISOString().split('T')[0] });
+
+  const handlePotgImageUpload = async (file: File) => {
+    setPotgParseState('parsing');
+    setPotgParseError(null);
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      const imageBase64 = btoa(binary);
+      const result = await parsePotgImage(imageBase64, file.type as string);
+      if (result.ok && result.data) {
+        setPotgForm(f => ({
+          ...f,
+          playerName: result.data.playerName ?? '',
+          team: result.data.team ?? '',
+          pts: String(result.data.pts ?? ''),
+          rebs: String(result.data.rebs ?? ''),
+          assts: String(result.data.assts ?? ''),
+          gameResult: result.data.gameResult ?? '',
+        }));
+        setPotgParseState('parsed');
+      } else {
+        setPotgParseError('Parse failed — fill in manually');
+        setPotgParseState('error');
+      }
+    } catch (e) {
+      setPotgParseError(e instanceof Error ? e.message : 'Unknown error');
+      setPotgParseState('error');
+    }
+  };
 
   const bootstrapQuery = useQuery({ queryKey: ['ops-bootstrap'], queryFn: fetchOpsBootstrap });
   const historyQuery = useQuery({ queryKey: ['ops-import-history'], queryFn: fetchImportHistory });
@@ -47,6 +84,23 @@ const OpsPage = () => {
         queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] }),
         queryClient.invalidateQueries({ queryKey: ['ops-import-history'] }),
       ]);
+    },
+  });
+
+  const potgMutation = useMutation({
+    mutationFn: () => submitPotgRecord({
+      playerName: potgForm.playerName,
+      team: potgForm.team,
+      pts: Number(potgForm.pts),
+      rebs: Number(potgForm.rebs),
+      assts: Number(potgForm.assts),
+      gameResult: potgForm.gameResult,
+      leagueId: potgForm.leagueId,
+      date: potgForm.date,
+    }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
     },
   });
 
@@ -138,6 +192,111 @@ const OpsPage = () => {
           {!hasSupabaseClientConfig && <p className="text-xs text-warning">Supabase client env missing; media uploads disabled.</p>}
           {storeMutation.error && <p className="text-xs text-destructive">{(storeMutation.error as Error).message}</p>}
           {storeMutation.data && <p className="text-xs text-success">Saved product {storeMutation.data.productId}</p>}
+        </div>
+      )}
+
+      {activeTab === 'potg' && (
+        <div className="panel p-4 space-y-5 max-w-xl">
+          <div>
+            <h2 className="font-display text-xl">POTG Image Parser</h2>
+            <p className="text-xs text-muted-foreground mt-1">Upload a Player of the Game graphic — Claude Vision extracts the data automatically, then you confirm before it writes to the pipeline.</p>
+          </div>
+
+          {/* Image drop zone */}
+          <div
+            className="border-2 border-dashed border-border rounded-sm p-6 text-center cursor-pointer hover:border-primary/40 transition-colors"
+            onClick={() => potgFileRef.current?.click()}
+            onDragOver={e => e.preventDefault()}
+            onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handlePotgImageUpload(f); }}
+          >
+            <input ref={potgFileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handlePotgImageUpload(f); }} />
+            {potgParseState === 'parsing' ? (
+              <div className="flex flex-col items-center gap-2">
+                <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                <p className="text-sm text-muted-foreground">Parsing with Claude Vision…</p>
+              </div>
+            ) : potgParseState === 'parsed' ? (
+              <div className="flex flex-col items-center gap-1">
+                <CheckCircle2 className="w-5 h-5 text-success" />
+                <p className="text-xs text-success font-medium">Data extracted — review below</p>
+                <p className="text-[10px] text-muted-foreground">Click to parse another image</p>
+              </div>
+            ) : potgParseState === 'error' ? (
+              <div className="flex flex-col items-center gap-1">
+                <AlertCircle className="w-5 h-5 text-destructive" />
+                <p className="text-xs text-destructive">{potgParseError}</p>
+                <p className="text-[10px] text-muted-foreground">Fill in fields manually below</p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-2">
+                <Upload className="w-6 h-6 text-muted-foreground" />
+                <p className="text-sm text-muted-foreground">Drop POTG graphic or click to upload</p>
+                <p className="text-[10px] text-muted-foreground">PNG, JPG — Claude reads PTS / REB / AST / player name / team / game result</p>
+              </div>
+            )}
+          </div>
+
+          {/* Editable parsed fields */}
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Player Name</label>
+                <input className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={potgForm.playerName} onChange={e => setPotgForm(f => ({ ...f, playerName: e.target.value }))} placeholder="e.g. Michael Ramos" />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Team</label>
+                <input className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={potgForm.team} onChange={e => setPotgForm(f => ({ ...f, team: e.target.value }))} placeholder="e.g. Ball is Life" />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground">PTS</label>
+                <input type="number" className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={potgForm.pts} onChange={e => setPotgForm(f => ({ ...f, pts: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground">REB</label>
+                <input type="number" className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={potgForm.rebs} onChange={e => setPotgForm(f => ({ ...f, rebs: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground">AST</label>
+                <input type="number" className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={potgForm.assts} onChange={e => setPotgForm(f => ({ ...f, assts: e.target.value }))} />
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Game Result</label>
+              <input className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={potgForm.gameResult} onChange={e => setPotgForm(f => ({ ...f, gameResult: e.target.value }))} placeholder="e.g. OSY 77 vs Solid North 63" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground">League</label>
+                <select className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={potgForm.leagueId} onChange={e => setPotgForm(f => ({ ...f, leagueId: e.target.value }))}>
+                  {LEAGUE_REGISTRY.map(l => <option key={l.id} value={l.id}>{l.shortName}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Date</label>
+                <input type="date" className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={potgForm.date} onChange={e => setPotgForm(f => ({ ...f, date: e.target.value }))} />
+              </div>
+            </div>
+          </div>
+
+          <button
+            disabled={potgMutation.isPending || !potgForm.playerName || !potgForm.team}
+            onClick={() => potgMutation.mutate()}
+            className="w-full gold-bg py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm disabled:opacity-50 transition-opacity"
+          >
+            {potgMutation.isPending ? 'Submitting to Pipeline…' : 'Submit to Data Pipeline'}
+          </button>
+
+          {potgMutation.error && <p className="text-xs text-destructive">{(potgMutation.error as Error).message}</p>}
+          {potgMutation.data && (
+            <div className="p-3 bg-success/10 border border-success/20 rounded-sm">
+              <p className="text-xs text-success font-medium">
+                ✓ Submitted — Job {potgMutation.data.jobId?.slice(0, 8)}
+                {potgMutation.data.matched ? ' · Player profile matched and stats written' : ' · Queued for manual player match'}
+              </p>
+            </div>
+          )}
         </div>
       )}
 

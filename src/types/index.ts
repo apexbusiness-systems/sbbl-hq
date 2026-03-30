@@ -88,6 +88,19 @@ export interface ReviewItem {
   status: 'pending' | 'resolved' | 'dismissed';
 }
 
+export interface PlayerOfTheGame {
+  id: string;
+  leagueId: LeagueId;
+  playerName: string;
+  playerId?: string;
+  team: string;
+  pts: number;
+  rebs: number;
+  assts: number;
+  gameResult: string;
+  date: string;
+}
+
 export interface Invoice {
   id: string;
   description: string;

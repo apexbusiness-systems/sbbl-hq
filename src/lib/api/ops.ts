@@ -34,6 +34,27 @@ export async function submitCsvImport(kind: 'teams' | 'players' | 'schedules' | 
   });
 }
 
+export async function parsePotgImage(imageBase64: string, mimeType: string) {
+  return apiFetch<{
+    ok: boolean;
+    data: { playerName: string; team: string; pts: number; rebs: number; assts: number; gameResult: string };
+  }>('/ops/potg/parse', {
+    method: 'POST',
+    body: JSON.stringify({ imageBase64, mimeType }),
+  });
+}
+
+export async function submitPotgRecord(payload: {
+  playerName: string; team: string; pts: number; rebs: number; assts: number;
+  gameResult: string; leagueId: string; date: string;
+}) {
+  return apiFetch<{ ok: boolean; jobId: string; matched: boolean }>('/ops/potg/submit', {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-potg') },
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function uploadStoreMedia(payload: {
   title: string;
   price: number;
