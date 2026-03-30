@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { LeagueId } from '@/types';
+import { AppRole } from '@/lib/auth/roles';
 import { hasPremiumPlayerAccess, isPlayerSubscriptionActive } from '@/lib/auth/subscription';
 import { useAuth } from '@/hooks/use-auth';
 import { leagueIdFromCode, persistLeague, loadPersistedLeague } from '@/lib/leagues';
@@ -8,7 +9,9 @@ import { readClientEnv } from '@/lib/env';
 interface AppState {
   activeLeague: LeagueId;
   setActiveLeague: (l: LeagueId) => void;
-  authRole: 'fan' | 'player' | 'team_manager' | 'league_admin' | 'media_operator' | 'store_operator' | 'super_admin';
+  authRole: AppRole;
+  setAuthRole: (m: AppRole) => void;
+  isPrototypeAuthMode: boolean;
   isAdmin: boolean;
   playerSubscriptionEndsAt: string | null;
   isPlayerSubscriptionActive: boolean;
@@ -41,17 +44,26 @@ function resolveDefaultLeague(): LeagueId {
 }
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
-  const { roles, isAdmin } = useAuth();
+  const { roles, isAdmin: jwtIsAdmin } = useAuth();
   const [activeLeague, setActiveLeagueRaw] = useState<LeagueId>(resolveDefaultLeague);
+  const [authRoleOverride, setAuthRoleOverride] = useState<AppRole | null>(null);
   const [playerSubscriptionEndsAt, setPlayerSubscriptionEndsAt] = useState<string | null>(null);
   const [bagItems, setBagItems] = useState<string[]>([]);
   const [bagOpen, setBagOpen] = useState(false);
 
-  const authRole = (roles[0] ?? 'fan') as AppState['authRole'];
+  // Effective role: prototype toggle overrides JWT role when set
+  const authRole: AppRole = authRoleOverride ?? ((roles[0] ?? 'fan') as AppRole);
+
+  // isAdmin: either JWT says so, or prototype toggle is set to an admin role
+  const isAdmin = jwtIsAdmin || authRole === 'league_admin' || authRole === 'super_admin';
 
   const setActiveLeague = (l: LeagueId) => {
     setActiveLeagueRaw(l);
     persistLeague(l);
+  };
+
+  const setAuthRole = (role: AppRole) => {
+    setAuthRoleOverride(role);
   };
 
   const renewPlayerTier = () => {
@@ -87,6 +99,8 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       activeLeague,
       setActiveLeague,
       authRole,
+      setAuthRole,
+      isPrototypeAuthMode: true,
       isAdmin,
       playerSubscriptionEndsAt,
       isPlayerSubscriptionActive: isPlayerSubscriptionActive(playerSubscriptionEndsAt),
