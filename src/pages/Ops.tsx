@@ -37,7 +37,7 @@ const OpsPage = () => {
   const { user, roles } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
-  const [storeForm, setStoreForm] = useState({ title: '', price: '0', category: 'apparel', publishStatus: 'draft' as 'draft' | 'published', imageFile: null as File | null });
+  const [storeForm, setStoreForm] = useState({ title: '', price: '0', category: 'apparel', publishStatus: 'draft' as 'draft' | 'published', imageFile: null as File | null, sale: false });
   const potgFileRef = useRef<HTMLInputElement>(null);
   const [potgParseState, setPotgParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
   const [potgParseError, setPotgParseError] = useState<string | null>(null);
@@ -117,6 +117,7 @@ const OpsPage = () => {
         price: Number(storeForm.price),
         category: storeForm.category,
         publishStatus: storeForm.publishStatus,
+        sale: storeForm.sale,
         imageUrl,
       });
     },
@@ -188,6 +189,15 @@ const OpsPage = () => {
             <option value="draft">Draft</option><option value="published">Published</option>
           </select>
           <input type="file" accept="image/*" onChange={(e) => setStoreForm((s) => ({ ...s, imageFile: e.target.files?.[0] ?? null }))} />
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <div
+              onClick={() => setStoreForm(s => ({ ...s, sale: !s.sale }))}
+              className={`w-10 h-5 rounded-full relative transition-colors ${storeForm.sale ? 'bg-primary' : 'bg-secondary'}`}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-transform ${storeForm.sale ? 'translate-x-5 bg-primary-foreground' : 'translate-x-0.5 bg-muted-foreground'}`} />
+            </div>
+            <span className="text-xs font-medium">Feature in Live Stream Carousel <span className="text-muted-foreground">(mark as Sale)</span></span>
+          </label>
           <button className="gold-bg px-4 py-2 rounded-sm" onClick={() => storeMutation.mutate()} disabled={storeMutation.isPending || !hasSupabaseClientConfig}>{storeMutation.isPending ? 'Uploading…' : 'Upload & Save'}</button>
           {!hasSupabaseClientConfig && <p className="text-xs text-warning">Supabase client env missing; media uploads disabled.</p>}
           {storeMutation.error && <p className="text-xs text-destructive">{(storeMutation.error as Error).message}</p>}

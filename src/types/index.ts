@@ -66,6 +66,7 @@ export interface Product {
   sizes?: string[];
   colors?: string[];
   badge?: string;
+  sale?: boolean;
 }
 
 export interface MediaAsset {
