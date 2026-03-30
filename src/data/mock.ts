@@ -54,11 +54,11 @@ export const games: Game[] = [
 ];
 
 export const products: Product[] = [
-  { id: 'prod1', name: 'SBBL HQ Official Jersey', category: 'jerseys', price: 1850, image: storeJersey, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black/Gold', 'White/Gold'] },
-  { id: 'prod2', name: 'APEX Hoodie', category: 'hoodies', price: 2200, image: storeHoodie, sizes: ['S', 'M', 'L', 'XL'], colors: ['Black', 'Charcoal'] },
+  { id: 'prod1', name: 'SBBL HQ Official Jersey', category: 'jerseys', price: 1850, image: storeJersey, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black/Gold', 'White/Gold'], sale: true },
+  { id: 'prod2', name: 'APEX Hoodie', category: 'hoodies', price: 2200, image: storeHoodie, sizes: ['S', 'M', 'L', 'XL'], colors: ['Black', 'Charcoal'], sale: true },
   { id: 'prod3', name: 'Championship Cap', category: 'caps', price: 850, image: storeCap, colors: ['Black/Gold', 'Black/Silver'] },
-  { id: 'prod4', name: 'Court Culture Tee', category: 'tees', price: 950, image: storeTee, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black', 'Graphite'] },
-  { id: 'prod5', name: 'Pro Gear Bundle', category: 'accessories', price: 1450, image: storeAccessories, badge: 'Bundle Deal' },
+  { id: 'prod4', name: 'Court Culture Tee', category: 'tees', price: 950, image: storeTee, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black', 'Graphite'], sale: true },
+  { id: 'prod5', name: 'Pro Gear Bundle', category: 'accessories', price: 1450, image: storeAccessories, badge: 'Bundle Deal', sale: true },
   { id: 'prod6', name: 'MVP Rewards Jersey', category: 'rewards', price: 0, image: storeJersey, badge: 'Reward Item', sizes: ['M', 'L', 'XL'] },
 ];
 
