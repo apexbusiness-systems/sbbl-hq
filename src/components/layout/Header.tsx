@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { signOut } from '@/lib/api/auth';
@@ -26,6 +26,7 @@ export const Header = () => {
   const { activeLeague, setActiveLeague, authRole, setAuthRole, isPrototypeAuthMode, isAdmin, bagItems, setBagOpen } = useApp();
   const { isSignedIn, user } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [logoErrors, setLogoErrors] = useState<Record<string, boolean>>({});
 
@@ -55,7 +56,7 @@ export const Header = () => {
                   key={l.id}
                   role="tab"
                   aria-selected={isActive}
-                  onClick={() => setActiveLeague(l.id)}
+                  onClick={() => { setActiveLeague(l.id); navigate(`/league/${l.id}`); }}
                   className={`relative flex items-center gap-1.5 px-3 h-10 text-[11px] font-semibold uppercase tracking-widest transition-colors ${
                     isActive
                       ? `${l.accentClass} border-b-2 border-current`
