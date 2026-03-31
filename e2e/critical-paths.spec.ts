@@ -50,7 +50,7 @@ test.describe('critical path coverage', () => {
 
   test('schedules and teams routes render headings', async ({ page }) => {
     await page.goto('/schedules', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Schedules' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Schedules', exact: true })).toBeVisible();
     await page.goto('/teams', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Teams' })).toBeVisible();
   });
