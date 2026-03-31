@@ -372,16 +372,55 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
   });
   if (webhookProcess.error) throw new Error(webhookProcess.error.message);
 
-  // Best-effort: stamp subscription_ends_at on player registration checkout completion.
-  // Wrapped in try/catch so a profile update failure never blocks the 200 response.
+  // Best-effort post-payment side-effects — never block the 200 response.
   if (event.type === 'checkout.session.completed' && userId) {
-    try {
-      const now = new Date();
-      now.setDate(now.getDate() + 30);
-      await ctx.admin.from('profiles')
-        .update({ subscription_ends_at: now.toISOString() })
-        .eq('user_id', userId);
-    } catch { /* non-critical — subscription sync will retry via billing reconcile job */ }
+    const purchaseType = typeof metadata.purchase_type === 'string' ? metadata.purchase_type : null;
+
+    // Player registration: stamp subscription_ends_at (+30 days)
+    if (!purchaseType || purchaseType === 'player_registration') {
+      try {
+        const now = new Date();
+        now.setDate(now.getDate() + 30);
+        await ctx.admin.from('profiles')
+          .update({ subscription_ends_at: now.toISOString() })
+          .eq('user_id', userId);
+      } catch { /* non-critical */ }
+    }
+
+    // PPV purchase: create stream entitlement (24h access window)
+    if (purchaseType === 'ppv' && typeof metadata.game_id === 'string') {
+      try {
+        const expiresAt = new Date();
+        expiresAt.setHours(expiresAt.getHours() + 24);
+        await ctx.admin.rpc('create_stream_entitlement', {
+          p_game_id: metadata.game_id,
+          p_user_id: userId,
+          p_order_id: typeof metadata.order_id === 'string' ? metadata.order_id : null,
+          p_expires_at: expiresAt.toISOString(),
+          p_idempotency_key: event.id ?? crypto.randomUUID(),
+        });
+      } catch { /* non-critical — entitlement can be manually granted via ops */ }
+    }
+
+    // Store order: mark order as paid
+    if (purchaseType === 'store_order' && typeof metadata.order_id === 'string') {
+      try {
+        await ctx.admin.rpc('mark_order_paid', {
+          p_order_id: metadata.order_id,
+          p_payment_ref: providerRef,
+          p_idempotency_key: event.id ?? crypto.randomUUID(),
+        });
+        // Also close the cart
+        const { data: orderRow } = await ctx.admin.from('orders')
+          .select('metadata').eq('id', metadata.order_id).maybeSingle();
+        const cartId = (orderRow as Record<string, unknown> | null)?.metadata
+          ? ((orderRow as Record<string, unknown>).metadata as Record<string, unknown>)?.cart_id
+          : null;
+        if (typeof cartId === 'string') {
+          await ctx.admin.from('carts').update({ status: 'completed' }).eq('id', cartId);
+        }
+      } catch { /* non-critical */ }
+    }
   }
 
   return json({
@@ -836,6 +875,250 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
   return json({ ok: true, jobId: jobData.id, matched: !!profileData });
 }
 
+// ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
+
+async function handleStreamAccess({ req, admin }: HandlerCtx) {
+  const userId = requireAuth(req);
+  const gameId = new URL(req.url).pathname.split('/')[3]; // /api/streams/:gameId/access
+  const { data, error } = await admin.rpc('can_user_view_stream', {
+    p_game_id: gameId,
+    p_user_id: userId,
+  });
+  if (error) throw new Error(error.message);
+  const hasAccess = Boolean(data);
+  return json({ ok: true, hasAccess, gameId, userId });
+}
+
+async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
+  await ensureMutation(req, { req, env, admin, params: {} });
+  const userId = requireAuth(req);
+  const gameId = new URL(req.url).pathname.split('/')[3];
+  if (!env.STRIPE_SECRET_KEY) return json({ ok: false, error: 'payments_not_configured' }, 503);
+
+  const body = await req.json().catch(() => null) as { successUrl?: string; cancelUrl?: string; ppvPrice?: number } | null;
+  const unitAmount = Math.round((body?.ppvPrice ?? 2.5) * 100);
+  const successUrl = body?.successUrl ?? 'https://sbbl-hq.icu/live?access=1';
+  const cancelUrl = body?.cancelUrl ?? 'https://sbbl-hq.icu/live';
+
+  const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'POST',
+    headers: { 'authorization': `Bearer ${env.STRIPE_SECRET_KEY}`, 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      'payment_method_types[]': 'card',
+      'line_items[0][price_data][currency]': 'usd',
+      'line_items[0][price_data][product_data][name]': 'SBBL HQ PPV Access',
+      'line_items[0][price_data][unit_amount]': String(unitAmount),
+      'line_items[0][quantity]': '1',
+      'mode': 'payment',
+      'success_url': successUrl,
+      'cancel_url': cancelUrl,
+      'metadata[user_id]': userId,
+      'metadata[game_id]': gameId,
+      'metadata[purchase_type]': 'ppv',
+    }),
+  });
+  if (!stripeRes.ok) {
+    const err = await stripeRes.json() as { error?: { message?: string } };
+    return json({ ok: false, error: err?.error?.message ?? 'stripe_error' }, 502);
+  }
+  const checkout = await stripeRes.json() as { url: string; id: string };
+  return json({ ok: true, url: checkout.url, sessionId: checkout.id });
+}
+
+// ── PROFILE ONBOARDING & HEADSHOT ───────────────────────────────────────────
+
+async function handleProfileOnboarding({ req, admin }: HandlerCtx) {
+  await ensureMutation(req, { req, env: {} as Env, admin, params: {} });
+  const userId = requireAuth(req);
+  const body = await req.json().catch(() => null) as Record<string, unknown> | null;
+  if (!body) return json({ ok: false, error: 'invalid_body' }, 400);
+
+  // Upsert profile fields
+  const { error: profileErr } = await admin.from('profiles').upsert({
+    user_id: userId,
+    display_name: typeof body.displayName === 'string' ? body.displayName : undefined,
+    full_name: typeof body.fullName === 'string' ? body.fullName : undefined,
+    bio: typeof body.bio === 'string' ? body.bio : undefined,
+    preferred_league: typeof body.preferredLeague === 'string' ? body.preferredLeague : undefined,
+    primary_role_intent: typeof body.primaryRoleIntent === 'string' ? body.primaryRoleIntent : undefined,
+  }, { onConflict: 'user_id', ignoreDuplicates: false });
+  if (profileErr) throw new Error(profileErr.message);
+
+  // Create player record if role is player
+  if (body.primaryRoleIntent === 'player') {
+    await admin.from('players').upsert({
+      user_id: userId,
+      jersey_number: typeof body.jerseyNumber === 'number' ? body.jerseyNumber : null,
+      position: typeof body.position === 'string' ? body.position : null,
+      height: typeof body.height === 'string' ? body.height : null,
+    }, { onConflict: 'user_id', ignoreDuplicates: true });
+  }
+
+  await admin.from('player_registration_submissions').insert({
+    user_id: userId,
+    payload: body,
+    idempotency_key: readIdempotencyKey(req.headers),
+  }).then(() => null);
+
+  return json({ ok: true, userId });
+}
+
+async function handleProfileHeadshot({ req, admin }: HandlerCtx) {
+  await ensureMutation(req, { req, env: {} as Env, admin, params: {} });
+  const userId = requireAuth(req);
+  const body = await req.json().catch(() => null) as { assetUrl?: string; assetId?: string } | null;
+  if (!body?.assetUrl && !body?.assetId) return json({ ok: false, error: 'asset_required' }, 400);
+
+  // Lookup player record for this user
+  const { data: playerRow } = await admin.from('players').select('id').eq('user_id', userId).maybeSingle();
+  if (!playerRow) return json({ ok: false, error: 'player_profile_not_found' }, 404);
+
+  // Create a media_asset record for the headshot
+  let assetId = body.assetId;
+  if (!assetId && body.assetUrl) {
+    const { data: mediaRow, error: mediaErr } = await admin.from('media_assets').insert({
+      title: `Headshot — ${userId}`,
+      status: 'draft',
+      metadata: { image_url: body.assetUrl, type: 'headshot' },
+    }).select('id').single();
+    if (mediaErr) throw new Error(mediaErr.message);
+    assetId = mediaRow.id as string;
+  }
+
+  const { error } = await admin.from('player_profile_headshots').insert({
+    player_id: playerRow.id as string,
+    original_asset_id: assetId,
+    cropped_asset_id: assetId,
+    validation_result: 'review_required',
+    status: 'pending',
+    idempotency_key: readIdempotencyKey(req.headers),
+  });
+  if (error && !error.message.includes('duplicate')) throw new Error(error.message);
+  return json({ ok: true, userId, assetId });
+}
+
+// ── CART & ORDERS ────────────────────────────────────────────────────────────
+
+async function handleGetCart({ req, admin }: HandlerCtx) {
+  const userId = requireAuth(req);
+  // Find active cart or return empty
+  const { data: cart } = await admin.from('carts')
+    .select('id,status,created_at')
+    .eq('user_id', userId)
+    .eq('status', 'open')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!cart) return json({ ok: true, cart: null, items: [] });
+
+  const { data: items } = await admin.from('cart_items')
+    .select('id,variant_id,qty,created_at')
+    .eq('cart_id', (cart as Record<string, unknown>).id);
+
+  return json({ ok: true, cart, items: items ?? [] });
+}
+
+async function handleAddCartItem({ req, admin }: HandlerCtx) {
+  await ensureMutation(req, { req, env: {} as Env, admin, params: {} });
+  const userId = requireAuth(req);
+  const body = await req.json().catch(() => null) as { cartId?: string; variantId?: string; qty?: number } | null;
+  if (!body?.variantId) return json({ ok: false, error: 'variant_id_required' }, 400);
+
+  // Get or create an open cart
+  let cartId = body.cartId;
+  if (!cartId) {
+    const { data: existing } = await admin.from('carts')
+      .select('id').eq('user_id', userId).eq('status', 'open')
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    if (existing) {
+      cartId = (existing as Record<string, unknown>).id as string;
+    } else {
+      const { data: newCart, error: cartErr } = await admin.from('carts')
+        .insert({ user_id: userId, status: 'open', idempotency_key: readIdempotencyKey(req.headers) })
+        .select('id').single();
+      if (cartErr) throw new Error(cartErr.message);
+      cartId = (newCart as Record<string, unknown>).id as string;
+    }
+  }
+
+  const { error } = await admin.from('cart_items').insert({
+    cart_id: cartId,
+    variant_id: body.variantId,
+    qty: body.qty ?? 1,
+    idempotency_key: readIdempotencyKey(req.headers),
+  });
+  if (error && !error.message.includes('duplicate')) throw new Error(error.message);
+  return json({ ok: true, cartId, variantId: body.variantId });
+}
+
+async function handleCreateOrder({ req, admin }: HandlerCtx) {
+  await ensureMutation(req, { req, env: {} as Env, admin, params: {} });
+  const userId = requireAuth(req);
+  const body = await req.json().catch(() => null) as { cartId?: string } | null;
+  if (!body?.cartId) return json({ ok: false, error: 'cart_id_required' }, 400);
+
+  // Verify cart belongs to user
+  const { data: cart } = await admin.from('carts').select('id,status')
+    .eq('id', body.cartId).eq('user_id', userId).maybeSingle();
+  if (!cart) return json({ ok: false, error: 'cart_not_found' }, 404);
+
+  // Get cart items to compute total
+  const { data: items } = await admin.from('cart_items')
+    .select('qty,variant_id').eq('cart_id', body.cartId);
+
+  const { data: order, error } = await admin.from('orders').insert({
+    user_id: userId,
+    status: 'pending',
+    total_amount: 0, // will be updated by payment webhook
+    metadata: { cart_id: body.cartId, item_count: (items ?? []).length },
+    idempotency_key: readIdempotencyKey(req.headers),
+  }).select('id').single();
+  if (error) throw new Error(error.message);
+
+  // Mark cart as processing
+  await admin.from('carts').update({ status: 'processing' }).eq('id', body.cartId);
+
+  return json({ ok: true, orderId: (order as Record<string, unknown>).id, userId });
+}
+
+async function handlePayOrder(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, { ...ctx, params: {} });
+  const userId = requireAuth(ctx.req);
+  const orderId = ctx.params.id;
+  if (!ctx.env.STRIPE_SECRET_KEY) return json({ ok: false, error: 'payments_not_configured' }, 503);
+
+  const { data: order } = await ctx.admin.from('orders').select('id,total_amount,status')
+    .eq('id', orderId).eq('user_id', userId).maybeSingle();
+  if (!order) return json({ ok: false, error: 'order_not_found' }, 404);
+  if ((order as Record<string, unknown>).status === 'paid') return json({ ok: true, alreadyPaid: true });
+
+  const body = await ctx.req.json().catch(() => null) as { successUrl?: string; cancelUrl?: string } | null;
+  const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'POST',
+    headers: { 'authorization': `Bearer ${ctx.env.STRIPE_SECRET_KEY}`, 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      'payment_method_types[]': 'card',
+      'line_items[0][price_data][currency]': 'usd',
+      'line_items[0][price_data][product_data][name]': 'SBBL HQ Store Order',
+      'line_items[0][price_data][unit_amount]': String((order as Record<string, unknown>).total_amount as number || 100),
+      'line_items[0][quantity]': '1',
+      'mode': 'payment',
+      'success_url': body?.successUrl ?? 'https://sbbl-hq.icu/store?success=1',
+      'cancel_url': body?.cancelUrl ?? 'https://sbbl-hq.icu/store',
+      'metadata[user_id]': userId,
+      'metadata[order_id]': orderId,
+      'metadata[purchase_type]': 'store_order',
+    }),
+  });
+  if (!stripeRes.ok) {
+    const err = await stripeRes.json() as { error?: { message?: string } };
+    return json({ ok: false, error: err?.error?.message ?? 'stripe_error' }, 502);
+  }
+  const checkout = await stripeRes.json() as { url: string; id: string };
+  return json({ ok: true, url: checkout.url, sessionId: checkout.id });
+}
+
 async function handlePublicProducts({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get('leagueId');
@@ -905,21 +1188,22 @@ async function handleBillingHistory({ req, admin }: HandlerCtx) {
 const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'GET', path: '/auth/session', handler: handleAuthSession },
   { method: 'GET', path: '/api/profile/me', handler: handleMe },
-  { method: 'POST', path: '/api/profile/onboarding', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'profile-onboarding' } }) },
-  { method: 'POST', path: '/api/profile/headshot', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'profile-headshot' } }) },
+  { method: 'POST', path: '/api/profile/onboarding', handler: handleProfileOnboarding },
+  { method: 'POST', path: '/api/profile/headshot', handler: handleProfileHeadshot },
   { method: 'GET', path: '/api/games/:id/stat-sheet', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'games-stat-sheet', ...ctx.params } }) },
   { method: 'POST', path: '/api/games/:id/stats/draft', handler: (ctx) => handleDraft({ ...ctx, params: { route: 'games-stats-draft', ...ctx.params } }) },
   { method: 'POST', path: '/api/games/:id/stats/finalize', handler: (ctx) => handleFinalize({ ...ctx, params: { route: 'games-stats-finalize', ...ctx.params } }) },
   { method: 'GET', path: '/api/stats', handler: handleStats },
   { method: 'GET', path: '/api/leaderboards', handler: handleLeaderboards },
   { method: 'GET', path: '/api/streams/:gameId/preview', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'streams-preview', ...ctx.params } }) },
-  { method: 'POST', path: '/api/streams/:gameId/purchase', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'streams-purchase', ...ctx.params } }) },
-  { method: 'GET', path: '/api/streams/:gameId/access', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'streams-access', ...ctx.params } }) },
+  { method: 'POST', path: '/api/streams/:gameId/purchase', handler: handleStreamPurchase },
+  { method: 'GET', path: '/api/streams/:gameId/access', handler: handleStreamAccess },
   { method: 'POST', path: '/api/streams/:gameId/session', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'streams-session', ...ctx.params } }) },
-  { method: 'GET', path: '/api/cart', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'cart' } }) },
-  { method: 'POST', path: '/api/cart/items', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'cart-items' } }) },
-  { method: 'POST', path: '/api/orders', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'orders' } }) },
-  { method: 'POST', path: '/api/orders/:id/pay', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'orders-pay', ...ctx.params } }) },
+  { method: 'GET', path: '/api/cart', handler: handleGetCart },
+  { method: 'POST', path: '/api/cart/items', handler: handleAddCartItem },
+  { method: 'DELETE', path: '/api/cart/items/:itemId', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'cart-item-delete', ...ctx.params } }) },
+  { method: 'POST', path: '/api/orders', handler: handleCreateOrder },
+  { method: 'POST', path: '/api/orders/:id/pay', handler: handlePayOrder },
   { method: 'GET', path: '/api/billing/history', handler: handleBillingHistory },
   { method: 'GET', path: '/api/public/products', handler: handlePublicProducts },
   { method: 'GET', path: '/api/public/media', handler: handlePublicMedia },

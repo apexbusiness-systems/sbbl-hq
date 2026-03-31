@@ -5,6 +5,7 @@ import { hasPremiumPlayerAccess, isPlayerSubscriptionActive } from '@/lib/auth/s
 import { useAuth } from '@/hooks/use-auth';
 import { leagueIdFromCode, persistLeague, loadPersistedLeague } from '@/lib/leagues';
 import { readClientEnv } from '@/lib/env';
+import { getSupabaseClient } from '@/lib/supabase/client';
 
 interface AppState {
   activeLeague: LeagueId;
@@ -44,7 +45,7 @@ function resolveDefaultLeague(): LeagueId {
 }
 
 export const AppProvider = ({ children }: { children: ReactNode }) => {
-  const { roles, isAdmin: jwtIsAdmin } = useAuth();
+  const { roles, isAdmin: jwtIsAdmin, user } = useAuth();
   const [activeLeague, setActiveLeagueRaw] = useState<LeagueId>(resolveDefaultLeague);
   const [authRoleOverride, setAuthRoleOverride] = useState<AppRole | null>(null);
   const [playerSubscriptionEndsAt, setPlayerSubscriptionEndsAt] = useState<string | null>(null);
@@ -66,24 +67,31 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setAuthRoleOverride(role);
   };
 
-  const renewPlayerTier = () => {
-    const now = new Date();
-    now.setMonth(now.getMonth() + 1);
-    setPlayerSubscriptionEndsAt(now.toISOString());
-  };
+  // No-op: kept for interface compatibility. Actual renewal goes through
+  // POST /api/player/checkout → Stripe → webhook stamps subscription_ends_at in DB.
+  const renewPlayerTier = () => { /* wired via Billing page checkout flow */ };
 
+  // Subscription status sourced exclusively from Supabase — never localStorage.
+  // This prevents DevTools bypass (localStorage.setItem to fake premium access).
   useEffect(() => {
-    const stored = localStorage.getItem('sbblhq.playerSubscriptionEndsAt');
-    if (stored) setPlayerSubscriptionEndsAt(stored);
-  }, []);
-
-  useEffect(() => {
-    if (!playerSubscriptionEndsAt) {
-      localStorage.removeItem('sbblhq.playerSubscriptionEndsAt');
+    if (!user?.id) {
+      setPlayerSubscriptionEndsAt(null);
       return;
     }
-    localStorage.setItem('sbblhq.playerSubscriptionEndsAt', playerSubscriptionEndsAt);
-  }, [playerSubscriptionEndsAt]);
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+    void supabase
+      .from('profiles')
+      .select('subscription_ends_at')
+      .eq('user_id', user.id)
+      .maybeSingle()
+      .then(({ data, error }) => {
+        if (!error && data) {
+          const raw = (data as Record<string, unknown>).subscription_ends_at;
+          if (typeof raw === 'string') setPlayerSubscriptionEndsAt(raw);
+        }
+      });
+  }, [user?.id]);
 
   const addToBag = (id: string) => {
     setBagItems((prev) => [...prev, id]);
