@@ -5,6 +5,7 @@ export type StaticTeam = {
   leagueId: LeagueId;
   leagueCode: string;
   season: string;
+  division?: string;
 };
 
 /**
@@ -32,23 +33,27 @@ export const STATIC_TEAMS: StaticTeam[] = [
   { name: 'Banayad Hoopers', leagueId: 'tgifbl', leagueCode: 'TGIFBL', season: 'Season 1' },
 
   // ── Weekend Basketball League — Season 3 ──
-  { name: 'OSY', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Rebelde Jrs', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Solid North', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Crosslinx Warriors', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Rebelde', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Downtown', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'La Liga Elite', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Blacksmith', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Splash', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'SPG', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Harina x Wild Dogs', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'NSD', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: '4Lifers', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Serviteurs', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Batang Kanto', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Disciples', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
-  { name: 'Ball is Life', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3' },
+  { name: 'Ball is Life', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite' },
+  { name: '4Lifers', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite' },
+  { name: 'NSD', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite' },
+  { name: 'Disciples', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite' },
+  { name: 'Dark Knight', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite' },
+  { name: 'Avlis', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite' },
+  { name: 'Downtown', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 2' },
+  { name: 'Rebelde', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 2' },
+  { name: 'BRB', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 2' },
+  { name: 'Harina x Wild Dogs', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 2' },
+  { name: 'GLS Auto', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 2' },
+  { name: 'Crosslinx Warriors', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 2' },
+  { name: 'Splash', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 3' },
+  { name: 'Batang Kanto', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 3' },
+  { name: 'Blacksmith', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 3' },
+  { name: 'Rebelde Jrs.', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 3' },
+  { name: 'Solid North', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 3' },
+  { name: 'Pinoy Northstars', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 3' },
+  { name: 'Serviteurs', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 3' },
+  { name: 'OSY x LCL', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 3' },
+  { name: 'SPG Cutie', leagueId: 'wbl', leagueCode: 'WBL', season: 'Season 3', division: 'Elite 3' },
 ];
 
 export function getTeamsByLeague(leagueId: LeagueId): StaticTeam[] {
