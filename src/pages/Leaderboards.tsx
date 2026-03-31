@@ -76,7 +76,7 @@ const LeaderboardsPage = () => {
   const rankIcon = (i: number) => {
     if (i === 0) return <Crown className="w-4 h-4 text-primary" />;
     if (i === 1) return <Medal className="w-4 h-4 text-wbl" />;
-    if (i === 2) return <Medal className="w-4 h-4 text-tgifbl" />;
+    if (i === 2) return <Medal className="w-4 h-4 text-tgif" />;
     return <span className="stat-numeral text-sm text-muted-foreground w-4 text-center">{i + 1}</span>;
   };
 

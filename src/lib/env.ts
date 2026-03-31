@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const clientEnvSchema = z.object({
   VITE_APP_NAME: z.string().min(1).default('SBBL HQ'),
-  VITE_DEFAULT_LEAGUE: z.enum(['SBBL', 'WBL', 'TGIFBL']).default('SBBL'),
+  VITE_DEFAULT_LEAGUE: z.enum(['SBBL', 'WBL', 'TGIF']).default('SBBL'),
   VITE_DEFAULT_PPV_PRICE: z.coerce.number().positive().default(2.5),
   VITE_PUBLIC_BASE_URL: z.string().url().default('http://localhost:5173'),
   // Optional to avoid hard-crashing the SPA when env vars are missing in preview/prod.

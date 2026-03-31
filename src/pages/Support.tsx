@@ -20,7 +20,7 @@ const faqs = [
   },
   {
     q: 'Which leagues are in the APEX organization?',
-    a: 'SBBL (Sunday\'s Best Basketball League), WBL (Weekend Basketball League), and TGIFBL (Thank God It\'s Friday Basketball League). Each league has its own standings, stats, and media.',
+    a: 'SBBL (Sunday\'s Best Basketball League), WBL (Weekend Basketball League), and TGIF (Thank God It\'s Friday Basketball League). Each league has its own standings, stats, and media.',
   },
   {
     q: 'How do I report a stat error or game issue?',
@@ -107,7 +107,7 @@ const SupportPage = () => {
             <MessageCircle className="w-5 h-5 text-muted-foreground flex-shrink-0" />
             <div>
               <p className="text-sm font-medium">General Inquiry</p>
-              <p className="text-[11px] text-muted-foreground">Questions about SBBL, WBL, or TGIFBL</p>
+              <p className="text-[11px] text-muted-foreground">Questions about SBBL, WBL, or TGIF</p>
             </div>
           </a>
         </div>

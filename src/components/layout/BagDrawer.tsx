@@ -1,3 +1,5 @@
+import { AppRole } from '@/lib/auth/roles';
+import { getStoreDiscountPercent } from '@/lib/auth/subscription';
 import { useState } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
@@ -8,15 +10,25 @@ import { toast } from 'sonner';
 
 export const BagDrawer = () => {
   const { bagOpen, setBagOpen, bagItems, removeFromBag } = useApp();
-  const { session } = useAuth();
+  const { session, roles } = useAuth();
+  const { playerSubscriptionEndsAt } = useApp();
   const [checkingOut, setCheckingOut] = useState(false);
 
   if (!bagOpen) return null;
+
+  const appRoles = (roles.length > 0 ? roles : ['fan']) as AppRole[];
+  // Determine highest role for discount processing
+  const primaryRole = appRoles[appRoles.length - 1];
+  const discountPercent = getStoreDiscountPercent(primaryRole, playerSubscriptionEndsAt);
+  const discountMultiplier = 1 - (discountPercent / 100);
 
   const subtotal = bagItems.reduce((sum, id) => {
     const product = products.find(p => p.id === id);
     return sum + (product?.price ?? 0);
   }, 0);
+
+  const finalTotal = subtotal * discountMultiplier;
+
 
   const handleCheckout = async () => {
     if (!session) { toast.error('Sign in to complete your purchase.'); return; }
@@ -95,7 +107,17 @@ export const BagDrawer = () => {
           <div className="p-4 border-t border-border space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Subtotal</span>
-              <span className="font-display font-bold text-primary">₱{subtotal.toLocaleString()}</span>
+              <span className="font-display font-bold text-muted-foreground line-through">₱{subtotal.toLocaleString()}</span>
+            </div>
+            {discountPercent > 0 && (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-success font-bold uppercase tracking-wider">{discountPercent}% Player/Coach Discount</span>
+                <span className="font-display font-bold text-success">-₱{(subtotal - finalTotal).toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between border-t border-border/50 pt-2">
+              <span className="text-sm font-bold">Total</span>
+              <span className="font-display font-bold text-primary text-xl">₱{finalTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>
             </div>
             <button
               onClick={handleCheckout}
