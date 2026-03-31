@@ -53,7 +53,18 @@ export default defineConfig(({ mode }) => {
         },
         workbox: {
           globPatterns: ["**/*.{js,css,html,ico,png,svg,jpg,jpeg}"],
+          cleanupOutdatedCaches: true,
+          clientsClaim: true,
+          skipWaiting: true,
           runtimeCaching: [
+            {
+              urlPattern: /^https:\/\/sbbl-hq\.icu\/.*/i,
+              handler: "NetworkFirst",
+              options: {
+                cacheName: "sbbl-hq-cache",
+                expiration: { maxEntries: 200 },
+              },
+            },
             {
               urlPattern: ({ request }: { request: Request }) => request.destination === "image",
               handler: "CacheFirst",
@@ -64,6 +75,7 @@ export default defineConfig(({ mode }) => {
             },
           ],
         },
+        devOptions: { enabled: true },
       }),
       mode === "development" && componentTagger(),
     ].filter(Boolean),
