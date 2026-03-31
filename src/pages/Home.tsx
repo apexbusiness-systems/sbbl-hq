@@ -109,8 +109,8 @@ const HomePage = () => {
                     <Play className="w-4 h-4" /> Watch Live
                   </Link>
                 ) : (
-                  <Link to="/teams" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
-                    <Calendar className="w-4 h-4" /> View Teams
+                  <Link to={`/teams?league=${activeLeague}`} className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                    <Trophy className="w-4 h-4" /> Teams & Standings
                   </Link>
                 )}
                 <Link to="/schedules" className="px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2 border border-border text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors">
