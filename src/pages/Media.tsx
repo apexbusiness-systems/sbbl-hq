@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { mediaAssets } from '@/data/mock';
+import { mediaAssets as mockMediaAssets } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { useApp } from '@/contexts/AppContext';
-import { LeagueId } from '@/types';
+import { LeagueId, MediaAsset } from '@/types';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api/client';
 import { Play, Share2, Upload, Eye, Clock, Check } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -37,13 +39,26 @@ const MediaPage = () => {
     setSearchParams(val === 'all' ? {} : { league: val }, { replace: true });
   };
 
-  const filtered = mediaAssets.filter(m => {
+  const mediaQuery = useQuery({
+    queryKey: ['public-media'],
+    queryFn: () => apiFetch<{ ok: boolean; data: MediaAsset[] }>('/api/public/media'),
+    retry: 1,
+    staleTime: 60_000,
+  });
+
+  const allMedia = useMemo<MediaAsset[]>(() => {
+    const apiData = mediaQuery.data?.data;
+    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
+    return mockMediaAssets;
+  }, [mediaQuery.data]);
+
+  const filtered = allMedia.filter(m => {
     const leagueMatch = leagueFilter === 'all' || m.leagueId === leagueFilter;
     const typeMatch = typeFilter === 'all' || m.type === typeFilter;
     return leagueMatch && typeMatch;
   });
 
-  const shareAsset = shareModal ? mediaAssets.find(m => m.id === shareModal) : null;
+  const shareAsset = shareModal ? allMedia.find(m => m.id === shareModal) : null;
   const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
 
   const handleCopyLink = async () => {

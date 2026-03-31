@@ -14,6 +14,14 @@ begin
 end;
 $$ language plpgsql;
 
+create or replace function public.has_any_role(roles public.app_role[]) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.user_role_assignments
+    where user_id = auth.uid() and role = any(roles)
+  )
+$$;
+
 create table if not exists public.profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique,
@@ -826,15 +834,24 @@ begin
   end loop;
 end $$;
 
-create policy if not exists profiles_public_read on public.profiles for select using (profile_public = true or user_id = auth.uid());
-create policy if not exists profiles_self_update on public.profiles for update using (user_id = auth.uid());
-create policy if not exists orders_self_read on public.orders for select using (user_id = auth.uid());
-create policy if not exists orders_self_mutate on public.orders for update using (user_id = auth.uid());
-create policy if not exists headshots_self_read on public.player_profile_headshots for select using (exists(select 1 from public.players p where p.id = player_id and p.user_id = auth.uid()));
-create policy if not exists registration_self_write on public.player_registration_submissions for all using (user_id = auth.uid()) with check (user_id = auth.uid());
-create policy if not exists products_public_read on public.products for select using (status = 'published');
-create policy if not exists media_assets_public_read on public.media_assets for select using (status = 'published');
-create policy if not exists schedules_public_read on public.games for select using (published = true);
+drop policy if exists profiles_public_read on public.profiles;
+create policy profiles_public_read on public.profiles for select using (profile_public = true or user_id = auth.uid());
+drop policy if exists profiles_self_update on public.profiles;
+create policy profiles_self_update on public.profiles for update using (user_id = auth.uid());
+drop policy if exists orders_self_read on public.orders;
+create policy orders_self_read on public.orders for select using (user_id = auth.uid());
+drop policy if exists orders_self_mutate on public.orders;
+create policy orders_self_mutate on public.orders for update using (user_id = auth.uid());
+drop policy if exists headshots_self_read on public.player_profile_headshots;
+create policy headshots_self_read on public.player_profile_headshots for select using (exists(select 1 from public.players p where p.id = player_id and p.user_id = auth.uid()));
+drop policy if exists registration_self_write on public.player_registration_submissions;
+create policy registration_self_write on public.player_registration_submissions for all using (user_id = auth.uid()) with check (user_id = auth.uid());
+drop policy if exists products_public_read on public.products;
+create policy products_public_read on public.products for select using (status = 'published');
+drop policy if exists media_assets_public_read on public.media_assets;
+create policy media_assets_public_read on public.media_assets for select using (status = 'published');
+drop policy if exists schedules_public_read on public.games;
+create policy schedules_public_read on public.games for select using (published = true);
 
 insert into storage.buckets (id, name, public)
 values

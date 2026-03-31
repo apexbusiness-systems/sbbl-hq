@@ -67,15 +67,12 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     setAuthRoleOverride(role);
   };
 
-  const renewPlayerTier = () => {
-    // TODO: replace with POST /api/player/checkout → Stripe checkout session
-    const now = new Date();
-    now.setMonth(now.getMonth() + 1);
-    setPlayerSubscriptionEndsAt(now.toISOString());
-  };
+  // No-op: kept for interface compatibility. Actual renewal goes through
+  // POST /api/player/checkout → Stripe → webhook stamps subscription_ends_at in DB.
+  const renewPlayerTier = () => { /* wired via Billing page checkout flow */ };
 
-  // Pull subscription_ends_at from the database — source of truth is the profile row,
-  // not localStorage. If the column doesn't exist yet the query fails silently (null).
+  // Subscription status sourced exclusively from Supabase — never localStorage.
+  // This prevents DevTools bypass (localStorage.setItem to fake premium access).
   useEffect(() => {
     if (!user?.id) {
       setPlayerSubscriptionEndsAt(null);
@@ -83,7 +80,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
     }
     const supabase = getSupabaseClient();
     if (!supabase) return;
-
     void supabase
       .from('profiles')
       .select('subscription_ends_at')

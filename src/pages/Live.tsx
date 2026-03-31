@@ -1,19 +1,43 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
 import { games, players, products } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
-import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag, LogIn } from 'lucide-react';
+import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
 import { toast } from 'sonner';
-import { Link } from 'react-router-dom';
+import { apiFetch } from '@/lib/api/client';
 
 type ViewerState = 'locked' | 'preview' | 'purchased';
 
 const LivePage = () => {
-  const { isSignedIn } = useAuth();
   const { addToBag, authRole, hasPremiumPlayerAccess, isAdmin, playerSubscriptionEndsAt } = useApp();
+  const { user, session } = useAuth();
+  const token = session?.access_token ?? null;
+  const [ppvEntitled, setPpvEntitled] = useState(false);
+  const [purchasing, setPurchasing] = useState(false);
   const liveGame = games.find(g => g.status === 'live') || games[0];
+
+  // Derive viewer entitlement from auth — no prototype toggle.
+  // Admins and active premium players always have access.
+  // Otherwise check for a PPV purchase for this specific game.
+  const viewerState = useMemo<ViewerState>(() => {
+    if (!user) return 'locked';
+    if (isAdmin || hasPremiumPlayerAccess) return 'purchased';
+    if (ppvEntitled) return 'purchased';
+    return 'preview';
+  }, [user, isAdmin, hasPremiumPlayerAccess, ppvEntitled]);
+
+  // Fetch per-game PPV entitlement from worker once we have a logged-in user
+  // who doesn't already have full premium access.
+  useEffect(() => {
+    if (!user || isAdmin || hasPremiumPlayerAccess) return;
+    apiFetch<{ entitled: boolean }>(`/api/streams/${liveGame.id}/access`, {}, token)
+      .then(res => { if (res.entitled) setPpvEntitled(true); })
+      .catch(() => { /* network error — stay in preview */ });
+  }, [user?.id, liveGame.id, isAdmin, hasPremiumPlayerAccess, token]);
+
   const [comments, setComments] = useState([
     { user: 'CourtSide_Fan', text: 'Rivera is on fire tonight!' },
     { user: 'HoopHead23', text: 'That crossover was nasty 🔥' },
@@ -28,21 +52,6 @@ const LivePage = () => {
   const featuredProducts = products.filter(p => p.sale);
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselProduct = featuredProducts[carouselIdx] ?? products[0];
-
-  // Derive access level from real auth — no prototype toggle
-  const deriveViewerState = (): ViewerState => {
-    if (!isSignedIn) return 'locked';
-    if (isAdmin || hasPremiumPlayerAccess) return 'purchased';
-    return 'preview';
-  };
-
-  const [viewerState, setViewerState] = useState<ViewerState>(deriveViewerState);
-
-  // Re-derive when auth state loads/changes
-  useEffect(() => {
-    setViewerState(deriveViewerState());
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSignedIn, isAdmin, hasPremiumPlayerAccess]);
 
   useEffect(() => {
     if (featuredProducts.length <= 1) return;
@@ -179,14 +188,9 @@ const LivePage = () => {
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-background px-4 text-center">
                   <Lock className="w-12 h-12 text-muted-foreground mb-4" />
                   <h2 className="font-display text-2xl font-bold mb-2">Sign In to Watch</h2>
-                  <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-                    Create a free account or sign in to access live games, PPV events, and exclusive content.
-                  </p>
-                  <Link
-                    to="/login"
-                    className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2"
-                  >
-                    <LogIn className="w-4 h-4" /> Sign In
+                  <p className="text-sm text-muted-foreground mb-4">You need an account to access live streams.</p>
+                  <Link to="/login" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm">
+                    Sign In
                   </Link>
                 </div>
               ) : viewerState === 'preview' ? (
@@ -203,12 +207,27 @@ const LivePage = () => {
                     <p className="text-sm text-muted-foreground mb-6">{liveGame.venue} · {liveGame.court} · Q4 8:42</p>
                     <div className="flex flex-col items-center gap-3">
                       {hasPremiumPlayerAccess && authRole === 'player' ? (
-                        <button onClick={() => setViewerState('purchased')} className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
+                        // Should not normally reach preview if premium — belt-and-suspenders
+                        <button disabled className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2 opacity-80">
                           <Play className="w-4 h-4" /> Free Player Access Unlocked
                         </button>
                       ) : (
-                        <button onClick={handlePurchaseAccess} className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2">
-                          <Play className="w-4 h-4" /> Purchase Access — ${liveGame.ppvPrice.toFixed(2)}
+                        <button
+                          disabled={purchasing}
+                          onClick={async () => {
+                            setPurchasing(true);
+                            try {
+                              const res = await apiFetch<{ url: string }>(`/api/streams/${liveGame.id}/purchase`, { method: 'POST' }, token);
+                              if (res.url) window.location.href = res.url;
+                            } catch {
+                              toast.error('Could not start checkout. Please try again.');
+                            } finally {
+                              setPurchasing(false);
+                            }
+                          }}
+                          className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2 disabled:opacity-60"
+                        >
+                          <Play className="w-4 h-4" /> {purchasing ? 'Redirecting…' : `Purchase Access — $${liveGame.ppvPrice.toFixed(2)}`}
                         </button>
                       )}
                       <p className="text-[11px] text-muted-foreground max-w-xs">
