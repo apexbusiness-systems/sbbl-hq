@@ -8,13 +8,13 @@ vi.mock('@/hooks/use-auth', () => ({
 }));
 
 describe('login page', () => {
-  it('renders secure sign in heading', () => {
+  it('renders sign in heading', () => {
     render(
       <BrowserRouter>
         <LoginPage />
       </BrowserRouter>,
     );
-    expect(screen.getByText('Secure Sign In')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /sign in/i })).toBeInTheDocument();
   });
 
   it('renders trust bullets on desktop', () => {

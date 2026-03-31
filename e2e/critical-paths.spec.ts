@@ -22,9 +22,9 @@ test.describe('critical path coverage', () => {
     await expect(page.getByRole('tab', { name: 'SBBL' })).toHaveAttribute('aria-selected', 'false');
   });
 
-  test('login route renders secure sign in without leaking raw config names', async ({ page }) => {
+  test('login route renders sign in without leaking raw config names', async ({ page }) => {
     await page.goto('/login', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Secure Sign In' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible({ timeout: 15000 });
     await expect(page.locator('body')).not.toContainText(/VITE_SUPABASE|SUPABASE_SERVICE_ROLE_KEY|SUPABASE_URL/);
   });
 

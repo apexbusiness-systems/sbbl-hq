@@ -4,7 +4,6 @@ import { useApp } from '@/contexts/AppContext';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { signOut } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
-import { AppRole } from '@/lib/auth/roles';
 import {
   RefreshCw, Share2, CreditCard, Settings, Shield, ShoppingBag, Menu, X, LogIn, LogOut
 } from 'lucide-react';
@@ -26,10 +25,8 @@ const leagueAwarePaths: Record<LeagueAwareLabel, string> = {
   Media: '/media',
 };
 
-const authRoleCycle: AppRole[] = ['fan', 'player', 'league_admin', 'super_admin'];
-
 export const Header = () => {
-  const { activeLeague, setActiveLeague, authRole, setAuthRole, isPrototypeAuthMode, isAdmin, bagItems, setBagOpen } = useApp();
+  const { activeLeague, setActiveLeague, isAdmin, bagItems, setBagOpen } = useApp();
   const { isSignedIn, user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
@@ -38,12 +35,6 @@ export const Header = () => {
 
   const handleLogoError = (id: string) => {
     setLogoErrors((prev) => ({ ...prev, [id]: true }));
-  };
-
-  const cycleAuthRole = () => {
-    const currentIndex = authRoleCycle.findIndex((role) => role === authRole);
-    const nextRole = authRoleCycle[(currentIndex + 1) % authRoleCycle.length];
-    setAuthRole(nextRole);
   };
 
   return (
@@ -88,22 +79,6 @@ export const Header = () => {
 
           {/* Right utility controls */}
           <div className="flex items-center gap-2">
-            {/* Prototype auth role toggle — always visible */}
-            {isPrototypeAuthMode && (
-              <button
-                onClick={cycleAuthRole}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-sm text-xs font-medium transition-colors ${
-                  isAdmin
-                    ? 'bg-primary/15 text-primary border border-primary/30'
-                    : 'bg-secondary text-secondary-foreground'
-                }`}
-                title="Cycle auth role (prototype)"
-              >
-                <Shield className="w-3 h-3" />
-                {authRole.replace(/_/g, ' ')}
-              </button>
-            )}
-
             <div className="hidden md:flex items-center gap-1">
               <button className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Refresh"><RefreshCw className="w-3.5 h-3.5" /></button>
               <button className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Share"><Share2 className="w-3.5 h-3.5" /></button>

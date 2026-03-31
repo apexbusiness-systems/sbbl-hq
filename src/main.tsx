@@ -4,7 +4,13 @@ import "./index.css";
 import { registerSW } from "virtual:pwa-register";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
 
-registerSW({ immediate: true });
+registerSW({
+  onNeedRefresh() {
+    if (confirm('New version available. Reload to update?')) {
+      window.location.reload();
+    }
+  },
+});
 
 document.title = "SBBL HQ";
 

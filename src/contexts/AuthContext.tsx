@@ -77,13 +77,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await load();
 
       const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
-        setSession(nextSession);
+        // Use the session directly from the event — never call load() here.
+        // Calling load() from inside onAuthStateChange triggers a second
+        // getSession() which can transiently return null and wipe auth state
+        // during the magic-link or password sign-in redirect window.
+        setSession(nextSession ?? null);
         setUser(nextSession?.user ?? null);
-        if (!nextSession?.user) {
+        if (nextSession?.user?.id) {
+          void fetchProfileAndRoles(nextSession.user.id).then(({ profile: p, roles: r }) => {
+            setProfile(p);
+            setRoles(r);
+          }).catch(() => {
+            setProfile(null);
+            setRoles([]);
+          });
+        } else {
           setProfile(null);
           setRoles([]);
         }
-        void load();
       });
       unsubscribe = () => data.subscription.unsubscribe();
     };
