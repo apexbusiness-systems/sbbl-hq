@@ -52,7 +52,10 @@ export default defineConfig(({ mode }) => {
           ]
         },
         workbox: {
-          globPatterns: ["**/*.{js,css,html,ico,png,svg,jpg,jpeg}"],
+          // globPatterns deliberately omitted — vite-plugin-pwa defaults to
+          // ["**/*.{js,css,html,ico,png,svg,jpg,jpeg}"] in production, and
+          // omitting it prevents a spurious dev-dist warning when the Vite
+          // dev server starts before the dist directory is populated.
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
