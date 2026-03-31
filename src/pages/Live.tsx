@@ -1,42 +1,18 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
 import { games, players, products } from '@/data/mock';
-import { LeagueBadge } from '@/components/ui/LeagueBadge';
-import gameAction from '@/assets/game-action.svg';
-import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
+import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
+import { CASLNudge } from '@/components/CASLNudge';
+import { MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiFetch } from '@/lib/api/client';
-
-type ViewerState = 'locked' | 'preview' | 'purchased';
 
 const LivePage = () => {
-  const { addToBag, authRole, hasPremiumPlayerAccess, isAdmin, playerSubscriptionEndsAt } = useApp();
-  const { user, session } = useAuth();
+  const { addToBag, hasPremiumPlayerAccess } = useApp();
+  const { user, session, roles } = useAuth();
   const token = session?.access_token ?? null;
-  const [ppvEntitled, setPpvEntitled] = useState(false);
-  const [purchasing, setPurchasing] = useState(false);
+
   const liveGame = games.find(g => g.status === 'live') || games[0];
-
-  // Derive viewer entitlement from auth — no prototype toggle.
-  // Admins and active premium players always have access.
-  // Otherwise check for a PPV purchase for this specific game.
-  const viewerState = useMemo<ViewerState>(() => {
-    if (!user) return 'locked';
-    if (isAdmin || hasPremiumPlayerAccess) return 'purchased';
-    if (ppvEntitled) return 'purchased';
-    return 'preview';
-  }, [user, isAdmin, hasPremiumPlayerAccess, ppvEntitled]);
-
-  // Fetch per-game PPV entitlement from worker once we have a logged-in user
-  // who doesn't already have full premium access.
-  useEffect(() => {
-    if (!user || isAdmin || hasPremiumPlayerAccess) return;
-    apiFetch<{ entitled: boolean }>(`/api/streams/${liveGame.id}/access`, {}, token)
-      .then(res => { if (res.entitled) setPpvEntitled(true); })
-      .catch(() => { /* network error — stay in preview */ });
-  }, [user, user?.id, liveGame.id, isAdmin, hasPremiumPlayerAccess, token]);
 
   const [comments, setComments] = useState([
     { user: 'CourtSide_Fan', text: 'Rivera is on fire tonight!' },
@@ -87,14 +63,9 @@ const LivePage = () => {
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
   };
 
-  // TODO: replace with POST /api/streams/:gameId/purchase → Stripe checkout
-  const handlePurchaseAccess = () => {
-    toast.info('Payment integration coming soon. Contact league admin for access.');
-  };
-
   const sidebar = (
     <div className="space-y-4">
-      {/* Featured Merch Carousel — sale items, eye-level with video */}
+      {/* Featured Merch Carousel */}
       {featuredProducts.length > 0 && (
         <div className="panel overflow-hidden">
           <div className="relative aspect-square overflow-hidden bg-secondary">
@@ -170,105 +141,26 @@ const LivePage = () => {
 
   return (
     <div className="min-h-screen">
-      {/*
-        Desktop layout: 3-col grid
-          - Left 2 cols: video stacked above actions+chat
-          - Right 1 col: sticky merch sidebar always visible beside video
-        Mobile: single column, sidebar below chat
-      */}
       <div className="lg:container lg:py-4">
         <div className="lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
 
-          {/* LEFT: video + actions + chat */}
+          {/* LEFT: broadcast area + actions + chat */}
           <div className="lg:col-span-2 flex flex-col">
 
-            {/* Broadcast Area */}
+            {/* Broadcast Area — all access-gate logic lives inside LiveStreamPlayer */}
             <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
-              {viewerState === 'locked' ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-background px-4 text-center">
-                  <Lock className="w-12 h-12 text-muted-foreground mb-4" />
-                  <h2 className="font-display text-2xl font-bold mb-2">Sign In to Watch</h2>
-                  <p className="text-sm text-muted-foreground mb-4">You need an account to access live streams.</p>
-                  <Link to="/login" className="gold-bg px-6 py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm">
-                    Sign In
-                  </Link>
-                </div>
-              ) : viewerState === 'preview' ? (
-                <div className="absolute inset-0">
-                  <img src={gameAction} alt="Game preview" className="w-full h-full object-cover opacity-40" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-background via-background/60 to-transparent" />
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-4">
-                    <LeagueBadge leagueId={liveGame.leagueId} size="md" />
-                    <div className="mt-4 mb-2">
-                      <span className="stat-numeral text-4xl md:text-5xl">{liveGame.homeTeam.name}</span>
-                      <span className="stat-numeral text-4xl md:text-5xl text-primary mx-4">{liveGame.score?.home} — {liveGame.score?.away}</span>
-                      <span className="stat-numeral text-4xl md:text-5xl">{liveGame.awayTeam.name}</span>
-                    </div>
-                    <p className="text-sm text-muted-foreground mb-6">{liveGame.venue} · {liveGame.court} · Q4 8:42</p>
-                    <div className="flex flex-col items-center gap-3">
-                      {hasPremiumPlayerAccess && authRole === 'player' ? (
-                        // Should not normally reach preview if premium — belt-and-suspenders
-                        <button disabled className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2 opacity-80">
-                          <Play className="w-4 h-4" /> Free Player Access Unlocked
-                        </button>
-                      ) : (
-                        <button
-                          disabled={purchasing}
-                          onClick={async () => {
-                            setPurchasing(true);
-                            try {
-                              const res = await apiFetch<{ url: string }>(`/api/streams/${liveGame.id}/purchase`, { method: 'POST' }, token);
-                              if (res.url) window.location.href = res.url;
-                            } catch {
-                              toast.error('Could not start checkout. Please try again.');
-                            } finally {
-                              setPurchasing(false);
-                            }
-                          }}
-                          className="gold-bg px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center gap-2 disabled:opacity-60"
-                        >
-                          <Play className="w-4 h-4" /> {purchasing ? 'Redirecting…' : `Purchase Access — $${liveGame.ppvPrice.toFixed(2)}`}
-                        </button>
-                      )}
-                      <p className="text-[11px] text-muted-foreground max-w-xs">
-                        Session-bound access. Do not share your stream link. Account watermark applied.
-                      </p>
-                      {authRole === 'player' && (
-                        <p className="text-[11px] text-muted-foreground">
-                          Player tier: {hasPremiumPlayerAccess ? `active through ${playerSubscriptionEndsAt ? new Date(playerSubscriptionEndsAt).toLocaleDateString() : 'this cycle'}` : 'inactive (renew in Billing for free monthly livestream access)'}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="absolute inset-0">
-                  <img src={gameAction} alt="Live game" className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-background/80 via-transparent to-transparent" />
-                  <div className="absolute top-4 left-4 panel-glass px-4 py-2 flex items-center gap-4">
-                    <LeagueBadge leagueId={liveGame.leagueId} />
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm font-medium">{liveGame.homeTeam.name}</span>
-                      <span className="stat-numeral text-xl text-live">{liveGame.score?.home}</span>
-                      <span className="text-xs text-muted-foreground">—</span>
-                      <span className="stat-numeral text-xl text-live">{liveGame.score?.away}</span>
-                      <span className="text-sm font-medium">{liveGame.awayTeam.name}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full bg-live animate-pulse" />
-                      <span className="text-[10px] text-live font-semibold uppercase">Live · Q4</span>
-                    </div>
-                  </div>
-                  <div className="absolute top-4 right-4 text-[10px] text-foreground/10 font-mono">
-                    SESSION-BOUND · ACC-2847
-                  </div>
-                </div>
-              )}
+              <LiveStreamPlayer
+                game={liveGame}
+                userId={user?.id ?? null}
+                roles={roles}
+                token={token}
+                hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+              />
             </div>
 
             {/* Actions + Chat */}
             <div className="container lg:px-0 py-4 space-y-4">
-              {/* Actions Bar */}
+              {/* Reaction bar */}
               <div className="flex items-center gap-3 flex-wrap">
                 <button onClick={() => setReactions(r => ({ ...r, fire: r.fire + 1 }))} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   🔥 <span className="stat-numeral">{reactions.fire}</span>
@@ -325,18 +217,21 @@ const LivePage = () => {
                 </div>
               </div>
 
-              {/* Mobile-only sidebar (below chat on small screens) */}
+              {/* Mobile-only sidebar */}
               <div className="lg:hidden">{sidebar}</div>
             </div>
           </div>
 
-          {/* RIGHT: sticky sidebar — always visible beside video on desktop */}
+          {/* RIGHT: sticky sidebar */}
           <div className="hidden lg:block sticky top-[73px]">
             {sidebar}
           </div>
 
         </div>
       </div>
+
+      {/* CASL nudge — one-time per session, bottom-right, easy dismiss */}
+      <CASLNudge roles={roles} />
     </div>
   );
 };
