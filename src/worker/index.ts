@@ -1367,7 +1367,7 @@ async function handleProfileHeadshot({ req, admin }: HandlerCtx) {
 // ── CART & ORDERS ────────────────────────────────────────────────────────────
 
 
-async function handleEditEntity(ctx: HandlerCtx, table: string, allowedFields: (body: any) => any) {
+async function handleEditEntity(ctx: HandlerCtx, table: string, allowedFields: (body: Record<string, unknown>) => Record<string, unknown>) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireAdminSession(ctx.req, ctx.admin);
   const id = ctx.params.id;
@@ -1659,7 +1659,7 @@ async function handlePublicPotg({ req, admin }: HandlerCtx) {
 async function handlePublicSchedule({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const league = url.searchParams.get('league')?.toUpperCase();
-  let query = admin.from('schedule_slots')
+  const query = admin.from('schedule_slots')
     .select('id,starts_at,ends_at,status,venues(name,address),seasons(leagues(code))')
     .in('status', ['upcoming', 'in_progress'])
     .order('starts_at')

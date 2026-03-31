@@ -15,7 +15,7 @@ const SchedulesPage = () => {
 
   const schedulesQuery = useQuery({
     queryKey: ['schedules'],
-    queryFn: () => apiFetch<{ ok: boolean; data: any[] }>('/api/public/schedule'),
+    queryFn: () => apiFetch<{ ok: boolean; data: unknown[] }>('/api/public/schedule'),
     staleTime: 60_000,
   });
 

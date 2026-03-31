@@ -25,7 +25,7 @@ const LivePage = () => {
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const featuredProducts: any[] = [];
+  const featuredProducts: unknown[] = [];
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselProduct = featuredProducts[carouselIdx];
 

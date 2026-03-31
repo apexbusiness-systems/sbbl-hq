@@ -264,7 +264,7 @@ const HomePage = () => {
         {/* Players of the Game — always rendered; empty state when no data for this league yet */}
         {(() => {
           // In a real scenario we might map import_jobs to PotgProfile here.
-  const potgList = (potgQuery.data?.data || []).map((job: any) => ({
+  const potgList = (potgQuery.data?.data || []).map((job: unknown) => ({
     id: job.id,
     playerId: job.payload_summary.playerId || '',
     name: job.payload_summary.playerName || '',

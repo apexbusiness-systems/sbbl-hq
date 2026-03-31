@@ -29,7 +29,7 @@ const OpsPage = () => {
   const queryClient = useQueryClient();
   const { user, roles } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
-  const [editTarget, setEditTarget] = useState<any | null>(null);
+  const [editTarget, setEditTarget] = useState<Record<string, unknown> | null>(null);
 
   const editMutation = useMutation({
     mutationFn: ({ type, id, patch }: { type: string; id: string; patch: Record<string, unknown> }) =>
