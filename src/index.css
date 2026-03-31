@@ -42,8 +42,8 @@
     --sbbl-glow: 35 100% 60%;
     --wbl: 210 60% 60%;
     --wbl-glow: 215 70% 65%;
-    --tgif: 42 50% 42%;
-    --tgif-glow: 45 55% 48%;
+    --tgifbl: 42 50% 42%;
+    --tgifbl-glow: 45 55% 48%;
 
     /* Functional */
     --live: 210 100% 55%;
@@ -127,11 +127,11 @@
     border: 1px solid hsl(var(--wbl) / 0.3);
   }
 
-  .league-badge-tgif {
+  .league-badge-tgifbl {
     @apply league-badge;
-    background: hsl(var(--tgif) / 0.15);
-    color: hsl(var(--tgif));
-    border: 1px solid hsl(var(--tgif) / 0.3);
+    background: hsl(var(--tgifbl) / 0.15);
+    color: hsl(var(--tgifbl));
+    border: 1px solid hsl(var(--tgifbl) / 0.3);
   }
 
   .gold-accent {

@@ -2,7 +2,6 @@ export const APP_ROLES = [
   'fan',
   'paid_fan',  // registered fan who has purchased PPV access; may generate 1 invite/game
   'player',
-  'coach',
   'team_manager',
   'league_admin',
   'media_operator',
@@ -16,7 +15,6 @@ const hierarchy: Record<AppRole, number> = {
   fan: 1,
   paid_fan: 1,  // peer to fan in hierarchy; distinguished by invite-generation privilege
   player: 2,
-  coach: 3,
   team_manager: 3,
   media_operator: 3,
   store_operator: 3,
@@ -37,23 +35,3 @@ export function assertRole(userRoles: AppRole[], required: AppRole) {
     throw new Error(`forbidden: requires ${required}`);
   }
 }
-
-// Player specific
-export function canUpdateBio(userRoles: AppRole[]) { return hasRole(userRoles, 'player'); }
-export function canCheckIn(userRoles: AppRole[]) { return hasRole(userRoles, 'player'); }
-
-// Coach specific
-export function canSetTeamEvents(userRoles: AppRole[]) { return hasRole(userRoles, 'coach'); }
-
-// Admin specific (includes super admin via hierarchy)
-export function canScanQR(userRoles: AppRole[]) { return hasRole(userRoles, 'league_admin'); }
-export function canUploadStoreInventory(userRoles: AppRole[]) { return hasRole(userRoles, 'league_admin'); }
-export function canEditMedia(userRoles: AppRole[]) { return hasRole(userRoles, 'league_admin'); }
-export function canEditEvents(userRoles: AppRole[]) { return hasRole(userRoles, 'league_admin'); }
-export function canSetPaywall(userRoles: AppRole[]) { return hasRole(userRoles, 'league_admin'); }
-
-// Super Admin exclusive
-export function canSetPricing(userRoles: AppRole[]) { return hasRole(userRoles, 'super_admin'); }
-export function canUploadSaleItems(userRoles: AppRole[]) { return hasRole(userRoles, 'super_admin'); }
-export function canModerateUsers(userRoles: AppRole[]) { return hasRole(userRoles, 'super_admin'); } // Suspend/ban
-export function canControlLiveStreams(userRoles: AppRole[]) { return hasRole(userRoles, 'super_admin'); } // Start/end streams

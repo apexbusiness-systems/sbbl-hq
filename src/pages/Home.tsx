@@ -176,20 +176,7 @@ const HomePage = () => {
 
           </div>
 
-          {/* ── SBBL FEATURE PROMO ── */}
-          {resolvedLeague === 'sbbl' && (
-            <motion.div
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.4, delay: 0.2 }}
-              className="mt-10 max-w-4xl mx-auto rounded-sm overflow-hidden border border-primary/20 shadow-[0_0_30px_rgba(0,0,0,0.4)]"
-            >
-              <img src="/assets/sbbl-feature.jpg" alt="SBBL Spring Edition" className="w-full h-auto object-cover hover:scale-105 transition-transform duration-700" />
-            </motion.div>
-          )}
-
           {/* ── VALUE PILLARS — fills hero bottom, doubles as marketing ── */}
-
           <motion.div
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}

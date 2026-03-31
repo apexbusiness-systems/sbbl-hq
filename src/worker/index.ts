@@ -770,13 +770,13 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
   const { data: teamsData, error: teamsError } = await query;
   if (teamsError) throw new Error(teamsError.message);
 
-  let filteredTeamsData = teamsData ?? [];
+  let filteredTeamsData = (teamsData as unknown as Record<string, unknown>[]) ?? [];
   const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leagueId || '');
 
   if (leagueId && !isUuid) {
       filteredTeamsData = filteredTeamsData.filter((t: Record<string, unknown>) =>
-        (t.leagues?.code || '').toLowerCase() === leagueId.toLowerCase() ||
-        (t.leagues?.name || '').toLowerCase() === leagueId.toLowerCase()
+        (((t.leagues as Record<string, unknown>)?.code as string) || '').toLowerCase() === leagueId.toLowerCase() ||
+        (((t.leagues as Record<string, unknown>)?.name as string) || '').toLowerCase() === leagueId.toLowerCase()
       );
   }
 
@@ -790,31 +790,36 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
   const { data: gamesData, error: gamesError } = await gamesQuery;
   if (gamesError) throw new Error(gamesError.message);
 
-  let filteredGamesData = gamesData ?? [];
+  let filteredGamesData = (gamesData as unknown as Record<string, unknown>[]) ?? [];
   if (leagueId && !isUuid) {
       filteredGamesData = filteredGamesData.filter((g: Record<string, unknown>) =>
-        (g.seasons?.leagues?.code || '').toLowerCase() === leagueId.toLowerCase()
+        ((((g.seasons as Record<string, unknown>)?.leagues as Record<string, unknown>)?.code as string) || '').toLowerCase() === leagueId.toLowerCase()
       );
   }
 
   const statsMap = new Map<string, { wins: number; losses: number; ptsFor: number; ptsAgainst: number }>();
   for (const game of filteredGamesData) {
-    if (game.home_team_id && game.away_team_id && game.home_score != null && game.away_score != null) {
-      if (!statsMap.has(game.home_team_id)) statsMap.set(game.home_team_id, { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 });
-      if (!statsMap.has(game.away_team_id)) statsMap.set(game.away_team_id, { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 });
+    const hId = game.home_team_id as string | undefined;
+    const aId = game.away_team_id as string | undefined;
+    const hScore = game.home_score as number | undefined;
+    const aScore = game.away_score as number | undefined;
 
-      const homeStats = statsMap.get(game.home_team_id)!;
-      const awayStats = statsMap.get(game.away_team_id)!;
+    if (hId && aId && hScore != null && aScore != null) {
+      if (!statsMap.has(hId)) statsMap.set(hId, { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 });
+      if (!statsMap.has(aId)) statsMap.set(aId, { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 });
 
-      homeStats.ptsFor += game.home_score;
-      homeStats.ptsAgainst += game.away_score;
-      awayStats.ptsFor += game.away_score;
-      awayStats.ptsAgainst += game.home_score;
+      const homeStats = statsMap.get(hId)!;
+      const awayStats = statsMap.get(aId)!;
 
-      if (game.home_score > game.away_score) {
+      homeStats.ptsFor += hScore;
+      homeStats.ptsAgainst += aScore;
+      awayStats.ptsFor += aScore;
+      awayStats.ptsAgainst += hScore;
+
+      if (hScore > aScore) {
         homeStats.wins += 1;
         awayStats.losses += 1;
-      } else if (game.away_score > game.home_score) {
+      } else if (aScore > hScore) {
         awayStats.wins += 1;
         homeStats.losses += 1;
       }
@@ -822,7 +827,7 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
   }
 
   const teams = filteredTeamsData.map((row: Record<string, unknown>) => {
-    const stats = statsMap.get(row.id) || { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 };
+    const stats = statsMap.get(row.id as string) || { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 };
     const gp = stats.wins + stats.losses;
     let winPct = gp > 0 ? (stats.wins / gp).toFixed(3) : '.000';
     if (winPct.startsWith('1')) winPct = '1.000';
@@ -831,12 +836,12 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
     return {
       id: String(row.id),
       name: String(row.name),
-      league_code: ((row.leagues as Record<string, unknown>)?.code ?? '').toUpperCase(),
+      league_code: (((row.leagues as Record<string, unknown>)?.code as string) ?? '').toUpperCase(),
       league_name: String((row.leagues as Record<string, unknown>)?.name ?? 'League'),
       season_name: String((row.seasons as Record<string, unknown>)?.name ?? 'Season'),
       division_name: (row.divisions as Record<string, unknown>)?.name ?? null,
       roster_count: Array.isArray(row.players) ? row.players.length : 0,
-      players: (row.players ?? []).map((p: Record<string, unknown>) => ({
+      players: (Array.isArray(row.players) ? row.players : []).map((p: Record<string, unknown>) => ({
         id: p.id,
         user_id: p.user_id,
         jersey_number: p.jersey_number,
@@ -845,7 +850,7 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
         last_name: (p.profiles as Record<string, unknown>)?.last_name ?? null,
         avatar_url: (p.profiles as Record<string, unknown>)?.avatar_url ?? null,
       })),
-      coaches: (row.team_memberships ?? [])
+      coaches: (Array.isArray(row.team_memberships) ? row.team_memberships : [])
         .filter((m: Record<string, unknown>) => m.role === 'team_manager' || m.role === 'coach')
         .map((m: Record<string, unknown>) => ({
           id: m.id,
@@ -1509,17 +1514,11 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
     },
     body: new URLSearchParams({
       'payment_method_types[]': 'card',
-      'line_items[0][price_data][currency]': 'cad',
-      'line_items[0][price_data][product_data][name]': 'SBBL HQ Player/Coach Registration',
+      'line_items[0][price_data][currency]': 'usd',
+      'line_items[0][price_data][product_data][name]': 'SBBL HQ Player Registration',
       'line_items[0][price_data][unit_amount]': '700',
-      'line_items[0][price_data][recurring][interval]': 'month',
       'line_items[0][quantity]': '1',
-      'line_items[1][price_data][currency]': 'cad',
-      'line_items[1][price_data][product_data][name]': 'Alberta GST (5%)',
-      'line_items[1][price_data][unit_amount]': '35',
-      'line_items[1][price_data][recurring][interval]': 'month',
-      'line_items[1][quantity]': '1',
-      'mode': 'subscription',
+      'mode': 'payment',
       'success_url': successUrl,
       'cancel_url': cancelUrl,
       'metadata[user_id]': userId,
