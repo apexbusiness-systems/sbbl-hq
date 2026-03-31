@@ -101,7 +101,7 @@ const TeamsPage = () => {
                     <h2 className="font-display text-xl font-bold">{team.name}</h2>
                     <LeagueBadge leagueId={team.leagueId} />
                   </div>
-                  <p className="text-xs text-muted-foreground">{team.season}</p>
+                  <p className="text-xs text-muted-foreground">{team.season}{team.division ? ` \u00B7 ${team.division}` : ''}</p>
                 </article>
               );
             })}
