@@ -149,6 +149,58 @@ async function handleAuthSession({ req }: HandlerCtx) {
   }
 }
 
+// In-memory rate limiter for OTP requests — 1 per 55s per email (per worker instance)
+const otpRateLimitMap = new Map<string, number>();
+
+async function handleAuthOtp({ req, env }: HandlerCtx) {
+  const body = await req.json().catch(() => null) as { email?: string; redirectTo?: string } | null;
+  const email = body?.email?.trim().toLowerCase();
+  if (!email || !email.includes('@') || !email.includes('.')) {
+    return json({ ok: false, error: 'invalid_email' }, 400);
+  }
+
+  // Server-side guard: 55s window per email address
+  const now = Date.now();
+  const last = otpRateLimitMap.get(email);
+  if (last && now - last < 55_000) {
+    return json({ ok: false, error: 'rate_limited' }, 429);
+  }
+  otpRateLimitMap.set(email, now);
+  // Prune stale entries
+  if (otpRateLimitMap.size > 500) {
+    for (const [k, t] of otpRateLimitMap.entries()) {
+      if (now - t > 120_000) otpRateLimitMap.delete(k);
+    }
+  }
+
+  const supabaseUrl = env.SUPABASE_URL;
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  const redirectTo = body?.redirectTo ?? 'https://sbbl-hq.icu/';
+
+  // Use the service role key — bypasses the anon-key per-user email rate limits
+  const resp = await fetch(`${supabaseUrl}/auth/v1/otp`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': serviceKey,
+      'Authorization': `Bearer ${serviceKey}`,
+    },
+    body: JSON.stringify({
+      email,
+      create_user: true,
+      options: { emailRedirectTo: redirectTo },
+    }),
+  });
+
+  if (!resp.ok) {
+    const errData = await resp.json().catch(() => ({})) as Record<string, unknown>;
+    const msg = String(errData.msg ?? errData.message ?? errData.error_description ?? `otp_error_${resp.status}`);
+    return json({ ok: false, error: msg }, resp.status >= 500 ? 502 : 400);
+  }
+
+  return json({ ok: true });
+}
+
 async function handleMe({ req }: HandlerCtx) {
   const userId = requireAuth(req);
   return json({ id: userId, profileStatus: 'active', roles: getRolesFromVerifiedSession(req) });
@@ -818,7 +870,7 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
   const session = await requireAdminSession(ctx.req, ctx.admin);
   const body = await ctx.req.json().catch(() => null) as {
     playerName: string; team: string; pts: number; rebs: number; assts: number;
-    gameResult: string; leagueId: string; date?: string;
+    gameResult: string; leagueId: string; date?: string; imageUrl?: string;
   } | null;
 
   if (!body?.playerName || !body?.team || !body?.leagueId) {
@@ -845,6 +897,7 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
       gameResult: body.gameResult,
       leagueId: body.leagueId,
       date: body.date ?? new Date().toISOString().split('T')[0],
+      imageUrl: body.imageUrl ?? null,
       matched_profile_id: profileData?.user_id ?? null,
       source: 'potg_image_parser',
     },
@@ -1238,6 +1291,7 @@ async function handleBillingHistory({ req, admin }: HandlerCtx) {
 }
 
 const routes: Array<{ method: string; path: string; handler: Handler }> = [
+  { method: 'POST', path: '/auth/otp', handler: handleAuthOtp },
   { method: 'GET', path: '/auth/session', handler: handleAuthSession },
   { method: 'GET', path: '/api/profile/me', handler: handleMe },
   { method: 'POST', path: '/api/profile/onboarding', handler: handleProfileOnboarding },

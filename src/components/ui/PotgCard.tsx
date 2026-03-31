@@ -1,19 +1,23 @@
+import { useState } from 'react';
 import type { PlayerOfTheGame } from '@/types';
 import { Trophy } from 'lucide-react';
 
 interface PotgCardProps {
   potg: PlayerOfTheGame;
-  featured?: boolean;
+  featured?: boolean; // kept for API compat; no longer affects dimensions
 }
 
-export const PotgCard = ({ potg, featured = false }: PotgCardProps) => {
-  // If a real graphic card image exists, render it as a poster-style card
-  if (potg.image) {
+// All cards share the same 280×(3:4) container so the scroll strip is uniform.
+const CARD_WIDTH = 'min-w-[280px] max-w-[280px]';
+
+export const PotgCard = ({ potg }: PotgCardProps) => {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  // Poster-style card — shown when a real graphic image is available and loads ok
+  if (potg.image && !imgFailed) {
     return (
       <div
-        className={`relative overflow-hidden flex-shrink-0 rounded-sm border border-border group cursor-default transition-all duration-300 hover:border-primary/40 hover:shadow-[0_0_32px_-4px_hsl(43_52%_54%/0.25)] ${
-          featured ? 'min-w-[280px] max-w-[280px]' : 'min-w-[220px] max-w-[220px]'
-        }`}
+        className={`relative overflow-hidden flex-shrink-0 rounded-sm border border-border group cursor-default transition-all duration-300 hover:border-primary/40 hover:shadow-[0_0_32px_-4px_hsl(43_52%_54%/0.25)] ${CARD_WIDTH}`}
         style={{ aspectRatio: '3/4' }}
       >
         <img
@@ -21,6 +25,7 @@ export const PotgCard = ({ potg, featured = false }: PotgCardProps) => {
           alt={`${potg.playerName} — Player of the Game`}
           className="w-full h-full object-cover object-top group-hover:scale-[1.03] transition-transform duration-500"
           loading="lazy"
+          onError={() => setImgFailed(true)}
         />
         {/* Bottom stat overlay */}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-3 pb-3 pt-8">
@@ -35,17 +40,16 @@ export const PotgCard = ({ potg, featured = false }: PotgCardProps) => {
     );
   }
 
-  // Text-only fallback card (no image available)
+  // Text-only fallback card (no image or image failed to load)
   return (
     <div
-      className={`relative bg-card border border-border rounded-sm overflow-hidden flex-shrink-0 flex flex-col transition-all duration-300 hover:border-primary/40 hover:shadow-[0_0_24px_-4px_hsl(43_52%_54%/0.15)] ${
-        featured ? 'min-w-[320px]' : 'min-w-[260px]'
-      }`}
+      className={`relative bg-card border border-border rounded-sm overflow-hidden flex-shrink-0 flex flex-col transition-all duration-300 hover:border-primary/40 hover:shadow-[0_0_24px_-4px_hsl(43_52%_54%/0.15)] ${CARD_WIDTH}`}
+      style={{ aspectRatio: '3/4' }}
     >
       {/* Gold accent top bar */}
       <div className="h-[3px] bg-gradient-to-r from-primary via-primary/60 to-transparent" />
 
-      <div className={`p-5 flex flex-col flex-1 ${featured ? 'p-6' : 'p-5'}`}>
+      <div className="p-6 flex flex-col flex-1">
         <div className="flex items-center gap-1.5 mb-4">
           <Trophy className="w-3 h-3 text-primary" />
           <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-primary">
@@ -53,11 +57,7 @@ export const PotgCard = ({ potg, featured = false }: PotgCardProps) => {
           </span>
         </div>
 
-        <h3
-          className={`font-display uppercase leading-none text-foreground mb-2 ${
-            featured ? 'text-4xl' : 'text-3xl'
-          }`}
-        >
+        <h3 className="font-display text-4xl uppercase leading-none text-foreground mb-2">
           {potg.playerName}
         </h3>
 
@@ -67,21 +67,15 @@ export const PotgCard = ({ potg, featured = false }: PotgCardProps) => {
 
         <div className="grid grid-cols-3 gap-1 mb-5">
           <div className="text-center">
-            <p className={`stat-numeral leading-none text-foreground ${featured ? 'text-5xl' : 'text-4xl'}`}>
-              {potg.pts}
-            </p>
+            <p className="stat-numeral text-5xl leading-none text-foreground">{potg.pts}</p>
             <p className="text-[9px] text-muted-foreground uppercase tracking-widest mt-1.5 font-medium">PTS</p>
           </div>
           <div className="text-center border-x border-border">
-            <p className={`stat-numeral leading-none text-foreground ${featured ? 'text-5xl' : 'text-4xl'}`}>
-              {potg.rebs}
-            </p>
+            <p className="stat-numeral text-5xl leading-none text-foreground">{potg.rebs}</p>
             <p className="text-[9px] text-muted-foreground uppercase tracking-widest mt-1.5 font-medium">REB</p>
           </div>
           <div className="text-center">
-            <p className={`stat-numeral leading-none text-foreground ${featured ? 'text-5xl' : 'text-4xl'}`}>
-              {potg.assts}
-            </p>
+            <p className="stat-numeral text-5xl leading-none text-foreground">{potg.assts}</p>
             <p className="text-[9px] text-muted-foreground uppercase tracking-widest mt-1.5 font-medium">AST</p>
           </div>
         </div>
