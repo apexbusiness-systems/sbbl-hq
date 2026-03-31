@@ -1420,7 +1420,7 @@ async function handleEditGame(ctx: HandlerCtx) {
 }
 
 
-async function handleDeleteEntity(table: string) {
+function handleDeleteEntity(table: string) {
   return async (ctx: HandlerCtx) => {
     await ensureMutation(ctx.req, ctx);
     const session = await requireAdminSession(ctx.req, ctx.admin);

@@ -3,7 +3,7 @@ import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 // type ScheduleDay replaced with mapped data structure
-type ScheduleDay = { leagueId: string, date: string, season: string, week: number, venue: string, address: string, courts: { name: string, games: { time: string, home: string, away: string }[] }[] };
+type ScheduleDay = { leagueId: LeagueId, date: string, season: string, week: number, venue: string, address: string, courts: { name: string, games: { time: string, home: string, away: string }[] }[] };
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
 import { Calendar, MapPin, Clock } from 'lucide-react';

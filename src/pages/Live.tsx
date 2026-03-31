@@ -27,7 +27,7 @@ const LivePage = () => {
 
   const featuredProducts: unknown[] = [];
   const [carouselIdx, setCarouselIdx] = useState(0);
-  const carouselProduct = featuredProducts[carouselIdx];
+  const carouselProduct: any = featuredProducts[carouselIdx];
 
   useEffect(() => {
     if (featuredProducts.length <= 1) return;

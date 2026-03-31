@@ -29,6 +29,11 @@ const HomePage = () => {
     : activeLeague;
   const league = getLeagueConfig(resolvedLeague);
   const [state, setState] = useState<LoadState>('loading');
+  const potgQuery = useQuery({
+    queryKey: ['potg', activeLeague],
+    queryFn: () => apiFetch<{ ok: boolean; data: any[] }>('/api/public/potg?league=' + activeLeague.toLowerCase() + '&limit=4'),
+    staleTime: 60_000,
+  });
   const [data, setData] = useState<PublicHomeData | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -264,13 +269,19 @@ const HomePage = () => {
         {/* Players of the Game — always rendered; empty state when no data for this league yet */}
         {(() => {
           // In a real scenario we might map import_jobs to PotgProfile here.
-  const potgList = (potgQuery.data?.data || []).map((job: unknown) => ({
+  const playersOfTheGame: any[] = potgQuery.data?.data || [];
+  const potgList = (playersOfTheGame || []).map((job: any) => ({
     id: job.id,
     playerId: job.payload_summary.playerId || '',
     name: job.payload_summary.playerName || '',
+    playerName: job.payload_summary.playerName || '',
     avatar: '',
     teamId: job.payload_summary.team || '',
+    team: job.payload_summary.team || '',
     leagueId: job.payload_summary.leagueId || resolvedLeague,
+    pts: parseInt(job.payload_summary.pts || '0'),
+    rebs: parseInt(job.payload_summary.rebs || '0'),
+    assts: parseInt(job.payload_summary.assts || '0'),
     stats: {
       pts: parseInt(job.payload_summary.pts || '0'),
       rebs: parseInt(job.payload_summary.rebs || '0'),
