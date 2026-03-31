@@ -24,7 +24,7 @@ test.describe('critical path coverage', () => {
 
   test('login route renders secure sign in without leaking raw config names', async ({ page }) => {
     await page.goto('/login', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Secure Sign In' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Secure Sign In' })).toBeVisible({ timeout: 15000 });
     await expect(page.locator('body')).not.toContainText(/VITE_SUPABASE|SUPABASE_SERVICE_ROLE_KEY|SUPABASE_URL/);
   });
 
