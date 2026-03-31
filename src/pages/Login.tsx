@@ -1,37 +1,34 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { signInWithEmail } from '@/lib/api/auth';
+import { signInWithPassword, signUpWithPassword } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
 import { LEAGUE_CONFIGS } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { Shield, BarChart3, Users, Zap, CheckCircle2 } from 'lucide-react';
 
+type Mode = 'signin' | 'signup';
+
 const LoginPage = () => {
+  const [mode, setMode] = useState<Mode>('signin');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [cooldown, setCooldown] = useState(0);
-  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { isSignedIn, needsOnboarding, configAvailable, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Tick down the cooldown every second
-  useEffect(() => {
-    if (cooldown <= 0) return;
-    cooldownRef.current = setInterval(() => {
-      setCooldown((c) => {
-        if (c <= 1) { clearInterval(cooldownRef.current!); return 0; }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(cooldownRef.current!);
-  }, [cooldown > 0]); // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     if (isSignedIn) navigate(needsOnboarding ? '/onboarding' : '/');
   }, [isSignedIn, needsOnboarding, navigate]);
+
+  const switchMode = (next: Mode) => {
+    setMode(next);
+    setError(null);
+    setMessage(null);
+    setPassword('');
+  };
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -39,16 +36,29 @@ const LoginPage = () => {
     setError(null);
     setMessage(null);
     try {
-      await signInWithEmail(email);
-      setMessage('Magic link sent — check your inbox and click the link to sign in.');
-      setCooldown(60);
-    } catch (submitError) {
-      const text = submitError instanceof Error ? submitError.message : 'Login failed';
-      if (text.toLowerCase().includes('rate limit') || text.toLowerCase().includes('too many')) {
-        setError('Too many requests — please wait 60 seconds before trying again.');
-        setCooldown(60);
+      if (mode === 'signin') {
+        await signInWithPassword(email, password);
+        // AuthContext onAuthStateChange will handle the SIGNED_IN event and redirect
       } else {
-        setError(text);
+        await signUpWithPassword(email, password);
+        setMessage('Account created — check your inbox to confirm your email, then sign in.');
+        setMode('signin');
+        setPassword('');
+      }
+    } catch (submitError) {
+      const raw = submitError instanceof Error ? submitError.message : 'Something went wrong';
+      // Surface friendly messages for common Supabase error strings
+      if (raw.toLowerCase().includes('invalid login') || raw.toLowerCase().includes('invalid credentials')) {
+        setError('Incorrect email or password. Please try again.');
+      } else if (raw.toLowerCase().includes('email not confirmed')) {
+        setError('Please confirm your email address before signing in. Check your inbox.');
+      } else if (raw.toLowerCase().includes('already registered') || raw.toLowerCase().includes('user already registered')) {
+        setError('An account with that email already exists. Sign in instead.');
+        setMode('signin');
+      } else if (raw.toLowerCase().includes('password') && raw.toLowerCase().includes('characters')) {
+        setError('Password must be at least 6 characters.');
+      } else {
+        setError(raw);
       }
     } finally {
       setSubmitting(false);
@@ -56,7 +66,8 @@ const LoginPage = () => {
   };
 
   const isEmailValid = email.includes('@') && email.includes('.');
-  const canSubmit = isEmailValid && !submitting && configAvailable && cooldown === 0;
+  const isPasswordValid = password.length >= 6;
+  const canSubmit = isEmailValid && isPasswordValid && !submitting && configAvailable;
 
   return (
     <div className="min-h-[calc(100vh-6rem)] flex items-center justify-center px-4 py-10">
@@ -78,7 +89,7 @@ const LoginPage = () => {
                 <TrustBullet icon={<Zap className="w-4 h-4" />} text="Live scoring and real-time game updates" />
                 <TrustBullet icon={<BarChart3 className="w-4 h-4" />} text="Career stats, standings, and leaderboards" />
                 <TrustBullet icon={<Users className="w-4 h-4" />} text="Team and roster operations" />
-                <TrustBullet icon={<Shield className="w-4 h-4" />} text="Secure magic-link sign-in — no password needed" />
+                <TrustBullet icon={<Shield className="w-4 h-4" />} text="Secure email & password — your account, your access" />
               </div>
             </div>
             <div className="mt-8">
@@ -90,7 +101,7 @@ const LoginPage = () => {
             </div>
           </div>
 
-          {/* Right panel — sign in form */}
+          {/* Right panel — sign in / sign up form */}
           <div className="panel p-6 md:p-8 flex flex-col justify-center">
             {/* Mobile brand header */}
             <div className="md:hidden flex items-center gap-2 mb-4">
@@ -98,9 +109,13 @@ const LoginPage = () => {
               <span className="font-display text-lg font-bold tracking-tight text-primary">HQ</span>
             </div>
 
-            <h1 className="font-display text-2xl md:text-3xl font-bold uppercase tracking-tight">Secure Sign In</h1>
+            <h1 className="font-display text-2xl md:text-3xl font-bold uppercase tracking-tight">
+              {mode === 'signin' ? 'Sign In' : 'Create Account'}
+            </h1>
             <p className="text-sm text-muted-foreground mt-2">
-              Enter your email to receive a one-time magic link. No password required.
+              {mode === 'signin'
+                ? 'Enter your email and password to access your account.'
+                : 'Create a free account to get started.'}
             </p>
 
             {!configAvailable && !loading && (
@@ -129,12 +144,29 @@ const LoginPage = () => {
                   disabled={!configAvailable}
                 />
               </div>
+              <div>
+                <label htmlFor="login-password" className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Password
+                </label>
+                <input
+                  id="login-password"
+                  type="password"
+                  required
+                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="mt-1.5 w-full bg-secondary border border-border rounded-sm px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors"
+                  placeholder={mode === 'signup' ? 'At least 6 characters' : '••••••••'}
+                  disabled={!configAvailable}
+                  minLength={6}
+                />
+              </div>
               <button
                 type="submit"
                 disabled={!canSubmit}
                 className="gold-bg px-4 py-3 rounded-sm font-display font-bold text-sm uppercase tracking-wider w-full disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
-                {submitting ? 'Sending…' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Send Magic Link'}
+                {submitting ? (mode === 'signin' ? 'Signing in…' : 'Creating account…') : (mode === 'signin' ? 'Sign In' : 'Create Account')}
               </button>
             </form>
 
@@ -153,10 +185,22 @@ const LoginPage = () => {
               <p className="mt-4 text-sm text-destructive">{error}</p>
             )}
 
-            <div className="mt-8 pt-4 border-t border-border">
+            <div className="mt-6 pt-4 border-t border-border flex items-center justify-between">
+              <p className="text-xs text-muted-foreground">
+                {mode === 'signin' ? "Don't have an account?" : 'Already have an account?'}
+              </p>
+              <button
+                type="button"
+                onClick={() => switchMode(mode === 'signin' ? 'signup' : 'signin')}
+                className="text-xs font-semibold text-primary hover:text-primary/80 transition-colors"
+              >
+                {mode === 'signin' ? 'Create one' : 'Sign in'}
+              </button>
+            </div>
+
+            <div className="mt-4">
               <p className="text-[11px] text-muted-foreground leading-relaxed">
-                By signing in, you agree to our terms of service. We use secure magic links —
-                your email is never shared and no password is stored.
+                By signing in, you agree to our terms of service. Your email is never shared.
               </p>
             </div>
           </div>
