@@ -1126,6 +1126,51 @@ async function handlePayOrder(ctx: HandlerCtx) {
   return json({ ok: true, url: checkout.url, sessionId: checkout.id });
 }
 
+// ── DIRECT STORE CHECKOUT ─────────────────────────────────────────────────────
+// Accepts line items from the client (no DB variant records required).
+// Used by BagDrawer until real DB products/variants are seeded.
+async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
+  await ensureMutation(req, { req, env, admin, params: {} });
+  const userId = requireAuth(req);
+  if (!env.STRIPE_SECRET_KEY) return json({ ok: false, error: 'payments_not_configured' }, 503);
+
+  const body = await req.json().catch(() => null) as {
+    items?: Array<{ name: string; price: number; qty?: number }>;
+    successUrl?: string;
+    cancelUrl?: string;
+  } | null;
+
+  if (!body?.items?.length) return json({ ok: false, error: 'items_required' }, 400);
+
+  const params = new URLSearchParams({
+    'payment_method_types[]': 'card',
+    mode: 'payment',
+    success_url: body.successUrl ?? `${new URL(req.url).origin}/store?success=1`,
+    cancel_url: body.cancelUrl ?? `${new URL(req.url).origin}/store`,
+    'metadata[user_id]': userId,
+    'metadata[purchase_type]': 'store_order',
+  });
+  // price is in PHP whole units — Stripe expects centavos (×100)
+  body.items.forEach((item, i) => {
+    params.set(`line_items[${i}][price_data][currency]`, 'php');
+    params.set(`line_items[${i}][price_data][product_data][name]`, item.name);
+    params.set(`line_items[${i}][price_data][unit_amount]`, String(Math.round(item.price * 100)));
+    params.set(`line_items[${i}][quantity]`, String(item.qty ?? 1));
+  });
+
+  const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${env.STRIPE_SECRET_KEY}`, 'content-type': 'application/x-www-form-urlencoded' },
+    body: params,
+  });
+  if (!stripeRes.ok) {
+    const err = await stripeRes.json() as { error?: { message?: string } };
+    return json({ ok: false, error: err?.error?.message ?? 'stripe_error' }, 502);
+  }
+  const session = await stripeRes.json() as { url: string; id: string };
+  return json({ ok: true, url: session.url, sessionId: session.id });
+}
+
 async function handlePublicProducts({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get('leagueId');
@@ -1215,6 +1260,7 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'GET', path: '/api/public/products', handler: handlePublicProducts },
   { method: 'GET', path: '/api/public/media', handler: handlePublicMedia },
   { method: 'POST', path: '/api/player/checkout', handler: handlePlayerCheckout },
+  { method: 'POST', path: '/api/store/checkout', handler: handleDirectStoreCheckout },
   { method: 'POST', path: '/api/rewards/redeem', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'rewards-redeem' } }) },
   { method: 'GET', path: '/ops/bootstrap', handler: handleOpsBootstrap },
   { method: 'POST', path: '/ops/imports/teams', handler: (ctx) => handleImportRoute(ctx, 'teams') },
