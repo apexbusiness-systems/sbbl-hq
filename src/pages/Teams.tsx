@@ -36,7 +36,7 @@ const TeamsPage = () => {
     }
   }, [activeLeague, paramLeague]);
 
-  // Fetch ALL teams once from the worker — the queryKey is static ['teams'] so
+  // Fetch ALL teams once from the worker  --the queryKey is static ['teams'] so
   // switching filters doesn't cause a refetch; we simply re-filter client-side.
   const teamsQuery = useQuery({
     queryKey: ['teams'],
