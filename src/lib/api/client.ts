@@ -13,6 +13,12 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}, token?: 
   const headers = new Headers(init.headers);
   headers.set('content-type', headers.get('content-type') ?? 'application/json');
   if (authToken) headers.set('authorization', `Bearer ${authToken}`);
+  // All mutating requests require an idempotency key — auto-generate one so
+  // callers don't have to manage this manually.
+  const method = (init.method ?? 'GET').toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    headers.set('x-idempotency-key', `${path}-${Date.now()}-${crypto.randomUUID()}`);
+  }
 
   const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   const payload = await response.json().catch(() => ({ ok: false, error: 'invalid_json_response' }));

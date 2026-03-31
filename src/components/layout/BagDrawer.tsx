@@ -1,9 +1,15 @@
+import { useState } from 'react';
 import { useApp } from '@/contexts/AppContext';
+import { useAuth } from '@/hooks/use-auth';
+import { apiFetch } from '@/lib/api/client';
 import { products } from '@/data/mock';
-import { X, Trash2, ShoppingBag } from 'lucide-react';
+import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
 
 export const BagDrawer = () => {
   const { bagOpen, setBagOpen, bagItems, removeFromBag } = useApp();
+  const { session } = useAuth();
+  const [checkingOut, setCheckingOut] = useState(false);
 
   if (!bagOpen) return null;
 
@@ -11,6 +17,40 @@ export const BagDrawer = () => {
     const product = products.find(p => p.id === id);
     return sum + (product?.price ?? 0);
   }, 0);
+
+  const handleCheckout = async () => {
+    if (!session) { toast.error('Sign in to complete your purchase.'); return; }
+    const lineItems = bagItems.reduce<Array<{ name: string; price: number; qty: number }>>((acc, id) => {
+      const product = products.find(p => p.id === id);
+      if (!product || product.price === 0) return acc; // skip reward/free items
+      const existing = acc.find(i => i.name === product.name);
+      if (existing) { existing.qty += 1; } else { acc.push({ name: product.name, price: product.price, qty: 1 }); }
+      return acc;
+    }, []);
+    if (!lineItems.length) { toast.error('No purchasable items in bag.'); return; }
+    setCheckingOut(true);
+    try {
+      const res = await apiFetch<{ ok: boolean; url?: string; error?: string }>('/api/store/checkout', {
+        method: 'POST',
+        body: JSON.stringify({
+          items: lineItems,
+          successUrl: `${window.location.origin}/store?success=1`,
+          cancelUrl: `${window.location.origin}/store`,
+        }),
+      }, session.access_token);
+      if (res.ok && res.url) {
+        window.location.href = res.url;
+      } else if (res.error === 'payments_not_configured') {
+        toast.error('Payments not yet configured. Contact info-outreach@sbbl-hq.icu');
+      } else {
+        toast.error(res.error ?? 'Checkout failed. Please try again.');
+      }
+    } catch {
+      toast.error('Could not reach the payment service. Please try again.');
+    } finally {
+      setCheckingOut(false);
+    }
+  };
 
   return (
     <div className="fixed inset-0 z-[60]">
@@ -57,8 +97,13 @@ export const BagDrawer = () => {
               <span className="text-sm text-muted-foreground">Subtotal</span>
               <span className="font-display font-bold text-primary">₱{subtotal.toLocaleString()}</span>
             </div>
-            <button className="w-full gold-bg py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm">
-              Proceed to Checkout
+            <button
+              onClick={handleCheckout}
+              disabled={checkingOut}
+              className="w-full gold-bg py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm inline-flex items-center justify-center gap-2 disabled:opacity-60"
+            >
+              {checkingOut ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {checkingOut ? 'Redirecting…' : 'Proceed to Checkout'}
             </button>
           </div>
         )}
