@@ -27,6 +27,7 @@ const LivePage = () => {
 
   const featuredProducts: unknown[] = [];
   const [carouselIdx, setCarouselIdx] = useState(0);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const carouselProduct: any = featuredProducts[carouselIdx];
 
   useEffect(() => {

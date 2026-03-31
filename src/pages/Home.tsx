@@ -31,7 +31,7 @@ const HomePage = () => {
   const [state, setState] = useState<LoadState>('loading');
   const potgQuery = useQuery({
     queryKey: ['potg', activeLeague],
-    queryFn: () => apiFetch<{ ok: boolean; data: any[] }>('/api/public/potg?league=' + activeLeague.toLowerCase() + '&limit=4'),
+    queryFn: () => apiFetch<{ ok: boolean; data: Record<string, unknown>[] }>('//api/public/potg?league=' + activeLeague.toLowerCase() + '&limit=4'),
     staleTime: 60_000,
   });
   const [data, setData] = useState<PublicHomeData | null>(null);
@@ -269,7 +269,8 @@ const HomePage = () => {
         {/* Players of the Game — always rendered; empty state when no data for this league yet */}
         {(() => {
           // In a real scenario we might map import_jobs to PotgProfile here.
-  const playersOfTheGame: any[] = potgQuery.data?.data || [];
+  const playersOfTheGame: Record<string, unknown>[] = potgQuery.data?.data || [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const potgList = (playersOfTheGame || []).map((job: any) => ({
     id: job.id,
     playerId: job.payload_summary.playerId || '',
