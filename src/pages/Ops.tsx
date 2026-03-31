@@ -7,6 +7,7 @@ import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedi
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit } from '@/lib/imageResize';
+import { parseCsv } from "@/lib/parseCsv";
 
 type Tab = 'overview' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
 
@@ -21,18 +22,8 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'history', label: 'Import History' },
 ];
 
-function parseCsv(raw: string) {
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map((h) => h.trim());
-  return lines.slice(1).map((line) => {
-    const values = line.split(',').map((v) => v.trim());
-    return headers.reduce<Record<string, string>>((acc, key, idx) => {
-      acc[key] = values[idx] ?? '';
-      return acc;
-    }, {});
-  });
-}
+
+
 
 const OpsPage = () => {
   const queryClient = useQueryClient();
