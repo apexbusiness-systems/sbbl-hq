@@ -667,7 +667,7 @@ async function handlePublicHome({ req, admin }: HandlerCtx) {
   const [leaguesRes, teamsRes, gamesRes, seasonsRes] = await Promise.all([
     admin.from('leagues').select('id,name,code').order('name'),
     admin.from('teams')
-      .select('id,name,leagues(name,code),seasons(name),divisions(name),team_memberships(id)')
+      .select('id,name,leagues(name,code),seasons(name),divisions(name),players(id)')
       .eq('status', 'published')
       .limit(200),
     admin.from('games')
@@ -692,7 +692,7 @@ async function handlePublicHome({ req, admin }: HandlerCtx) {
     league_name: String((row.leagues as { name?: string } | null)?.name ?? ''),
     season_name: String((row.seasons as { name?: string } | null)?.name ?? ''),
     division_name: (row.divisions as { name?: string } | null)?.name ?? null,
-    roster_count: Array.isArray(row.team_memberships) ? row.team_memberships.length : 0,
+    roster_count: Array.isArray(row.players) ? row.players.length : 0,
   }));
   const leagueTeams = activeLeagueId
     ? allTeams.filter((t) => t.league_code === leagueCode)
@@ -750,19 +750,127 @@ async function handlePublicHome({ req, admin }: HandlerCtx) {
 
 async function handleTeamsList({ req, admin }: HandlerCtx) {
   const leagueId = new URL(req.url).searchParams.get('leagueId');
-  let query = admin.from('teams').select('id,name,divisions(name),seasons(name),leagues(name),team_memberships(id)').eq('status', 'published').limit(200);
-  if (leagueId) query = query.eq('league_id', leagueId);
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
 
-  const teams = (data ?? []).map((row: Record<string, unknown>) => ({
-    id: String(row.id),
-    name: String(row.name),
-    league_name: String((row.leagues as { name?: string } | null)?.name ?? 'League'),
-    season_name: String((row.seasons as { name?: string } | null)?.name ?? 'Season'),
-    division_name: (row.divisions as { name?: string } | null)?.name ?? null,
-    roster_count: Array.isArray(row.team_memberships) ? row.team_memberships.length : 0,
-  }));
+  let query = admin.from('teams')
+    .select(
+      'id,name,league_id,leagues(code,name),seasons(name),divisions(name),' +
+      'players(id,jersey_number,position,user_id,profiles(first_name,last_name,avatar_url)),' +
+      'team_memberships(id,user_id,role,profiles(first_name,last_name,avatar_url))'
+    )
+    .eq('status', 'published')
+    .limit(200);
+
+  if (leagueId) {
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leagueId);
+    if (isUuid) {
+      query = query.eq('league_id', leagueId);
+    }
+  }
+
+  const { data: teamsData, error: teamsError } = await query;
+  if (teamsError) throw new Error(teamsError.message);
+
+  let filteredTeamsData = (teamsData as unknown as Record<string, unknown>[]) ?? [];
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(leagueId || '');
+
+  if (leagueId && !isUuid) {
+      filteredTeamsData = filteredTeamsData.filter((t: Record<string, unknown>) =>
+        (((t.leagues as Record<string, unknown>)?.code as string) || '').toLowerCase() === leagueId.toLowerCase() ||
+        (((t.leagues as Record<string, unknown>)?.name as string) || '').toLowerCase() === leagueId.toLowerCase()
+      );
+  }
+
+  // Fetch games for standings
+  let gamesQuery = admin.from('games')
+    .select('id,home_team_id,away_team_id,status,home_score,away_score,league_id,seasons(leagues(code))')
+    .eq('status', 'final');
+
+  if (leagueId && isUuid) gamesQuery = gamesQuery.eq('league_id', leagueId);
+
+  const { data: gamesData, error: gamesError } = await gamesQuery;
+  if (gamesError) throw new Error(gamesError.message);
+
+  let filteredGamesData = (gamesData as unknown as Record<string, unknown>[]) ?? [];
+  if (leagueId && !isUuid) {
+      filteredGamesData = filteredGamesData.filter((g: Record<string, unknown>) =>
+        ((((g.seasons as Record<string, unknown>)?.leagues as Record<string, unknown>)?.code as string) || '').toLowerCase() === leagueId.toLowerCase()
+      );
+  }
+
+  const statsMap = new Map<string, { wins: number; losses: number; ptsFor: number; ptsAgainst: number }>();
+  for (const game of filteredGamesData) {
+    const hId = game.home_team_id as string | undefined;
+    const aId = game.away_team_id as string | undefined;
+    const hScore = game.home_score as number | undefined;
+    const aScore = game.away_score as number | undefined;
+
+    if (hId && aId && hScore != null && aScore != null) {
+      if (!statsMap.has(hId)) statsMap.set(hId, { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 });
+      if (!statsMap.has(aId)) statsMap.set(aId, { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 });
+
+      const homeStats = statsMap.get(hId)!;
+      const awayStats = statsMap.get(aId)!;
+
+      homeStats.ptsFor += hScore;
+      homeStats.ptsAgainst += aScore;
+      awayStats.ptsFor += aScore;
+      awayStats.ptsAgainst += hScore;
+
+      if (hScore > aScore) {
+        homeStats.wins += 1;
+        awayStats.losses += 1;
+      } else if (aScore > hScore) {
+        awayStats.wins += 1;
+        homeStats.losses += 1;
+      }
+    }
+  }
+
+  const teams = filteredTeamsData.map((row: Record<string, unknown>) => {
+    const stats = statsMap.get(row.id as string) || { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 };
+    const gp = stats.wins + stats.losses;
+    let winPct = gp > 0 ? (stats.wins / gp).toFixed(3) : '.000';
+    if (winPct.startsWith('1')) winPct = '1.000';
+    else winPct = winPct.replace(/^0/, '');
+
+    return {
+      id: String(row.id),
+      name: String(row.name),
+      league_code: (((row.leagues as Record<string, unknown>)?.code as string) ?? '').toUpperCase(),
+      league_name: String((row.leagues as Record<string, unknown>)?.name ?? 'League'),
+      season_name: String((row.seasons as Record<string, unknown>)?.name ?? 'Season'),
+      division_name: (row.divisions as Record<string, unknown>)?.name ?? null,
+      roster_count: Array.isArray(row.players) ? row.players.length : 0,
+      players: (Array.isArray(row.players) ? row.players : []).map((p: Record<string, unknown>) => ({
+        id: p.id,
+        user_id: p.user_id,
+        jersey_number: p.jersey_number,
+        position: p.position,
+        first_name: (p.profiles as Record<string, unknown>)?.first_name ?? null,
+        last_name: (p.profiles as Record<string, unknown>)?.last_name ?? null,
+        avatar_url: (p.profiles as Record<string, unknown>)?.avatar_url ?? null,
+      })),
+      coaches: (Array.isArray(row.team_memberships) ? row.team_memberships : [])
+        .filter((m: Record<string, unknown>) => m.role === 'team_manager' || m.role === 'coach')
+        .map((m: Record<string, unknown>) => ({
+          id: m.id,
+          user_id: m.user_id,
+          role: m.role,
+          first_name: (m.profiles as Record<string, unknown>)?.first_name ?? null,
+          last_name: (m.profiles as Record<string, unknown>)?.last_name ?? null,
+          avatar_url: (m.profiles as Record<string, unknown>)?.avatar_url ?? null,
+        })),
+      stats: {
+        wins: stats.wins,
+        losses: stats.losses,
+        gamesPlayed: gp,
+        ptsFor: stats.ptsFor,
+        ptsAgainst: stats.ptsAgainst,
+        winPct: winPct,
+        diff: stats.ptsFor - stats.ptsAgainst,
+      }
+    };
+  });
 
   return json({ ok: true, teams });
 }
@@ -1406,17 +1514,11 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
     },
     body: new URLSearchParams({
       'payment_method_types[]': 'card',
-      'line_items[0][price_data][currency]': 'cad',
-      'line_items[0][price_data][product_data][name]': 'SBBL HQ Player/Coach Registration',
+      'line_items[0][price_data][currency]': 'usd',
+      'line_items[0][price_data][product_data][name]': 'SBBL HQ Player Registration',
       'line_items[0][price_data][unit_amount]': '700',
-      'line_items[0][price_data][recurring][interval]': 'month',
       'line_items[0][quantity]': '1',
-      'line_items[1][price_data][currency]': 'cad',
-      'line_items[1][price_data][product_data][name]': 'Alberta GST (5%)',
-      'line_items[1][price_data][unit_amount]': '35',
-      'line_items[1][price_data][recurring][interval]': 'month',
-      'line_items[1][quantity]': '1',
-      'mode': 'subscription',
+      'mode': 'payment',
       'success_url': successUrl,
       'cancel_url': cancelUrl,
       'metadata[user_id]': userId,

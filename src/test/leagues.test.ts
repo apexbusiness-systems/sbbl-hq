@@ -5,13 +5,13 @@ describe('canonical league model', () => {
   it('returns correct config for each league id', () => {
     expect(getLeagueConfig('sbbl').code).toBe('SBBL');
     expect(getLeagueConfig('wbl').code).toBe('WBL');
-    expect(getLeagueConfig('tgif').code).toBe('TGIF');
+    expect(getLeagueConfig('tgifbl').code).toBe('TGIFBL');
   });
 
   it('maps league codes to ids', () => {
     expect(leagueIdFromCode('SBBL')).toBe('sbbl');
     expect(leagueIdFromCode('WBL')).toBe('wbl');
-    expect(leagueIdFromCode('TGIF')).toBe('tgif');
+    expect(leagueIdFromCode('TGIFBL')).toBe('tgifbl');
     expect(leagueIdFromCode('sbbl')).toBe('sbbl');
   });
 
@@ -22,7 +22,7 @@ describe('canonical league model', () => {
   it('maps league ids to codes', () => {
     expect(leagueCodeFromId('sbbl')).toBe('SBBL');
     expect(leagueCodeFromId('wbl')).toBe('WBL');
-    expect(leagueCodeFromId('tgif')).toBe('TGIF');
+    expect(leagueCodeFromId('tgifbl')).toBe('TGIFBL');
   });
 
   it('has exactly 3 league configs', () => {
@@ -60,6 +60,6 @@ describe('canonical league model', () => {
   it('shortNames match expected display values', () => {
     expect(getLeagueConfig('wbl').shortName).toBe('WBL');
     expect(getLeagueConfig('sbbl').shortName).toBe('SBBL');
-    expect(getLeagueConfig('tgif').shortName).toBe('TGIF');
+    expect(getLeagueConfig('tgifbl').shortName).toBe('TGIF');
   });
 });

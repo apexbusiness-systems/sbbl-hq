@@ -45,14 +45,14 @@ test.describe('critical path coverage', () => {
     await expect(nav.getByRole('link', { name: 'Stats' })).toBeVisible();
     await expect(nav.getByRole('link', { name: 'Leaderboards' })).toBeVisible();
     await expect(nav.getByRole('link', { name: 'Media' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Teams' })).toHaveCount(0);
+    await expect(nav.getByRole('link', { name: 'Teams' })).toBeVisible();
   });
 
   test('schedules and teams routes render headings', async ({ page }) => {
     await page.goto('/schedules', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Schedules', exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Schedules' })).toBeVisible();
     await page.goto('/teams', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Teams' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Teams & Standings' })).toBeVisible();
   });
 
   test('music player is present but does not autoplay before user gesture', async ({ page }) => {
