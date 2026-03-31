@@ -5,7 +5,7 @@ import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { signOut } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
 import {
-  RefreshCw, Share2, CreditCard, Settings, Shield, ShoppingBag, Menu, X, LogIn, LogOut
+  RefreshCw, Share2, CreditCard, Settings, Shield, ShoppingBag, Menu, X, LogIn, LogOut, HelpCircle
 } from 'lucide-react';
 
 const staticNav = [
@@ -14,7 +14,6 @@ const staticNav = [
   { label: 'Schedules', path: '/schedules' },
   { label: 'Store', path: '/store' },
   { label: 'Profiles', path: '/profiles' },
-  { label: 'Support', path: '/support' },
 ];
 // These pages accept ?league= to pre-filter — injected dynamically in the component
 const leagueAwareNav = ['Teams', 'Stats', 'Leaderboards', 'Media'] as const;
@@ -83,6 +82,7 @@ export const Header = () => {
             <div className="hidden md:flex items-center gap-1">
               <button className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Refresh"><RefreshCw className="w-3.5 h-3.5" /></button>
               <button className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Share"><Share2 className="w-3.5 h-3.5" /></button>
+              <Link to="/support" className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Support"><HelpCircle className="w-3.5 h-3.5" /></Link>
               {isSignedIn && <Link to="/billing" className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Billing"><CreditCard className="w-3.5 h-3.5" /></Link>}
               {isSignedIn && <Link to="/settings" className="p-1.5 text-muted-foreground hover:text-foreground" aria-label="Settings"><Settings className="w-3.5 h-3.5" /></Link>}
               {isAdmin && <Link to="/ops" className="p-1.5 text-primary hover:text-primary/80" aria-label="Operations"><Shield className="w-3.5 h-3.5" /></Link>}
@@ -210,6 +210,7 @@ export const Header = () => {
             <div className="flex items-center gap-2 px-3 pt-2 border-t border-border mt-2">
               {isSignedIn && <Link to="/billing" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><CreditCard className="w-4 h-4" /> Billing</Link>}
               {isSignedIn && <Link to="/settings" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><Settings className="w-4 h-4" /> Settings</Link>}
+              <Link to="/support" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-muted-foreground"><HelpCircle className="w-4 h-4" /> Support</Link>
               {isAdmin && <Link to="/ops" onClick={() => setMobileMenuOpen(false)} className="flex items-center gap-2 py-2 text-sm text-primary"><Shield className="w-4 h-4" /> Ops</Link>}
               {isSignedIn && (
                 <button
