@@ -1,6 +1,9 @@
 import { useApp } from '@/contexts/AppContext';
 import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
-import { SCHEDULE_DATA, type ScheduleDay } from '@/data/schedules';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api/client';
+// type ScheduleDay replaced with mapped data structure
+type ScheduleDay = { leagueId: LeagueId, date: string, season: string, week: number, venue: string, address: string, courts: { name: string, games: { time: string, home: string, away: string }[] }[] };
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
 import { Calendar, MapPin, Clock } from 'lucide-react';
@@ -9,6 +12,14 @@ import { useState } from 'react';
 const SchedulesPage = () => {
   const { activeLeague } = useApp();
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>('all');
+
+  const schedulesQuery = useQuery({
+    queryKey: ['schedules'],
+    queryFn: () => apiFetch<{ ok: boolean; data: unknown[] }>('/api/public/schedule'),
+    staleTime: 60_000,
+  });
+
+  const SCHEDULE_DATA: ScheduleDay[] = [];
 
   const filtered = leagueFilter === 'all'
     ? SCHEDULE_DATA

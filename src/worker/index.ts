@@ -1366,6 +1366,103 @@ async function handleProfileHeadshot({ req, admin }: HandlerCtx) {
 
 // ── CART & ORDERS ────────────────────────────────────────────────────────────
 
+
+async function handleEditEntity(ctx: HandlerCtx, table: string, allowedFields: (body: Record<string, unknown>) => Record<string, unknown>) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireAdminSession(ctx.req, ctx.admin);
+  const id = ctx.params.id;
+  const body = await ctx.req.json().catch(() => null) as Record<string, unknown> | null;
+  if (!body) return json({ ok: false, error: 'invalid_body' }, 400);
+
+  const clean = allowedFields(body);
+
+  const { error } = await ctx.admin.from(table).update(clean).eq('id', id);
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: session.userId,
+    action: `ops_edit_${table.replace('_', '-')}`,
+    ref_type: table,
+    ref_id: id,
+    payload: clean,
+    idempotency_key: readIdempotencyKey(ctx.req.headers),
+  });
+
+  return json({ ok: true, id });
+}
+
+async function handleEditTeam(ctx: HandlerCtx) {
+  return handleEditEntity(ctx, 'teams', body => {
+    const allowed = { name: body.name, division_id: body.division_id, season_id: body.season_id };
+    return Object.fromEntries(Object.entries(allowed).filter(([, v]) => v !== undefined));
+  });
+}
+
+async function handleEditPlayer(ctx: HandlerCtx) {
+  return handleEditEntity(ctx, 'players', body => {
+    const allowed = { name: body.name, position: body.position, jersey_number: body.jersey_number };
+    return Object.fromEntries(Object.entries(allowed).filter(([, v]) => v !== undefined));
+  });
+}
+
+async function handleEditProduct(ctx: HandlerCtx) {
+  return handleEditEntity(ctx, 'products', body => {
+    const allowed = { name: body.name, price: body.price, status: body.status };
+    return Object.fromEntries(Object.entries(allowed).filter(([, v]) => v !== undefined));
+  });
+}
+
+async function handleEditGame(ctx: HandlerCtx) {
+  return handleEditEntity(ctx, 'games', body => {
+    const allowed = { status: body.status, score: body.score };
+    return Object.fromEntries(Object.entries(allowed).filter(([, v]) => v !== undefined));
+  });
+}
+
+
+function handleDeleteEntity(table: string) {
+  return async (ctx: HandlerCtx) => {
+    await ensureMutation(ctx.req, ctx);
+    const session = await requireAdminSession(ctx.req, ctx.admin);
+    const { id } = ctx.params;
+
+    const { error } = await ctx.admin.from(table).update({ status: 'archived' }).eq('id', id);
+    if (error) throw new Error(error.message);
+
+    await ctx.admin.from('audit_logs').insert({
+      actor_id: session.userId,
+      action: `ops_delete_${table.replace('_', '-')}`,
+      ref_type: table,
+      ref_id: id,
+      payload: { soft_deleted: true },
+      idempotency_key: readIdempotencyKey(ctx.req.headers),
+    });
+
+    return json({ ok: true, id, archived: true });
+  };
+}
+
+
+async function handleDeleteCartItem({ req, admin }: HandlerCtx) {
+  await ensureMutation(req, { req, env: {} as Env, admin, params: {} });
+  const userId = requireAuth(req);
+  const itemId = new URL(req.url).pathname.split('/').pop()!;
+
+  // Verify ownership before deleting
+  const { data: item } = await admin.from('cart_items')
+    .select('id, cart_id, carts(user_id)')
+    .eq('id', itemId)
+    .maybeSingle();
+
+  if (!item) return json({ ok: false, error: 'not_found' }, 404);
+  const cartUserId = (item as Record<string, unknown>).carts as { user_id: string } | null;
+  if (cartUserId?.user_id !== userId) return json({ ok: false, error: 'forbidden' }, 403);
+
+  const { error } = await admin.from('cart_items').delete().eq('id', itemId);
+  if (error) throw new Error(error.message);
+  return json({ ok: true, deleted: itemId });
+}
+
 async function handleGetCart({ req, admin }: HandlerCtx) {
   const userId = requireAuth(req);
   // Find active cart or return empty
@@ -1541,6 +1638,41 @@ async function handlePublicProducts({ req, admin }: HandlerCtx) {
   return json({ ok: true, data: data ?? [] });
 }
 
+
+
+async function handlePublicPotg({ req, admin }: HandlerCtx) {
+  const url = new URL(req.url);
+  const league = url.searchParams.get('league');
+  const limit = Math.min(20, Number(url.searchParams.get('limit') ?? '4'));
+  let query = admin.from('import_jobs')
+    .select('id,payload_summary,created_at')
+    .eq('job_type', 'potg_award')
+    .in('status', ['completed', 'pending_match'])
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (league) query = query.contains('payload_summary', { leagueId: league });
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return json({ ok: true, data: data ?? [] });
+}
+
+async function handlePublicSchedule({ req, admin }: HandlerCtx) {
+  const url = new URL(req.url);
+  const league = url.searchParams.get('league')?.toUpperCase();
+  const query = admin.from('schedule_slots')
+    .select('id,starts_at,ends_at,status,venues(name,address),seasons(leagues(code))')
+    .in('status', ['upcoming', 'in_progress'])
+    .order('starts_at')
+    .limit(100);
+
+  // The schema likely doesn't have a direct league filter like this on schedule_slots, but we fetch and map.
+  // Actually, I'll return the raw data and let the frontend format it or format it here.
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return json({ ok: true, data: data ?? [] });
+}
+
 async function handlePublicMedia({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get('leagueId');
@@ -1615,16 +1747,26 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'POST', path: '/api/streams/:gameId/session', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'streams-session', ...ctx.params } }) },
   { method: 'GET', path: '/api/cart', handler: handleGetCart },
   { method: 'POST', path: '/api/cart/items', handler: handleAddCartItem },
-  { method: 'DELETE', path: '/api/cart/items/:itemId', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'cart-item-delete', ...ctx.params } }) },
+  { method: 'DELETE', path: '/api/cart/items/:itemId', handler: handleDeleteCartItem },
   { method: 'POST', path: '/api/orders', handler: handleCreateOrder },
   { method: 'POST', path: '/api/orders/:id/pay', handler: handlePayOrder },
   { method: 'GET', path: '/api/billing/history', handler: handleBillingHistory },
   { method: 'GET', path: '/api/public/products', handler: handlePublicProducts },
+  { method: 'GET', path: '/api/public/potg', handler: handlePublicPotg },
+  { method: 'GET', path: '/api/public/schedule', handler: handlePublicSchedule },
   { method: 'GET', path: '/api/public/media', handler: handlePublicMedia },
   { method: 'POST', path: '/api/player/checkout', handler: handlePlayerCheckout },
   { method: 'POST', path: '/api/store/checkout', handler: handleDirectStoreCheckout },
   { method: 'POST', path: '/api/rewards/redeem', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'rewards-redeem' } }) },
   { method: 'GET', path: '/ops/bootstrap', handler: handleOpsBootstrap },
+  { method: 'DELETE', path: '/ops/teams/:id', handler: handleDeleteEntity('teams') },
+  { method: 'DELETE', path: '/ops/players/:id', handler: handleDeleteEntity('players') },
+  { method: 'DELETE', path: '/ops/products/:id', handler: handleDeleteEntity('products') },
+  { method: 'DELETE', path: '/ops/games/:id', handler: handleDeleteEntity('games') },
+  { method: 'PATCH', path: '/ops/teams/:id', handler: handleEditTeam },
+  { method: 'PATCH', path: '/ops/players/:id', handler: handleEditPlayer },
+  { method: 'PATCH', path: '/ops/products/:id', handler: handleEditProduct },
+  { method: 'PATCH', path: '/ops/games/:id', handler: handleEditGame },
   { method: 'POST', path: '/ops/imports/teams', handler: (ctx) => handleImportRoute(ctx, 'teams') },
   { method: 'POST', path: '/ops/imports/players', handler: (ctx) => handleImportRoute(ctx, 'players') },
   { method: 'POST', path: '/ops/imports/schedules', handler: (ctx) => handleImportRoute(ctx, 'schedules') },

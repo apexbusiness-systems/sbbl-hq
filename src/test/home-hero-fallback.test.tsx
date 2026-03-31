@@ -3,6 +3,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import HomePage from '@/pages/Home';
 import { AppProvider } from '@/contexts/AppContext';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ roles: ['fan'], isAdmin: false, configAvailable: true, loading: false }),
@@ -24,14 +25,18 @@ vi.mock('@/lib/api/public', () => ({
   }),
 }));
 
+const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
 describe('home hero fallback', () => {
   it('renders league snapshot heading when data is loaded', async () => {
     render(
-      <BrowserRouter>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
         <AppProvider>
           <HomePage />
         </AppProvider>
-      </BrowserRouter>,
+      </BrowserRouter>
+      </QueryClientProvider>,
     );
 
     expect(await screen.findByText('League Snapshot')).toBeInTheDocument();
@@ -39,11 +44,13 @@ describe('home hero fallback', () => {
 
   it('shows empty state when no teams or games exist', async () => {
     render(
-      <BrowserRouter>
+      <QueryClientProvider client={queryClient}>
+        <BrowserRouter>
         <AppProvider>
           <HomePage />
         </AppProvider>
-      </BrowserRouter>,
+      </BrowserRouter>
+      </QueryClientProvider>,
     );
 
     expect(await screen.findByText('Season Coming Soon')).toBeInTheDocument();
