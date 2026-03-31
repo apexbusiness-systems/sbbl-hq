@@ -64,7 +64,7 @@ const TeamsPage = () => {
   // Stats leaders: sort by Points For (total offense)
   const statsLeaders = useMemo(() => {
     return [...filteredTeams]
-      .filter((t) => t.stats.gamesPlayed > 0) // Only include teams with games played
+      .filter((t) => t.stats && t.stats.gamesPlayed > 0) // Only include teams with games played
       .sort((a, b) => b.stats.ptsFor - a.stats.ptsFor);
   }, [filteredTeams]);
 
@@ -178,21 +178,21 @@ const TeamsPage = () => {
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5\">{team.season_name}</div>
                   </td>
-                  <td className="px-2 py-3 text-center font-semibold\">{team.stats.wins}</td>
-                  <td className="px-2 py-3 text-center font-semibold\">{team.stats.losses}</td>
-                  <td className="px-2 py-3 text-center font-mono\">{team.stats.winPct}</td>
-                  <td className="px-2 py-3 text-center\">{team.stats.ptsFor}</td>
-                  <td className="px-2 py-3 text-center\">{team.stats.ptsAgainst}</td>
+                  <td className="px-2 py-3 text-center font-semibold\">{team.stats?.wins ?? 0}</td>
+                  <td className="px-2 py-3 text-center font-semibold\">{team.stats?.losses ?? 0}</td>
+                  <td className="px-2 py-3 text-center font-mono\">{team.stats?.winPct ?? ".000"}</td>
+                  <td className="px-2 py-3 text-center\">{team.stats?.ptsFor ?? 0}</td>
+                  <td className="px-2 py-3 text-center\">{team.stats?.ptsAgainst ?? 0}</td>
                   <td
                     className={`px-2 py-3 text-center font-semibold ${
-                      team.stats.diff > 0
+                      (team.stats?.diff ?? 0) > 0
                         ? 'text-green-500'
-                        : team.stats.diff < 0
+                        : (team.stats?.diff ?? 0) < 0
                         ? 'text-red-500'
                         : 'text-muted-foreground'
                     }`}
                   >
-                    {team.stats.diff > 0 ? '+' : ''}{team.stats.diff}
+                    {(team.stats?.diff ?? 0) > 0 ? '+' : ''}{team.stats?.diff ?? 0}
                   </td>
                 </tr>
               ))}
@@ -322,7 +322,7 @@ const TeamsPage = () => {
             <h3 className="text-lg font-semibold mb-4\">Best Defense (PAPG)</h3>
             <div className="space-y-2\">
               {[...filteredTeams]
-                .filter((t) => t.stats.gamesPlayed > 0)
+                .filter((t) => t.stats && t.stats.gamesPlayed > 0)
                 .sort((a, b) => {
                   const papgA = a.stats.ptsAgainst / a.stats.gamesPlayed;
                   const papgB = b.stats.ptsAgainst / b.stats.gamesPlayed;
