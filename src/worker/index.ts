@@ -1261,10 +1261,11 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
     body: new URLSearchParams({
       'payment_method_types[]': 'card',
       'line_items[0][price_data][currency]': 'usd',
-      'line_items[0][price_data][product_data][name]': 'SBBL HQ Player Registration',
+      'line_items[0][price_data][product_data][name]': 'SBBL HQ Player/Coach Registration',
       'line_items[0][price_data][unit_amount]': '700',
+      'line_items[0][price_data][recurring][interval]': 'month',
       'line_items[0][quantity]': '1',
-      'mode': 'payment',
+      'mode': 'subscription',
       'success_url': successUrl,
       'cancel_url': cancelUrl,
       'metadata[user_id]': userId,
