@@ -748,14 +748,33 @@ async function handlePublicHome({ req, admin }: HandlerCtx) {
   });
 }
 
+function splitProfileName(profile: Record<string, unknown> | undefined) {
+  const fullName = typeof profile?.full_name === 'string' ? profile.full_name.trim() : '';
+  const displayName = typeof profile?.display_name === 'string' ? profile.display_name.trim() : '';
+  const rawName = fullName || displayName;
+  if (!rawName) {
+    return { first_name: null, last_name: null };
+  }
+
+  const parts = rawName.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return { first_name: parts[0], last_name: null };
+  }
+
+  return {
+    first_name: parts.slice(0, -1).join(' '),
+    last_name: parts[parts.length - 1],
+  };
+}
+
 async function handleTeamsList({ req, admin }: HandlerCtx) {
   const leagueId = new URL(req.url).searchParams.get('leagueId');
 
   let query = admin.from('teams')
     .select(
       'id,name,league_id,leagues(code,name),seasons(name),divisions(name),' +
-      'players(id,jersey_number,position,user_id,profiles(first_name,last_name,avatar_url)),' +
-      'team_memberships(id,user_id,role,profiles(first_name,last_name,avatar_url))'
+      'players(id,jersey_number,position,user_id),' +
+      'team_memberships(id,user_id,role)'
     )
     .eq('status', 'published')
     .limit(200);
@@ -795,6 +814,32 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
       filteredGamesData = filteredGamesData.filter((g: Record<string, unknown>) =>
         ((((g.seasons as Record<string, unknown>)?.leagues as Record<string, unknown>)?.code as string) || '').toLowerCase() === leagueId.toLowerCase()
       );
+  }
+
+  const profileUserIds = Array.from(new Set(
+    filteredTeamsData.flatMap((team) => {
+      const players = Array.isArray(team.players) ? team.players : [];
+      const memberships = Array.isArray(team.team_memberships) ? team.team_memberships : [];
+      return [...players, ...memberships]
+        .map((entry) => typeof (entry as Record<string, unknown>).user_id === 'string' ? String((entry as Record<string, unknown>).user_id) : null)
+        .filter((userId): userId is string => Boolean(userId));
+    }),
+  ));
+
+  const profileMap = new Map<string, Record<string, unknown>>();
+  if (profileUserIds.length > 0) {
+    const { data: profilesData, error: profilesError } = await admin
+      .from('profiles')
+      .select('user_id,full_name,display_name,avatar_url')
+      .in('user_id', profileUserIds);
+
+    if (profilesError) throw new Error(profilesError.message);
+
+    for (const profile of (profilesData as Record<string, unknown>[] | null) ?? []) {
+      if (typeof profile.user_id === 'string') {
+        profileMap.set(profile.user_id, profile);
+      }
+    }
   }
 
   const statsMap = new Map<string, { wins: number; losses: number; ptsFor: number; ptsAgainst: number }>();
@@ -841,25 +886,33 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
       season_name: String((row.seasons as Record<string, unknown>)?.name ?? 'Season'),
       division_name: (row.divisions as Record<string, unknown>)?.name ?? null,
       roster_count: Array.isArray(row.players) ? row.players.length : 0,
-      players: (Array.isArray(row.players) ? row.players : []).map((p: Record<string, unknown>) => ({
-        id: p.id,
-        user_id: p.user_id,
-        jersey_number: p.jersey_number,
-        position: p.position,
-        first_name: (p.profiles as Record<string, unknown>)?.first_name ?? null,
-        last_name: (p.profiles as Record<string, unknown>)?.last_name ?? null,
-        avatar_url: (p.profiles as Record<string, unknown>)?.avatar_url ?? null,
-      })),
+      players: (Array.isArray(row.players) ? row.players : []).map((p: Record<string, unknown>) => {
+        const profile = typeof p.user_id === 'string' ? profileMap.get(p.user_id) : undefined;
+        const name = splitProfileName(profile);
+        return {
+          id: p.id,
+          user_id: p.user_id,
+          jersey_number: p.jersey_number,
+          position: p.position,
+          first_name: name.first_name,
+          last_name: name.last_name,
+          avatar_url: (profile?.avatar_url as string | null | undefined) ?? null,
+        };
+      }),
       coaches: (Array.isArray(row.team_memberships) ? row.team_memberships : [])
         .filter((m: Record<string, unknown>) => m.role === 'team_manager' || m.role === 'coach')
-        .map((m: Record<string, unknown>) => ({
-          id: m.id,
-          user_id: m.user_id,
-          role: m.role,
-          first_name: (m.profiles as Record<string, unknown>)?.first_name ?? null,
-          last_name: (m.profiles as Record<string, unknown>)?.last_name ?? null,
-          avatar_url: (m.profiles as Record<string, unknown>)?.avatar_url ?? null,
-        })),
+        .map((m: Record<string, unknown>) => {
+          const profile = typeof m.user_id === 'string' ? profileMap.get(m.user_id) : undefined;
+          const name = splitProfileName(profile);
+          return {
+            id: m.id,
+            user_id: m.user_id,
+            role: m.role,
+            first_name: name.first_name,
+            last_name: name.last_name,
+            avatar_url: (profile?.avatar_url as string | null | undefined) ?? null,
+          };
+        }),
       stats: {
         wins: stats.wins,
         losses: stats.losses,
