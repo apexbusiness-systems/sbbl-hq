@@ -935,6 +935,204 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
   return json({ ok: true, jobId: jobData.id, matched: !!profileData });
 }
 
+// ── PPV INVITE SYSTEM ────────────────────────────────────────────────────────
+//
+// UNVERIFIED: IP source — CF-Connecting-IP is the canonical Cloudflare Pages
+// header containing the real client IP (set by Cloudflare's edge before the
+// request reaches the Worker).  In local dev without Cloudflare in front,
+// x-forwarded-for is used as fallback and may be spoofable.  Never trust a
+// client-supplied IP header — always derive it server-side here.
+
+function getClientIP(req: Request): string {
+  return (
+    req.headers.get('cf-connecting-ip') ??
+    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
+    'unknown'
+  );
+}
+
+async function getUserRolesFromDB(userId: string, admin: SupabaseClient): Promise<string[]> {
+  const { data } = await admin
+    .from('user_role_assignments')
+    .select('role')
+    .eq('user_id', userId);
+  return (data ?? []).map((row) => String(row.role));
+}
+
+/**
+ * POST /api/invite/generate
+ * Auth required.  Eligible roles: player, paid_fan, super_admin.
+ * Rate-limit: 1 invite per (user, game) enforced by UNIQUE DB constraint.
+ * Returns { code: uuid } — the invite ID is the redemption token.
+ * On duplicate request for same game returns the existing code (idempotent).
+ */
+async function handleInviteGenerate(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+
+  // Fetch roles from DB — worker JWT session defaults to ['fan'] only
+  const userRoles = await getUserRolesFromDB(userId, ctx.admin);
+  const canGenerate = userRoles.some(
+    (r) => r === 'player' || r === 'paid_fan' || r === 'super_admin',
+  );
+  if (!canGenerate) {
+    return json({ ok: false, error: 'forbidden' }, 403);
+  }
+
+  const body = await ctx.req.json().catch(() => null) as { gameId?: string } | null;
+  const gameId = body?.gameId;
+  if (!gameId) return json({ ok: false, error: 'game_id_required' }, 400);
+
+  // Verify the game exists
+  const { data: game, error: gameErr } = await ctx.admin
+    .from('games')
+    .select('id')
+    .eq('id', gameId)
+    .maybeSingle();
+  if (gameErr || !game) return json({ ok: false, error: 'game_not_found' }, 404);
+
+  // Check for an existing invite (idempotent — return same code on re-request)
+  const { data: existing } = await ctx.admin
+    .from('ppv_invites')
+    .select('id')
+    .eq('generated_by', userId)
+    .eq('game_id', gameId)
+    .maybeSingle();
+
+  if (existing) {
+    return json({ ok: true, code: (existing as { id: string }).id, reused: true });
+  }
+
+  // Insert new invite; UNIQUE(generated_by, game_id) prevents double-generation
+  const { data: invite, error: insertErr } = await ctx.admin
+    .from('ppv_invites')
+    .insert({ game_id: gameId, generated_by: userId })
+    .select('id')
+    .single();
+
+  if (insertErr) {
+    // Race condition: concurrent insert won — fetch the winner's row
+    if (insertErr.code === '23505' || insertErr.message.includes('duplicate')) {
+      const { data: raceRow } = await ctx.admin
+        .from('ppv_invites')
+        .select('id')
+        .eq('generated_by', userId)
+        .eq('game_id', gameId)
+        .maybeSingle();
+      if (raceRow) return json({ ok: true, code: (raceRow as { id: string }).id, reused: true });
+    }
+    throw new Error(insertErr.message);
+  }
+
+  return json({ ok: true, code: (invite as { id: string }).id, reused: false });
+}
+
+/**
+ * POST /api/invite/redeem
+ * Auth required.  User must be a registered fan (any authenticated user qualifies).
+ * Validates: exists → not expired → not already used by someone else.
+ * On first use: locks used_by = auth.uid() and ip_address = CF-Connecting-IP.
+ * IP-mismatch on re-use → 403.  Different user on re-use → 403 (non-transferable).
+ * Idempotent for same user + same IP (re-entry after page refresh).
+ */
+async function handleInviteRedeem(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const ip = getClientIP(ctx.req);
+
+  const body = await ctx.req.json().catch(() => null) as { code?: string; gameId?: string } | null;
+  const code   = body?.code?.trim();
+  const gameId = body?.gameId?.trim();
+  if (!code || !gameId) return json({ ok: false, error: 'code_and_game_id_required' }, 400);
+
+  // Fetch invite record
+  const { data: row, error: fetchErr } = await ctx.admin
+    .from('ppv_invites')
+    .select('id, game_id, generated_by, used_by, ip_address, used_at, expires_at')
+    .eq('id', code)
+    .eq('game_id', gameId)
+    .maybeSingle();
+
+  if (fetchErr || !row) return json({ ok: false, error: 'invalid_invite' }, 404);
+
+  const inv = row as {
+    id: string;
+    game_id: string;
+    generated_by: string;
+    used_by: string | null;
+    ip_address: string | null;
+    used_at: string | null;
+    expires_at: string;
+  };
+
+  // Expiry gate
+  if (new Date(inv.expires_at) < new Date()) {
+    return json({ ok: false, error: 'expired' }, 410);
+  }
+
+  // Generator cannot redeem their own invite (prevents self-gifting bypass)
+  if (inv.generated_by === userId) {
+    return json({ ok: false, error: 'cannot_redeem_own_invite' }, 403);
+  }
+
+  if (inv.used_by) {
+    // Idempotent re-entry: same user, same IP → already granted
+    if (inv.used_by === userId && inv.ip_address === ip) {
+      return json({ ok: true, granted: true, idempotent: true });
+    }
+    // Same user but different IP (VPN switch, location change) → reject
+    if (inv.used_by === userId && inv.ip_address !== ip) {
+      return json({ ok: false, error: 'ip_mismatch' }, 403);
+    }
+    // Different user entirely → non-transferable
+    return json({ ok: false, error: 'non_transferable' }, 403);
+  }
+
+  // First use: atomically lock the invite to this user + IP
+  // The `.is('used_by', null)` filter makes this a compare-and-swap:
+  // if a concurrent request already locked it, this update affects 0 rows.
+  const { error: updateErr, count } = await ctx.admin
+    .from('ppv_invites')
+    .update({
+      used_by: userId,
+      ip_address: ip,
+      used_at: new Date().toISOString(),
+    })
+    .eq('id', code)
+    .is('used_by', null)
+    .select('id');  // returns rows to detect 0-row update
+
+  if (updateErr) throw new Error(updateErr.message);
+
+  // count === 0 means a concurrent request locked it first — re-check
+  if (count === 0) {
+    const { data: recheck } = await ctx.admin
+      .from('ppv_invites')
+      .select('used_by, ip_address')
+      .eq('id', code)
+      .single();
+    const r = recheck as { used_by: string | null; ip_address: string | null } | null;
+    if (r?.used_by === userId && r?.ip_address === ip) {
+      return json({ ok: true, granted: true, idempotent: true });
+    }
+    return json({ ok: false, error: 'non_transferable' }, 403);
+  }
+
+  // Belt-and-suspenders: also create a stream_entitlement so ops dashboards
+  // show the access grant and can_user_view_stream checks both paths.
+  try {
+    await ctx.admin.rpc('create_stream_entitlement', {
+      p_game_id: gameId,
+      p_user_id: userId,
+      p_order_id: null,
+      p_expires_at: inv.expires_at,
+      p_idempotency_key: `invite-${code}-${userId}`,
+    });
+  } catch { /* non-critical — ppv_invites path in RPC is the primary gate */ }
+
+  return json({ ok: true, granted: true });
+}
+
 // ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
 
 async function handleStreamAccess({ req, admin }: HandlerCtx) {
@@ -1301,6 +1499,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'POST', path: '/api/games/:id/stats/finalize', handler: (ctx) => handleFinalize({ ...ctx, params: { route: 'games-stats-finalize', ...ctx.params } }) },
   { method: 'GET', path: '/api/stats', handler: handleStats },
   { method: 'GET', path: '/api/leaderboards', handler: handleLeaderboards },
+  { method: 'POST', path: '/api/invite/generate', handler: handleInviteGenerate },
+  { method: 'POST', path: '/api/invite/redeem', handler: handleInviteRedeem },
   { method: 'GET', path: '/api/streams/:gameId/preview', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'streams-preview', ...ctx.params } }) },
   { method: 'POST', path: '/api/streams/:gameId/purchase', handler: handleStreamPurchase },
   { method: 'GET', path: '/api/streams/:gameId/access', handler: handleStreamAccess },
