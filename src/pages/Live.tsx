@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { games, players, products } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
-import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
+import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag, LogIn } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 
@@ -53,6 +53,21 @@ const LivePage = () => {
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselProduct = featuredProducts[carouselIdx] ?? products[0];
 
+  // Derive access level from real auth — no prototype toggle
+  const deriveViewerState = (): ViewerState => {
+    if (!isSignedIn) return 'locked';
+    if (isAdmin || hasPremiumPlayerAccess) return 'purchased';
+    return 'preview';
+  };
+
+  const [viewerState, setViewerState] = useState<ViewerState>(deriveViewerState);
+
+  // Re-derive when auth state loads/changes
+  useEffect(() => {
+    setViewerState(deriveViewerState());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn, isAdmin, hasPremiumPlayerAccess]);
+
   useEffect(() => {
     if (featuredProducts.length <= 1) return;
     const id = setInterval(() => setCarouselIdx(i => (i + 1) % featuredProducts.length), 4000);
@@ -85,6 +100,11 @@ const LivePage = () => {
     setComments(prev => [...prev, { user: 'You', text }]);
     setChatInput('');
     setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+  };
+
+  // TODO: replace with POST /api/streams/:gameId/purchase → Stripe checkout
+  const handlePurchaseAccess = () => {
+    toast.info('Payment integration coming soon. Contact league admin for access.');
   };
 
   const sidebar = (
@@ -180,7 +200,7 @@ const LivePage = () => {
             {/* Broadcast Area */}
             <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
               {viewerState === 'locked' ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center bg-background">
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-background px-4 text-center">
                   <Lock className="w-12 h-12 text-muted-foreground mb-4" />
                   <h2 className="font-display text-2xl font-bold mb-2">Sign In to Watch</h2>
                   <p className="text-sm text-muted-foreground mb-4">You need an account to access live streams.</p>

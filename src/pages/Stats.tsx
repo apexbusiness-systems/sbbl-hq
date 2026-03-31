@@ -1,11 +1,14 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { players, teams } from '@/data/mock';
+import { players as mockPlayers, teams } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
-import { LeagueId, StatLine } from '@/types';
+import { LeagueId, StatLine, PlayerProfile } from '@/types';
 import { ArrowUpDown, BarChart3, Lock } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
+import { useAuth } from '@/hooks/use-auth';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api/client';
 
 type StatKey = keyof StatLine;
 const statKeys: StatKey[] = ['pts', 'reb', 'ast', 'stl', 'blk', 'fls', 'min'];
@@ -13,6 +16,7 @@ const statLabels: Record<StatKey, string> = { pts: 'PTS', reb: 'REB', ast: 'AST'
 
 const StatsPage = () => {
   const { hasPremiumPlayerAccess, activeLeague } = useApp();
+  const { isSignedIn } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sortBy, setSortBy] = useState<StatKey>('pts');
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
@@ -39,10 +43,27 @@ const StatsPage = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fetch live stats from the worker; fall back to mock if API unavailable or returns empty
+  const statsQuery = useQuery({
+    queryKey: ['stats', leagueFilter],
+    queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/stats'),
+    enabled: isSignedIn,
+    retry: 1,
+    staleTime: 30_000,
+  });
+
+  const players = useMemo<PlayerProfile[]>(() => {
+    const apiData = statsQuery.data?.data;
+    if (Array.isArray(apiData) && apiData.length > 0 && 'stats' in (apiData[0] ?? {})) {
+      return apiData;
+    }
+    return mockPlayers;
+  }, [statsQuery.data]);
+
   const filtered = useMemo(() => {
     const list = leagueFilter === 'all' ? players : players.filter(p => p.leagueId === leagueFilter);
     return [...list].sort((a, b) => b.stats[sortBy] - a.stats[sortBy]);
-  }, [leagueFilter, sortBy]);
+  }, [leagueFilter, sortBy, players]);
   const visibleRows = hasPremiumPlayerAccess ? filtered : filtered.slice(0, 3);
 
   const detail = selectedPlayer ? players.find(p => p.id === selectedPlayer) : null;
