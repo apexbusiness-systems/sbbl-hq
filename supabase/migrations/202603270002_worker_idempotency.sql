@@ -8,7 +8,8 @@ create table if not exists public.api_idempotency_keys (
 
 alter table public.api_idempotency_keys enable row level security;
 
-create policy if not exists api_idempotency_service_only on public.api_idempotency_keys
+drop policy if exists api_idempotency_service_only on public.api_idempotency_keys;
+create policy api_idempotency_service_only on public.api_idempotency_keys
 for all
 using (auth.role() = 'service_role')
 with check (auth.role() = 'service_role');

@@ -15,6 +15,7 @@ const staticNav = [
   { label: 'Schedules', path: '/schedules' },
   { label: 'Store', path: '/store' },
   { label: 'Profiles', path: '/profiles' },
+  { label: 'Support', path: '/support' },
 ];
 // These pages accept ?league= to pre-filter — injected dynamically in the component
 const leagueAwareNav = ['Stats', 'Leaderboards', 'Media'] as const;

@@ -100,6 +100,8 @@ export interface PlayerOfTheGame {
   assts: number;
   gameResult: string;
   date: string;
+  /** Path to POTG graphic card (marketing asset) */
+  image?: string;
 }
 
 export interface Invoice {
