@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { PlayerOfTheGame } from '@/types';
 import { Trophy } from 'lucide-react';
 
@@ -7,8 +8,10 @@ interface PotgCardProps {
 }
 
 export const PotgCard = ({ potg, featured = false }: PotgCardProps) => {
-  // If a real graphic card image exists, render it as a poster-style card
-  if (potg.image) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  // If a real graphic card image exists (and loaded ok), render as poster-style card
+  if (potg.image && !imgFailed) {
     return (
       <div
         className={`relative overflow-hidden flex-shrink-0 rounded-sm border border-border group cursor-default transition-all duration-300 hover:border-primary/40 hover:shadow-[0_0_32px_-4px_hsl(43_52%_54%/0.25)] ${
@@ -21,6 +24,7 @@ export const PotgCard = ({ potg, featured = false }: PotgCardProps) => {
           alt={`${potg.playerName} — Player of the Game`}
           className="w-full h-full object-cover object-top group-hover:scale-[1.03] transition-transform duration-500"
           loading="lazy"
+          onError={() => setImgFailed(true)}
         />
         {/* Bottom stat overlay */}
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 via-black/60 to-transparent px-3 pb-3 pt-8">

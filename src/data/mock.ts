@@ -13,7 +13,7 @@ import gameAction from '@/assets/game-action.svg';
 // Marketing assets — real photos & event graphics
 // Drop image files at these paths and they will auto-render throughout the app
 const potgTataRamon = '/assets/potg/wbl-tata-ramon.jpg';
-const potgMichaelRamos = '/assets/potg/wbl-michael-ramos.jpg';
+const potgMichaelRamos = '/assets/potg/michael-ramos.jpg';
 const potgHaroldCasio = '/assets/potg/wbl-harold-casio.jpg';
 const potgJtBalangui = '/assets/potg/wbl-jt-balangui.jpg';
 const event1v1Sbbl = '/assets/events/1v1-fred-vs-karl.jpg';

@@ -6,6 +6,7 @@ import { PotgCard } from '@/components/ui/PotgCard';
 import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord } from '@/lib/api/ops';
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
+import { resizeImageToFit } from '@/lib/imageResize';
 
 type Tab = 'overview' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
 
@@ -43,11 +44,13 @@ const OpsPage = () => {
   const potgFileRef = useRef<HTMLInputElement>(null);
   const [potgParseState, setPotgParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
   const [potgParseError, setPotgParseError] = useState<string | null>(null);
+  const [potgImageFile, setPotgImageFile] = useState<File | null>(null);
   const [potgForm, setPotgForm] = useState({ playerName: '', team: '', pts: '', rebs: '', assts: '', gameResult: '', leagueId: 'wbl', date: new Date().toISOString().split('T')[0] });
 
   const handlePotgImageUpload = async (file: File) => {
     setPotgParseState('parsing');
     setPotgParseError(null);
+    setPotgImageFile(file);
     try {
       const buffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
@@ -91,16 +94,29 @@ const OpsPage = () => {
   });
 
   const potgMutation = useMutation({
-    mutationFn: () => submitPotgRecord({
-      playerName: potgForm.playerName,
-      team: potgForm.team,
-      pts: Number(potgForm.pts),
-      rebs: Number(potgForm.rebs),
-      assts: Number(potgForm.assts),
-      gameResult: potgForm.gameResult,
-      leagueId: potgForm.leagueId,
-      date: potgForm.date,
-    }),
+    mutationFn: async () => {
+      // Upload the POTG graphic to Supabase storage (resized to 560×747 — 2× the 280×373 card)
+      let imageUrl: string | undefined;
+      if (potgImageFile && hasSupabaseClientConfig) {
+        const supabase = requireSupabaseClient();
+        const resized = await resizeImageToFit(potgImageFile, 560, 747);
+        const objectPath = `potg/${potgForm.leagueId}/${crypto.randomUUID()}.jpg`;
+        const upload = await supabase.storage.from('media').upload(objectPath, resized, { upsert: true });
+        if (upload.error) throw upload.error;
+        imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
+      }
+      return submitPotgRecord({
+        playerName: potgForm.playerName,
+        team: potgForm.team,
+        pts: Number(potgForm.pts),
+        rebs: Number(potgForm.rebs),
+        assts: Number(potgForm.assts),
+        gameResult: potgForm.gameResult,
+        leagueId: potgForm.leagueId,
+        date: potgForm.date,
+        imageUrl,
+      });
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
       await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
@@ -111,8 +127,9 @@ const OpsPage = () => {
     mutationFn: async () => {
       if (!storeForm.imageFile) throw new Error('Image is required');
       const supabase = requireSupabaseClient();
-      const objectPath = `store/${crypto.randomUUID()}-${storeForm.imageFile.name}`;
-      const upload = await supabase.storage.from('media').upload(objectPath, storeForm.imageFile, { upsert: true });
+      const resized = await resizeImageToFit(storeForm.imageFile, 800, 800);
+      const objectPath = `store/${crypto.randomUUID()}.jpg`;
+      const upload = await supabase.storage.from('media').upload(objectPath, resized, { upsert: true });
       if (upload.error) throw upload.error;
       const imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
       return uploadStoreMedia({
@@ -339,7 +356,7 @@ const OpsPage = () => {
             onClick={() => potgMutation.mutate()}
             className="w-full gold-bg py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm disabled:opacity-50 transition-opacity"
           >
-            {potgMutation.isPending ? 'Submitting to Pipeline…' : 'Submit to Data Pipeline'}
+            {potgMutation.isPending ? (potgImageFile ? 'Resizing & Uploading…' : 'Submitting to Pipeline…') : 'Submit to Data Pipeline'}
           </button>
 
           {potgMutation.error && <p className="text-xs text-destructive">{(potgMutation.error as Error).message}</p>}

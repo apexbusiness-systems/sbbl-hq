@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { signInWithEmail } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
@@ -11,9 +11,23 @@ const LoginPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [cooldown, setCooldown] = useState(0);
+  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const { isSignedIn, needsOnboarding, configAvailable, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Tick down the cooldown every second
+  useEffect(() => {
+    if (cooldown <= 0) return;
+    cooldownRef.current = setInterval(() => {
+      setCooldown((c) => {
+        if (c <= 1) { clearInterval(cooldownRef.current!); return 0; }
+        return c - 1;
+      });
+    }, 1000);
+    return () => clearInterval(cooldownRef.current!);
+  }, [cooldown > 0]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (isSignedIn) navigate(needsOnboarding ? '/onboarding' : '/');
@@ -27,16 +41,22 @@ const LoginPage = () => {
     try {
       await signInWithEmail(email);
       setMessage('Magic link sent — check your inbox and click the link to sign in.');
+      setCooldown(60);
     } catch (submitError) {
       const text = submitError instanceof Error ? submitError.message : 'Login failed';
-      setError(text);
+      if (text.toLowerCase().includes('rate limit') || text.toLowerCase().includes('too many')) {
+        setError('Too many requests — please wait 60 seconds before trying again.');
+        setCooldown(60);
+      } else {
+        setError(text);
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
   const isEmailValid = email.includes('@') && email.includes('.');
-  const canSubmit = isEmailValid && !submitting && configAvailable;
+  const canSubmit = isEmailValid && !submitting && configAvailable && cooldown === 0;
 
   return (
     <div className="min-h-[calc(100vh-6rem)] flex items-center justify-center px-4 py-10">
@@ -114,7 +134,7 @@ const LoginPage = () => {
                 disabled={!canSubmit}
                 className="gold-bg px-4 py-3 rounded-sm font-display font-bold text-sm uppercase tracking-wider w-full disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
-                {submitting ? 'Sending…' : 'Send Magic Link'}
+                {submitting ? 'Sending…' : cooldown > 0 ? `Resend in ${cooldown}s` : 'Send Magic Link'}
               </button>
             </form>
 

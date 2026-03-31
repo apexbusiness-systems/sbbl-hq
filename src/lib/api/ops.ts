@@ -46,7 +46,7 @@ export async function parsePotgImage(imageBase64: string, mimeType: string) {
 
 export async function submitPotgRecord(payload: {
   playerName: string; team: string; pts: number; rebs: number; assts: number;
-  gameResult: string; leagueId: string; date: string;
+  gameResult: string; leagueId: string; date: string; imageUrl?: string;
 }) {
   return apiFetch<{ ok: boolean; jobId: string; matched: boolean }>('/ops/potg/submit', {
     method: 'POST',

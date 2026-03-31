@@ -818,7 +818,7 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
   const session = await requireAdminSession(ctx.req, ctx.admin);
   const body = await ctx.req.json().catch(() => null) as {
     playerName: string; team: string; pts: number; rebs: number; assts: number;
-    gameResult: string; leagueId: string; date?: string;
+    gameResult: string; leagueId: string; date?: string; imageUrl?: string;
   } | null;
 
   if (!body?.playerName || !body?.team || !body?.leagueId) {
@@ -845,6 +845,7 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
       gameResult: body.gameResult,
       leagueId: body.leagueId,
       date: body.date ?? new Date().toISOString().split('T')[0],
+      imageUrl: body.imageUrl ?? null,
       matched_profile_id: profileData?.user_id ?? null,
       source: 'potg_image_parser',
     },
