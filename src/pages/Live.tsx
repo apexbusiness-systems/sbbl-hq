@@ -6,6 +6,7 @@ import { CASLNudge } from '@/components/CASLNudge';
 import { MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 
+type Product = { id: string; name: string; image: string; price: number; colors?: string[]; };
 const LivePage = () => {
   const { addToBag, hasPremiumPlayerAccess } = useApp();
   const { user, session, roles } = useAuth();
@@ -27,8 +28,7 @@ const LivePage = () => {
 
   const featuredProducts: unknown[] = [];
   const [carouselIdx, setCarouselIdx] = useState(0);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const carouselProduct: any = featuredProducts[carouselIdx];
+  const carouselProduct: Product = featuredProducts[carouselIdx] as Product;
 
   useEffect(() => {
     if (featuredProducts.length <= 1) return;

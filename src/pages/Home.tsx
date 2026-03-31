@@ -13,6 +13,22 @@ import type { LeagueId } from '@/types';
 
 type LoadState = 'loading' | 'loaded' | 'error';
 
+
+interface PotgJob {
+  id: string;
+  created_at: string;
+  payload_summary: {
+    playerId?: string;
+    playerName?: string;
+    team?: string;
+    leagueId?: string;
+    pts?: string | number;
+    rebs?: string | number;
+    assts?: string | number;
+    gameResult?: string;
+  };
+}
+
 const HomePage = () => {
   const { activeLeague, setActiveLeague } = useApp();
   const { leagueId: leagueParam } = useParams<{ leagueId?: string }>();
@@ -31,7 +47,7 @@ const HomePage = () => {
   const [state, setState] = useState<LoadState>('loading');
   const potgQuery = useQuery({
     queryKey: ['potg', activeLeague],
-    queryFn: () => apiFetch<{ ok: boolean; data: Record<string, unknown>[] }>('//api/public/potg?league=' + activeLeague.toLowerCase() + '&limit=4'),
+    queryFn: () => apiFetch<{ ok: boolean; data: PotgJob[] }>('/api/public/potg?league=' + activeLeague.toLowerCase() + '&limit=4'),
     staleTime: 60_000,
   });
   const [data, setData] = useState<PublicHomeData | null>(null);
@@ -269,9 +285,8 @@ const HomePage = () => {
         {/* Players of the Game — always rendered; empty state when no data for this league yet */}
         {(() => {
           // In a real scenario we might map import_jobs to PotgProfile here.
-  const playersOfTheGame: Record<string, unknown>[] = potgQuery.data?.data || [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const potgList = (playersOfTheGame || []).map((job: any) => ({
+  const playersOfTheGame: PotgJob[] = potgQuery.data?.data || [];
+  const potgList = (playersOfTheGame || []).map((job: PotgJob) => ({
     id: job.id,
     playerId: job.payload_summary.playerId || '',
     name: job.payload_summary.playerName || '',
@@ -279,14 +294,14 @@ const HomePage = () => {
     avatar: '',
     teamId: job.payload_summary.team || '',
     team: job.payload_summary.team || '',
-    leagueId: job.payload_summary.leagueId || resolvedLeague,
-    pts: parseInt(job.payload_summary.pts || '0'),
-    rebs: parseInt(job.payload_summary.rebs || '0'),
-    assts: parseInt(job.payload_summary.assts || '0'),
+    leagueId: (job.payload_summary.leagueId as LeagueId) || resolvedLeague,
+    pts: parseInt(String(job.payload_summary.pts || '0')),
+    rebs: parseInt(String(job.payload_summary.rebs || '0')),
+    assts: parseInt(String(job.payload_summary.assts || '0')),
     stats: {
-      pts: parseInt(job.payload_summary.pts || '0'),
-      rebs: parseInt(job.payload_summary.rebs || '0'),
-      assts: parseInt(job.payload_summary.assts || '0')
+      pts: parseInt(String(job.payload_summary.pts || '0')),
+      rebs: parseInt(String(job.payload_summary.rebs || '0')),
+      assts: parseInt(String(job.payload_summary.assts || '0'))
     },
     date: job.created_at,
     gameResult: job.payload_summary.gameResult || ''
