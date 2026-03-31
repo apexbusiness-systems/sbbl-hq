@@ -1,4 +1,4 @@
-export type LeagueId = 'sbbl' | 'wbl' | 'tgifbl';
+export type LeagueId = 'sbbl' | 'wbl' | 'tgif';
 export type AuthRole = 'fan' | 'member' | 'player' | 'coach' | 'team_manager' | 'league_admin' | 'media_operator' | 'store_operator' | 'super_admin';
 export type GameStatus = 'upcoming' | 'live' | 'final' | 'postponed' | 'review_pending';
 export type EntitlementStatus = 'locked' | 'preview' | 'purchased' | 'active' | 'expired';

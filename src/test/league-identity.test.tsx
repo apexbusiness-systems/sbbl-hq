@@ -67,10 +67,10 @@ describe('LeagueBadge component', () => {
   it('supports md size variant', () => {
     const { container } = render(
       <MemoryRouter>
-        <LeagueBadge leagueId="tgifbl" size="md" />
+        <LeagueBadge leagueId="tgif" size="md" />
       </MemoryRouter>,
     );
-    const badge = container.querySelector('.league-badge-tgifbl');
+    const badge = container.querySelector('.league-badge-tgif');
     expect(badge?.className).toContain('text-sm');
   });
 });
@@ -87,7 +87,7 @@ describe('league identity registry completeness', () => {
     const ids = LEAGUE_REGISTRY.map((l) => l.id);
     expect(ids).toContain('sbbl');
     expect(ids).toContain('wbl');
-    expect(ids).toContain('tgifbl');
+    expect(ids).toContain('tgif');
     expect(ids).toHaveLength(3);
   });
 });

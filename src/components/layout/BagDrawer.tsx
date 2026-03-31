@@ -1,3 +1,5 @@
+import { AppRole } from '@/lib/auth/roles';
+import { getStoreDiscountPercent } from '@/lib/auth/subscription';
 import { useState } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
@@ -8,7 +10,8 @@ import { toast } from 'sonner';
 
 export const BagDrawer = () => {
   const { bagOpen, setBagOpen, bagItems, removeFromBag } = useApp();
-  const { session, roles, playerSubscriptionEndsAt } = useAuth();
+  const { session, roles } = useAuth();
+  const { playerSubscriptionEndsAt } = useApp();
   const [checkingOut, setCheckingOut] = useState(false);
 
   if (!bagOpen) return null;

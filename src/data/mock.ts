@@ -21,7 +21,7 @@ const event1v1Sbbl = '/assets/events/1v1-fred-vs-karl.jpg';
 export const leagues: League[] = [
   { id: 'sbbl', name: "Sunday's Best Basketball League", shortName: 'SBBL', fee: 1350, accentVar: '--sbbl', description: 'The flagship Sunday league with multiple Panalay divisions, strict review rules, and all-star media day events.' },
   { id: 'wbl', name: 'Weekend Basketball League', shortName: 'WBL', fee: 1390, accentVar: '--wbl', description: 'Weekend warriors compete at La Liga Sports Complex with best-of-3 finals and live broadcast coverage.' },
-  { id: 'tgifbl', name: "Thank God It's Friday Basketball League", shortName: 'TGIFBL', fee: 1390, accentVar: '--tgifbl', description: 'Friday night basketball at Tat Stadium featuring player-of-the-week awards and multiple division groups.' },
+  { id: 'tgif', name: "Thank God It's Friday Basketball League", shortName: 'TGIF', fee: 1390, accentVar: '--tgif', description: 'Friday night basketball at Tat Stadium featuring player-of-the-week awards and multiple division groups.' },
 ];
 
 export const teams: Team[] = [];
@@ -53,7 +53,7 @@ export const invoices: Invoice[] = [
   { id: 'inv2', description: 'WBL Season Registration — Weekend Warriors', amount: 1390, date: '2026-01-20', status: 'paid', leagueId: 'wbl' },
   { id: 'inv3', description: 'PPV Access — SBBL Game G1', amount: 2.50, date: '2026-03-29', status: 'paid', leagueId: 'sbbl' },
   { id: 'inv4', description: 'Store Order #1042 — APEX Hoodie', amount: 2200, date: '2026-03-25', status: 'pending' },
-  { id: 'inv5', description: 'TGIFBL Season Registration — Friday Flames', amount: 1390, date: '2026-01-22', status: 'paid', leagueId: 'tgifbl' },
+  { id: 'inv5', description: 'TGIF Season Registration — Friday Flames', amount: 1390, date: '2026-01-22', status: 'paid', leagueId: 'tgif' },
 ];
 
 export const gameActionImage = gameAction;
