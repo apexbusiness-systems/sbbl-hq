@@ -18,8 +18,8 @@ test.describe('critical path coverage', () => {
   test('league switch updates active tab state', async ({ page }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await page.getByRole('tab', { name: 'WBL' }).click();
-    await expect(page.getByRole('tab', { name: 'WBL' })).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByRole('tab', { name: 'SBBL' })).toHaveAttribute('aria-selected', 'false');
+    await expect(page.locator('header').getByRole('tab', { name: 'WBL' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('header').getByRole('tab', { name: 'SBBL' })).toHaveAttribute('aria-selected', 'false');
   });
 
   test('login route renders sign in without leaking raw config names', async ({ page }) => {
@@ -50,7 +50,7 @@ test.describe('critical path coverage', () => {
 
   test('schedules and teams routes render headings', async ({ page }) => {
     await page.goto('/schedules', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Schedules' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Schedules', exact: true })).toBeVisible();
     await page.goto('/teams', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Teams & Standings' })).toBeVisible();
   });

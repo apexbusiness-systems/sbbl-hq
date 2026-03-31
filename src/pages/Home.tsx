@@ -3,7 +3,8 @@ import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY } from '@/lib/league
 import { fetchPublicHome, type PublicHomeData, type PublicGame } from '@/lib/api/public';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { PotgCard } from '@/components/ui/PotgCard';
-import { playersOfTheGame } from '@/data/mock';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api/client';
 import { motion } from 'framer-motion';
 import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3, ShoppingBag, Video } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
@@ -11,6 +12,22 @@ import { useEffect, useState } from 'react';
 import type { LeagueId } from '@/types';
 
 type LoadState = 'loading' | 'loaded' | 'error';
+
+
+interface PotgJob {
+  id: string;
+  created_at: string;
+  payload_summary: {
+    playerId?: string;
+    playerName?: string;
+    team?: string;
+    leagueId?: string;
+    pts?: string | number;
+    rebs?: string | number;
+    assts?: string | number;
+    gameResult?: string;
+  };
+}
 
 const HomePage = () => {
   const { activeLeague, setActiveLeague } = useApp();
@@ -28,6 +45,11 @@ const HomePage = () => {
     : activeLeague;
   const league = getLeagueConfig(resolvedLeague);
   const [state, setState] = useState<LoadState>('loading');
+  const potgQuery = useQuery({
+    queryKey: ['potg', activeLeague],
+    queryFn: () => apiFetch<{ ok: boolean; data: PotgJob[] }>('/api/public/potg?league=' + activeLeague.toLowerCase() + '&limit=4'),
+    staleTime: 60_000,
+  });
   const [data, setData] = useState<PublicHomeData | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -262,7 +284,28 @@ const HomePage = () => {
 
         {/* Players of the Game — always rendered; empty state when no data for this league yet */}
         {(() => {
-          const potgList = playersOfTheGame.filter(p => p.leagueId === resolvedLeague);
+          // In a real scenario we might map import_jobs to PotgProfile here.
+  const playersOfTheGame: PotgJob[] = potgQuery.data?.data || [];
+  const potgList = (playersOfTheGame || []).map((job: PotgJob) => ({
+    id: job.id,
+    playerId: job.payload_summary.playerId || '',
+    name: job.payload_summary.playerName || '',
+    playerName: job.payload_summary.playerName || '',
+    avatar: '',
+    teamId: job.payload_summary.team || '',
+    team: job.payload_summary.team || '',
+    leagueId: (job.payload_summary.leagueId as LeagueId) || resolvedLeague,
+    pts: parseInt(String(job.payload_summary.pts || '0')),
+    rebs: parseInt(String(job.payload_summary.rebs || '0')),
+    assts: parseInt(String(job.payload_summary.assts || '0')),
+    stats: {
+      pts: parseInt(String(job.payload_summary.pts || '0')),
+      rebs: parseInt(String(job.payload_summary.rebs || '0')),
+      assts: parseInt(String(job.payload_summary.assts || '0'))
+    },
+    date: job.created_at,
+    gameResult: job.payload_summary.gameResult || ''
+  }));
           const leagueInfo = getLeagueConfig(resolvedLeague);
           return (
             <section>
