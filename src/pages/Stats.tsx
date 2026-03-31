@@ -47,7 +47,7 @@ const StatsPage = () => {
   const statsQuery = useQuery({
     queryKey: ['stats', leagueFilter],
     queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/stats'),
-    enabled: true,
+    enabled: isSignedIn,
     retry: 1,
     staleTime: 30_000,
   });
@@ -57,7 +57,7 @@ const StatsPage = () => {
     if (Array.isArray(apiData) && apiData.length > 0 && 'stats' in (apiData[0] ?? {})) {
       return apiData;
     }
-    return [];
+    return mockPlayers;
   }, [statsQuery.data]);
 
   const filtered = useMemo(() => {

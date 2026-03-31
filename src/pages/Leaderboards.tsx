@@ -54,7 +54,7 @@ const LeaderboardsPage = () => {
   const leaderboardsQuery = useQuery({
     queryKey: ['leaderboards', leagueFilter],
     queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/leaderboards'),
-    enabled: true,
+    enabled: isSignedIn,
     retry: 1,
     staleTime: 30_000,
   });
@@ -64,7 +64,7 @@ const LeaderboardsPage = () => {
     if (Array.isArray(apiData) && apiData.length > 0 && 'stats' in (apiData[0] ?? {})) {
       return apiData;
     }
-    return [];
+    return mockPlayers;
   }, [leaderboardsQuery.data]);
 
   const filtered = useMemo(() => {

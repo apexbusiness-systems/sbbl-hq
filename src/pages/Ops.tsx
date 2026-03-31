@@ -1,7 +1,6 @@
 import { parseCsv } from '@/lib/parseCsv';
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api/client';
 import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
@@ -9,7 +8,6 @@ import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedi
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit } from '@/lib/imageResize';
-import { parseCsv } from "@/lib/parseCsv";
 
 type Tab = 'overview' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
 
@@ -29,29 +27,6 @@ const OpsPage = () => {
   const queryClient = useQueryClient();
   const { user, roles } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
-  const [editTarget, setEditTarget] = useState<Record<string, unknown> | null>(null);
-
-  const editMutation = useMutation({
-    mutationFn: ({ type, id, patch }: { type: string; id: string; patch: Record<string, unknown> }) =>
-      apiFetch(`/ops/${type}/${id}`, {
-        method: 'PATCH',
-        headers: { 'Idempotency-Key': `edit-${type}-${id}-${Date.now()}` },
-        body: JSON.stringify(patch),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-      setEditTarget(null);
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: ({ type, id }: { type: string; id: string }) =>
-      apiFetch(`/ops/${type}/${id}`, {
-        method: 'DELETE',
-        headers: { 'Idempotency-Key': `delete-${type}-${id}-${Date.now()}` },
-      }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] }),
-  });
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
   const [storeForm, setStoreForm] = useState({ title: '', price: '0', category: 'apparel', publishStatus: 'draft' as 'draft' | 'published', imageFile: null as File | null, sale: false });
   const [csvLeagueId, setCsvLeagueId] = useState<string>('wbl');
