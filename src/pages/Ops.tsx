@@ -126,7 +126,7 @@ const OpsPage = () => {
     },
   });
 
-  const jobs = historyQuery.data?.jobs ?? bootstrapQuery.data?.importHistory ?? [];
+  const jobs = useMemo(() => historyQuery.data?.jobs ?? bootstrapQuery.data?.importHistory ?? [], [historyQuery.data?.jobs, bootstrapQuery.data?.importHistory]);
   const latestSummary = useMemo(() => jobs.slice(0, 5), [jobs]);
 
   return (
