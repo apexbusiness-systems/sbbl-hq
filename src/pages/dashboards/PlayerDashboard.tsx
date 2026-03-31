@@ -1,10 +1,10 @@
 
 import { User, CalendarCheck, CreditCard, AlertTriangle, Play, Award } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
+import { useApp } from '@/contexts/AppContext';
 import { getSubscriptionStatus } from '@/lib/auth/subscription';
 
 export const PlayerDashboard = () => {
-  const { playerSubscriptionEndsAt } = useAuth();
+  const { playerSubscriptionEndsAt } = useApp();
   const subStatus = getSubscriptionStatus(playerSubscriptionEndsAt);
   const isExpired = subStatus === 'expired';
   const isGrace = subStatus === 'grace';
