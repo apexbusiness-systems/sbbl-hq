@@ -14,10 +14,19 @@ export type AuthProfile = {
 };
 
 export async function signInWithEmail(email: string) {
-  const supabase = requireSupabaseClient();
+  // Route through our worker using the service role key — avoids the strict
+  // per-email rate limits that Supabase applies to anon-key OTP requests.
+  const API_BASE = (import.meta.env.VITE_WORKER_API_BASE ?? '').trim();
   const redirectTo = `${window.location.origin}/`;
-  const { error } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
-  if (error) throw error;
+  const resp = await fetch(`${API_BASE}/auth/otp`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: email.trim().toLowerCase(), redirectTo }),
+  });
+  const payload = await resp.json().catch(() => ({ ok: false, error: 'invalid_response' })) as { ok: boolean; error?: string };
+  if (!resp.ok || !payload.ok) {
+    throw new Error(payload.error ?? 'Failed to send magic link');
+  }
 }
 
 export async function signOut() {
