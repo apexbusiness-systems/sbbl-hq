@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
-import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { CASLNudge } from '@/components/CASLNudge';
 import { MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
@@ -12,7 +11,8 @@ const LivePage = () => {
   const { user, session, roles } = useAuth();
   const token = session?.access_token ?? null;
 
-  const liveGame = games.find(g => g.status === 'live') || games[0];
+  // TODO: Fetch real live game from API.
+  const liveGame = undefined;
 
   const [comments, setComments] = useState([
     { user: 'CourtSide_Fan', text: 'Rivera is on fire tonight!' },
@@ -25,9 +25,9 @@ const LivePage = () => {
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const featuredProducts = products.filter(p => p.sale);
+  const featuredProducts: any[] = [];
   const [carouselIdx, setCarouselIdx] = useState(0);
-  const carouselProduct = featuredProducts[carouselIdx] ?? products[0];
+  const carouselProduct = featuredProducts[carouselIdx];
 
   useEffect(() => {
     if (featuredProducts.length <= 1) return;
@@ -36,6 +36,7 @@ const LivePage = () => {
   }, [featuredProducts.length]);
 
   const handleShare = async () => {
+    if (!liveGame) return;
     const shareData = {
       title: `${liveGame.homeTeam.name} vs ${liveGame.awayTeam.name} — Live on SBBL HQ`,
       text: `Watch the game live: ${liveGame.score?.home}–${liveGame.score?.away} in Q4`,
@@ -125,7 +126,7 @@ const LivePage = () => {
       {/* Top Performers */}
       <div className="panel p-4">
         <h3 className="font-display font-bold text-sm mb-3">Top Performers</h3>
-        {players.slice(0, 3).map(p => (
+        {[]} { /* players.slice(0,3) */ } { [].map(p => (
           <div key={p.id} className="flex items-center gap-3 py-2 border-b border-border last:border-0">
             <img src={p.avatar} alt={p.name} className="w-8 h-8 rounded-full object-cover" loading="lazy" />
             <div className="flex-1 min-w-0">
@@ -149,6 +150,7 @@ const LivePage = () => {
 
             {/* Broadcast Area — all access-gate logic lives inside LiveStreamPlayer */}
             <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
+              {liveGame ? (
               <LiveStreamPlayer
                 game={liveGame}
                 userId={user?.id ?? null}
@@ -156,6 +158,12 @@ const LivePage = () => {
                 token={token}
                 hasPremiumPlayerAccess={hasPremiumPlayerAccess}
               />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-center p-8 bg-card">
+                <p className="font-display font-bold text-xl mb-2">No Live Games</p>
+                <p className="text-sm text-muted-foreground">Check the schedule for upcoming broadcasts.</p>
+              </div>
+            )}
             </div>
 
             {/* Actions + Chat */}
