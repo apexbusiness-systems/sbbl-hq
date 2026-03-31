@@ -5,7 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { games, players, products } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
-import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag, LogIn } from 'lucide-react';
+import { Lock, Play, MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 
@@ -52,21 +52,6 @@ const LivePage = () => {
   const featuredProducts = products.filter(p => p.sale);
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselProduct = featuredProducts[carouselIdx] ?? products[0];
-
-  // Derive access level from real auth — no prototype toggle
-  const deriveViewerState = (): ViewerState => {
-    if (!isSignedIn) return 'locked';
-    if (isAdmin || hasPremiumPlayerAccess) return 'purchased';
-    return 'preview';
-  };
-
-  const [viewerState, setViewerState] = useState<ViewerState>(deriveViewerState);
-
-  // Re-derive when auth state loads/changes
-  useEffect(() => {
-    setViewerState(deriveViewerState());
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSignedIn, isAdmin, hasPremiumPlayerAccess]);
 
   useEffect(() => {
     if (featuredProducts.length <= 1) return;
