@@ -71,44 +71,76 @@ const TeamsPage = () => {
           </div>
         )}
 
+
         {/* API-backed teams */}
         {hasApiData && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {apiFiltered.map((team) => (
-              <article key={team.id} className="panel p-4 hover:border-primary/20 transition-colors">
-                <div className="flex items-center justify-between mb-2">
-                  <h2 className="font-display text-xl font-bold">{team.name}</h2>
-                  <LeagueBadge leagueId={team.league_code?.toLowerCase() as LeagueId} />
+          <div className="space-y-12">
+            {Object.entries(
+              apiFiltered.reduce((acc, team) => {
+                const div = team.division_name || 'Uncategorized';
+                if (!acc[div]) acc[div] = [];
+                acc[div].push(team);
+                return acc;
+              }, {} as Record<string, typeof apiFiltered>)
+            ).map(([division, tms]) => (
+              <div key={division} className="relative">
+                <div className="flex items-center gap-4 mb-6">
+                  <h3 className="font-display text-xl md:text-2xl font-bold tracking-tight uppercase">{division}</h3>
+                  <div className="h-px bg-border flex-1 mt-1"></div>
                 </div>
-                <p className="text-xs text-muted-foreground">{team.season_name} &middot; {team.division_name ?? 'Division TBD'}</p>
-                <div className="mt-3 pt-3 border-t border-border flex items-center gap-2">
-                  <Users className="w-3.5 h-3.5 text-primary/50" />
-                  <span className="text-xs text-muted-foreground">{team.roster_count} rostered players</span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {tms.map((team) => (
+                    <article key={team.id} className="panel p-4 hover:border-primary/20 transition-colors">
+                      <div className="flex items-center justify-between mb-2">
+                        <h2 className="font-display text-xl font-bold">{team.name}</h2>
+                        <LeagueBadge leagueId={team.league_code?.toLowerCase() as LeagueId} />
+                      </div>
+                      <p className="text-xs text-muted-foreground">{team.season_name}</p>
+                      <div className="mt-3 pt-3 border-t border-border flex items-center gap-2">
+                        <Users className="w-3.5 h-3.5 text-primary/50" />
+                        <span className="text-xs text-muted-foreground">{team.roster_count} rostered players</span>
+                      </div>
+                    </article>
+                  ))}
                 </div>
-              </article>
+              </div>
             ))}
           </div>
         )}
 
-        {/* Static fallback teams */}
+{/* Static fallback teams */}
         {!hasApiData && !teamsQuery.isLoading && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {staticFiltered.map((team, i) => {
-              const league = getLeagueConfig(team.leagueId);
-              return (
-                <article key={`${team.leagueId}-${team.name}-${i}`} className="panel p-4 hover:border-primary/20 transition-colors">
-                  <div className="flex items-center justify-between mb-2">
-                    <h2 className="font-display text-xl font-bold">{team.name}</h2>
-                    <LeagueBadge leagueId={team.leagueId} />
-                  </div>
-                  <p className="text-xs text-muted-foreground">{team.season}{team.division ? ` \u00B7 ${team.division}` : ''}</p>
-                </article>
-              );
-            })}
+          <div className="space-y-12">
+            {Object.entries(
+              staticFiltered.reduce((acc, team) => {
+                const div = team.division || 'Uncategorized';
+                if (!acc[div]) acc[div] = [];
+                acc[div].push(team);
+                return acc;
+              }, {} as Record<string, typeof staticFiltered>)
+            ).map(([division, tms]) => (
+              <div key={division} className="relative">
+                <div className="flex items-center gap-4 mb-6">
+                  <h3 className="font-display text-xl md:text-2xl font-bold tracking-tight uppercase">{division}</h3>
+                  <div className="h-px bg-border flex-1 mt-1"></div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {tms.map((team, i) => (
+                    <article key={`${team.leagueId}-${team.name}-${i}`} className="panel p-4 hover:border-primary/20 transition-colors">
+                      <div className="flex items-center justify-between mb-2">
+                        <h2 className="font-display text-xl font-bold">{team.name}</h2>
+                        <LeagueBadge leagueId={team.leagueId} />
+                      </div>
+                      <p className="text-xs text-muted-foreground">{team.season}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
-        {/* Upcoming schedule for filtered league */}
+{/* Upcoming schedule for filtered league */}
         {upcomingGames.length > 0 && (
           <div className="mt-12">
             <div className="flex items-center justify-between mb-6">
