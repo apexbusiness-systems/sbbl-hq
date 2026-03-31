@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseCsv } from '@/lib/parseCsv';
+import { parseCsv } from './parseCsv';
 
 describe('parseCsv', () => {
   it('returns empty for header-only CSV', () => { expect(parseCsv('name,id')).toHaveLength(0); });
