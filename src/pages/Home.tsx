@@ -5,7 +5,7 @@ import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { PotgCard } from '@/components/ui/PotgCard';
 import { playersOfTheGame } from '@/data/mock';
 import { motion } from 'framer-motion';
-import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3 } from 'lucide-react';
+import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3, ShoppingBag, Video } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import type { LeagueId } from '@/types';
@@ -59,7 +59,7 @@ const HomePage = () => {
     <div className="min-h-screen">
 
       {/* ── LEAGUE LOGO HERO ──────────────────────────────────── */}
-      <section className="relative overflow-hidden bg-[#0A0A0A]" style={{ minHeight: '420px' }}>
+      <section className="relative overflow-hidden bg-[#0A0A0A]">
 
         {/* League radial glow centred on logo */}
         <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 50% 60%, hsl(var(--${league.id}) / 0.18) 0%, transparent 60%)` }} />
@@ -68,7 +68,7 @@ const HomePage = () => {
         {/* Bottom fade */}
         <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
 
-        <div className="relative container py-10 md:py-16 lg:py-20">
+        <div className="relative container py-10 md:py-14">
           {/* Hero: centered league logo as dominant element, snapshot card beside it on desktop */}
           <div className="flex flex-col lg:flex-row items-center lg:items-start gap-10 lg:gap-14">
 
@@ -175,6 +175,30 @@ const HomePage = () => {
             </motion.aside>
 
           </div>
+
+          {/* ── VALUE PILLARS — fills hero bottom, doubles as marketing ── */}
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.22 }}
+            className="grid grid-cols-2 md:grid-cols-4 gap-px mt-10 border border-border/40 rounded-sm overflow-hidden bg-border/40"
+          >
+            {[
+              { icon: <Video className="w-4 h-4" />, label: 'Live Scoring', desc: 'Real-time scores every game night' },
+              { icon: <BarChart3 className="w-4 h-4" />, label: 'Career Stats', desc: 'Full stat tracking across all 3 leagues' },
+              { icon: <Trophy className="w-4 h-4" />, label: 'POTG Awards', desc: 'Player of the Game every round' },
+              { icon: <ShoppingBag className="w-4 h-4" />, label: 'League Store', desc: 'Official jerseys, hoodies & gear' },
+            ].map(({ icon, label, desc }) => (
+              <div key={label} className="flex items-start gap-3 bg-card/60 backdrop-blur-sm px-4 py-4 md:px-5 md:py-5">
+                <div className="mt-0.5 p-2 bg-primary/10 rounded-sm text-primary flex-shrink-0">{icon}</div>
+                <div>
+                  <p className="text-sm font-semibold text-foreground leading-tight">{label}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{desc}</p>
+                </div>
+              </div>
+            ))}
+          </motion.div>
+
         </div>
       </section>
 
@@ -195,7 +219,7 @@ const HomePage = () => {
         </section>
       )}
 
-      <div className="container py-8 md:py-12 space-y-12">
+      <div className="container py-8 space-y-12">
 
         {/* ── SBBL FEATURED EVENT BANNER ───────────────────────── */}
         {resolvedLeague === 'sbbl' && (
