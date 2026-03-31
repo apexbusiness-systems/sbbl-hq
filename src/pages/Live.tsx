@@ -36,7 +36,7 @@ const LivePage = () => {
     apiFetch<{ entitled: boolean }>(`/api/streams/${liveGame.id}/access`, {}, token)
       .then(res => { if (res.entitled) setPpvEntitled(true); })
       .catch(() => { /* network error — stay in preview */ });
-  }, [user?.id, liveGame.id, isAdmin, hasPremiumPlayerAccess, token]);
+  }, [user, user?.id, liveGame.id, isAdmin, hasPremiumPlayerAccess, token]);
 
   const [comments, setComments] = useState([
     { user: 'CourtSide_Fan', text: 'Rivera is on fire tonight!' },

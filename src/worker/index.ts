@@ -125,7 +125,14 @@ async function ensureMutation(req: Request, ctx: HandlerCtx) {
   });
   if (error) {
     const now = Date.now();
-    const seenAt = transientIdempotency.get(key);
+    // Cleanup old keys
+  for (const [k, t] of transientIdempotency.entries()) {
+    if (now - t > 60000) {
+      transientIdempotency.delete(k);
+    }
+  }
+
+  const seenAt = transientIdempotency.get(key);
     if (seenAt && now - seenAt < 5 * 60 * 1000) {
       throw new Error('Duplicate idempotency key');
     }
