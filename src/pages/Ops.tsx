@@ -5,8 +5,9 @@ import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
 import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord } from '@/lib/api/ops';
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
-import { LEAGUE_REGISTRY } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
 import { resizeImageToFit } from '@/lib/imageResize';
+import type { LeagueId } from '@/types';
 
 type Tab = 'overview' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
 
@@ -40,7 +41,7 @@ const OpsPage = () => {
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
   const [storeForm, setStoreForm] = useState({ title: '', price: '0', category: 'apparel', publishStatus: 'draft' as 'draft' | 'published', imageFile: null as File | null, sale: false });
-  const [csvLeagueId, setCsvLeagueId] = useState<string>('wbl');
+  const [csvLeagueId, setCsvLeagueId] = useState<LeagueId>('wbl');
   const potgFileRef = useRef<HTMLInputElement>(null);
   const [potgParseState, setPotgParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
   const [potgParseError, setPotgParseError] = useState<string | null>(null);
@@ -84,7 +85,14 @@ const OpsPage = () => {
 
   const importMutation = useMutation({
     mutationFn: ({ kind, rows }: { kind: 'teams' | 'players' | 'schedules' | 'events'; rows: Record<string, string>[] }) =>
-      submitCsvImport(kind, rows.map(r => ({ ...r, league_id: csvLeagueId }))),
+      submitCsvImport(kind, rows.map((r) => {
+        const selectedLeague = bootstrapQuery.data?.references.leagues.find((league) => league.code?.toUpperCase() === getLeagueConfig(csvLeagueId).code);
+        return {
+          ...r,
+          league_id: r.league_id || selectedLeague?.id || csvLeagueId,
+          league_code: r.league_code || getLeagueConfig(csvLeagueId).code,
+        };
+      })),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] }),
@@ -129,9 +137,9 @@ const OpsPage = () => {
       const supabase = requireSupabaseClient();
       const resized = await resizeImageToFit(storeForm.imageFile, 800, 800);
       const objectPath = `store/${crypto.randomUUID()}.jpg`;
-      const upload = await supabase.storage.from('media').upload(objectPath, resized, { upsert: true });
+      const upload = await supabase.storage.from('store-products').upload(objectPath, resized, { upsert: true });
       if (upload.error) throw upload.error;
-      const imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
+      const imageUrl = supabase.storage.from('store-products').getPublicUrl(objectPath).data.publicUrl;
       return uploadStoreMedia({
         title: storeForm.title,
         price: Number(storeForm.price),
@@ -143,7 +151,10 @@ const OpsPage = () => {
     },
   });
 
-  const jobs = useMemo(() => historyQuery.data?.jobs ?? bootstrapQuery.data?.importHistory ?? [], [historyQuery.data?.jobs, bootstrapQuery.data?.importHistory]);
+  const jobs = useMemo(
+    () => historyQuery.data?.jobs ?? bootstrapQuery.data?.importHistory ?? [],
+    [historyQuery.data?.jobs, bootstrapQuery.data?.importHistory],
+  );
   const latestSummary = useMemo(() => jobs.slice(0, 5), [jobs]);
 
   return (

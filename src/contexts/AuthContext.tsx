@@ -39,19 +39,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setLoading(true);
-    const { data } = await client.auth.getSession();
-    setSession(data.session ?? null);
-    setUser(data.session?.user ?? null);
+    try {
+      const { data } = await client.auth.getSession();
+      setSession(data.session ?? null);
+      setUser(data.session?.user ?? null);
 
-    if (data.session?.user?.id) {
-      const details = await fetchProfileAndRoles(data.session.user.id);
-      setProfile(details.profile);
-      setRoles(details.roles);
-    } else {
+      if (data.session?.user?.id) {
+        const details = await fetchProfileAndRoles(data.session.user.id);
+        setProfile(details.profile);
+        setRoles(details.roles);
+      } else {
+        setProfile(null);
+        setRoles([]);
+      }
+    } catch {
       setProfile(null);
       setRoles([]);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   useEffect(() => {

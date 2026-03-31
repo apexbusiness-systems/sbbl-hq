@@ -14,7 +14,19 @@ vi.mock('@supabase/supabase-js', () => ({
       }),
     },
     rpc,
-    from: () => ({ insert }),
+    from: (table: string) => {
+      if (table === 'user_role_assignments') {
+        return {
+          select: () => ({
+            eq: vi.fn().mockResolvedValue({
+              data: [{ role: 'league_admin' }],
+              error: null,
+            }),
+          }),
+        };
+      }
+      return { insert };
+    },
   }),
 }));
 

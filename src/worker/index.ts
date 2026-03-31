@@ -1,5 +1,20 @@
 import { canAccessOps } from '@/lib/auth/roles';
 import { safeServerEnv } from '@/lib/env';
+import {
+  findCourtReference,
+  findDivisionReference,
+  findLeagueReference,
+  findSeasonReference,
+  findVenueReference,
+  firstNonEmptyValue,
+  isUuid,
+  type CourtReference,
+  type DivisionReference,
+  type LeagueReference,
+  type SeasonReference,
+  type VenueReference,
+} from '@/lib/imports/ops-imports';
+import { mapTeamDirectoryRow } from '@/lib/teams/directory';
 import { readIdempotencyKey } from '@/lib/api/idempotency';
 import { normalizeIngress, type IngressSourceType } from '@/lib/omniport';
 import { signSyncPacket, type SyncPacket } from '@/lib/sync-packets';
@@ -16,6 +31,14 @@ type Handler = (ctx: HandlerCtx) => Promise<Response>;
 
 type Route = { method: string; regex: RegExp; handler: Handler };
 const transientIdempotency = new Map<string, number>();
+
+type ImportReferenceState = {
+  leagues: LeagueReference[];
+  seasons: SeasonReference[];
+  divisions: DivisionReference[];
+  venues: VenueReference[];
+  courts: CourtReference[];
+};
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -81,6 +104,13 @@ async function verifyStripeSignature(rawBody: string, signatureHeader: string, s
   return parsed.signatures.some((candidate) => candidate.toLowerCase() === expected);
 }
 
+async function fetchUserRoles(admin: SupabaseClient, userId: string) {
+  const { data, error } = await admin.from('user_role_assignments').select('role').eq('user_id', userId);
+  if (error) throw new Error(error.message);
+  const roles = (data ?? []).map((row) => String(row.role));
+  return roles.length > 0 ? roles : ['fan'];
+}
+
 // SECURITY: session is established ONLY via a valid Supabase JWT Bearer token.
 // The x-sbbl-user-id fallback has been removed — any client-supplied identity
 // header is ignored. If JWT verification fails, session is null (unauthenticated).
@@ -92,11 +122,13 @@ async function getSession(req: Request, env: Env) {
     });
     const { data, error } = await supabase.auth.getUser(token);
     if (!error && data.user) {
-      // Roles are fetched from DB on admin-gated routes via requireAdminSession().
-      // For non-admin routes, default to 'fan' unless the DB assignment is present.
+      const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+      const roles = await fetchUserRoles(admin, data.user.id);
       return {
         userId: data.user.id,
-        roles: ['fan'] as string[],
+        roles,
       };
     }
   }
@@ -441,13 +473,156 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
 
 async function requireAdminSession(req: Request, admin: SupabaseClient) {
   const userId = requireAuth(req);
-  const { data, error } = await admin.from('user_role_assignments').select('role').eq('user_id', userId);
-  if (error) throw new Error(error.message);
-  const roles = (data ?? []).map((row) => String(row.role));
+  const roles = await fetchUserRoles(admin, userId);
   if (!roles.some((role) => role === 'league_admin' || role === 'super_admin' || role === 'team_manager')) {
     throw new Error('forbidden');
   }
   return { userId, roles };
+}
+
+async function loadImportReferences(admin: SupabaseClient): Promise<ImportReferenceState> {
+  const [leaguesRes, seasonsRes, divisionsRes, venuesRes, courtsRes] = await Promise.all([
+    admin.from('leagues').select('id,code,name').order('name'),
+    admin.from('seasons').select('id,name,league_id').order('created_at', { ascending: false }).limit(500),
+    admin.from('divisions').select('id,name,season_id').order('name').limit(1000),
+    admin.from('venues').select('id,name').order('name').limit(500),
+    admin.from('courts').select('id,name,venue_id').order('name').limit(1000),
+  ]);
+
+  if (leaguesRes.error || seasonsRes.error || divisionsRes.error || venuesRes.error || courtsRes.error) {
+    throw new Error('import_reference_load_failed');
+  }
+
+  return {
+    leagues: (leaguesRes.data ?? []) as LeagueReference[],
+    seasons: (seasonsRes.data ?? []) as SeasonReference[],
+    divisions: (divisionsRes.data ?? []) as DivisionReference[],
+    venues: (venuesRes.data ?? []) as VenueReference[],
+    courts: (courtsRes.data ?? []) as CourtReference[],
+  };
+}
+
+function resolveLeagueId(row: Record<string, string>, refs: ImportReferenceState) {
+  const leagueValue = firstNonEmptyValue(row, ['league_id', 'league_code', 'league', 'league_name']);
+  const league = findLeagueReference(refs.leagues, leagueValue);
+  if (!league) throw new Error('league_not_found');
+  return league.id;
+}
+
+async function resolveSeasonId(admin: SupabaseClient, row: Record<string, string>, refs: ImportReferenceState, leagueId: string) {
+  const seasonValue = firstNonEmptyValue(row, ['season_id', 'season_name', 'season']);
+  if (!seasonValue) {
+    const existing = refs.seasons.filter((season) => season.league_id === leagueId);
+    if (existing.length === 1) return existing[0].id;
+    throw new Error('season_required');
+  }
+
+  const existing = findSeasonReference(refs.seasons, leagueId, seasonValue);
+  if (existing) return existing.id;
+
+  if (isUuid(seasonValue)) {
+    throw new Error('season_not_found');
+  }
+
+  const insert = await admin.from('seasons').insert({
+    league_id: leagueId,
+    name: seasonValue,
+    status: 'published',
+  }).select('id,name,league_id').single();
+  if (insert.error) throw new Error(insert.error.message);
+
+  refs.seasons.unshift(insert.data as SeasonReference);
+  return insert.data.id;
+}
+
+async function resolveDivisionId(admin: SupabaseClient, row: Record<string, string>, refs: ImportReferenceState, seasonId: string) {
+  const divisionValue = firstNonEmptyValue(row, ['division_id', 'division_name', 'division']);
+  if (!divisionValue) return null;
+
+  const existing = findDivisionReference(refs.divisions, seasonId, divisionValue);
+  if (existing) return existing.id;
+
+  if (isUuid(divisionValue)) {
+    throw new Error('division_not_found');
+  }
+
+  const leagueId = refs.seasons.find((season) => season.id === seasonId)?.league_id;
+  if (!leagueId) throw new Error('division_league_not_found');
+
+  const insert = await admin.from('divisions').insert({
+    league_id: leagueId,
+    season_id: seasonId,
+    name: divisionValue,
+  }).select('id,name,season_id').single();
+  if (insert.error) throw new Error(insert.error.message);
+
+  refs.divisions.unshift(insert.data as DivisionReference);
+  return insert.data.id;
+}
+
+async function resolveVenueId(admin: SupabaseClient, row: Record<string, string>, refs: ImportReferenceState) {
+  const venueValue = firstNonEmptyValue(row, ['venue_id', 'venue_name', 'venue']);
+  if (!venueValue) return null;
+
+  const existing = findVenueReference(refs.venues, venueValue);
+  if (existing) return existing.id;
+
+  if (isUuid(venueValue)) {
+    throw new Error('venue_not_found');
+  }
+
+  const insert = await admin.from('venues').insert({
+    name: venueValue,
+    address: firstNonEmptyValue(row, ['venue_address', 'address']),
+  }).select('id,name').single();
+  if (insert.error) throw new Error(insert.error.message);
+
+  refs.venues.unshift(insert.data as VenueReference);
+  return insert.data.id;
+}
+
+async function resolveCourtId(admin: SupabaseClient, row: Record<string, string>, refs: ImportReferenceState, venueId: string | null) {
+  const courtValue = firstNonEmptyValue(row, ['court_id', 'court_name', 'court']);
+  if (!courtValue) return null;
+
+  if (!venueId && !isUuid(courtValue)) {
+    throw new Error('court_requires_venue');
+  }
+
+  const existing = venueId
+    ? findCourtReference(refs.courts, venueId, courtValue)
+    : refs.courts.find((court) => court.id === courtValue);
+  if (existing) return existing.id;
+
+  if (isUuid(courtValue)) {
+    throw new Error('court_not_found');
+  }
+  if (!venueId) return null;
+
+  const insert = await admin.from('courts').insert({
+    venue_id: venueId,
+    name: courtValue,
+  }).select('id,name,venue_id').single();
+  if (insert.error) throw new Error(insert.error.message);
+
+  refs.courts.unshift(insert.data as CourtReference);
+  return insert.data.id;
+}
+
+async function resolveTeamId(admin: SupabaseClient, row: Record<string, string>, leagueId: string | null) {
+  const explicitTeamId = firstNonEmptyValue(row, ['team_id']);
+  if (explicitTeamId && isUuid(explicitTeamId)) {
+    return explicitTeamId;
+  }
+
+  const teamName = firstNonEmptyValue(row, ['team_name', 'team']) ?? explicitTeamId;
+  if (!teamName) return null;
+
+  let query = admin.from('teams').select('id').eq('name', teamName).order('created_at', { ascending: false }).limit(1);
+  if (leagueId) query = query.eq('league_id', leagueId);
+  const { data, error } = await query.maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.id ?? null;
 }
 
 async function writeImportJob(admin: SupabaseClient, job: {
@@ -517,25 +692,31 @@ async function handleImportRoute(ctx: HandlerCtx, kind: 'teams' | 'players' | 's
   let insertedRows = 0;
   let failedRows = 0;
   const errors: string[] = [];
+  const refs = await loadImportReferences(ctx.admin);
 
   for (const row of rows) {
     try {
       if (kind === 'teams') {
+        const leagueId = resolveLeagueId(row, refs);
+        const seasonId = await resolveSeasonId(ctx.admin, row, refs, leagueId);
+        const divisionId = await resolveDivisionId(ctx.admin, row, refs, seasonId);
         const { error } = await ctx.admin.from('teams').insert({
-          league_id: row.league_id,
-          season_id: row.season_id,
-          division_id: row.division_id || null,
-          name: row.name,
+          league_id: leagueId,
+          season_id: seasonId,
+          division_id: divisionId,
+          name: firstNonEmptyValue(row, ['name', 'team_name', 'team']) ?? '',
           status: 'published',
         });
         if (error && !String(error.message).includes('duplicate key')) throw error;
       }
 
       if (kind === 'players') {
+        const leagueId = findLeagueReference(refs.leagues, firstNonEmptyValue(row, ['league_id', 'league_code', 'league', 'league_name']))?.id ?? null;
+        const teamId = await resolveTeamId(ctx.admin, row, leagueId);
         const { error } = await ctx.admin.from('players').upsert({
           user_id: row.user_id,
-          team_id: row.team_id || null,
-          league_id: row.league_id || null,
+          team_id: teamId,
+          league_id: leagueId,
           jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
           position: row.position || null,
         }, { onConflict: 'user_id' });
@@ -543,11 +724,15 @@ async function handleImportRoute(ctx: HandlerCtx, kind: 'teams' | 'players' | 's
       }
 
       if (kind === 'schedules') {
+        const leagueId = resolveLeagueId(row, refs);
+        const seasonId = await resolveSeasonId(ctx.admin, row, refs, leagueId);
+        const venueId = await resolveVenueId(ctx.admin, row, refs);
+        const courtId = await resolveCourtId(ctx.admin, row, refs, venueId);
         const { error } = await ctx.admin.from('schedule_slots').insert({
-          league_id: row.league_id,
-          season_id: row.season_id,
-          venue_id: row.venue_id || null,
-          court_id: row.court_id || null,
+          league_id: leagueId,
+          season_id: seasonId,
+          venue_id: venueId,
+          court_id: courtId,
           starts_at: row.starts_at,
           ends_at: row.ends_at || null,
           status: row.status || 'upcoming',
@@ -556,10 +741,16 @@ async function handleImportRoute(ctx: HandlerCtx, kind: 'teams' | 'players' | 's
       }
 
       if (kind === 'events') {
+        const leagueValue = firstNonEmptyValue(row, ['league_id', 'league_code', 'league', 'league_name']);
+        const leagueId = leagueValue ? resolveLeagueId(row, refs) : null;
+        const seasonId = leagueId
+          ? await resolveSeasonId(ctx.admin, row, refs, leagueId)
+          : null;
+        const venueId = await resolveVenueId(ctx.admin, row, refs);
         const { error } = await ctx.admin.from('league_events').insert({
-          league_id: row.league_id || null,
-          season_id: row.season_id || null,
-          venue_id: row.venue_id || null,
+          league_id: leagueId,
+          season_id: seasonId,
+          venue_id: venueId,
           title: row.title,
           starts_at: row.starts_at || null,
           metadata: row,
@@ -567,11 +758,16 @@ async function handleImportRoute(ctx: HandlerCtx, kind: 'teams' | 'players' | 's
         if (error) throw error;
       }
 
+      const resolvedLeagueId = kind === 'events'
+        ? (firstNonEmptyValue(row, ['league_id', 'league_code', 'league', 'league_name']) ? resolveLeagueId(row, refs) : null)
+        : kind === 'players'
+          ? findLeagueReference(refs.leagues, firstNonEmptyValue(row, ['league_id', 'league_code', 'league', 'league_name']))?.id ?? null
+          : resolveLeagueId(row, refs);
       await ctx.admin.rpc('enqueue_local_domain_event', {
         p_event_type: `${kind}_imported`,
         p_entity_type: kind,
         p_entity_id: null,
-        p_league_id: row.league_id || null,
+        p_league_id: resolvedLeagueId,
         p_payload: row,
         p_trace_id: crypto.randomUUID(),
         p_available_at: new Date().toISOString(),
@@ -685,15 +881,7 @@ async function handlePublicHome({ req, admin }: HandlerCtx) {
   const activeLeague = leagues.find((l) => l.code?.toUpperCase() === leagueCode) ?? leagues[0] ?? null;
   const activeLeagueId = activeLeague?.id ?? null;
 
-  const allTeams = (teamsRes.data ?? []).map((row: Record<string, unknown>) => ({
-    id: String(row.id),
-    name: String(row.name),
-    league_code: ((row.leagues as { code?: string } | null)?.code ?? '').toUpperCase(),
-    league_name: String((row.leagues as { name?: string } | null)?.name ?? ''),
-    season_name: String((row.seasons as { name?: string } | null)?.name ?? ''),
-    division_name: (row.divisions as { name?: string } | null)?.name ?? null,
-    roster_count: Array.isArray(row.players) ? row.players.length : 0,
-  }));
+  const allTeams = (teamsRes.data ?? []).map((row: Record<string, unknown>) => mapTeamDirectoryRow(row));
   const leagueTeams = activeLeagueId
     ? allTeams.filter((t) => t.league_code === leagueCode)
     : allTeams;
