@@ -152,7 +152,7 @@ const TeamsPage = () => {
       {/* -- STANDINGS VIEW ------------------------------------------ */}
       {!teamsQuery.isLoading && activeTab === 'standings' && filteredTeams.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-border/40\">
-          <table className="w-full text-sm\">
+          <table className="w-full text-sm">
             <thead className="bg-muted/40 text-muted-foreground font-medium\">
               <tr>
                 <th className="px-4 py-2 text-left\">Rank</th>
@@ -171,9 +171,9 @@ const TeamsPage = () => {
                   <td className="px-4 py-3 text-muted-foreground font-medium\">{index + 1}</td>
                   <td className="px-4 py-3\">
                     <div className="flex items-center gap-2\">
-                      <div className="font-semibold\">{team.name}</div>
+                      <div className="font-semibold">{team.name}</div>
                       {leagueFilter === 'all' && (
-                        <LeagueBadge leagueId={team.league_code.toLowerCase() as LeagueId} size="sm\" variant="subtle\" />
+                        <LeagueBadge leagueId={team.league_code.toLowerCase() as LeagueId} size="sm" />
                       )}
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5\">{team.season_name}</div>
@@ -210,7 +210,7 @@ const TeamsPage = () => {
                 <div>
                   <h3 className="text-lg font-semibold\">{team.name}</h3>
                   {leagueFilter === 'all' && (
-                    <LeagueBadge leagueId={team.league_code.toLowerCase() as LeagueId} size="sm\" variant="subtle\" />
+                    <LeagueBadge leagueId={team.league_code.toLowerCase() as LeagueId} size="sm" />
                   )}
                 </div>
                 <div className="flex items-center gap-4 text-xs text-muted-foreground\">
@@ -269,7 +269,7 @@ const TeamsPage = () => {
                   <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3\">
                     {team.players.map((player) => (
                       <div key={player.id} className="flex items-center gap-3 p-2 rounded-sm border border-border/30\">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center font-semibold text-sm\">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center font-semibold text-sm">
                           {player.jersey_number != null ? player.jersey_number : '-'}
                         </div>
                         <div className="flex-1 min-w-0\">
@@ -304,7 +304,7 @@ const TeamsPage = () => {
                     key={team.id}
                     className="flex items-center gap-3 p-3 rounded-lg border border-border/30 hover:bg-muted/20 transition-colors\"
                   >
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center font-semibold text-sm\">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center font-semibold text-sm">
                       {index + 1}
                     </div>
                     <div className="flex-1 min-w-0\">
@@ -337,7 +337,7 @@ const TeamsPage = () => {
                       key={team.id}
                       className="flex items-center gap-3 p-3 rounded-lg border border-border/30 hover:bg-muted/20 transition-colors\"
                     >
-                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center font-semibold text-sm\">
+                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center font-semibold text-sm">
                         {index + 1}
                       </div>
                       <div className="flex-1 min-w-0\">
