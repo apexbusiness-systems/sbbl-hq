@@ -138,35 +138,71 @@ const MediaPage = () => {
             <p className="text-sm text-muted-foreground">No media found for this filter.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map(m => (
-              <div key={m.id} className="panel overflow-hidden group">
-                <div className="relative aspect-video overflow-hidden">
-                  <img src={m.thumbnail} alt={m.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-card/90 via-transparent to-transparent" />
-                  <div className="absolute top-2 right-2 flex items-center gap-1.5">
-                    <span className={`text-[10px] font-semibold uppercase ${statusColors[m.status]}`}>
-                      {m.status === 'published' ? <Eye className="w-3 h-3 inline mr-0.5" /> : m.status === 'ready' ? <Clock className="w-3 h-3 inline mr-0.5" /> : <Upload className="w-3 h-3 inline mr-0.5" />}
-                      {m.status}
-                    </span>
-                  </div>
-                  <div className="absolute bottom-3 left-3 right-3">
-                    <LeagueBadge leagueId={m.leagueId} />
-                    <p className="font-display font-bold text-sm mt-1">{m.title}</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">{m.type} · {m.date}</p>
-                  </div>
-                  {(m.type === 'highlight' || m.type === 'clip') && (
-                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                      <div className="p-3 bg-primary/20 rounded-full backdrop-blur-sm"><Play className="w-6 h-6 text-primary" /></div>
+          // Grid: columns sized for landscape (wide) content; rows sized for portrait
+          // (tall) content via unified aspect-[3/4] cells. Every card fits
+          // its natural dimensions — poster/photo fills cover-top, video/clip
+          // is contained and framed by an ambient blurred version of itself.
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
+            {filtered.map(m => {
+              const isPortrait = m.type === 'poster' || m.type === 'photo';
+              const isPlayable = m.type === 'highlight' || m.type === 'clip';
+              return (
+                <div key={m.id} className="panel overflow-hidden group flex flex-col">
+                  {/* ── Image cell: always 3/4 tall, adapts internally ── */}
+                  <div className="relative overflow-hidden bg-[#0a0a0a]" style={{ aspectRatio: '3/4' }}>
+                    {/* Ambient blur fill — fills dead space for non-portrait content, adds depth for all */}
+                    <img
+                      src={m.thumbnail}
+                      aria-hidden
+                      className="absolute inset-0 w-full h-full object-cover scale-125 blur-3xl opacity-30 pointer-events-none select-none"
+                    />
+                    {/* Sharp primary image — cover+top for portrait, contain for landscape */}
+                    <img
+                      src={m.thumbnail}
+                      alt={m.title}
+                      loading="lazy"
+                      className={`absolute inset-0 w-full h-full transition-transform duration-500 group-hover:scale-105 ${
+                        isPortrait ? 'object-cover object-top' : 'object-contain'
+                      }`}
+                    />
+                    {/* Bottom gradient scrim for legibility */}
+                    <div className="absolute inset-x-0 bottom-0 h-2/5 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
+                    {/* Top-right status badge */}
+                    <div className="absolute top-2.5 right-2.5">
+                      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-sm bg-black/50 backdrop-blur-sm ${statusColors[m.status]}`}>
+                        {m.status === 'published' ? <Eye className="w-2.5 h-2.5" /> : m.status === 'ready' ? <Clock className="w-2.5 h-2.5" /> : <Upload className="w-2.5 h-2.5" />}
+                        {m.status}
+                      </span>
                     </div>
-                  )}
+                    {/* Bottom metadata overlay */}
+                    <div className="absolute bottom-0 inset-x-0 px-3 pb-3 pt-6">
+                      <LeagueBadge leagueId={m.leagueId} size="sm" />
+                      <p className="font-display font-bold text-sm text-white mt-1.5 leading-tight line-clamp-2">{m.title}</p>
+                      <p className="text-[10px] text-white/50 mt-0.5">{m.type} · {m.date}</p>
+                    </div>
+                    {/* Play overlay for video content */}
+                    {isPlayable && (
+                      <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <div className="p-4 bg-primary/25 rounded-full backdrop-blur-sm border border-primary/30">
+                          <Play className="w-7 h-7 text-primary" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  {/* ── Footer ── */}
+                  <div className="px-3 py-2.5 flex items-center justify-between border-t border-border/50">
+                    <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">{m.type}</span>
+                    <button
+                      onClick={() => { setShareModal(m.id); setCopied(false); }}
+                      className="p-1.5 text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label="Share"
+                    >
+                      <Share2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <div className="p-3 flex items-center justify-between">
-                  <span className="text-xs text-muted-foreground">{m.type}</span>
-                  <button onClick={() => { setShareModal(m.id); setCopied(false); }} className="p-1.5 text-muted-foreground hover:text-foreground"><Share2 className="w-3.5 h-3.5" /></button>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
