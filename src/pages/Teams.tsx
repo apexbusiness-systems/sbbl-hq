@@ -149,7 +149,7 @@ const TeamsPage = () => {
         </div>
       )}
 
-      {/* ── STANDINGS VIEW ────────────────────────────────────────── */}
+      {/* -- STANDINGS VIEW ------------------------------------------ */}
       {!teamsQuery.isLoading && activeTab === 'standings' && filteredTeams.length > 0 && (
         <div className=\"overflow-x-auto rounded-lg border border-border/40\">
           <table className=\"w-full text-sm\">
@@ -201,7 +201,7 @@ const TeamsPage = () => {
         </div>
       )}
 
-      {/* ── ROSTERS VIEW ────────────────────────────────────────── */}
+      {/* -- ROSTERS VIEW ------------------------------------------ */}
       {!teamsQuery.isLoading && activeTab === 'rosters' && filteredTeams.length > 0 && (
         <div className=\"space-y-6\">
           {filteredTeams.map((team) => (
@@ -290,7 +290,7 @@ const TeamsPage = () => {
         </div>
       )}
 
-      {/* ── STATS VIEW ────────────────────────────────────────── */}
+      {/* -- STATS VIEW ------------------------------------------ */}
       {!teamsQuery.isLoading && activeTab === 'stats' && filteredTeams.length > 0 && (
         <div className=\"grid gap-6 lg:grid-cols-2\">
           <div>
