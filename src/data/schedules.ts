@@ -26,6 +26,25 @@ export type ScheduleDay = {
  * Will be replaced by Supabase-backed API when schedule pipeline ships.
  */
 export const SCHEDULE_DATA: ScheduleDay[] = [
+  // ── SBBL ──────────────────────────────────────────────────────────────────
+  {
+    leagueId: 'sbbl',
+    leagueCode: 'SBBL',
+    season: 'Season 1',
+    week: 1,
+    date: '2026-04-03',
+    venue: 'Crawford School',
+    address: '531 Finch Ave W',
+    courts: [
+      {
+        name: '1v1 Exhibition',
+        games: [
+          { time: '6:30 PM', home: 'Fred', away: 'Karl', court: '1v1 Exhibition' },
+        ],
+      },
+    ],
+  },
+  // ── TGIFBL ────────────────────────────────────────────────────────────────
   {
     leagueId: 'tgifbl',
     leagueCode: 'TGIFBL',
