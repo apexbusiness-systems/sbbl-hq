@@ -25,18 +25,49 @@ export const leagues: League[] = [
 ];
 
 export const teams: Team[] = [
+  // Existing SBBL teams (DO NOT REMOVE OR CHANGE IDs)
   { id: 't1', name: 'Panalay Kings', leagueId: 'sbbl', division: 'Panalay A', record: { wins: 8, losses: 2 } },
-  { id: 't2', name: 'Court Blazers', leagueId: 'sbbl', division: 'Panalay A', record: { wins: 7, losses: 3 } },
-  { id: 't3', name: 'Sunday Strikers', leagueId: 'sbbl', division: 'Panalay B', record: { wins: 6, losses: 4 } },
-  { id: 't4', name: 'Weekend Warriors', leagueId: 'wbl', division: 'Main', record: { wins: 9, losses: 1 } },
-  { id: 't5', name: 'La Liga Legends', leagueId: 'wbl', division: 'Main', record: { wins: 5, losses: 5 } },
-  { id: 't6', name: 'Friday Flames', leagueId: 'tgifbl', division: 'Group 1', record: { wins: 7, losses: 3 } },
-  { id: 't7', name: 'Tat Stadium Elite', leagueId: 'tgifbl', division: 'Group 2', record: { wins: 6, losses: 4 } },
+  { id: 't2', name: 'Solid North', leagueId: 'sbbl', division: 'Panalay A', record: { wins: 7, losses: 3 } },
+  { id: 't3', name: 'Gensan Warriors', leagueId: 'sbbl', division: 'Panalay A', record: { wins: 6, losses: 4 } },
   { id: 't8', name: 'Rim Rattlers', leagueId: 'sbbl', division: 'Panalay B', record: { wins: 5, losses: 5 } },
-  { id: 't9', name: 'OSY Phoenix', leagueId: 'wbl', division: 'Main', record: { wins: 4, losses: 1 } },
-  { id: 't10', name: 'Ball is Life', leagueId: 'wbl', division: 'Main', record: { wins: 3, losses: 2 } },
+
+  // TGIF Basketball League
+  { id: 't6', name: 'Solid North', leagueId: 'tgifbl', division: 'Group 1', record: { wins: 3, losses: 1 } },
+  { id: 't7', name: 'OSY x LCL', leagueId: 'tgifbl', division: 'Group 1', record: { wins: 2, losses: 2 } },
+  { id: 't13', name: 'Batang Riles x Tri J', leagueId: 'tgifbl', division: 'Group 2', record: { wins: 1, losses: 2 } },
+  { id: 't14', name: 'J Elite', leagueId: 'tgifbl', division: 'Group 1', record: { wins: 0, losses: 3 } },
+  { id: 't15', name: 'YG', leagueId: 'tgifbl', division: 'Group 2', record: { wins: 2, losses: 1 } },
+  { id: 't16', name: 'Conceited Fantasy', leagueId: 'tgifbl', division: 'Group 1', record: { wins: 2, losses: 2 } },
+  { id: 't17', name: 'C&F', leagueId: 'tgifbl', division: 'Group 2', record: { wins: 2, losses: 2 } },
+  { id: 't18', name: 'City Above Elite', leagueId: 'tgifbl', division: 'Group 1', record: { wins: 0, losses: 3 } },
+  { id: 't19', name: 'Over Under', leagueId: 'tgifbl', division: 'Group 1', record: { wins: 2, losses: 1 } },
+  { id: 't20', name: 'Full Time Ballers', leagueId: 'tgifbl', division: 'Group 2', record: { wins: 3, losses: 1 } },
+  { id: 't21', name: 'DBRKDZ', leagueId: 'tgifbl', division: 'Group 3', record: { wins: 3, losses: 0 } },
+  { id: 't22', name: 'BLBG', leagueId: 'tgifbl', division: 'Group 3', record: { wins: 1, losses: 2 } },
+  { id: 't23', name: 'Mantiku', leagueId: 'tgifbl', division: 'Group 3', record: { wins: 1, losses: 2 } },
+  { id: 't24', name: 'Fourteen Ounce', leagueId: 'tgifbl', division: 'Group 1', record: { wins: 3, losses: 0 } },
+  { id: 't25', name: 'Ball is Life', leagueId: 'tgifbl', division: 'Group 3', record: { wins: 3, losses: 2 } },
+  { id: 't26', name: 'JC Trans Jrs', leagueId: 'tgifbl', division: 'Group 3', record: { wins: 0, losses: 3 } },
+  { id: 't27', name: 'Banayad Hoopers', leagueId: 'tgifbl', division: 'Group 2', record: { wins: 0, losses: 3 } },
+
+  // Weekend Basketball League (WBL)
+  { id: 't9', name: 'OSY', leagueId: 'wbl', division: 'Main', record: { wins: 4, losses: 1 } },
+  { id: 't28', name: 'Rebelde Jrs', leagueId: 'wbl', division: 'Main', record: { wins: 3, losses: 3 } },
+  { id: 't29', name: 'Solid North', leagueId: 'wbl', division: 'Main', record: { wins: 4, losses: 2 } },
+  { id: 't4', name: 'Crosslinx Warriors', leagueId: 'wbl', division: 'Main', record: { wins: 9, losses: 1 } },
   { id: 't11', name: 'Rebelde', leagueId: 'wbl', division: 'Main', record: { wins: 4, losses: 1 } },
+  { id: 't30', name: 'Downtown', leagueId: 'wbl', division: 'Main', record: { wins: 5, losses: 2 } },
+  { id: 't5', name: 'La Liga Elite', leagueId: 'wbl', division: 'Main', record: { wins: 5, losses: 5 } },
+  { id: 't31', name: 'Blacksmith', leagueId: 'wbl', division: 'Main', record: { wins: 2, losses: 4 } },
   { id: 't12', name: 'Splash', leagueId: 'wbl', division: 'Main', record: { wins: 3, losses: 2 } },
+  { id: 't32', name: 'SPG', leagueId: 'wbl', division: 'Main', record: { wins: 4, losses: 2 } },
+  { id: 't33', name: 'Harina x Wild Dogs', leagueId: 'wbl', division: 'Main', record: { wins: 1, losses: 5 } },
+  { id: 't34', name: 'NSD', leagueId: 'wbl', division: 'Main', record: { wins: 6, losses: 1 } },
+  { id: 't35', name: '4Lifers', leagueId: 'wbl', division: 'Main', record: { wins: 2, losses: 5 } },
+  { id: 't36', name: 'Serviteurs', leagueId: 'wbl', division: 'Main', record: { wins: 1, losses: 4 } },
+  { id: 't37', name: 'Batang Kanto', leagueId: 'wbl', division: 'Main', record: { wins: 0, losses: 6 } },
+  { id: 't38', name: 'Disciples', leagueId: 'wbl', division: 'Main', record: { wins: 3, losses: 3 } },
+  { id: 't10', name: 'Ball is Life', leagueId: 'wbl', division: 'Main', record: { wins: 3, losses: 2 } }
 ];
 
 export const players: PlayerProfile[] = [
@@ -54,10 +85,10 @@ export const players: PlayerProfile[] = [
 
 export const games: Game[] = [
   { id: 'g1', leagueId: 'sbbl', homeTeam: teams[0], awayTeam: teams[1], venue: 'Panalay Arena', court: 'Court 1', date: '2026-03-29', time: '14:00', status: 'live', score: { home: 67, away: 62 }, ppvPrice: 2.50 },
-  { id: 'g2', leagueId: 'wbl', homeTeam: teams[3], awayTeam: teams[4], venue: 'La Liga Sports Complex', court: 'Main Court', date: '2026-03-28', time: '16:00', status: 'upcoming', ppvPrice: 2.50 },
-  { id: 'g3', leagueId: 'tgifbl', homeTeam: teams[5], awayTeam: teams[6], venue: 'Tat Stadium', court: 'Court A', date: '2026-03-27', time: '19:00', status: 'final', score: { home: 88, away: 79 }, ppvPrice: 2.50 },
-  { id: 'g4', leagueId: 'sbbl', homeTeam: teams[2], awayTeam: teams[7], venue: 'Panalay Arena', court: 'Court 2', date: '2026-03-30', time: '10:00', status: 'upcoming', ppvPrice: 2.50 },
-  { id: 'g5', leagueId: 'wbl', homeTeam: teams[4], awayTeam: teams[3], venue: 'La Liga Sports Complex', court: 'Court 2', date: '2026-04-04', time: '15:00', status: 'upcoming', ppvPrice: 2.50 },
+  { id: 'g2', leagueId: 'wbl', homeTeam: teams[3], awayTeam: teams[24], venue: 'La Liga Sports Complex', court: 'Main Court', date: '2026-03-28', time: '16:00', status: 'upcoming', ppvPrice: 2.50 },
+  { id: 'g3', leagueId: 'tgifbl', homeTeam: teams[27], awayTeam: teams[4], venue: 'Tat Stadium', court: 'Court A', date: '2026-03-27', time: '19:00', status: 'final', score: { home: 88, away: 79 }, ppvPrice: 2.50 },
+  { id: 'g4', leagueId: 'sbbl', homeTeam: teams[2], awayTeam: teams[5], venue: 'Panalay Arena', court: 'Court 2', date: '2026-03-30', time: '10:00', status: 'upcoming', ppvPrice: 2.50 },
+  { id: 'g5', leagueId: 'wbl', homeTeam: teams[24], awayTeam: teams[3], venue: 'La Liga Sports Complex', court: 'Court 2', date: '2026-04-04', time: '15:00', status: 'upcoming', ppvPrice: 2.50 },
   { id: 'g6', leagueId: 'sbbl', homeTeam: teams[1], awayTeam: teams[2], venue: 'Panalay Arena', court: 'Court 1', date: '2026-03-22', time: '14:00', status: 'final', score: { home: 75, away: 71 }, ppvPrice: 2.50 },
 ];
 
@@ -72,7 +103,7 @@ export const products: Product[] = [
 
 export const mediaAssets: MediaAsset[] = [
   // SBBL marketing
-  { id: 'm-sbbl-1v1', title: '1v1 Event — Fred vs Karl', type: 'poster', thumbnail: event1v1Sbbl, leagueId: 'sbbl', status: 'published', date: '2026-04-03' },
+  { id: 'm-sbbl-1v1', title: '1v1 Event — Fred vs Karl', type: 'poster', thumbnail: event1v1Sbbl, leagueId: 'sbbl', status: 'published', date: '2026-04-02' },
   { id: 'm1', title: 'Rivera 40-Piece Performance', type: 'highlight', thumbnail: gameAction, leagueId: 'sbbl', status: 'published', date: '2026-03-22' },
   { id: 'm4', title: 'All-Star Media Day Reel', type: 'highlight', thumbnail: gameAction, leagueId: 'sbbl', status: 'draft', date: '2026-03-26' },
   // WBL Player of the Game cards
