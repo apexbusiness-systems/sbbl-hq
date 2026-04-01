@@ -1,4 +1,6 @@
-import { useState } from 'react';
+const fs = require('fs');
+const file = 'src/components/layout/BagDrawer.tsx';
+let code = `import { useState } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
 import { apiFetch } from '@/lib/api/client';
@@ -49,8 +51,8 @@ export const BagDrawer = () => {
         method: 'POST',
         body: JSON.stringify({
           items: lineItems,
-          successUrl: `${window.location.origin}/store?success=1`,
-          cancelUrl: `${window.location.origin}/store`,
+          successUrl: \`\${window.location.origin}/store?success=1\`,
+          cancelUrl: \`\${window.location.origin}/store\`,
         }),
       }, session.access_token);
 
@@ -94,7 +96,7 @@ export const BagDrawer = () => {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{product?.name ?? id}</p>
                       {product && product.price > 0 && (
-                        <p className="text-xs text-primary font-semibold">${product.price.toLocaleString()}</p>
+                        <p className="text-xs text-primary font-semibold">\${product.price.toLocaleString()}</p>
                       )}
                       {product && product.price === 0 && (
                         <p className="text-xs text-primary font-semibold">Reward Item</p>
@@ -112,7 +114,7 @@ export const BagDrawer = () => {
           <div className="p-4 border-t border-border space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-muted-foreground">Subtotal</span>
-              <span className="font-display font-bold text-primary">${subtotal.toLocaleString()}</span>
+              <span className="font-display font-bold text-primary">\${subtotal.toLocaleString()}</span>
             </div>
             <button
               onClick={handleCheckout}
@@ -127,4 +129,5 @@ export const BagDrawer = () => {
       </div>
     </div>
   );
-};
+};`;
+fs.writeFileSync(file, code);

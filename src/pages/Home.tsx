@@ -3,11 +3,14 @@ import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY } from '@/lib/league
 import { fetchPublicHome, type PublicHomeData} from '@/lib/api/public';
 
 import { PotgCard } from '@/components/ui/PotgCard';
-import { playersOfTheGame } from '@/data/mock';
+
 import { motion } from 'framer-motion';
 import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3, ShoppingBag, Video } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api/client';
+import type { PlayerOfTheGame } from '@/types';
 import type { LeagueId } from '@/types';
 
 type LoadState = 'loading' | 'loaded' | 'error';
@@ -30,6 +33,14 @@ const HomePage = () => {
   const [state, setState] = useState<LoadState>('loading');
   const [data, setData] = useState<PublicHomeData | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const potgQuery = useQuery({
+    queryKey: ['public-potg', resolvedLeague],
+    queryFn: () => apiFetch<{ ok: boolean; data: PlayerOfTheGame[] }>(`/api/public/potg?league=${resolvedLeague}&limit=6`),
+    staleTime: 60_000,
+    retry: 1,
+  });
+  const livePotgList = potgQuery.data?.data ?? [];
 
   useEffect(() => {
     let cancelled = false;
@@ -260,9 +271,11 @@ const HomePage = () => {
           </motion.section>
         )}
 
-        {/* Players of the Game — always rendered; empty state when no data for this league yet */}
+        {/* Players of the Game — sourced from real POTG pipeline */}
         {(() => {
-          const potgList = playersOfTheGame.filter(p => p.leagueId === resolvedLeague);
+          const potgList = livePotgList.length > 0
+            ? livePotgList
+            : []; // zero mock fallback — empty list shows the prompt state below
           const leagueInfo = getLeagueConfig(resolvedLeague);
           return (
             <section>
