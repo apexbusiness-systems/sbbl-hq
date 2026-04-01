@@ -7,6 +7,8 @@ import type { LeagueId } from '@/types';
 import { Users, Calendar, MapPin, Trophy, Target, TargetIcon, Navigation, UserCircle, Briefcase, Activity, Shield } from 'lucide-react';
 import { useState, useMemo, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { STATIC_TEAMS } from '@/data/teams';
+
 
 type TabView = 'standings' | 'rosters' | 'stats';
 
@@ -44,7 +46,27 @@ const TeamsPage = () => {
   });
 
   const filteredTeams = useMemo(() => {
-    const apiTeams = teamsQuery.data?.teams ?? [];
+    const mappedStatic = STATIC_TEAMS.map((st, index) => ({
+      id: `static-${index}`,
+      name: st.name,
+      league_code: st.leagueCode,
+      league_name: st.leagueCode,
+      season_name: st.season,
+      division_name: null,
+      roster_count: 0,
+      players: [],
+      coaches: [],
+      stats: {
+        wins: 0,
+        losses: 0,
+        gamesPlayed: 0,
+        ptsFor: 0,
+        ptsAgainst: 0,
+        winPct: '.000',
+        diff: 0
+      }
+    }));
+    const apiTeams = (teamsQuery.data?.teams && teamsQuery.data.teams.length > 0) ? teamsQuery.data.teams : mappedStatic;
     if (leagueFilter === 'all') return apiTeams;
     const code = getLeagueConfig(leagueFilter).code;
     return apiTeams.filter((t) => t.league_code === code);
@@ -136,21 +158,21 @@ const TeamsPage = () => {
       </div>
 
       {/* Loading state */}
-      {teamsQuery.isLoading && (
+      {(teamsQuery.isLoading && !teamsQuery.data?.teams && filteredTeams.length === 0) && (
         <div className="flex items-center justify-center py-16\">
           <div className="text-muted-foreground\">Loading teams data...</div>
         </div>
       )}
 
       {/* Empty state */}
-      {!teamsQuery.isLoading && filteredTeams.length === 0 && (
+      {!(teamsQuery.isLoading && !teamsQuery.data?.teams && filteredTeams.length === 0) && filteredTeams.length === 0 && (
         <div className="flex items-center justify-center py-16\">
           <div className="text-muted-foreground\">No teams found for the selected league.</div>
         </div>
       )}
 
       {/* -- STANDINGS VIEW ------------------------------------------ */}
-      {!teamsQuery.isLoading && activeTab === 'standings' && filteredTeams.length > 0 && (
+      {!(teamsQuery.isLoading && !teamsQuery.data?.teams && filteredTeams.length === 0) && activeTab === 'standings' && filteredTeams.length > 0 && (
         <div className="overflow-x-auto rounded-lg border border-border/40\">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-muted-foreground font-medium\">
@@ -202,7 +224,7 @@ const TeamsPage = () => {
       )}
 
       {/* -- ROSTERS VIEW ------------------------------------------ */}
-      {!teamsQuery.isLoading && activeTab === 'rosters' && filteredTeams.length > 0 && (
+      {!(teamsQuery.isLoading && !teamsQuery.data?.teams && filteredTeams.length === 0) && activeTab === 'rosters' && filteredTeams.length > 0 && (
         <div className="space-y-6\">
           {filteredTeams.map((team) => (
             <div key={team.id} className="rounded-lg border border-border/40 bg-card p-6\">
@@ -291,7 +313,7 @@ const TeamsPage = () => {
       )}
 
       {/* -- STATS VIEW ------------------------------------------ */}
-      {!teamsQuery.isLoading && activeTab === 'stats' && filteredTeams.length > 0 && (
+      {!(teamsQuery.isLoading && !teamsQuery.data?.teams && filteredTeams.length === 0) && activeTab === 'stats' && filteredTeams.length > 0 && (
         <div className="grid gap-6 lg:grid-cols-2\">
           <div>
             <h3 className="text-lg font-semibold mb-4\">Highest Scoring Offense (PPG)</h3>
