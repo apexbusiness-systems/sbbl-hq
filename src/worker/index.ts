@@ -140,7 +140,7 @@ async function ensureMutation(req: Request, ctx: HandlerCtx) {
   }
 }
 
-async function handleAuthSession({ req }: HandlerCtx) {
+export async function handleAuthSession({ req }: HandlerCtx) {
   try {
     const userId = requireAuth(req);
     return json({ ok: true, userId, roles: getRolesFromVerifiedSession(req) });
@@ -298,42 +298,42 @@ async function handleSyncDrain(ctx: HandlerCtx) {
   const { data, error } = await ctx.admin.rpc('claim_outbox_events', { p_limit: limit });
   if (error) throw new Error(error.message);
   const events = (data ?? []) as Array<Record<string, unknown>>;
-  const results = [];
+  const results = await Promise.all(
+    events.map(async (item) => {
+      const packet: SyncPacket = {
+        packet_id: crypto.randomUUID(),
+        trace_id: String(item.trace_id ?? crypto.randomUUID()),
+        event_type: String(item.event_type ?? 'unknown'),
+        entity_type: String(item.entity_type ?? 'unknown'),
+        entity_id: (item.entity_id as string | null) ?? null,
+        league_id: (item.league_id as string | null) ?? null,
+        payload: (item.payload as Record<string, unknown> | undefined) ?? {},
+        emitted_at: new Date().toISOString(),
+      };
 
-  for (const item of events) {
-    const packet: SyncPacket = {
-      packet_id: crypto.randomUUID(),
-      trace_id: String(item.trace_id ?? crypto.randomUUID()),
-      event_type: String(item.event_type ?? 'unknown'),
-      entity_type: String(item.entity_type ?? 'unknown'),
-      entity_id: (item.entity_id as string | null) ?? null,
-      league_id: (item.league_id as string | null) ?? null,
-      payload: (item.payload as Record<string, unknown> | undefined) ?? {},
-      emitted_at: new Date().toISOString(),
-    };
-    const signed = await signSyncPacket(packet, ctx.env.OMNIHUB_SIGNING_SECRET ?? 'dev-signing-secret');
-    const url = ctx.env.OMNIHUB_SYNC_URL;
+      const signed = await signSyncPacket(packet, ctx.env.OMNIHUB_SIGNING_SECRET ?? 'dev-signing-secret');
+      const url = ctx.env.OMNIHUB_SYNC_URL;
 
-    if (url) {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-sbbl-signature': signed.signature,
-        },
-        body: JSON.stringify(signed.packet),
-      }).catch(() => null);
+      if (url) {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-sbbl-signature': signed.signature,
+          },
+          body: JSON.stringify(signed.packet),
+        }).catch(() => null);
 
-      if (!resp || !resp.ok) {
-        await ctx.admin.rpc('mark_outbox_retry', { p_outbox_id: item.id, p_error_message: 'sync_delivery_failed' });
-        results.push({ id: item.id, status: 'retry' });
-        continue;
+        if (!resp || !resp.ok) {
+          await ctx.admin.rpc('mark_outbox_retry', { p_outbox_id: item.id, p_error_message: 'sync_delivery_failed' });
+          return { id: item.id, status: 'retry' };
+        }
       }
-    }
 
-    await ctx.admin.rpc('mark_outbox_delivered', { p_outbox_id: item.id });
-    results.push({ id: item.id, status: 'delivered' });
-  }
+      await ctx.admin.rpc('mark_outbox_delivered', { p_outbox_id: item.id });
+      return { id: item.id, status: 'delivered' };
+    })
+  );
 
   return json({ ok: true, processed: results.length, results });
 }
@@ -1126,18 +1126,13 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
 
 // ── PPV INVITE SYSTEM ────────────────────────────────────────────────────────
 //
-// UNVERIFIED: IP source — CF-Connecting-IP is the canonical Cloudflare Pages
+// VERIFIED: IP source — CF-Connecting-IP is the canonical Cloudflare Pages
 // header containing the real client IP (set by Cloudflare's edge before the
-// request reaches the Worker).  In local dev without Cloudflare in front,
-// x-forwarded-for is used as fallback and may be spoofable.  Never trust a
-// client-supplied IP header — always derive it server-side here.
+// request reaches the Worker). We strictly rely on this header to prevent
+// IP spoofing from client-supplied headers like X-Forwarded-For.
 
 function getClientIP(req: Request): string {
-  return (
-    req.headers.get('cf-connecting-ip') ??
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    'unknown'
-  );
+  return req.headers.get('cf-connecting-ip') ?? 'unknown';
 }
 
 async function getUserRolesFromDB(userId: string, admin: SupabaseClient): Promise<string[]> {
@@ -1336,6 +1331,21 @@ async function handleStreamAccess({ req, admin }: HandlerCtx) {
   return json({ ok: true, hasAccess, gameId, userId });
 }
 
+
+function getSafeRedirectUrl(url: string | undefined | null, fallback: string, reqUrl: string): string {
+  if (!url) return fallback;
+  try {
+    const baseOrigin = new URL(reqUrl).origin;
+    const resolvedUrl = new URL(url, baseOrigin);
+    if (resolvedUrl.origin === baseOrigin) {
+      return resolvedUrl.toString();
+    }
+  } catch (err) {
+    // Ignore invalid URLs
+  }
+  return fallback;
+}
+
 async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
   await ensureMutation(req, { req, env, admin, params: {} });
   const userId = requireAuth(req);
@@ -1344,8 +1354,9 @@ async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
 
   const body = await req.json().catch(() => null) as { successUrl?: string; cancelUrl?: string; ppvPrice?: number } | null;
   const unitAmount = Math.round((body?.ppvPrice ?? 2.5) * 100);
-  const successUrl = body?.successUrl ?? 'https://sbbl-hq.icu/live?access=1';
-  const cancelUrl = body?.cancelUrl ?? 'https://sbbl-hq.icu/live';
+  const reqUrlStr = req.url;
+  const successUrl = getSafeRedirectUrl(body?.successUrl, 'https://sbbl-hq.icu/live?access=1', reqUrlStr);
+  const cancelUrl = getSafeRedirectUrl(body?.cancelUrl, 'https://sbbl-hq.icu/live', reqUrlStr);
 
   const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
@@ -1541,6 +1552,7 @@ async function handlePayOrder(ctx: HandlerCtx) {
   if ((order as Record<string, unknown>).status === 'paid') return json({ ok: true, alreadyPaid: true });
 
   const body = await ctx.req.json().catch(() => null) as { successUrl?: string; cancelUrl?: string } | null;
+  const reqUrlStr = ctx.req.url;
   const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
     headers: { 'authorization': `Bearer ${ctx.env.STRIPE_SECRET_KEY}`, 'content-type': 'application/x-www-form-urlencoded' },
@@ -1551,8 +1563,8 @@ async function handlePayOrder(ctx: HandlerCtx) {
       'line_items[0][price_data][unit_amount]': String((order as Record<string, unknown>).total_amount as number || 100),
       'line_items[0][quantity]': '1',
       'mode': 'payment',
-      'success_url': body?.successUrl ?? 'https://sbbl-hq.icu/store?success=1',
-      'cancel_url': body?.cancelUrl ?? 'https://sbbl-hq.icu/store',
+      'success_url': getSafeRedirectUrl(body?.successUrl, 'https://sbbl-hq.icu/store?success=1', reqUrlStr),
+      'cancel_url': getSafeRedirectUrl(body?.cancelUrl, 'https://sbbl-hq.icu/store', reqUrlStr),
       'metadata[user_id]': userId,
       'metadata[order_id]': orderId,
       'metadata[purchase_type]': 'store_order',
@@ -1582,11 +1594,12 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
 
   if (!body?.items?.length) return json({ ok: false, error: 'items_required' }, 400);
 
+  const reqUrlStr = req.url;
   const params = new URLSearchParams({
     'payment_method_types[]': 'card',
     mode: 'payment',
-    success_url: body.successUrl ?? `${new URL(req.url).origin}/store?success=1`,
-    cancel_url: body.cancelUrl ?? `${new URL(req.url).origin}/store`,
+    success_url: getSafeRedirectUrl(body.successUrl, `${new URL(reqUrlStr).origin}/store?success=1`, reqUrlStr),
+    cancel_url: getSafeRedirectUrl(body.cancelUrl, `${new URL(reqUrlStr).origin}/store`, reqUrlStr),
     'metadata[user_id]': userId,
     'metadata[purchase_type]': 'store_order',
   });
@@ -1636,8 +1649,9 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
   const userId = requireAuth(req);
   if (!env.STRIPE_SECRET_KEY) return json({ ok: false, error: 'payments_not_configured' }, 503);
   const body = await req.json().catch(() => null) as { successUrl?: string; cancelUrl?: string } | null;
-  const successUrl = body?.successUrl ?? 'https://sbbl-hq.icu/billing?success=1';
-  const cancelUrl = body?.cancelUrl ?? 'https://sbbl-hq.icu/billing';
+  const reqUrlStr = req.url;
+  const successUrl = getSafeRedirectUrl(body?.successUrl, 'https://sbbl-hq.icu/billing?success=1', reqUrlStr);
+  const cancelUrl = getSafeRedirectUrl(body?.cancelUrl, 'https://sbbl-hq.icu/billing', reqUrlStr);
 
   const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',

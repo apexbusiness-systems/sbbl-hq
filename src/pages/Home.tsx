@@ -1,7 +1,7 @@
 import { useApp } from '@/contexts/AppContext';
 import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY } from '@/lib/leagues';
-import { fetchPublicHome, type PublicHomeData, type PublicGame } from '@/lib/api/public';
-import { LeagueBadge } from '@/components/ui/LeagueBadge';
+import { fetchPublicHome, type PublicHomeData} from '@/lib/api/public';
+
 import { PotgCard } from '@/components/ui/PotgCard';
 import { playersOfTheGame } from '@/data/mock';
 import { motion } from 'framer-motion';
@@ -377,7 +377,7 @@ function MetricCard({ label, value, icon, highlight }: { label: string; value: n
   );
 }
 
-function GameCard({ game, variant }: { game: PublicGame; variant: 'live' | 'upcoming' }) {
+function GameCard({ game, variant }: { game: PublicHomeData['liveGames'][number]; variant: 'live' | 'upcoming' }) {
   const isLive = variant === 'live';
   const scheduledDate = game.scheduled_at ? new Date(game.scheduled_at) : null;
 
