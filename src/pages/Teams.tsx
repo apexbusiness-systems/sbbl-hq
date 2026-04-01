@@ -1,10 +1,10 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchTeams, type TeamCard, type PlayerProfile, type CoachProfile } from '@/lib/api/teams';
+import { fetchTeams } from '@/lib/api/teams';
 import { useApp } from '@/contexts/AppContext';
-import { LEAGUE_REGISTRY, getLeagueConfig, leagueCodeFromId } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
-import { Users, Calendar, MapPin, Trophy, Target, TargetIcon, Navigation, UserCircle, Briefcase, Activity, Shield } from 'lucide-react';
+import { Users, Trophy, Briefcase, Activity } from 'lucide-react';
 import { useState, useMemo, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
