@@ -23,9 +23,9 @@ const potgGilbertBacera = '/assets/potg/wbl-gilbert-bacera.jpg';
 const eventSbblSeason11 = '/assets/events/sbbl-season-11.jpg';
 
 export const leagues: League[] = [
-  { id: 'sbbl', name: "Sunday's Best Basketball League", shortName: 'SBBL', fee: 1350, accentVar: '--sbbl', description: 'The flagship Sunday league with multiple Panalay divisions, strict review rules, and all-star media day events.' },
-  { id: 'wbl', name: 'Weekend Basketball League', shortName: 'WBL', fee: 1390, accentVar: '--wbl', description: 'Weekend warriors compete at La Liga Sports Complex with best-of-3 finals and live broadcast coverage.' },
-  { id: 'tgifbl', name: "Thank God It's Friday Basketball League", shortName: 'TGIFBL', fee: 1390, accentVar: '--tgifbl', description: 'Friday night basketball at Tat Stadium featuring player-of-the-week awards and multiple division groups.' },
+  { id: 'sbbl', name: "Sunday's Best Basketball League", shortName: 'SBBL', fee: 45, accentVar: '--sbbl', description: 'The flagship Sunday league with multiple Panalay divisions, strict review rules, and all-star media day events.' },
+  { id: 'wbl', name: 'Weekend Basketball League', shortName: 'WBL', fee: 49, accentVar: '--wbl', description: 'Weekend warriors compete at La Liga Sports Complex with best-of-3 finals and live broadcast coverage.' },
+  { id: 'tgifbl', name: "Thank God It's Friday Basketball League", shortName: 'TGIFBL', fee: 49, accentVar: '--tgifbl', description: 'Friday night basketball at Tat Stadium featuring player-of-the-week awards and multiple division groups.' },
 ];
 
 export const teams: Team[] = [
@@ -66,11 +66,11 @@ export const games: Game[] = [
 ];
 
 export const products: Product[] = [
-  { id: 'prod1', name: 'SBBL HQ Official Jersey', category: 'jerseys', price: 1850, image: storeJersey, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black/Gold', 'White/Gold'], sale: true },
-  { id: 'prod2', name: 'APEX Hoodie', category: 'hoodies', price: 2200, image: storeHoodie, sizes: ['S', 'M', 'L', 'XL'], colors: ['Black', 'Charcoal'], sale: true },
-  { id: 'prod3', name: 'Championship Cap', category: 'caps', price: 850, image: storeCap, colors: ['Black/Gold', 'Black/Silver'] },
-  { id: 'prod4', name: 'Court Culture Tee', category: 'tees', price: 950, image: storeTee, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black', 'Graphite'], sale: true },
-  { id: 'prod5', name: 'Pro Gear Bundle', category: 'accessories', price: 1450, image: storeAccessories, badge: 'Bundle Deal', sale: true },
+  { id: 'prod1', name: 'SBBL HQ Official Jersey', category: 'jerseys', price: 45, image: storeJersey, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black/Gold', 'White/Gold'], sale: true },
+  { id: 'prod2', name: 'APEX Hoodie', category: 'hoodies', price: 55, image: storeHoodie, sizes: ['S', 'M', 'L', 'XL'], colors: ['Black', 'Charcoal'], sale: true },
+  { id: 'prod3', name: 'Championship Cap', category: 'caps', price: 25, image: storeCap, colors: ['Black/Gold', 'Black/Silver'] },
+  { id: 'prod4', name: 'Court Culture Tee', category: 'tees', price: 29, image: storeTee, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black', 'Graphite'], sale: true },
+  { id: 'prod5', name: 'Pro Gear Bundle', category: 'accessories', price: 35, image: storeAccessories, badge: 'Bundle Deal', sale: true },
   { id: 'prod6', name: 'MVP Rewards Jersey', category: 'rewards', price: 0, image: storeJersey, badge: 'Reward Item', sizes: ['M', 'L', 'XL'] },
 ];
 
@@ -103,11 +103,11 @@ export const reviewItems: ReviewItem[] = [
 ];
 
 export const invoices: Invoice[] = [
-  { id: 'inv1', description: 'SBBL Season Registration — Panalay Kings', amount: 1350, date: '2026-01-15', status: 'paid', leagueId: 'sbbl' },
-  { id: 'inv2', description: 'WBL Season Registration — Weekend Warriors', amount: 1390, date: '2026-01-20', status: 'paid', leagueId: 'wbl' },
+  { id: 'inv1', description: 'SBBL Season Registration — Panalay Kings', amount: 45, date: '2026-01-15', status: 'paid', leagueId: 'sbbl' },
+  { id: 'inv2', description: 'WBL Season Registration — Weekend Warriors', amount: 49, date: '2026-01-20', status: 'paid', leagueId: 'wbl' },
   { id: 'inv3', description: 'PPV Access — SBBL Game G1', amount: 2.50, date: '2026-03-29', status: 'paid', leagueId: 'sbbl' },
-  { id: 'inv4', description: 'Store Order #1042 — APEX Hoodie', amount: 2200, date: '2026-03-25', status: 'pending' },
-  { id: 'inv5', description: 'TGIFBL Season Registration — Friday Flames', amount: 1390, date: '2026-01-22', status: 'paid', leagueId: 'tgifbl' },
+  { id: 'inv4', description: 'Store Order #1042 — APEX Hoodie', amount: 55, date: '2026-03-25', status: 'pending' },
+  { id: 'inv5', description: 'TGIFBL Season Registration — Friday Flames', amount: 49, date: '2026-01-22', status: 'paid', leagueId: 'tgifbl' },
 ];
 
 export const gameActionImage = gameAction;

@@ -170,7 +170,7 @@ const ProfilesPage = () => {
                 <p className="text-sm text-muted-foreground leading-relaxed">{l.description}</p>
                 <div className="flex items-center gap-6 mt-4 pt-4 border-t border-border">
                   <div>
-                    <p className="stat-numeral text-xl text-primary">₱{l.fee.toLocaleString()}</p>
+                    <p className="stat-numeral text-xl text-primary">${l.fee.toLocaleString()}</p>
                     <p className="text-[10px] text-muted-foreground uppercase">Season Fee</p>
                   </div>
                   <div>

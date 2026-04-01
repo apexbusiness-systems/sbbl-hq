@@ -62,7 +62,7 @@ const StorePage = () => {
                   </div>
                   <div className="p-3">
                     <p className="text-xs font-medium truncate">{p.name}</p>
-                    <p className="stat-numeral text-sm text-primary mt-0.5">{p.price > 0 ? `₱${p.price.toLocaleString()}` : 'Reward Item'}</p>
+                    <p className="stat-numeral text-sm text-primary mt-0.5">{p.price > 0 ? `$${p.price.toLocaleString()}` : 'Reward Item'}</p>
                   </div>
                 </div>
               ))}
@@ -77,7 +77,7 @@ const StorePage = () => {
                 <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wider">{detail.category}</p>
                   <h3 className="font-display text-lg font-bold mt-1">{detail.name}</h3>
-                  <p className="stat-numeral text-2xl text-primary mt-2">{detail.price > 0 ? `₱${detail.price.toLocaleString()}` : 'Reward Redemption'}</p>
+                  <p className="stat-numeral text-2xl text-primary mt-2">{detail.price > 0 ? `$${detail.price.toLocaleString()}` : 'Reward Redemption'}</p>
                 </div>
                 {detail.sizes && (
                   <div>
