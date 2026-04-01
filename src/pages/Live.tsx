@@ -1,4 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { apiFetch } from '@/lib/api';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
 import { games, players, products } from '@/data/mock';
@@ -18,6 +20,18 @@ const LivePage = () => {
   const [chatInput, setChatInput] = useState('');
   const [reactions, setReactions] = useState({ fire: 0, heart: 0, clap: 0 });
   const [clipSaved, setClipSaved] = useState(false);
+  const statsQuery = useQuery({
+    queryKey: ['stats'],
+    queryFn: () => apiFetch<{ ok: boolean; data: typeof players }>('/api/stats'),
+    enabled: !!session,
+    retry: 1,
+    staleTime: 30_000,
+  });
+  const topPerformers = useMemo(() => {
+    const apiData = statsQuery.data?.data;
+    const source = (Array.isArray(apiData) && apiData.length > 0 && 'stats' in (apiData[0] ?? {})) ? apiData : players;
+    return source.filter(p => p.teamId === liveGame.homeTeam.id || p.teamId === liveGame.awayTeam.id).sort((a, b) => b.stats.pts - a.stats.pts).slice(0, 3);
+  }, [statsQuery.data, liveGame]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const featuredProducts = products.filter(p => p.sale);
@@ -120,7 +134,7 @@ const LivePage = () => {
       {/* Top Performers */}
       <div className="panel p-4">
         <h3 className="font-display font-bold text-sm mb-3">Top Performers</h3>
-        {players.filter(p => p.teamId === liveGame.homeTeam.id || p.teamId === liveGame.awayTeam.id).sort((a, b) => b.stats.pts - a.stats.pts).slice(0, 3).map(p => (
+        {topPerformers.map(p => (
           <div key={p.id} className="flex items-center gap-3 py-2 border-b border-border last:border-0">
             <img src={p.avatar} alt={p.name} className="w-8 h-8 rounded-full object-cover" loading="lazy" />
             <div className="flex-1 min-w-0">
