@@ -140,7 +140,7 @@ async function ensureMutation(req: Request, ctx: HandlerCtx) {
   }
 }
 
-async function handleAuthSession({ req }: HandlerCtx) {
+export async function handleAuthSession({ req }: HandlerCtx) {
   try {
     const userId = requireAuth(req);
     return json({ ok: true, userId, roles: getRolesFromVerifiedSession(req) });
