@@ -1321,6 +1321,21 @@ async function handleStreamAccess({ req, admin }: HandlerCtx) {
   return json({ ok: true, hasAccess, gameId, userId });
 }
 
+
+function getSafeRedirectUrl(url: string | undefined | null, fallback: string, reqUrl: string): string {
+  if (!url) return fallback;
+  try {
+    const baseOrigin = new URL(reqUrl).origin;
+    const resolvedUrl = new URL(url, baseOrigin);
+    if (resolvedUrl.origin === baseOrigin) {
+      return resolvedUrl.toString();
+    }
+  } catch (err) {
+    // Ignore invalid URLs
+  }
+  return fallback;
+}
+
 async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
   await ensureMutation(req, { req, env, admin, params: {} });
   const userId = requireAuth(req);
@@ -1329,8 +1344,9 @@ async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
 
   const body = await req.json().catch(() => null) as { successUrl?: string; cancelUrl?: string; ppvPrice?: number } | null;
   const unitAmount = Math.round((body?.ppvPrice ?? 2.5) * 100);
-  const successUrl = body?.successUrl ?? 'https://sbbl-hq.icu/live?access=1';
-  const cancelUrl = body?.cancelUrl ?? 'https://sbbl-hq.icu/live';
+  const reqUrlStr = req.url;
+  const successUrl = getSafeRedirectUrl(body?.successUrl, 'https://sbbl-hq.icu/live?access=1', reqUrlStr);
+  const cancelUrl = getSafeRedirectUrl(body?.cancelUrl, 'https://sbbl-hq.icu/live', reqUrlStr);
 
   const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
@@ -1526,6 +1542,7 @@ async function handlePayOrder(ctx: HandlerCtx) {
   if ((order as Record<string, unknown>).status === 'paid') return json({ ok: true, alreadyPaid: true });
 
   const body = await ctx.req.json().catch(() => null) as { successUrl?: string; cancelUrl?: string } | null;
+  const reqUrlStr = ctx.req.url;
   const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
     headers: { 'authorization': `Bearer ${ctx.env.STRIPE_SECRET_KEY}`, 'content-type': 'application/x-www-form-urlencoded' },
@@ -1536,8 +1553,8 @@ async function handlePayOrder(ctx: HandlerCtx) {
       'line_items[0][price_data][unit_amount]': String((order as Record<string, unknown>).total_amount as number || 100),
       'line_items[0][quantity]': '1',
       'mode': 'payment',
-      'success_url': body?.successUrl ?? 'https://sbbl-hq.icu/store?success=1',
-      'cancel_url': body?.cancelUrl ?? 'https://sbbl-hq.icu/store',
+      'success_url': getSafeRedirectUrl(body?.successUrl, 'https://sbbl-hq.icu/store?success=1', reqUrlStr),
+      'cancel_url': getSafeRedirectUrl(body?.cancelUrl, 'https://sbbl-hq.icu/store', reqUrlStr),
       'metadata[user_id]': userId,
       'metadata[order_id]': orderId,
       'metadata[purchase_type]': 'store_order',
@@ -1567,11 +1584,12 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
 
   if (!body?.items?.length) return json({ ok: false, error: 'items_required' }, 400);
 
+  const reqUrlStr = req.url;
   const params = new URLSearchParams({
     'payment_method_types[]': 'card',
     mode: 'payment',
-    success_url: body.successUrl ?? `${new URL(req.url).origin}/store?success=1`,
-    cancel_url: body.cancelUrl ?? `${new URL(req.url).origin}/store`,
+    success_url: getSafeRedirectUrl(body.successUrl, `${new URL(reqUrlStr).origin}/store?success=1`, reqUrlStr),
+    cancel_url: getSafeRedirectUrl(body.cancelUrl, `${new URL(reqUrlStr).origin}/store`, reqUrlStr),
     'metadata[user_id]': userId,
     'metadata[purchase_type]': 'store_order',
   });
@@ -1621,8 +1639,9 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
   const userId = requireAuth(req);
   if (!env.STRIPE_SECRET_KEY) return json({ ok: false, error: 'payments_not_configured' }, 503);
   const body = await req.json().catch(() => null) as { successUrl?: string; cancelUrl?: string } | null;
-  const successUrl = body?.successUrl ?? 'https://sbbl-hq.icu/billing?success=1';
-  const cancelUrl = body?.cancelUrl ?? 'https://sbbl-hq.icu/billing';
+  const reqUrlStr = req.url;
+  const successUrl = getSafeRedirectUrl(body?.successUrl, 'https://sbbl-hq.icu/billing?success=1', reqUrlStr);
+  const cancelUrl = getSafeRedirectUrl(body?.cancelUrl, 'https://sbbl-hq.icu/billing', reqUrlStr);
 
   const stripeRes = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
