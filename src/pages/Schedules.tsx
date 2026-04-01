@@ -4,11 +4,37 @@ import { SCHEDULE_DATA, type ScheduleDay } from '@/data/schedules';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
 import { Calendar, MapPin, Clock } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 const SchedulesPage = () => {
-  const { activeLeague } = useApp();
-  const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>('all');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const paramLeague = searchParams.get('league') as LeagueId | 'all' | null;
+  const { activeLeague, setActiveLeague } = useApp();
+
+  // Validate paramLeague: must be 'all' or in LEAGUE_REGISTRY
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some((l) => l.id === paramLeague));
+
+  // League filter state: initialize from URL param or activeLeague.
+  const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(
+    isValidParam
+      ? (paramLeague as LeagueId | 'all')
+      : (activeLeague || 'all')
+  );
+  // Keep URL and local state in sync when user clicks page filters
+  const handleLeagueFilterChange = (val: LeagueId | 'all') => {
+    setLeagueFilter(val);
+    if (val !== 'all') setActiveLeague(val);
+    setSearchParams({ league: val }, { replace: true });
+  };
+
+  useEffect(() => {
+    if (isValidParam) {
+      setLeagueFilter(paramLeague as LeagueId | 'all');
+    } else if (activeLeague) {
+      setLeagueFilter(activeLeague);
+    }
+  }, [activeLeague, paramLeague, isValidParam]);
 
   const filtered = leagueFilter === 'all'
     ? SCHEDULE_DATA
@@ -28,7 +54,7 @@ const SchedulesPage = () => {
         {/* League filter */}
         <div className="flex gap-1 p-1 bg-secondary rounded-sm mb-8 w-fit">
           <button
-            onClick={() => setLeagueFilter('all')}
+            onClick={() => handleLeagueFilterChange('all')}
             className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors min-h-[36px] ${leagueFilter === 'all' ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
           >
             All
@@ -36,7 +62,7 @@ const SchedulesPage = () => {
           {LEAGUE_REGISTRY.map((l) => (
             <button
               key={l.id}
-              onClick={() => setLeagueFilter(l.id)}
+              onClick={() => handleLeagueFilterChange(l.id)}
               className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors min-h-[36px] ${leagueFilter === l.id ? 'bg-card text-foreground' : 'text-muted-foreground'}`}
             >
               {l.shortName}

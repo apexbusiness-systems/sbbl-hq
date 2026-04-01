@@ -15,7 +15,7 @@ const statKeys: StatKey[] = ['pts', 'reb', 'ast', 'stl', 'blk', 'fls', 'min'];
 const statLabels: Record<StatKey, string> = { pts: 'PTS', reb: 'REB', ast: 'AST', stl: 'STL', blk: 'BLK', fls: 'FLS', min: 'MIN' };
 
 const StatsPage = () => {
-  const { hasPremiumPlayerAccess, activeLeague } = useApp();
+  const { hasPremiumPlayerAccess, activeLeague, setActiveLeague } = useApp();
   const { isSignedIn } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [sortBy, setSortBy] = useState<StatKey>('pts');
@@ -33,15 +33,19 @@ const StatsPage = () => {
   const handleFilterChange = (val: LeagueId | 'all') => {
     setLeagueFilter(val);
     setSelectedPlayer(null);
-    setSearchParams(val === 'all' ? {} : { league: val }, { replace: true });
+    if (val !== 'all') setActiveLeague(val);
+    setSearchParams({ league: val }, { replace: true });
   };
 
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague));
+
   useEffect(() => {
-    if (paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))) {
+    if (isValidParam) {
       setLeagueFilter(paramLeague as LeagueId | 'all');
+    } else if (activeLeague) {
+      setLeagueFilter(activeLeague);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeLeague, paramLeague, isValidParam]);
 
   // Fetch live stats from the worker; fall back to mock if API unavailable or returns empty
   const statsQuery = useQuery({

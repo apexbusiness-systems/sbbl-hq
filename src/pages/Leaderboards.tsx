@@ -22,7 +22,7 @@ const categories: { key: StatKey; label: string }[] = [
 ];
 
 const LeaderboardsPage = () => {
-  const { hasPremiumPlayerAccess, activeLeague } = useApp();
+  const { hasPremiumPlayerAccess, activeLeague, setActiveLeague } = useApp();
   const { isSignedIn } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeCategory, setActiveCategory] = useState<StatKey>('pts');
@@ -39,16 +39,19 @@ const LeaderboardsPage = () => {
   // Keep URL in sync when filter changes
   const handleFilterChange = (val: LeagueId | 'all') => {
     setLeagueFilter(val);
-    setSearchParams(val === 'all' ? {} : { league: val }, { replace: true });
+    if (val !== 'all') setActiveLeague(val);
+    setSearchParams({ league: val }, { replace: true });
   };
 
-  // If the user navigates here from a league page, pick up the param on mount
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague));
+
   useEffect(() => {
-    if (paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))) {
+    if (isValidParam) {
       setLeagueFilter(paramLeague as LeagueId | 'all');
+    } else if (activeLeague) {
+      setLeagueFilter(activeLeague);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [activeLeague, paramLeague, isValidParam]);
 
   // Fetch live leaderboard data from the worker; fall back to mock if API unavailable
   const leaderboardsQuery = useQuery({
