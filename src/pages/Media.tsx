@@ -13,7 +13,7 @@ import { toast } from 'sonner';
 const statusColors = { draft: 'text-muted-foreground', ready: 'text-warning', published: 'text-success' };
 
 const MediaPage = () => {
-  const { activeLeague } = useApp();
+  const { activeLeague, setActiveLeague } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const [typeFilter, setTypeFilter] = useState<'all' | 'highlight' | 'clip' | 'poster' | 'photo'>('all');
   const [shareModal, setShareModal] = useState<string | null>(null);
@@ -27,17 +27,21 @@ const MediaPage = () => {
       : activeLeague;
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(initialLeague);
 
-  useEffect(() => {
-    if (paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))) {
-      setLeagueFilter(paramLeague as LeagueId | 'all');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handleLeagueChange = (val: LeagueId | 'all') => {
     setLeagueFilter(val);
-    setSearchParams(val === 'all' ? {} : { league: val }, { replace: true });
+    if (val !== 'all') setActiveLeague(val);
+    setSearchParams({ league: val }, { replace: true });
   };
+
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague));
+
+  useEffect(() => {
+    if (isValidParam) {
+      setLeagueFilter(paramLeague as LeagueId | 'all');
+    } else if (activeLeague) {
+      setLeagueFilter(activeLeague);
+    }
+  }, [activeLeague, paramLeague, isValidParam]);
 
   const mediaQuery = useQuery({
     queryKey: ['public-media'],

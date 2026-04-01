@@ -13,7 +13,7 @@ type TabView = 'standings' | 'rosters' | 'stats';
 const TeamsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const paramLeague = searchParams.get('league') as LeagueId | 'all' | null;
-  const { activeLeague } = useApp();
+  const { activeLeague, setActiveLeague } = useApp();
 
   // Validate paramLeague: must be 'all' or in LEAGUE_REGISTRY
   const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some((l) => l.id === paramLeague));
@@ -31,7 +31,8 @@ const TeamsPage = () => {
   // Keep URL and local state in sync when user clicks page filters
   const handleLeagueFilterChange = (val: LeagueId | 'all') => {
     setLeagueFilter(val);
-    setSearchParams(val === 'all' ? {} : { league: val }, { replace: true });
+    if (val !== 'all') setActiveLeague(val);
+    setSearchParams({ league: val }, { replace: true });
   };
 
   // CRITICAL FIX: sync leagueFilter with external activeLeague changes from header navigation

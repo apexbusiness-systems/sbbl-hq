@@ -11,14 +11,14 @@ import {
 const staticNav = [
   { label: 'Home', path: '/' },
   { label: 'Live', path: '/live' },
-  { label: 'Schedules', path: '/schedules' },
   { label: 'Store', path: '/store' },
   { label: 'Profiles', path: '/profiles' },
 ];
 // These pages accept ?league= to pre-filter — injected dynamically in the component
-const leagueAwareNav = ['Teams', 'Stats', 'Leaderboards', 'Media'] as const;
+const leagueAwareNav = ['Schedules', 'Teams', 'Stats', 'Leaderboards', 'Media'] as const;
 type LeagueAwareLabel = typeof leagueAwareNav[number];
 const leagueAwarePaths: Record<LeagueAwareLabel, string> = {
+  Schedules: '/schedules',
   Teams: '/teams',
   Stats: '/stats',
   Leaderboards: '/leaderboards',
