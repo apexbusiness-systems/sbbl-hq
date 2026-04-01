@@ -298,42 +298,42 @@ async function handleSyncDrain(ctx: HandlerCtx) {
   const { data, error } = await ctx.admin.rpc('claim_outbox_events', { p_limit: limit });
   if (error) throw new Error(error.message);
   const events = (data ?? []) as Array<Record<string, unknown>>;
-  const results = [];
+  const results = await Promise.all(
+    events.map(async (item) => {
+      const packet: SyncPacket = {
+        packet_id: crypto.randomUUID(),
+        trace_id: String(item.trace_id ?? crypto.randomUUID()),
+        event_type: String(item.event_type ?? 'unknown'),
+        entity_type: String(item.entity_type ?? 'unknown'),
+        entity_id: (item.entity_id as string | null) ?? null,
+        league_id: (item.league_id as string | null) ?? null,
+        payload: (item.payload as Record<string, unknown> | undefined) ?? {},
+        emitted_at: new Date().toISOString(),
+      };
 
-  for (const item of events) {
-    const packet: SyncPacket = {
-      packet_id: crypto.randomUUID(),
-      trace_id: String(item.trace_id ?? crypto.randomUUID()),
-      event_type: String(item.event_type ?? 'unknown'),
-      entity_type: String(item.entity_type ?? 'unknown'),
-      entity_id: (item.entity_id as string | null) ?? null,
-      league_id: (item.league_id as string | null) ?? null,
-      payload: (item.payload as Record<string, unknown> | undefined) ?? {},
-      emitted_at: new Date().toISOString(),
-    };
-    const signed = await signSyncPacket(packet, ctx.env.OMNIHUB_SIGNING_SECRET ?? 'dev-signing-secret');
-    const url = ctx.env.OMNIHUB_SYNC_URL;
+      const signed = await signSyncPacket(packet, ctx.env.OMNIHUB_SIGNING_SECRET ?? 'dev-signing-secret');
+      const url = ctx.env.OMNIHUB_SYNC_URL;
 
-    if (url) {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-sbbl-signature': signed.signature,
-        },
-        body: JSON.stringify(signed.packet),
-      }).catch(() => null);
+      if (url) {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-sbbl-signature': signed.signature,
+          },
+          body: JSON.stringify(signed.packet),
+        }).catch(() => null);
 
-      if (!resp || !resp.ok) {
-        await ctx.admin.rpc('mark_outbox_retry', { p_outbox_id: item.id, p_error_message: 'sync_delivery_failed' });
-        results.push({ id: item.id, status: 'retry' });
-        continue;
+        if (!resp || !resp.ok) {
+          await ctx.admin.rpc('mark_outbox_retry', { p_outbox_id: item.id, p_error_message: 'sync_delivery_failed' });
+          return { id: item.id, status: 'retry' };
+        }
       }
-    }
 
-    await ctx.admin.rpc('mark_outbox_delivered', { p_outbox_id: item.id });
-    results.push({ id: item.id, status: 'delivered' });
-  }
+      await ctx.admin.rpc('mark_outbox_delivered', { p_outbox_id: item.id });
+      return { id: item.id, status: 'delivered' };
+    })
+  );
 
   return json({ ok: true, processed: results.length, results });
 }
