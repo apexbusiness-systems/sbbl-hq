@@ -42,7 +42,7 @@ function getBearerToken(req: Request) {
 
 const textEncoder = new TextEncoder();
 
-function parseStripeSignature(header: string) {
+export function parseStripeSignature(header: string) {
   const fields = header.split(',').map((part) => part.trim());
   const timestamp = fields.find((part) => part.startsWith('t='))?.slice(2);
   const signatures = fields
