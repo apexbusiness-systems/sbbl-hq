@@ -19,8 +19,8 @@ describe('parseCsv security', () => {
     // The real test is if it polluted Object.prototype.
 
     expect(result[0].polluted).toBe('bar');
-    // @ts-ignore
-    expect(({}).polluted).toBeUndefined();
+    // @ts-expect-error - checking for non-existent property to verify no pollution
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
   it('should not allow overwriting constructor', () => {
@@ -37,7 +37,7 @@ describe('parseCsv security', () => {
     const result = parseCsv(csvData);
 
     expect(result[0].polluted).toBe('bar');
-    // @ts-ignore
-    expect(({}).polluted).toBeUndefined();
+    // @ts-expect-error - checking for non-existent property to verify no pollution
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 });
