@@ -1,4 +1,17 @@
-import { useState, useMemo, useEffect } from 'react';
+const fs = require('fs');
+
+const leaderboardsPath = 'src/pages/Leaderboards.tsx';
+let leaderboardsCode = fs.readFileSync(leaderboardsPath, 'utf8');
+
+// The new plan is to completely replace Leaderboards.tsx with only Player leaderboards
+// as requested in the task description, but without the "Team Standings" section at the bottom.
+// Wait, the task instructions explicitly tell me to put the team standings in Leaderboards.tsx.
+// TASK 3 - Leaderboards.tsx: "Public team standings — no auth required"
+// But the user just yelled: "MOVE ALL TEAM STANDINGS, TO THE DAMN TEAM AND STANDINGS TAB, WTF THIS IS COMMON SENSE."
+// So I will remove the team standings code from the Leaderboards.tsx replacement
+// and make sure it is not there. The Teams tab already seems to have it!
+
+const leaderboardsTarget = `import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
@@ -78,7 +91,7 @@ const LeaderboardsPage = () => {
           <div>
             <h1 className="font-display text-3xl md:text-4xl font-bold">Leaderboards</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {leagueFilter === 'all' ? 'Top performers across all three leagues' : `${activeLeagueObj?.name ?? leagueFilter.toUpperCase()} — league leaders`}
+              {leagueFilter === 'all' ? 'Top performers across all three leagues' : \`\${activeLeagueObj?.name ?? leagueFilter.toUpperCase()} — league leaders\`}
             </p>
           </div>
           <Trophy className="w-5 h-5 text-primary" />
@@ -86,9 +99,9 @@ const LeaderboardsPage = () => {
 
         {/* League filter */}
         <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit mb-6 overflow-x-auto">
-          <button onClick={() => handleFilterChange('all')} className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors whitespace-nowrap ${leagueFilter === 'all' ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>All Org</button>
+          <button onClick={() => handleFilterChange('all')} className={\`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors whitespace-nowrap \${leagueFilter === 'all' ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'}\`}>All Org</button>
           {LEAGUE_REGISTRY.map(l => (
-            <button key={l.id} onClick={() => handleFilterChange(l.id)} className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors whitespace-nowrap ${leagueFilter === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}>
+            <button key={l.id} onClick={() => handleFilterChange(l.id)} className={\`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors whitespace-nowrap \${leagueFilter === l.id ? \`bg-card \${l.accentClass} border border-current/20\` : 'text-muted-foreground hover:text-foreground'}\`}>
               <img src={l.logo} alt="" width={14} height={14} className="flex-shrink-0 opacity-80" style={{ aspectRatio: '1/1' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
               {l.shortName}
             </button>
@@ -98,7 +111,7 @@ const LeaderboardsPage = () => {
         {/* Category tabs */}
         <div className="flex gap-2 mb-8 overflow-x-auto scrollbar-hidden pb-2">
           {categories.map(c => (
-            <button key={c.key} onClick={() => setActiveCategory(c.key)} className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider rounded-sm whitespace-nowrap transition-colors ${activeCategory === c.key ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'}`}>{c.label}</button>
+            <button key={c.key} onClick={() => setActiveCategory(c.key)} className={\`px-4 py-2 text-xs font-semibold uppercase tracking-wider rounded-sm whitespace-nowrap transition-colors \${activeCategory === c.key ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'}\`}>{c.label}</button>
           ))}
         </div>
 
@@ -129,9 +142,9 @@ const LeaderboardsPage = () => {
               {visible.length >= 3 && (
                 <div className="grid grid-cols-3 gap-4 mb-8">
                   {visible.slice(0, 3).map((p, i) => (
-                    <div key={p.id} className={`panel p-4 text-center ${i === 0 ? 'border-primary/30' : ''}`}>
+                    <div key={p.id} className={\`panel p-4 text-center \${i === 0 ? 'border-primary/30' : ''}\`}>
                       <div className="flex justify-center mb-2">{rankIcon(i)}</div>
-                      <img src={p.avatar} alt={p.name} className="w-16 h-16 rounded-full object-cover mx-auto mb-2" loading="lazy" onError={e => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=111111&color=C9A84C`; }} />
+                      <img src={p.avatar} alt={p.name} className="w-16 h-16 rounded-full object-cover mx-auto mb-2" loading="lazy" onError={e => { (e.target as HTMLImageElement).src = \`https://ui-avatars.com/api/?name=\${encodeURIComponent(p.name)}&background=111111&color=C9A84C\`; }} />
                       <p className="font-display font-bold text-sm">{p.name}</p>
                       <LeagueBadge leagueId={p.leagueId} />
                       <p className="stat-numeral text-3xl text-primary mt-2">{p.stats[activeCategory]}</p>
@@ -142,9 +155,9 @@ const LeaderboardsPage = () => {
               )}
               <div className="space-y-2">
                 {visible.map((p, i) => (
-                  <div key={p.id} className={`panel p-3 flex items-center gap-4 ${i < 3 ? 'border-primary/20' : ''}`}>
+                  <div key={p.id} className={\`panel p-3 flex items-center gap-4 \${i < 3 ? 'border-primary/20' : ''}\`}>
                     <div className="w-6 flex justify-center">{rankIcon(i)}</div>
-                    <img src={p.avatar} alt={p.name} className="w-10 h-10 rounded-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${encodeURIComponent(p.name)}&background=111111&color=C9A84C`; }} />
+                    <img src={p.avatar} alt={p.name} className="w-10 h-10 rounded-full object-cover" loading="lazy" onError={e => { (e.target as HTMLImageElement).src = \`https://ui-avatars.com/api/?name=\${encodeURIComponent(p.name)}&background=111111&color=C9A84C\`; }} />
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium">{p.name}</p>
                       <div className="flex items-center gap-2">
@@ -155,7 +168,7 @@ const LeaderboardsPage = () => {
                     <p className="stat-numeral text-xl text-primary">{p.stats[activeCategory]}</p>
                     <div className="hidden md:block w-24">
                       <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                        <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: visible[0] ? `${(p.stats[activeCategory] / visible[0].stats[activeCategory]) * 100}%` : '0%' }} />
+                        <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: visible[0] ? \`\${(p.stats[activeCategory] / visible[0].stats[activeCategory]) * 100}%\` : '0%' }} />
                       </div>
                     </div>
                   </div>
@@ -176,3 +189,6 @@ const LeaderboardsPage = () => {
 };
 
 export default LeaderboardsPage;
+`;
+
+fs.writeFileSync(leaderboardsPath, leaderboardsTarget);
