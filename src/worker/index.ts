@@ -1046,18 +1046,13 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
 
 // ── PPV INVITE SYSTEM ────────────────────────────────────────────────────────
 //
-// UNVERIFIED: IP source — CF-Connecting-IP is the canonical Cloudflare Pages
+// VERIFIED: IP source — CF-Connecting-IP is the canonical Cloudflare Pages
 // header containing the real client IP (set by Cloudflare's edge before the
-// request reaches the Worker).  In local dev without Cloudflare in front,
-// x-forwarded-for is used as fallback and may be spoofable.  Never trust a
-// client-supplied IP header — always derive it server-side here.
+// request reaches the Worker). We strictly rely on this header to prevent
+// IP spoofing from client-supplied headers like X-Forwarded-For.
 
 function getClientIP(req: Request): string {
-  return (
-    req.headers.get('cf-connecting-ip') ??
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    'unknown'
-  );
+  return req.headers.get('cf-connecting-ip') ?? 'unknown';
 }
 
 async function getUserRolesFromDB(userId: string, admin: SupabaseClient): Promise<string[]> {
