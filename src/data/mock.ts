@@ -17,11 +17,15 @@ const potgMichaelRamos = '/assets/potg/wbl-michael-ramos.jpg';
 const potgHaroldCasio = '/assets/potg/wbl-harold-casio.jpg';
 const potgJtBalangui = '/assets/potg/wbl-jt-balangui.jpg';
 const event1v1Sbbl = '/assets/events/1v1-fred-vs-karl.jpg';
+const potgDarylGamiao = '/assets/potg/wbl-daryl-gamiao.jpg';
+const potgRjayCuntapay = '/assets/potg/wbl-rjay-cuntapay.jpg';
+const potgGilbertBacera = '/assets/potg/wbl-gilbert-bacera.jpg';
+const eventSbblSeason11 = '/assets/events/sbbl-season-11.jpg';
 
 export const leagues: League[] = [
-  { id: 'sbbl', name: "Sunday's Best Basketball League", shortName: 'SBBL', fee: 1350, accentVar: '--sbbl', description: 'The flagship Sunday league with multiple Panalay divisions, strict review rules, and all-star media day events.' },
-  { id: 'wbl', name: 'Weekend Basketball League', shortName: 'WBL', fee: 1390, accentVar: '--wbl', description: 'Weekend warriors compete at La Liga Sports Complex with best-of-3 finals and live broadcast coverage.' },
-  { id: 'tgifbl', name: "Thank God It's Friday Basketball League", shortName: 'TGIFBL', fee: 1390, accentVar: '--tgifbl', description: 'Friday night basketball at Tat Stadium featuring player-of-the-week awards and multiple division groups.' },
+  { id: 'sbbl', name: "Sunday's Best Basketball League", shortName: 'SBBL', fee: 45, accentVar: '--sbbl', description: 'The flagship Sunday league with multiple Panalay divisions, strict review rules, and all-star media day events.' },
+  { id: 'wbl', name: 'Weekend Basketball League', shortName: 'WBL', fee: 49, accentVar: '--wbl', description: 'Weekend warriors compete at La Liga Sports Complex with best-of-3 finals and live broadcast coverage.' },
+  { id: 'tgifbl', name: "Thank God It's Friday Basketball League", shortName: 'TGIFBL', fee: 49, accentVar: '--tgifbl', description: 'Friday night basketball at Tat Stadium featuring player-of-the-week awards and multiple division groups.' },
 ];
 
 export const teams: Team[] = [
@@ -93,11 +97,11 @@ export const games: Game[] = [
 ];
 
 export const products: Product[] = [
-  { id: 'prod1', name: 'SBBL HQ Official Jersey', category: 'jerseys', price: 1850, image: storeJersey, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black/Gold', 'White/Gold'], sale: true },
-  { id: 'prod2', name: 'APEX Hoodie', category: 'hoodies', price: 2200, image: storeHoodie, sizes: ['S', 'M', 'L', 'XL'], colors: ['Black', 'Charcoal'], sale: true },
-  { id: 'prod3', name: 'Championship Cap', category: 'caps', price: 850, image: storeCap, colors: ['Black/Gold', 'Black/Silver'] },
-  { id: 'prod4', name: 'Court Culture Tee', category: 'tees', price: 950, image: storeTee, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black', 'Graphite'], sale: true },
-  { id: 'prod5', name: 'Pro Gear Bundle', category: 'accessories', price: 1450, image: storeAccessories, badge: 'Bundle Deal', sale: true },
+  { id: 'prod1', name: 'SBBL HQ Official Jersey', category: 'jerseys', price: 45, image: storeJersey, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black/Gold', 'White/Gold'], sale: true },
+  { id: 'prod2', name: 'APEX Hoodie', category: 'hoodies', price: 55, image: storeHoodie, sizes: ['S', 'M', 'L', 'XL'], colors: ['Black', 'Charcoal'], sale: true },
+  { id: 'prod3', name: 'Championship Cap', category: 'caps', price: 25, image: storeCap, colors: ['Black/Gold', 'Black/Silver'] },
+  { id: 'prod4', name: 'Court Culture Tee', category: 'tees', price: 29, image: storeTee, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black', 'Graphite'], sale: true },
+  { id: 'prod5', name: 'Pro Gear Bundle', category: 'accessories', price: 35, image: storeAccessories, badge: 'Bundle Deal', sale: true },
   { id: 'prod6', name: 'MVP Rewards Jersey', category: 'rewards', price: 0, image: storeJersey, badge: 'Reward Item', sizes: ['M', 'L', 'XL'] },
 ];
 
@@ -114,6 +118,12 @@ export const mediaAssets: MediaAsset[] = [
   { id: 'm2', title: 'WBL Finals Preview', type: 'poster', thumbnail: gameAction, leagueId: 'wbl', status: 'ready', date: '2026-03-25' },
   // TGIFBL
   { id: 'm3', title: 'TGIFBL Player of the Week', type: 'clip', thumbnail: gameAction, leagueId: 'tgifbl', status: 'published', date: '2026-03-21' },
+  // New Event
+  { id: 'm-sbbl-s11', title: 'SBBL Season 11 Spring Edition Tip Off', type: 'poster', thumbnail: eventSbblSeason11, leagueId: 'sbbl', status: 'published', date: '2026-04-12' },
+  // New POTGs
+  { id: 'm-wbl-potg-daryl', title: 'POTG — Daryl Gamiao (BRB)', type: 'poster', thumbnail: potgDarylGamiao, leagueId: 'wbl', status: 'published', date: '2026-04-01' },
+  { id: 'm-wbl-potg-rjay', title: 'POTG — Rjay Cuntapay (SPG Cutie)', type: 'poster', thumbnail: potgRjayCuntapay, leagueId: 'wbl', status: 'published', date: '2026-04-01' },
+  { id: 'm-wbl-potg-gilbert', title: 'POTG — Gilbert Bacera (Blacksmith)', type: 'poster', thumbnail: potgGilbertBacera, leagueId: 'wbl', status: 'published', date: '2026-04-01' },
 ];
 
 export const reviewItems: ReviewItem[] = [
@@ -124,11 +134,11 @@ export const reviewItems: ReviewItem[] = [
 ];
 
 export const invoices: Invoice[] = [
-  { id: 'inv1', description: 'SBBL Season Registration — Panalay Kings', amount: 1350, date: '2026-01-15', status: 'paid', leagueId: 'sbbl' },
-  { id: 'inv2', description: 'WBL Season Registration — Weekend Warriors', amount: 1390, date: '2026-01-20', status: 'paid', leagueId: 'wbl' },
+  { id: 'inv1', description: 'SBBL Season Registration — Panalay Kings', amount: 45, date: '2026-01-15', status: 'paid', leagueId: 'sbbl' },
+  { id: 'inv2', description: 'WBL Season Registration — Weekend Warriors', amount: 49, date: '2026-01-20', status: 'paid', leagueId: 'wbl' },
   { id: 'inv3', description: 'PPV Access — SBBL Game G1', amount: 2.50, date: '2026-03-29', status: 'paid', leagueId: 'sbbl' },
-  { id: 'inv4', description: 'Store Order #1042 — APEX Hoodie', amount: 2200, date: '2026-03-25', status: 'pending' },
-  { id: 'inv5', description: 'TGIFBL Season Registration — Friday Flames', amount: 1390, date: '2026-01-22', status: 'paid', leagueId: 'tgifbl' },
+  { id: 'inv4', description: 'Store Order #1042 — APEX Hoodie', amount: 55, date: '2026-03-25', status: 'pending' },
+  { id: 'inv5', description: 'TGIFBL Season Registration — Friday Flames', amount: 49, date: '2026-01-22', status: 'paid', leagueId: 'tgifbl' },
 ];
 
 export const gameActionImage = gameAction;
@@ -138,4 +148,7 @@ export const playersOfTheGame: PlayerOfTheGame[] = [
   { id: 'potg-wbl-2', leagueId: 'wbl', playerName: 'Tata Ramon', playerId: 'p7', team: 'OSY Phoenix', pts: 22, rebs: 5, assts: 6, gameResult: 'OSY 77 vs Solid North 63', date: '2026-03-29', image: potgTataRamon },
   { id: 'potg-wbl-3', leagueId: 'wbl', playerName: 'Harold Casio', playerId: 'p9', team: 'Rebelde', pts: 20, rebs: 7, assts: 5, gameResult: 'Harina x Wild Dogs 62 vs Rebelde 79', date: '2026-03-22', image: potgHaroldCasio },
   { id: 'potg-wbl-4', leagueId: 'wbl', playerName: 'JT Balangui', playerId: 'p10', team: 'Splash', pts: 20, rebs: 6, assts: 6, gameResult: 'Splash 60 vs Rebelde Jrs 51', date: '2026-03-22', image: potgJtBalangui },
+  { id: 'potg-wbl-5', leagueId: 'wbl', playerName: 'Daryl Gamiao', team: 'BRB', pts: 15, rebs: 4, assts: 4, gameResult: 'BRB 61 VS SERVITEURS 54', date: '2026-04-01', image: potgDarylGamiao },
+  { id: 'potg-wbl-6', leagueId: 'wbl', playerName: 'Rjay Cuntapay', team: 'SPG Cutie', pts: 14, rebs: 3, assts: 4, gameResult: 'BATANG KANTO 45 VS SPG CUTIE 69', date: '2026-04-01', image: potgRjayCuntapay },
+  { id: 'potg-wbl-7', leagueId: 'wbl', playerName: 'Gilbert Bacera', team: 'Blacksmith', pts: 16, rebs: 4, assts: 5, gameResult: 'BLACKSMITH 63 VS DOWNTOWN 46', date: '2026-04-01', image: potgGilbertBacera },
 ];
