@@ -7,7 +7,7 @@ describe('handleAuthSession', () => {
     const req = new Request('https://local/auth/session');
 
     // We only need the req property for this test
-    const ctx = { req } as any;
+    const ctx = { req } as unknown as Parameters<typeof handleAuthSession>[0];
 
     const res = await handleAuthSession(ctx);
 
@@ -26,7 +26,7 @@ describe('handleAuthSession', () => {
       }
     });
 
-    const ctx = { req } as any;
+    const ctx = { req } as unknown as Parameters<typeof handleAuthSession>[0];
 
     const res = await handleAuthSession(ctx);
 
