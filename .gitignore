@@ -27,7 +27,6 @@ dist-ssr
 
 # Lockfile conflicts — standardise on bun.lock (text format)
 bun.lockb
-package-lock.json
 
 # Internal APEX tooling — must never be committed to product repos
 *.zip
