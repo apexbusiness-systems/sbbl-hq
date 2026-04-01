@@ -166,7 +166,7 @@ const AppHomePage = () => {
                   <p className="font-display font-bold text-sm">{p.name}</p>
                   {p.colors && <p className="text-[10px] text-muted-foreground mt-0.5">{p.colors[0]}</p>}
                   <div className="flex items-center justify-between mt-3">
-                    <span className="text-sm font-bold text-primary">₱{p.price.toLocaleString()}</span>
+                    <span className="text-sm font-bold text-primary">${p.price.toLocaleString()}</span>
                     <button onClick={() => addToBag(p.id)} className="inline-flex items-center gap-1.5 px-3 py-1.5 gold-bg text-xs font-bold uppercase tracking-wider rounded-sm">
                       <ShoppingBag className="w-3 h-3" /> Add
                     </button>
