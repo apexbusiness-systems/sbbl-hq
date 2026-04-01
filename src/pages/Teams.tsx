@@ -11,30 +11,39 @@ import { Link, useSearchParams } from 'react-router-dom';
 type TabView = 'standings' | 'rosters' | 'stats';
 
 const TeamsPage = () => {
-  const [searchParams] = useSearchParams();
-  const paramLeague = searchParams.get('league') as LeagueId | null;
+  const [searchParams, setSearchParams] = useSearchParams();
+  const paramLeague = searchParams.get('league') as LeagueId | 'all' | null;
   const { activeLeague } = useApp();
+
+  // Validate paramLeague: must be 'all' or in LEAGUE_REGISTRY
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some((l) => l.id === paramLeague));
 
   // League filter state: initialize from URL param or activeLeague.
   // Always default to 'all' if neither is provided.
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(
-    paramLeague && LEAGUE_REGISTRY.some((l) => l.id === paramLeague)
-      ? paramLeague
+    isValidParam
+      ? (paramLeague as LeagueId | 'all')
       : (activeLeague || 'all')
   );
 
   const [activeTab, setActiveTab] = useState<TabView>('standings');
 
+  // Keep URL and local state in sync when user clicks page filters
+  const handleLeagueFilterChange = (val: LeagueId | 'all') => {
+    setLeagueFilter(val);
+    setSearchParams(val === 'all' ? {} : { league: val }, { replace: true });
+  };
+
   // CRITICAL FIX: sync leagueFilter with external activeLeague changes from header navigation
   useEffect(() => {
     // If user switches league via header or direct navigation, sync the filter.
     // URL param takes precedence, then activeLeague from context.
-    if (paramLeague && LEAGUE_REGISTRY.some((l) => l.id === paramLeague)) {
-      setLeagueFilter(paramLeague);
+    if (isValidParam) {
+      setLeagueFilter(paramLeague as LeagueId | 'all');
     } else if (activeLeague) {
       setLeagueFilter(activeLeague);
     }
-  }, [activeLeague, paramLeague]);
+  }, [activeLeague, paramLeague, isValidParam]);
 
   // Fetch ALL teams once from the worker  --the queryKey is static ['teams'] so
   // switching filters doesn't cause a refetch; we simply re-filter client-side.
@@ -89,7 +98,7 @@ const TeamsPage = () => {
         {/* League filter */}
         <div className="flex items-center gap-2 flex-wrap\">
           <button
-            onClick={() => setLeagueFilter('all')}
+            onClick={() => handleLeagueFilterChange('all')}
             className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors min-h-[36px] ${
               leagueFilter === 'all' ? 'bg-card text-foreground' : 'text-muted-foreground'
             }`}
@@ -99,7 +108,7 @@ const TeamsPage = () => {
           {LEAGUE_REGISTRY.map((l) => (
             <button
               key={l.id}
-              onClick={() => setLeagueFilter(l.id)}
+              onClick={() => handleLeagueFilterChange(l.id)}
               className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors min-h-[36px] ${
                 leagueFilter === l.id ? 'bg-card text-foreground' : 'text-muted-foreground'
               }`}
