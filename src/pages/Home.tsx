@@ -3,6 +3,7 @@ import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY } from '@/lib/league
 import { fetchPublicHome, type PublicHomeData} from '@/lib/api/public';
 
 import { PotgCard } from '@/components/ui/PotgCard';
+import { playersOfTheGame } from '@/data/mock';
 import { motion } from 'framer-motion';
 import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3, ShoppingBag, Video } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
@@ -261,19 +262,7 @@ const HomePage = () => {
 
         {/* Players of the Game — always rendered; empty state when no data for this league yet */}
         {(() => {
-          // No local mock fallback in production surface.
-          const potgList: Array<{
-            id: string;
-            leagueId: LeagueId;
-            playerName: string;
-            team: string;
-            pts: number;
-            rebs: number;
-            assts: number;
-            gameResult: string;
-            date: string;
-            image?: string;
-          }> = [];
+          const potgList = playersOfTheGame.filter(p => p.leagueId === resolvedLeague);
           const leagueInfo = getLeagueConfig(resolvedLeague);
           return (
             <section>
