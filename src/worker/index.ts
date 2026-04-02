@@ -209,6 +209,123 @@ async function handleFinalize(ctx: HandlerCtx) {
   return json({ ok: true, userId, gameId: ctx.params.id, status: 'finalized' });
 }
 
+async function handleGameStatSheet({ req, admin, params }: HandlerCtx) {
+  requireAuth(req);
+  const gameId = params.id;
+  if (!gameId) return json({ ok: false, error: 'game_id_required' }, 400);
+
+  const { data, error } = await admin
+    .from('player_game_stats')
+    .select('id,player_id,pts,reb,ast,stl,blk,fls,min,players(id,jersey_number,position,user_id),games(home_team_id,away_team_id,status)')
+    .eq('game_id', gameId)
+    .order('pts', { ascending: false });
+  if (error) throw new Error(error.message);
+
+  return json({ ok: true, gameId, rows: data ?? [] });
+}
+
+async function handleStreamPreview({ req, admin, params }: HandlerCtx) {
+  const userId = requireAuth(req);
+  const gameId = params.gameId;
+  if (!gameId) return json({ ok: false, error: 'game_id_required' }, 400);
+
+  const { data: entitlement, error } = await admin
+    .from('stream_entitlements')
+    .select('id,status,expires_at,created_at')
+    .eq('game_id', gameId)
+    .eq('user_id', userId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+
+  return json({
+    ok: true,
+    gameId,
+    hasAccess: Boolean(entitlement && (entitlement.status === 'active' || entitlement.status === 'purchased')),
+    entitlement: entitlement ?? null,
+  });
+}
+
+async function handleStreamSession(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: 'game_id_required' }, 400);
+
+  const { data: existing, error: existingErr } = await ctx.admin
+    .from('stream_sessions')
+    .select('id,game_id,status,updated_at')
+    .eq('game_id', gameId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingErr) throw new Error(existingErr.message);
+
+  if (existing) return json({ ok: true, session: existing, reused: true });
+
+  const { data, error } = await ctx.admin
+    .from('stream_sessions')
+    .insert({ game_id: gameId, status: 'active', created_by: userId, updated_by: userId })
+    .select('id,game_id,status,created_at,updated_at')
+    .single();
+  if (error) throw new Error(error.message);
+
+  return json({ ok: true, session: data, reused: false });
+}
+
+async function handleDeleteCartItem(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const itemId = ctx.params.itemId;
+  if (!itemId) return json({ ok: false, error: 'item_id_required' }, 400);
+
+  const { data: owned, error: ownedErr } = await ctx.admin
+    .from('cart_items')
+    .select('id,cart_id,carts(user_id,status)')
+    .eq('id', itemId)
+    .limit(1)
+    .maybeSingle();
+  if (ownedErr) throw new Error(ownedErr.message);
+  if (!owned) return json({ ok: false, error: 'item_not_found' }, 404);
+  if ((owned.carts as { user_id?: string } | null)?.user_id !== userId) return json({ ok: false, error: 'forbidden' }, 403);
+
+  const { error } = await ctx.admin.from('cart_items').delete().eq('id', itemId);
+  if (error) throw new Error(error.message);
+  return json({ ok: true, itemId });
+}
+
+async function handleRewardsRedeem(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const body = await ctx.req.json().catch(() => null) as { rewardId?: string } | null;
+  if (!body?.rewardId) return json({ ok: false, error: 'reward_id_required' }, 400);
+
+  const { data: reward, error: rewardErr } = await ctx.admin
+    .from('reward_catalog')
+    .select('id,status,name,credit_cost')
+    .eq('id', body.rewardId)
+    .maybeSingle();
+  if (rewardErr) throw new Error(rewardErr.message);
+  if (!reward || reward.status !== 'published') return json({ ok: false, error: 'reward_unavailable' }, 404);
+
+  const { data, error } = await ctx.admin
+    .from('reward_claims')
+    .insert({
+      reward_id: body.rewardId,
+      user_id: userId,
+      status: 'granted',
+      idempotency_key: readIdempotencyKey(ctx.req.headers),
+      created_by: userId,
+      updated_by: userId,
+    })
+    .select('id,reward_id,user_id,status,created_at')
+    .single();
+  if (error) throw new Error(error.message);
+
+  return json({ ok: true, claim: data });
+}
+
 function isSuperAdmin(roles: string[]) {
   return roles.includes('super_admin');
 }
@@ -2005,20 +2122,20 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'GET', path: '/api/profile/me', handler: handleMe },
   { method: 'POST', path: '/api/profile/onboarding', handler: handleProfileOnboarding },
   { method: 'POST', path: '/api/profile/headshot', handler: handleProfileHeadshot },
-  { method: 'GET', path: '/api/games/:id/stat-sheet', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'games-stat-sheet', ...ctx.params } }) },
+  { method: 'GET', path: '/api/games/:id/stat-sheet', handler: handleGameStatSheet },
   { method: 'POST', path: '/api/games/:id/stats/draft', handler: (ctx) => handleDraft({ ...ctx, params: { route: 'games-stats-draft', ...ctx.params } }) },
   { method: 'POST', path: '/api/games/:id/stats/finalize', handler: (ctx) => handleFinalize({ ...ctx, params: { route: 'games-stats-finalize', ...ctx.params } }) },
   { method: 'GET', path: '/api/stats', handler: handleStats },
   { method: 'GET', path: '/api/leaderboards', handler: handleLeaderboards },
   { method: 'POST', path: '/api/invite/generate', handler: handleInviteGenerate },
   { method: 'POST', path: '/api/invite/redeem', handler: handleInviteRedeem },
-  { method: 'GET', path: '/api/streams/:gameId/preview', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'streams-preview', ...ctx.params } }) },
+  { method: 'GET', path: '/api/streams/:gameId/preview', handler: handleStreamPreview },
   { method: 'POST', path: '/api/streams/:gameId/purchase', handler: handleStreamPurchase },
   { method: 'GET', path: '/api/streams/:gameId/access', handler: handleStreamAccess },
-  { method: 'POST', path: '/api/streams/:gameId/session', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'streams-session', ...ctx.params } }) },
+  { method: 'POST', path: '/api/streams/:gameId/session', handler: handleStreamSession },
   { method: 'GET', path: '/api/cart', handler: handleGetCart },
   { method: 'POST', path: '/api/cart/items', handler: handleAddCartItem },
-  { method: 'DELETE', path: '/api/cart/items/:itemId', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'cart-item-delete', ...ctx.params } }) },
+  { method: 'DELETE', path: '/api/cart/items/:itemId', handler: handleDeleteCartItem },
   { method: 'POST', path: '/api/orders', handler: handleCreateOrder },
   { method: 'POST', path: '/api/orders/:id/pay', handler: handlePayOrder },
   { method: 'GET', path: '/api/billing/history', handler: handleBillingHistory },
@@ -2026,7 +2143,7 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'GET', path: '/api/public/media', handler: handlePublicMedia },
   { method: 'POST', path: '/api/player/checkout', handler: handlePlayerCheckout },
   { method: 'POST', path: '/api/store/checkout', handler: handleDirectStoreCheckout },
-  { method: 'POST', path: '/api/rewards/redeem', handler: (ctx) => handleMutationAck({ ...ctx, params: { route: 'rewards-redeem' } }) },
+  { method: 'POST', path: '/api/rewards/redeem', handler: handleRewardsRedeem },
   { method: 'GET', path: '/ops/bootstrap', handler: handleOpsBootstrap },
   { method: 'POST', path: '/ops/imports/teams', handler: (ctx) => handleImportRoute(ctx, 'teams') },
   { method: 'POST', path: '/ops/imports/players', handler: (ctx) => handleImportRoute(ctx, 'players') },

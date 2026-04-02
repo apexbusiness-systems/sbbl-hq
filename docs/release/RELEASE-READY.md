@@ -89,3 +89,20 @@ Scope in this pass: Phase 1 baseline verification + prioritized execution queue.
   - full admin CRUD parity not fully proven for all required entities
   - fresh DB migration + deployed integration smoke evidence still pending
   - Playwright acceptance still blocked by missing browser binary
+
+## 5) PHASE EXECUTION UPDATE (Ack Route Wiring Pass)
+
+### Closed in this pass
+- Replaced ack-only route placeholders with real handlers for:
+  - `GET /api/games/:id/stat-sheet`
+  - `GET /api/streams/:gameId/preview`
+  - `POST /api/streams/:gameId/session`
+  - `DELETE /api/cart/items/:itemId`
+  - `POST /api/rewards/redeem`
+- These routes now execute real DB reads/writes and return actual operational outcomes instead of fake success payloads.
+
+### Still open
+- Storage bucket contract migration (`media` usage) still pending.
+- Admin CRUD parity for all required entities is not fully proven end-to-end.
+- Fresh DB migration on clean environment and deploy smoke checks remain pending.
+- Playwright acceptance still blocked by missing Chromium binary in this environment.
