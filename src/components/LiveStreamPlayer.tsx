@@ -3,37 +3,49 @@
  * Renders the live-stream broadcast area with a multi-layer access gate:
  *
  *   Unregistered (no auth.user)           → registration wall → /register?redirect=/live
- *   player role                           → free access always → Switcher Studio iframe
- *   paid_fan | super_admin                → free access + invite generator → iframe
- *   fan with PPV entitlement (Stripe)     → access → iframe
- *   fan with redeemed invite              → access → iframe
+ *   player role                           → free access always → Switcher Studio player
+ *   paid_fan | super_admin                → free access + invite generator → player
+ *   fan with PPV entitlement (Stripe)     → access → player
+ *   fan with redeemed invite              → access → player
  *   fan with no access                    → preview gate → PPV buy ($4.99) + invite redeem
  *
  * IP locking and single-use enforcement happen server-side in /api/invite/redeem.
  * No role/entitlement data is trusted from the client.
  *
- * REPLACE BEFORE APRIL 2: swap the Switcher Studio src to the real embed URL.
+ * Uses Switcher Studio's script-based embed player.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
+import ReactPlayer from 'react-player';
 import { apiFetch } from '@/lib/api/client';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
 import type { Game } from '@/types';
 import type { AppRole } from '@/lib/auth/roles';
 
-// REPLACE WITH REAL PRICE ID BEFORE APRIL 2
 const PPV_PRICE_USD = 4.99;
+
+// Switcher Studio embed configuration
+const SWITCHER_CATALOG_ID = '4f5ea6d3-17fd-449c-9c0d-09996f4805c8';
+const SWITCHER_EMBED_CLASS = 'dff402f7-5be0-4890-b831-95c5b63ddb42';
+const SWITCHER_HOSTNAME = 'https://player.switcherstudio.com';
+const SWITCHER_EMBED_SCRIPT = 'https://player.switcherstudio.com/embed.js';
 
 interface LiveStreamPlayerProps {
   game: Game;
   userId: string | null;
   roles: AppRole[];
   token: string | null;
-  hasPremiumPlayerAccess: boolean;  // player role with active subscription → invite generation
+  hasPremiumPlayerAccess: boolean;
+  /** Optional override for Switcher catalog ID from admin controls */
+  catalogId?: string;
+  /** Whether admin has set stream to live */
+  isStreamLive?: boolean;
+  streamSource?: 'switcher' | 'custom';
+  customStreamUrl?: string;
 }
 
 export function LiveStreamPlayer({
@@ -42,6 +54,10 @@ export function LiveStreamPlayer({
   roles,
   token,
   hasPremiumPlayerAccess,
+  catalogId,
+  isStreamLive,
+  streamSource = 'switcher',
+  customStreamUrl = '',
 }: LiveStreamPlayerProps) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
@@ -56,20 +72,32 @@ export function LiveStreamPlayer({
   const [inviteInput, setInviteInput] = useState('');
   const [redeemingInvite, setRedeemingInvite] = useState(false);
 
+  const embedRef = useRef<HTMLDivElement>(null);
+  const scriptLoaded = useRef(false);
+
   // ── Role classification ──────────────────────────────────────────────────
   const isPlayer    = roles.includes('player');
   const isPaidFan   = roles.includes('paid_fan');
   const isSuperAdmin = roles.includes('super_admin');
 
-  // Access via role: players always free; paid_fan and super_admin always free.
   const hasRoleAccess = isPlayer || isPaidFan || isSuperAdmin;
-
-  // Invite generation: paid players (active sub), paid_fan, super_admin.
-  // All players get free access; only those with active subscription may generate invites
-  // so that the invite token carries meaningful social proof.
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
-
   const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
+
+  // ── Load Switcher Studio embed script ─────────────────────────────────
+  useEffect(() => {
+    if (!hasAccess || scriptLoaded.current || streamSource !== 'switcher') return;
+
+    // Only load the script once
+    const existingScript = document.querySelector(`script[src="${SWITCHER_EMBED_SCRIPT}"]`);
+    if (!existingScript) {
+      const script = document.createElement('script');
+      script.src = SWITCHER_EMBED_SCRIPT;
+      script.async = true;
+      document.body.appendChild(script);
+    }
+    scriptLoaded.current = true;
+  }, [hasAccess, streamSource]);
 
   // ── Fetch stream entitlement (skip if role already grants access) ─────────
   useEffect(() => {
@@ -121,29 +149,55 @@ export function LiveStreamPlayer({
     );
   }
 
-  // ── Gate 2: Access granted → Switcher Studio iframe ──────────────────────
+  // ── Gate 2: Access granted → Player ──────────────────────
   if (hasAccess) {
+    const activeCatalogId = catalogId || SWITCHER_CATALOG_ID;
+
     return (
-      <div className="absolute inset-0 flex flex-col">
-        {/*
-          Switcher Studio embed.
-          REPLACE src with real embed URL before April 2:
-            e.g. https://stream.switcherstudio.com/live/<channel-id>
-        */}
-        <iframe
-          src={`https://switcherstudio.com/embed/${game.id}`}
-          className="w-full h-full border-0"
-          allow="camera; microphone; fullscreen; display-capture"
-          referrerPolicy="no-referrer-when-downgrade"
-          title={`${game.homeTeam.name} vs ${game.awayTeam.name} — Live`}
-          sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
-        />
+      <div className="absolute inset-0 flex flex-col relative z-0">
+        {/* Stream Player Area */}
+        {streamSource === 'custom' && customStreamUrl ? (
+          <div className="absolute inset-0 pointer-events-auto">
+            <ReactPlayer
+              url={customStreamUrl}
+              playing={true}
+              controls={false}
+              width="100%"
+              height="100%"
+              config={{
+                youtube: {
+                  playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0 }
+                }
+              }}
+              style={{ position: 'absolute', top: 0, left: 0 }}
+            />
+          </div>
+        ) : (
+          <div
+            ref={embedRef}
+            className={`${SWITCHER_EMBED_CLASS} w-full h-full pointer-events-auto`}
+            data-hostname={SWITCHER_HOSTNAME}
+            data-path="/embed"
+            data-catalogid={activeCatalogId}
+            data-location="iframe"
+          />
+        )}
+
+        {/* Offline overlay — shown when admin hasn't started the stream */}
+        {isStreamLive === false && (
+          <div className="absolute inset-0 bg-background/90 flex flex-col items-center justify-center text-center z-10">
+            <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center mb-4">
+              <Play className="w-8 h-8 text-muted-foreground" />
+            </div>
+            <h3 className="font-display text-xl font-bold mb-1">Stream Starting Soon</h3>
+            <p className="text-sm text-muted-foreground">The broadcast will begin shortly. Stay tuned.</p>
+          </div>
+        )}
 
         {/* Invite generator: shown to eligible roles only */}
         {canGenerateInvite && (
           <div className="absolute bottom-4 right-4 z-10">
             {generatedCode ? (
-              /* Display generated code with copy button */
               <div className="bg-background/90 backdrop-blur-sm border border-border rounded-2xl px-4 py-3 flex items-center gap-3 shadow-xl">
                 <Ticket className="w-4 h-4 text-amber-500 shrink-0" />
                 <div className="flex flex-col">
@@ -171,7 +225,6 @@ export function LiveStreamPlayer({
                 </button>
               </div>
             ) : (
-              /* Generate button */
               <button
                 disabled={generatingInvite}
                 onClick={async () => {

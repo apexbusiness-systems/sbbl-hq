@@ -1,12 +1,11 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { players as mockPlayers, teams } from '@/data/mock';
+import { players as mockPlayers } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
 import { ArrowUpDown, BarChart3, Lock } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
-import { useAuth } from '@/hooks/use-auth';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 
@@ -16,7 +15,7 @@ const statLabels: Record<StatKey, string> = { pts: 'PTS', reb: 'REB', ast: 'AST'
 
 const StatsPage = () => {
   const { hasPremiumPlayerAccess, activeLeague } = useApp();
-  const { isSignedIn } = useAuth();
+
   const [searchParams, setSearchParams] = useSearchParams();
   const [sortBy, setSortBy] = useState<StatKey>('pts');
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
@@ -47,7 +46,6 @@ const StatsPage = () => {
   const statsQuery = useQuery({
     queryKey: ['stats', leagueFilter],
     queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/stats'),
-    enabled: isSignedIn,
     retry: 1,
     staleTime: 30_000,
   });
@@ -116,6 +114,13 @@ const StatsPage = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Stats Table */}
           <div className="lg:col-span-2">
+            {filtered.length === 0 ? (
+              <div className="panel p-8 text-center border-dashed">
+                <BarChart3 className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">No player stats available for this league yet.</p>
+                <p className="text-xs text-muted-foreground mt-1">Stats will populate once games are recorded through the Ops pipeline.</p>
+              </div>
+            ) : (
             <div className="panel overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full">
@@ -166,6 +171,7 @@ const StatsPage = () => {
                 </div>
               )}
             </div>
+            )}
           </div>
 
           {/* Player Detail Panel */}

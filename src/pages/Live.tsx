@@ -4,15 +4,162 @@ import { useAuth } from '@/hooks/use-auth';
 import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { CASLNudge } from '@/components/CASLNudge';
-import { MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
+import {
+  MessageSquare, Share2, Scissors, ShoppingBag, Check,
+  ChevronLeft, ChevronRight, Tag, ChevronDown, ChevronUp,
+  Radio, Eye, DollarSign, ExternalLink,
+} from 'lucide-react';
 import { toast } from 'sonner';
 
+// ── Admin Stream Controls (collapsible panel) ─────────────────────────────
+// Visible only to super_admin. Manages stream state passed to LiveStreamPlayer
+// via props — no embed logic duplicated here.
+function AdminStreamControls({
+  isLive, setIsLive,
+  streamTitle, setStreamTitle,
+  viewerCount,
+}: {
+  isLive: boolean;
+  setIsLive: (v: boolean) => void;
+  streamTitle: string;
+  setStreamTitle: (v: string) => void;
+  viewerCount: number;
+  streamSource: 'switcher' | 'custom';
+  setStreamSource: (v: 'switcher' | 'custom') => void;
+  customStreamUrl: string;
+  setCustomStreamUrl: (v: string) => void;
+}) {
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <div className="panel border-primary/30 mb-4 overflow-hidden">
+      {/* Header — always visible */}
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/30 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="font-display font-bold text-sm uppercase tracking-wider">Super Admin</span>
+          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${isLive ? 'bg-red-500/20 text-red-400' : 'bg-secondary text-muted-foreground'}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-red-500 animate-pulse' : 'bg-muted-foreground'}`} />
+            {isLive ? 'Live' : 'Offline'}
+          </span>
+        </div>
+        {collapsed ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronUp className="w-4 h-4 text-muted-foreground" />}
+      </button>
+
+      {/* Controls — collapsible */}
+      {!collapsed && (
+        <div className="px-4 pb-4 space-y-4 border-t border-border">
+          {/* Stats row */}
+          <div className="grid grid-cols-3 gap-3 pt-3">
+            <div className="text-center p-2 bg-secondary/50 rounded-sm">
+              <div className="flex items-center justify-center gap-1 mb-1">
+                <Radio className="w-3 h-3 text-muted-foreground" />
+              </div>
+              <p className="stat-numeral text-lg">{isLive ? 'LIVE' : 'OFF'}</p>
+              <p className="text-[9px] text-muted-foreground uppercase">Stream</p>
+            </div>
+            <div className="text-center p-2 bg-secondary/50 rounded-sm">
+              <div className="flex items-center justify-center gap-1 mb-1">
+                <Eye className="w-3 h-3 text-muted-foreground" />
+              </div>
+              <p className="stat-numeral text-lg">{viewerCount}</p>
+              <p className="text-[9px] text-muted-foreground uppercase">Viewers</p>
+            </div>
+            <div className="text-center p-2 bg-secondary/50 rounded-sm">
+              <div className="flex items-center justify-center gap-1 mb-1">
+                <DollarSign className="w-3 h-3 text-muted-foreground" />
+              </div>
+              <p className="stat-numeral text-lg">0</p>
+              <p className="text-[9px] text-muted-foreground uppercase">PPV Rev</p>
+            </div>
+          </div>
+
+          {/* Stream settings */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Stream Source</label>
+              <select
+                value={streamSource}
+                onChange={e => setStreamSource(e.target.value as 'switcher' | 'custom')}
+                className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-primary/50"
+              >
+                <option value="switcher">Switcher Studio Embed</option>
+                <option value="custom">Custom URL (YouTube/HLS)</option>
+              </select>
+            </div>
+            {streamSource === 'custom' ? (
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Custom Stream URL</label>
+                <input
+                  type="text"
+                  value={customStreamUrl}
+                  onChange={e => setCustomStreamUrl(e.target.value)}
+                  className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-primary/50"
+                  placeholder="e.g. https://youtu.be/..."
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Stream Title</label>
+                <input
+                  type="text"
+                  value={streamTitle}
+                  onChange={e => setStreamTitle(e.target.value)}
+                  className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-primary/50"
+                  placeholder="Live Game Broadcast"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                setIsLive(!isLive);
+                toast.success(isLive ? 'Stream set to offline' : 'Stream set to live');
+              }}
+              className={`flex-1 py-2.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm transition-colors ${
+                isLive
+                  ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                  : 'bg-green-600 text-white hover:bg-green-500'
+              }`}
+            >
+              {isLive ? 'End Stream' : 'Go Live'}
+            </button>
+            <a
+              href="https://app.switcherstudio.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-2.5 bg-secondary border border-border rounded-sm text-xs font-medium inline-flex items-center gap-1.5 hover:border-primary/30 transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Switcher Studio
+            </a>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Main Live Page ─────────────────────────────────────────────────────────
 const LivePage = () => {
   const { addToBag, hasPremiumPlayerAccess } = useApp();
   const { user, session, roles } = useAuth();
   const token = session?.access_token ?? null;
+  const isSuperAdmin = roles.includes('super_admin');
 
   const liveGame = games.find(g => g.status === 'live') || games[0];
+
+  // Admin stream state — passed to LiveStreamPlayer via props
+  const [isStreamLive, setIsStreamLive] = useState(false);
+  const [streamTitle, setStreamTitle] = useState('Live Game Broadcast');
+  const [viewerCount] = useState(0);
+  const [streamSource, setStreamSource] = useState<'switcher' | 'custom'>('switcher');
+  const [customStreamUrl, setCustomStreamUrl] = useState('');
 
   const [comments, setComments] = useState([
     { user: 'CourtSide_Fan', text: 'Rivera is on fire tonight!' },
@@ -144,10 +291,27 @@ const LivePage = () => {
       <div className="lg:container lg:py-4">
         <div className="lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
 
-          {/* LEFT: broadcast area + actions + chat */}
+          {/* LEFT: admin controls + broadcast area + actions + chat */}
           <div className="lg:col-span-2 flex flex-col">
 
-            {/* Broadcast Area — all access-gate logic lives inside LiveStreamPlayer */}
+            {/* Admin stream controls — super_admin only */}
+            {isSuperAdmin && (
+              <div className="container lg:px-0 pt-4 lg:pt-0">
+                <AdminStreamControls
+                  isLive={isStreamLive}
+                  setIsLive={setIsStreamLive}
+                  streamTitle={streamTitle}
+                  setStreamTitle={setStreamTitle}
+                  viewerCount={viewerCount}
+                  streamSource={streamSource}
+                  setStreamSource={setStreamSource}
+                  customStreamUrl={customStreamUrl}
+                  setCustomStreamUrl={setCustomStreamUrl}
+                />
+              </div>
+            )}
+
+            {/* Broadcast Area — access-gate logic lives inside LiveStreamPlayer */}
             <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
               <LiveStreamPlayer
                 game={liveGame}
@@ -155,6 +319,9 @@ const LivePage = () => {
                 roles={roles}
                 token={token}
                 hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                isStreamLive={isStreamLive}
+                streamSource={streamSource}
+                customStreamUrl={customStreamUrl}
               />
             </div>
 

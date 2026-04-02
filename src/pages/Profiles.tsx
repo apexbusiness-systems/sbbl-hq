@@ -1,52 +1,35 @@
 import { useEffect, useMemo, useState } from 'react';
-import { players, teams as mockTeams, leagues } from '@/data/mock';
+import { players, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { useApp } from '@/contexts/AppContext';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api/client';
-import { Team } from '@/types';
 import { Award, Users, Lock } from 'lucide-react';
 
-type ProfileView = 'players' | 'teams' | 'leagues';
+type ProfileView = 'players' | 'leagues';
 
 const ProfilesPage = () => {
   const { hasPremiumPlayerAccess } = useApp();
   const [view, setView] = useState<ProfileView>('players');
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
 
-  const teamsQuery = useQuery({
-    queryKey: ['teams'],
-    queryFn: () => apiFetch<{ ok: boolean; teams: Team[] }>('/api/teams'),
-    retry: 1,
-    staleTime: 120_000,
-  });
-
-  const teams = useMemo<Team[]>(() => {
-    const apiData = teamsQuery.data?.teams;
-    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
-    return mockTeams;
-  }, [teamsQuery.data]);
-
   const filteredPlayers = players;
-  const filteredTeams = teams;
   const detail = selectedPlayer ? players.find(p => p.id === selectedPlayer) : null;
 
   const views: ProfileView[] = useMemo(
-    () => (hasPremiumPlayerAccess ? ['players', 'teams', 'leagues'] : ['teams', 'leagues']),
+    () => (hasPremiumPlayerAccess ? ['players', 'leagues'] : ['leagues']),
     [hasPremiumPlayerAccess],
   );
   useEffect(() => {
     if (!views.includes(view)) {
-      setView('teams');
+      setView(hasPremiumPlayerAccess ? 'players' : 'leagues');
     }
-  }, [view, views]);
+  }, [view, views, hasPremiumPlayerAccess]);
 
   return (
     <div className="min-h-screen">
       <div className="container py-8 md:py-12">
         <div className="mb-8">
           <h1 className="font-display text-3xl md:text-4xl font-bold">Profiles</h1>
-          <p className="text-sm text-muted-foreground mt-1">Players, teams, and leagues</p>
+          <p className="text-sm text-muted-foreground mt-1">Players and leagues</p>
         </div>
 
         {/* View Toggle */}
@@ -81,7 +64,7 @@ const ProfilesPage = () => {
                     </div>
                   </div>
                   <div className="p-3 flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">{p.position} · {teams.find(t => t.id === p.teamId)?.name}</span>
+                    <span className="text-xs text-muted-foreground">{p.position}</span>
                     <span className="stat-numeral text-sm text-primary">{p.stats.pts} PPG</span>
                   </div>
                 </div>
@@ -97,7 +80,7 @@ const ProfilesPage = () => {
                     <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-card p-4">
                       <span className="stat-numeral text-3xl text-primary">#{detail.number}</span>
                       <h3 className="font-display text-xl font-bold">{detail.name}</h3>
-                      <p className="text-xs text-muted-foreground">{detail.position} · {teams.find(t => t.id === detail.teamId)?.name}</p>
+                      <p className="text-xs text-muted-foreground">{detail.position}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
@@ -126,39 +109,6 @@ const ProfilesPage = () => {
           </div>
         )}
 
-        {view === 'teams' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {filteredTeams.map(t => (
-              <div key={t.id} className="panel p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h3 className="font-display font-bold">{t.name}</h3>
-                    <p className="text-xs text-muted-foreground">{t.division}</p>
-                  </div>
-                  <LeagueBadge leagueId={t.leagueId} />
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-center">
-                    <p className="stat-numeral text-2xl text-success">{t.record.wins}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase">Wins</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="stat-numeral text-2xl text-destructive">{t.record.losses}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase">Losses</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="stat-numeral text-2xl">{((t.record.wins / (t.record.wins + t.record.losses)) * 100).toFixed(0)}%</p>
-                    <p className="text-[10px] text-muted-foreground uppercase">Win %</p>
-                  </div>
-                </div>
-                <div className="mt-3 pt-3 border-t border-border">
-                  <p className="text-xs text-muted-foreground">Roster: {players.filter(p => p.teamId === t.id).map(p => p.name).join(', ') || 'View full roster'}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
         {view === 'leagues' && (
           <div className="space-y-4">
             {leagues.map(l => (
@@ -172,10 +122,6 @@ const ProfilesPage = () => {
                   <div>
                     <p className="stat-numeral text-xl text-primary">₱{l.fee.toLocaleString()}</p>
                     <p className="text-[10px] text-muted-foreground uppercase">Season Fee</p>
-                  </div>
-                  <div>
-                    <p className="stat-numeral text-xl">{teams.filter(t => t.leagueId === l.id).length}</p>
-                    <p className="text-[10px] text-muted-foreground uppercase">Teams</p>
                   </div>
                   <div>
                     <p className="stat-numeral text-xl">{players.filter(p => p.leagueId === l.id).length}</p>
