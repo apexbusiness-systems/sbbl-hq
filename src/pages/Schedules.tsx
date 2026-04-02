@@ -51,7 +51,8 @@ const SchedulesPage = () => {
 
   // Safely map live schedules into ScheduleDay shape if we have them
   // Group by league and date, then court
-  const groupedLive = liveSchedules.reduce((acc: any, curr: any) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const groupedLive = liveSchedules.reduce((acc: Record<string, any>, curr: any) => {
     const key = `${curr.league_id}-${curr.start_time.split('T')[0]}`;
     if (!acc[key]) {
       acc[key] = {
@@ -77,8 +78,10 @@ const SchedulesPage = () => {
     return acc;
   }, {});
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const mappedLiveSchedules: ScheduleDay[] = Object.values(groupedLive).map((g: any) => ({
     ...g,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     courts: Object.entries(g.courts).map(([name, games]) => ({ name, games: games as any[] }))
   }));
 

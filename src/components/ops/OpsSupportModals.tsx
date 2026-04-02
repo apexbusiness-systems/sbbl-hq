@@ -5,7 +5,7 @@ import { patchOpsEntity, deleteOpsEntity } from '@/lib/api/ops';
 interface EditModalProps {
   entity: 'teams' | 'players' | 'products' | 'events' | 'schedules';
   id: string;
-  initialData: Record<string, any>;
+  initialData: Record<string, unknown>;
   onClose: () => void;
 }
 
@@ -14,7 +14,7 @@ export function OpsEditModal({ entity, id, initialData, onClose }: EditModalProp
   const [formData, setFormData] = useState(initialData);
 
   const { mutate, isPending } = useMutation({
-    mutationFn: (payload: Record<string, any>) => patchOpsEntity(entity, id, payload),
+    mutationFn: (payload: Record<string, unknown>) => patchOpsEntity(entity, id, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: [`ops-${entity}-list`] });
       onClose();
