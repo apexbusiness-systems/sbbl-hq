@@ -1,6 +1,6 @@
 # SBBL HQ Documentation Hub
 
-**Documentation Version:** v1.2.2  
+**Documentation Version:** v1.2.1  
 **Last Updated (UTC):** 2026-04-02
 
 This directory contains the operational and engineering documentation set for SBBL HQ.
@@ -14,7 +14,7 @@ This directory contains the operational and engineering documentation set for SB
 5. [Emergency Response Protocol](./protocols/EMERGENCY_RESPONSE_PROTOCOL_v1.0.0.md)
 6. [Production Status](./status/PRODUCTION_STATUS_2026-03-28_v1.0.0.md)
 7. [Release Readiness Index](./release/RELEASE-READY.md)
-8. [Release Readiness Report v1.2.2 (2026-04-02)](./release/RELEASE_READY_2026-04-02_v1.2.2.md)
+8. [Release Readiness Report v1.2.1 (2026-04-02)](./release/RELEASE_READY_2026-04-02_v1.2.1.md)
 
 ## Documentation Governance
 
