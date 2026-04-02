@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
 import { apiFetch } from '@/lib/api/client';
-import { useQuery } from '@tanstack/react-query';
+import { products } from '@/data/mock';
 import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -10,13 +10,6 @@ export const BagDrawer = () => {
   const { bagOpen, setBagOpen, bagItems, removeFromBag } = useApp();
   const { session } = useAuth();
   const [checkingOut, setCheckingOut] = useState(false);
-
-  const productsQuery = useQuery({
-    queryKey: ['public-products-bag'],
-    queryFn: () => apiFetch<{ ok: boolean; data: Array<{ id: string; name: string; price: number; metadata?: Record<string, unknown> }> }>('/api/public/products'),
-    staleTime: 60_000,
-  });
-  const products = productsQuery.data?.data ?? [];
 
   if (!bagOpen) return null;
 
@@ -27,22 +20,14 @@ export const BagDrawer = () => {
 
   const handleCheckout = async () => {
     if (!session) { toast.error('Sign in to complete your purchase.'); return; }
-
     const lineItems = bagItems.reduce<Array<{ name: string; price: number; qty: number }>>((acc, id) => {
       const product = products.find(p => p.id === id);
       if (!product || product.price === 0) return acc; // skip reward/free items
-
       const existing = acc.find(i => i.name === product.name);
-      if (existing) {
-        existing.qty += 1;
-      } else {
-        acc.push({ name: product.name, price: product.price, qty: 1 });
-      }
+      if (existing) { existing.qty += 1; } else { acc.push({ name: product.name, price: product.price, qty: 1 }); }
       return acc;
     }, []);
-
     if (!lineItems.length) { toast.error('No purchasable items in bag.'); return; }
-
     setCheckingOut(true);
     try {
       const res = await apiFetch<{ ok: boolean; url?: string; error?: string }>('/api/store/checkout', {
@@ -53,7 +38,6 @@ export const BagDrawer = () => {
           cancelUrl: `${window.location.origin}/store`,
         }),
       }, session.access_token);
-
       if (res.ok && res.url) {
         window.location.href = res.url;
       } else if (res.error === 'payments_not_configured') {
@@ -88,8 +72,8 @@ export const BagDrawer = () => {
                 const product = products.find(p => p.id === id);
                 return (
                   <div key={i} className="flex items-center gap-3 p-3 bg-secondary rounded-sm">
-                    {product?.metadata?.image_url && (
-                      <img src={product.metadata.image_url as string} alt={product.name} className="w-12 h-12 object-cover rounded-sm flex-shrink-0" />
+                    {product?.image && (
+                      <img src={product.image} alt={product.name} className="w-12 h-12 object-cover rounded-sm flex-shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{product?.name ?? id}</p>
@@ -107,7 +91,6 @@ export const BagDrawer = () => {
             </div>
           )}
         </div>
-
         {bagItems.length > 0 && (
           <div className="p-4 border-t border-border space-y-3">
             <div className="flex items-center justify-between">

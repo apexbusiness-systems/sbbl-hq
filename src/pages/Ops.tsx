@@ -1,11 +1,9 @@
 import { parseCsv } from '@/lib/parseCsv';
 import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy, Edit2, Trash2, X, Check as CheckIcon, AlertTriangle } from 'lucide-react';
+import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
-import { apiFetch } from '@/lib/api/client';
-import { IDEMPOTENCY_HEADER, createIdempotencyKey } from '@/lib/api/idempotency';
 import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord } from '@/lib/api/ops';
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
@@ -36,8 +34,6 @@ const OpsPage = () => {
   const [potgParseState, setPotgParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
   const [potgParseError, setPotgParseError] = useState<string | null>(null);
   const [potgImageFile, setPotgImageFile] = useState<File | null>(null);
-  const [editModal, setEditModal] = useState<{ table: 'teams' | 'players' | 'products' | 'league_events'; id: string; fields: Record<string, string> } | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ table: string; id: string; name: string } | null>(null);
   const [potgForm, setPotgForm] = useState({ playerName: '', team: '', pts: '', rebs: '', assts: '', gameResult: '', leagueId: 'wbl', date: new Date().toISOString().split('T')[0] });
 
   const handlePotgImageUpload = async (file: File) => {
@@ -73,38 +69,6 @@ const OpsPage = () => {
   };
 
   const bootstrapQuery = useQuery({ queryKey: ['ops-bootstrap'], queryFn: fetchOpsBootstrap });
-  const entityListQuery = useQuery({
-    queryKey: ['ops-list', activeTab],
-    queryFn: () => apiFetch<{ ok: boolean; data: Array<Record<string, unknown>> }>(`/ops/list/${activeTab === 'events' ? 'events' : activeTab}`),
-    enabled: ['teams', 'players', 'events'].includes(activeTab),
-    staleTime: 30_000,
-  });
-
-  const editMutation = useMutation({
-    mutationFn: ({ table, id, patch }: { table: string; id: string; patch: Record<string, unknown> }) =>
-      apiFetch(`/ops/${table}/${id}`, {
-        method: 'PATCH',
-        headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`edit-${table}-${id}`) },
-        body: JSON.stringify(patch),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ops-list'] });
-      setEditModal(null);
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: ({ table, id }: { table: string; id: string }) =>
-      apiFetch(`/ops/${table}/${id}`, {
-        method: 'DELETE',
-        headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`delete-${table}-${id}`) },
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['ops-list'] });
-      setDeleteTarget(null);
-    },
-  });
-
   const historyQuery = useQuery({ queryKey: ['ops-import-history'], queryFn: fetchImportHistory });
 
   const importMutation = useMutation({
@@ -409,66 +373,6 @@ const OpsPage = () => {
               ))}
             </div>
           )}
-        </div>
-      )}
-      {/* Edit Modal */}
-      {editModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={() => setEditModal(null)} />
-          <div className="relative panel p-5 w-full max-w-md space-y-4 z-10">
-            <div className="flex items-center justify-between">
-              <h3 className="font-display text-lg font-bold capitalize">Edit {editModal.table.replace('_', ' ')}</h3>
-              <button onClick={() => setEditModal(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button></div>{Object.entries(editModal.fields).map(([key, val]) => (
-              <div key={key}>
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">{key.replace(/_/g, ' ')}</label>
-                <input
-                  className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm"
-                  value={val as string}
-                  onChange={e => setEditModal(m => m ? { ...m, fields: { ...m.fields, [key]: e.target.value } } : null)}
-                />
-              </div>
-            ))}
-            <div className="flex gap-2 pt-1">
-              <button
-                onClick={() => editMutation.mutate({ table: editModal.table, id: editModal.id, patch: editModal.fields })}
-                disabled={editMutation.isPending}
-                className="flex-1 gold-bg py-2 text-sm font-display font-bold uppercase tracking-wider rounded-sm disabled:opacity-60 inline-flex items-center justify-center gap-2"
-              >
-                {editMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
-                Save Changes
-              </button>
-              <button onClick={() => setEditModal(null)} className="px-4 py-2 text-sm border border-border rounded-sm text-muted-foreground hover:text-foreground">Cancel</button>
-            </div>
-            {editMutation.error && <p className="text-xs text-destructive">{(editMutation.error as Error).message}</p>}
-          </div>
-        </div>
-      )}
-
-      {/* Delete / Archive Confirm */}
-      {deleteTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={() => setDeleteTarget(null)} />
-          <div className="relative panel p-5 w-full max-w-sm space-y-4 z-10">
-            <div className="flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
-              <div>
-                <h3 className="font-display font-bold text-base">Archive {deleteTarget.name}?</h3>
-                <p className="text-xs text-muted-foreground mt-1">This will soft-archive the record. It will not appear in any public views. Action is logged and reversible by a super admin.</p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => deleteMutation.mutate({ table: deleteTarget.table, id: deleteTarget.id })}
-                disabled={deleteMutation.isPending}
-                className="flex-1 bg-destructive text-destructive-foreground py-2 text-sm font-display font-bold uppercase tracking-wider rounded-sm disabled:opacity-60 inline-flex items-center justify-center gap-2"
-              >
-                {deleteMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <AlertCircle className="w-3.5 h-3.5" />}
-                Archive
-              </button>
-              <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 text-sm border border-border rounded-sm text-muted-foreground hover:text-foreground">Cancel</button>
-            </div>
-            {deleteMutation.error && <p className="text-xs text-destructive">{(deleteMutation.error as Error).message}</p>}
-          </div>
         </div>
       )}
     </div>

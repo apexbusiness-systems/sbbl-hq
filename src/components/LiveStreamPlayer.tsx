@@ -57,7 +57,7 @@ function SuperAdminPanel() {
 
   return (
     <>
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 flex flex-col gap-3 bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-4 rounded-xl shadow-2xl w-80">
+      <div className="absolute top-4 right-4 z-50 flex flex-col gap-3 bg-zinc-950/90 backdrop-blur-md border border-zinc-800 p-4 rounded-xl shadow-2xl w-80">
         <div className="flex items-center justify-between mb-2">
           <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Super Admin</span>
           {isLive ? (
