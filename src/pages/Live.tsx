@@ -3,18 +3,59 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
-import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { CASLNudge } from '@/components/CASLNudge';
 import { MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
 import { toast } from 'sonner';
+import { fetchPublicHome } from '@/lib/api/public';
+import type { Game, Product, PlayerProfile } from '@/types';
 
 const LivePage = () => {
   const { addToBag, hasPremiumPlayerAccess } = useApp();
   const { user, session, roles } = useAuth();
   const token = session?.access_token ?? null;
+  const homeQuery = useQuery({
+    queryKey: ['public-home-live', 'SBBL'],
+    queryFn: () => fetchPublicHome('SBBL'),
+    retry: 1,
+    staleTime: 30_000,
+  });
+  const productsQuery = useQuery({
+    queryKey: ['public-products'],
+    queryFn: () => apiFetch<{ ok: boolean; data: Product[] }>('/api/public/products'),
+    retry: 1,
+    staleTime: 60_000,
+  });
 
-  const liveGame = games.find(g => g.status === 'live') || games[0];
+  const liveGame = useMemo<Game | null>(() => {
+    const game = homeQuery.data?.liveGames?.[0] ?? homeQuery.data?.upcomingGames?.[0];
+    if (!game) return null;
+    return {
+      id: game.id,
+      leagueId: 'sbbl',
+      homeTeam: {
+        id: game.home_team?.id ?? 'home',
+        name: game.home_team?.name ?? 'Home Team',
+        leagueId: 'sbbl',
+        division: game.home_team?.division_name ?? 'Division',
+        record: { wins: 0, losses: 0 },
+      },
+      awayTeam: {
+        id: game.away_team?.id ?? 'away',
+        name: game.away_team?.name ?? 'Away Team',
+        leagueId: 'sbbl',
+        division: game.away_team?.division_name ?? 'Division',
+        record: { wins: 0, losses: 0 },
+      },
+      venue: game.venue ?? 'TBD',
+      court: game.court ?? 'TBD',
+      date: game.scheduled_at ?? new Date().toISOString(),
+      time: game.scheduled_at ?? new Date().toISOString(),
+      status: game.status === 'live' ? 'live' : game.status === 'final' ? 'final' : 'upcoming',
+      score: game.home_score != null && game.away_score != null ? { home: game.home_score, away: game.away_score } : undefined,
+      ppvPrice: 4.99,
+    };
+  }, [homeQuery.data]);
 
   const [comments, setComments] = useState<{ user: string; text: string }[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -22,21 +63,21 @@ const LivePage = () => {
   const [clipSaved, setClipSaved] = useState(false);
   const statsQuery = useQuery({
     queryKey: ['stats'],
-    queryFn: () => apiFetch<{ ok: boolean; data: typeof players }>('/api/stats'),
+    queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/stats'),
     enabled: !!session,
     retry: 1,
     staleTime: 30_000,
   });
   const topPerformers = useMemo(() => {
     const apiData = statsQuery.data?.data;
-    const source = (Array.isArray(apiData) && apiData.length > 0 && 'stats' in (apiData[0] ?? {})) ? apiData : players;
-    return source.filter(p => p.teamId === liveGame.homeTeam.id || p.teamId === liveGame.awayTeam.id).sort((a, b) => b.stats.pts - a.stats.pts).slice(0, 3);
+    if (!Array.isArray(apiData) || apiData.length === 0 || !liveGame) return [];
+    return apiData.filter(p => p.teamId === liveGame.homeTeam.id || p.teamId === liveGame.awayTeam.id).sort((a, b) => b.stats.pts - a.stats.pts).slice(0, 3);
   }, [statsQuery.data, liveGame]);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const featuredProducts = products.filter(p => p.sale);
+  const featuredProducts = (productsQuery.data?.data ?? []).filter(p => p.sale);
   const [carouselIdx, setCarouselIdx] = useState(0);
-  const carouselProduct = featuredProducts[carouselIdx] ?? products[0];
+  const carouselProduct = featuredProducts[carouselIdx] ?? null;
 
   useEffect(() => {
     if (featuredProducts.length <= 1) return;
@@ -45,9 +86,10 @@ const LivePage = () => {
   }, [featuredProducts.length]);
 
   const handleShare = async () => {
+    if (!liveGame) return;
     const shareData = {
       title: `${liveGame.homeTeam.name} vs ${liveGame.awayTeam.name} — Live on SBBL HQ`,
-      text: `Watch the game live: ${liveGame.score?.home}–${liveGame.score?.away} in Q4`,
+      text: `Watch the game live on SBBL HQ`,
       url: window.location.href,
     };
     if (navigator.share) {
@@ -75,7 +117,7 @@ const LivePage = () => {
   const sidebar = (
     <div className="space-y-4">
       {/* Featured Merch Carousel */}
-      {featuredProducts.length > 0 && (
+      {featuredProducts.length > 0 && carouselProduct && (
         <div className="panel overflow-hidden">
           <div className="relative aspect-square overflow-hidden bg-secondary">
             <img
@@ -147,6 +189,13 @@ const LivePage = () => {
       </div>
     </div>
   );
+
+  if (homeQuery.isLoading) {
+    return <div className="container py-8"><div className="panel p-8 text-center text-sm text-muted-foreground">Loading live game…</div></div>;
+  }
+  if (homeQuery.isError || !liveGame) {
+    return <div className="container py-8"><div className="panel p-8 text-center text-sm text-destructive">Live game unavailable right now.</div></div>;
+  }
 
   return (
     <div className="min-h-screen">
