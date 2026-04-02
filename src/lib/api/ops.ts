@@ -89,15 +89,3 @@ export async function deleteOpsEntity(entity: 'teams' | 'players' | 'products' |
     headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-delete-${entity}-${id}`) },
   });
 }
-
-export async function manualOpsAction(
-  kind: 'team' | 'player' | 'schedule' | 'event' | 'store',
-  action: 'create' | 'delete' | 'suspend' | 'batch_create',
-  payload: Record<string, unknown>,
-) {
-  return apiFetch<{ ok: boolean; error?: string }>(`/ops/manual/${kind}/${action}`, {
-    method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-manual-${kind}-${action}`) },
-    body: JSON.stringify(payload),
-  });
-}
