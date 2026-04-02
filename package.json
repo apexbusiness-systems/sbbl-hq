@@ -14,7 +14,7 @@
     "test:watch": "vitest",
     "cf:deploy": "wrangler deploy",
     "cf:deploy:staging": "wrangler deploy --env staging",
-    "db:migrate": "supabase db push",
+    "db:migrate": "npx supabase db push",
     "db:types": "supabase gen types typescript --project-id ezanilxygnpucwkwpsoc > src/types/database.generated.ts",
     "cap:sync": "npm run build && npx cap sync",
     "cap:copy": "npm run build && npx cap copy",
