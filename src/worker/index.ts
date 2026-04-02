@@ -1,4 +1,3 @@
-import { canAccessOps } from '@/lib/auth/roles';
 import { safeServerEnv } from '@/lib/env';
 import { readIdempotencyKey } from '@/lib/api/idempotency';
 import { normalizeIngress, type IngressSourceType } from '@/lib/omniport';
@@ -203,22 +202,325 @@ async function handleFinalize(ctx: HandlerCtx) {
   return json({ ok: true, userId, gameId: ctx.params.id, status: 'finalized' });
 }
 
-async function handleOps({ req }: HandlerCtx) {
-  const userId = requireAuth(req);
-  const roles = getRolesFromVerifiedSession(req);
-  if (!canAccessOps(roles as never)) {
-    return json({ ok: false, error: 'forbidden' }, 403);
+function isSuperAdmin(roles: string[]) {
+  return roles.includes('super_admin');
+}
+
+async function requireSuperAdminSession(req: Request, admin: SupabaseClient) {
+  const session = await requireAdminSession(req, admin);
+  if (!isSuperAdmin(session.roles)) throw new Error('forbidden');
+  return session;
+}
+
+async function getOrCreateStreamConfig(admin: SupabaseClient) {
+  const existing = await admin
+    .from('stream_admin_config')
+    .select('collection_id,title,source,is_live,active_game_id,updated_at,live_started_at,live_ended_at')
+    .eq('id', true)
+    .maybeSingle();
+  if (existing.error) throw new Error(existing.error.message);
+  if (existing.data) return existing.data as Record<string, unknown>;
+
+  const created = await admin
+    .from('stream_admin_config')
+    .insert({
+      id: true,
+      collection_id: '',
+      title: 'SBBL Live Stream',
+      source: 'main',
+      is_live: false,
+    })
+    .select('collection_id,title,source,is_live,active_game_id,updated_at,live_started_at,live_ended_at')
+    .single();
+  if (created.error) throw new Error(created.error.message);
+  return created.data as Record<string, unknown>;
+}
+
+async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
+  const url = new URL(req.url);
+  const gameId = url.searchParams.get('gameId');
+  const cfg = await getOrCreateStreamConfig(admin);
+  let viewerCount = 0;
+  const activeGameId = gameId ?? (cfg.active_game_id as string | null) ?? null;
+  if (activeGameId) {
+    const viewers = await admin
+      .from('stream_entitlements')
+      .select('id', { count: 'exact', head: true })
+      .eq('game_id', activeGameId)
+      .eq('status', 'active');
+    if (!viewers.error) {
+      viewerCount = viewers.count ?? 0;
+    }
   }
 
   return json({
     ok: true,
-    userId,
-    queue: [
-      { type: 'source_conflict', league: 'WBL', status: 'pending' },
-      { type: 'rule_conflict', league: 'SBBL', status: 'pending' },
-      { type: 'stream_risk', league: 'SBBL', status: 'warning' },
-    ],
+    isLive: Boolean(cfg.is_live),
+    title: String(cfg.title ?? 'SBBL Live Stream'),
+    viewerCount,
+    gameId: activeGameId,
   });
+}
+
+async function handleGetStreamConfig({ req, admin }: HandlerCtx) {
+  await requireAdminSession(req, admin);
+  const cfg = await getOrCreateStreamConfig(admin);
+  return json({
+    ok: true,
+    config: {
+      collectionId: String(cfg.collection_id ?? ''),
+      title: String(cfg.title ?? 'SBBL Live Stream'),
+      source: String(cfg.source ?? 'main'),
+      isLive: Boolean(cfg.is_live),
+      viewerCount: 0,
+      updatedAt: cfg.updated_at,
+      gameId: cfg.active_game_id ?? null,
+    },
+  });
+}
+
+async function handleUpdateStreamConfig(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const body = await ctx.req.json().catch(() => null) as { collectionId?: string; title?: string; source?: 'main' | 'backup' | 'test' } | null;
+  if (!body) return json({ ok: false, error: 'invalid_body' }, 400);
+  const patch: Record<string, unknown> = {};
+  if (typeof body.collectionId === 'string') patch.collection_id = body.collectionId.trim();
+  if (typeof body.title === 'string') patch.title = body.title.trim();
+  if (typeof body.source === 'string') patch.source = body.source;
+  if (Object.keys(patch).length === 0) return json({ ok: false, error: 'patch_required' }, 400);
+
+  const { data, error } = await ctx.admin
+    .from('stream_admin_config')
+    .upsert({ id: true, ...patch, updated_by: session.userId }, { onConflict: 'id' })
+    .select('collection_id,title,source,is_live,updated_at')
+    .single();
+  if (error) throw new Error(error.message);
+  return json({
+    ok: true,
+    config: {
+      collectionId: data.collection_id,
+      title: data.title,
+      source: data.source,
+      isLive: data.is_live,
+      viewerCount: 0,
+      updatedAt: data.updated_at,
+    },
+  });
+}
+
+async function handleSetStreamStatus(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const body = await ctx.req.json().catch(() => null) as { isLive?: boolean; gameId?: string | null } | null;
+  if (typeof body?.isLive !== 'boolean') return json({ ok: false, error: 'is_live_required' }, 400);
+  const nowIso = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    id: true,
+    is_live: body.isLive,
+    updated_by: session.userId,
+  };
+  if (typeof body.gameId === 'string') patch.active_game_id = body.gameId;
+  if (body.isLive) {
+    patch.live_started_at = nowIso;
+    patch.live_ended_at = null;
+  } else {
+    patch.live_ended_at = nowIso;
+  }
+  const { error } = await ctx.admin.from('stream_admin_config').upsert(patch, { onConflict: 'id' });
+  if (error) throw new Error(error.message);
+
+  if (typeof body.gameId === 'string') {
+    await ctx.admin.from('stream_sessions').insert({
+      game_id: body.gameId,
+      status: body.isLive ? 'live' : 'ended',
+      created_by: session.userId,
+      updated_by: session.userId,
+    });
+  }
+  return json({ ok: true, isLive: body.isLive, at: nowIso });
+}
+
+async function handleStreamSessions({ req, admin }: HandlerCtx) {
+  await requireAdminSession(req, admin);
+  const { data, error } = await admin.from('stream_sessions')
+    .select('id,game_id,status,created_at,updated_at,games(league_id)')
+    .order('updated_at', { ascending: false })
+    .limit(50);
+  if (error) throw new Error(error.message);
+  return json({
+    ok: true,
+    sessions: (data ?? []).map((s: Record<string, unknown>) => ({
+      id: s.id,
+      gameId: s.game_id,
+      leagueId: (s.games as Record<string, unknown> | null)?.league_id ?? null,
+      startedAt: s.created_at,
+      endedAt: s.status === 'ended' ? s.updated_at : null,
+      peakViewers: 0,
+      totalPpvRevenue: 0,
+      source: 'main',
+    })),
+  });
+}
+
+async function handleOpsRevenue({ req, admin }: HandlerCtx) {
+  await requireAdminSession(req, admin);
+  const [orders, invites, sessions] = await Promise.all([
+    admin.from('orders').select('id,total_amount,status,metadata').eq('status', 'paid'),
+    admin.from('ppv_invites').select('id'),
+    admin.from('stream_sessions').select('id,game_id,status,created_at,updated_at').order('updated_at', { ascending: false }).limit(10),
+  ]);
+  if (orders.error || invites.error || sessions.error) throw new Error('ops_revenue_failed');
+  const ppvOrders = (orders.data ?? []).filter((o: Record<string, unknown>) => {
+    const metadata = (o.metadata as Record<string, unknown> | null) ?? {};
+    return metadata.purchase_type === 'ppv';
+  });
+  const totalPpvRevenue = ppvOrders.reduce((sum, o: Record<string, unknown>) => sum + Number(o.total_amount ?? 0), 0);
+
+  return json({
+    ok: true,
+    totalPpvRevenue,
+    totalPpvOrders: ppvOrders.length,
+    totalInviteRedemptions: invites.data?.length ?? 0,
+    recentSessions: (sessions.data ?? []).map((s: Record<string, unknown>) => ({
+      id: s.id,
+      gameId: s.game_id,
+      leagueId: null,
+      startedAt: s.created_at,
+      endedAt: s.status === 'ended' ? s.updated_at : null,
+      peakViewers: 0,
+      totalPpvRevenue: 0,
+      source: 'main',
+    })),
+  });
+}
+
+async function handleReviewQueue({ req, admin }: HandlerCtx) {
+  await requireAdminSession(req, admin);
+  const { data, error } = await admin.from('review_queue')
+    .select('id,review_type,status,payload,created_at')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) throw new Error(error.message);
+  return json({
+    ok: true,
+    queue: (data ?? []).map((item: Record<string, unknown>) => ({
+      id: item.id,
+      type: item.review_type,
+      title: String(((item.payload as Record<string, unknown> | null)?.title) ?? item.review_type),
+      description: (item.payload as Record<string, unknown> | null)?.description ?? null,
+      league: (item.payload as Record<string, unknown> | null)?.league ?? null,
+      severity: ((item.payload as Record<string, unknown> | null)?.severity as string | undefined) ?? 'medium',
+      status: item.status,
+      createdAt: item.created_at,
+    })),
+  });
+}
+
+async function handleResolveReview(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  await requireAdminSession(ctx.req, ctx.admin);
+  const body = await ctx.req.json().catch(() => null) as { resolution?: 'resolved' | 'dismissed' } | null;
+  if (!body?.resolution) return json({ ok: false, error: 'resolution_required' }, 400);
+  const nextStatus = body.resolution === 'resolved' ? 'resolved' : 'dismissed';
+  const { error } = await ctx.admin.from('review_queue').update({ status: nextStatus }).eq('id', ctx.params.id);
+  if (error) throw new Error(error.message);
+  return json({ ok: true, id: ctx.params.id, status: nextStatus });
+}
+
+async function handlePublishJobs({ req, admin }: HandlerCtx) {
+  await requireAdminSession(req, admin);
+  const { data, error } = await admin.from('publish_jobs')
+    .select('id,destination,status,created_at,updated_at,media_asset_id')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) throw new Error(error.message);
+  return json({ ok: true, jobs: data ?? [] });
+}
+
+async function handleHeadshotQueue({ req, admin }: HandlerCtx) {
+  await requireAdminSession(req, admin);
+  const { data, error } = await admin.from('player_profile_headshots')
+    .select('id,player_id,validation_result,status,review_reason,created_at,updated_at')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) throw new Error(error.message);
+  return json({ ok: true, queue: data ?? [] });
+}
+
+async function handleAccessLookup({ req, admin }: HandlerCtx) {
+  await requireSuperAdminSession(req, admin);
+  const email = new URL(req.url).searchParams.get('email')?.trim().toLowerCase();
+  if (!email) return json({ ok: false, error: 'email_required' }, 400);
+  const userRes = await admin.from('profiles').select('user_id').ilike('display_name', email).limit(1);
+  const authRes = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });
+  if (authRes.error) throw new Error(authRes.error.message);
+  const authUsers = (authRes.data?.users ?? []) as Array<{ id: string; email?: string | null }>;
+  const user = authUsers.find((u) => (u.email ?? '').toLowerCase() === email);
+  if (!user) return json({ ok: false, error: 'user_not_found' }, 404);
+  const roleRes = await admin.from('user_role_assignments').select('role').eq('user_id', user.id);
+  const entRes = await admin.from('stream_entitlements').select('game_id,created_at,created_by,status').eq('user_id', user.id).eq('status', 'active');
+  if (roleRes.error || entRes.error || userRes.error) throw new Error('access_lookup_failed');
+
+  return json({
+    ok: true,
+    user: {
+      userId: user.id,
+      email: user.email ?? '',
+      roles: (roleRes.data ?? []).map((r) => String(r.role)),
+      hasPpvAccess: (entRes.data?.length ?? 0) > 0,
+      ppvEntitlements: (entRes.data ?? []).map((e: Record<string, unknown>) => ({
+        gameId: e.game_id,
+        grantedAt: e.created_at,
+        grantedBy: e.created_by ?? '',
+        method: 'manual_or_purchase',
+      })),
+    },
+  });
+}
+
+async function handleAccessOverride(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const body = await ctx.req.json().catch(() => null) as { email?: string; userId?: string; gameId?: string; action?: 'grant' | 'revoke'; reason?: string } | null;
+  if (!body?.gameId || !body.action || (!body.userId && !body.email)) return json({ ok: false, error: 'invalid_override_payload' }, 400);
+  let targetUserId = body.userId ?? null;
+  if (!targetUserId && body.email) {
+    const users = await ctx.admin.auth.admin.listUsers({ page: 1, perPage: 200 });
+    if (users.error) throw new Error(users.error.message);
+    const authUsers = (users.data?.users ?? []) as Array<{ id: string; email?: string | null }>;
+    targetUserId = authUsers.find((u) => (u.email ?? '').toLowerCase() === body.email?.toLowerCase())?.id ?? null;
+  }
+  if (!targetUserId) return json({ ok: false, error: 'user_not_found' }, 404);
+
+  if (body.action === 'grant') {
+    const { error } = await ctx.admin.from('stream_entitlements').insert({
+      game_id: body.gameId,
+      user_id: targetUserId,
+      status: 'active',
+      idempotency_key: readIdempotencyKey(ctx.req.headers),
+      created_by: session.userId,
+      updated_by: session.userId,
+    });
+    if (error && !error.message.includes('duplicate')) throw new Error(error.message);
+  } else {
+    const { error } = await ctx.admin.from('stream_entitlements')
+      .update({ status: 'expired', updated_by: session.userId })
+      .eq('game_id', body.gameId)
+      .eq('user_id', targetUserId);
+    if (error) throw new Error(error.message);
+  }
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: session.userId,
+    action: `ops_access_override_${body.action}`,
+    ref_type: 'stream_entitlements',
+    ref_id: null,
+    payload: { game_id: body.gameId, user_id: targetUserId, reason: body.reason ?? null },
+    idempotency_key: readIdempotencyKey(ctx.req.headers),
+  });
+
+  return json({ ok: true, userId: targetUserId, action: body.action, gameId: body.gameId });
 }
 
 async function writeIngressFailure(admin: SupabaseClient, reason: string, rawInput: unknown, sourceType: string, userId?: string | null) {
@@ -1730,12 +2032,18 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: 'GET', path: '/api/public-config', handler: handlePublicConfig },
   { method: 'GET', path: '/api/public/home', handler: handlePublicHome },
   { method: 'GET', path: '/api/teams', handler: handleTeamsList },
-  { method: 'GET', path: '/ops/review', handler: handleOps },
-  { method: 'POST', path: '/ops/review/:id/resolve', handler: handleOps },
-  { method: 'GET', path: '/ops/streams', handler: handleOps },
-  { method: 'GET', path: '/ops/publish-jobs', handler: handleOps },
-  { method: 'GET', path: '/ops/revenue', handler: handleOps },
-  { method: 'GET', path: '/ops/headshots', handler: handleOps },
+  { method: 'GET', path: '/api/streams/status', handler: handlePublicStreamStatus },
+  { method: 'GET', path: '/ops/streams/config', handler: handleGetStreamConfig },
+  { method: 'POST', path: '/ops/streams/config', handler: handleUpdateStreamConfig },
+  { method: 'POST', path: '/ops/streams/status', handler: handleSetStreamStatus },
+  { method: 'GET', path: '/ops/streams/sessions', handler: handleStreamSessions },
+  { method: 'GET', path: '/ops/access/lookup', handler: handleAccessLookup },
+  { method: 'POST', path: '/ops/access/override', handler: handleAccessOverride },
+  { method: 'GET', path: '/ops/review', handler: handleReviewQueue },
+  { method: 'POST', path: '/ops/review/:id/resolve', handler: handleResolveReview },
+  { method: 'GET', path: '/ops/revenue', handler: handleOpsRevenue },
+  { method: 'GET', path: '/ops/publish-jobs', handler: handlePublishJobs },
+  { method: 'GET', path: '/ops/headshots', handler: handleHeadshotQueue },
   { method: 'POST', path: '/api/ingress', handler: handleIngress },
   { method: 'POST', path: '/sync/drain', handler: handleSyncDrain },
   { method: 'POST', path: '/webhooks/stripe', handler: handleStripeWebhook },
