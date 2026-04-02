@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { players as mockPlayers, teams } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
@@ -47,7 +46,7 @@ const StatsPage = () => {
     }
   }, [activeLeague, paramLeague, isValidParam]);
 
-  // Fetch live stats from the worker; fall back to mock if API unavailable or returns empty
+  // Fetch live stats from the worker; never fall back to mock in production path.
   const statsQuery = useQuery({
     queryKey: ['stats', leagueFilter],
     queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/stats'),
@@ -58,10 +57,10 @@ const StatsPage = () => {
 
   const players = useMemo<PlayerProfile[]>(() => {
     const apiData = statsQuery.data?.data;
-    if (Array.isArray(apiData) && apiData.length > 0 && 'stats' in (apiData[0] ?? {})) {
+    if (Array.isArray(apiData) && 'stats' in (apiData[0] ?? {})) {
       return apiData;
     }
-    return mockPlayers;
+    return [];
   }, [statsQuery.data]);
 
   const filtered = useMemo(() => {
@@ -72,7 +71,7 @@ const StatsPage = () => {
 
   const detail = selectedPlayer ? players.find(p => p.id === selectedPlayer) : null;
 
-  const maxStat = (key: StatKey) => Math.max(...filtered.map(p => p.stats[key]));
+  const maxStat = (key: StatKey) => Math.max(...filtered.map(p => p.stats[key]), 0);
 
   const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
 
@@ -117,6 +116,23 @@ const StatsPage = () => {
           </div>
         </div>
 
+        {!isSignedIn ? (
+          <div className="panel p-8 text-center">
+            <p className="text-sm text-muted-foreground">Sign in to view player statistics.</p>
+          </div>
+        ) : statsQuery.isLoading ? (
+          <div className="panel p-8 text-center">
+            <p className="text-sm text-muted-foreground">Loading stats…</p>
+          </div>
+        ) : statsQuery.isError ? (
+          <div className="panel p-8 text-center">
+            <p className="text-sm text-destructive">Could not load stats. Please try again.</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="panel p-8 text-center">
+            <p className="text-sm text-muted-foreground">No stats available for this league yet.</p>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Stats Table */}
           <div className="lg:col-span-2">
@@ -216,6 +232,7 @@ const StatsPage = () => {
             )}
           </div>
         </div>
+        )}
       </div>
     </div>
   );

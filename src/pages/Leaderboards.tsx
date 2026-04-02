@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { players as mockPlayers, teams } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
@@ -61,14 +60,21 @@ const LeaderboardsPage = () => {
     retry: 1,
     staleTime: 30_000,
   });
+  const teamsQuery = useQuery({
+    queryKey: ['teams'],
+    queryFn: () => apiFetch<{ ok: boolean; teams: Array<{ id: string; name: string; league_code: string; division_name: string | null; stats: { wins: number; losses: number } }> }>('/api/teams'),
+    retry: 1,
+    staleTime: 60_000,
+  });
 
   const players = useMemo<PlayerProfile[]>(() => {
     const apiData = leaderboardsQuery.data?.data;
-    if (Array.isArray(apiData) && apiData.length > 0 && 'stats' in (apiData[0] ?? {})) {
+    if (Array.isArray(apiData) && 'stats' in (apiData[0] ?? {})) {
       return apiData;
     }
-    return mockPlayers;
+    return [];
   }, [leaderboardsQuery.data]);
+  const standingsTeams = useMemo(() => teamsQuery.data?.teams ?? [], [teamsQuery.data]);
 
   const filtered = useMemo(() => {
     const list = leagueFilter === 'all' ? players : players.filter(p => p.leagueId === leagueFilter);
@@ -134,6 +140,23 @@ const LeaderboardsPage = () => {
         </div>
 
         {/* Leaderboard */}
+        {!isSignedIn ? (
+          <div className="panel p-8 text-center">
+            <p className="text-sm text-muted-foreground">Sign in to view leaderboards.</p>
+          </div>
+        ) : leaderboardsQuery.isLoading ? (
+          <div className="panel p-8 text-center">
+            <p className="text-sm text-muted-foreground">Loading leaderboard…</p>
+          </div>
+        ) : leaderboardsQuery.isError ? (
+          <div className="panel p-8 text-center">
+            <p className="text-sm text-destructive">Could not load leaderboard. Please try again.</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="panel p-8 text-center">
+            <p className="text-sm text-muted-foreground">No leaderboard data available yet.</p>
+          </div>
+        ) : (
         <div className="max-w-3xl">
           {/* Top 3 Spotlight */}
           {visible.length >= 3 && (
@@ -161,7 +184,7 @@ const LeaderboardsPage = () => {
                   <p className="text-sm font-medium">{p.name}</p>
                   <div className="flex items-center gap-2">
                     <LeagueBadge leagueId={p.leagueId} />
-                    <span className="text-[10px] text-muted-foreground">{p.position} · {teams.find(t => t.id === p.teamId)?.name}</span>
+                    <span className="text-[10px] text-muted-foreground">{p.position}</span>
                   </div>
                 </div>
                 <div className="text-right">
@@ -198,29 +221,30 @@ const LeaderboardsPage = () => {
               )}
             </div>
             <div className="space-y-2">
-              {teams
-                .filter(t => leagueFilter === 'all' || t.leagueId === leagueFilter)
-                .sort((a, b) => (b.record.wins / (b.record.wins + b.record.losses)) - (a.record.wins / (a.record.wins + a.record.losses)))
+              {standingsTeams
+                .filter(t => leagueFilter === 'all' || t.league_code.toLowerCase() === leagueFilter)
+                .sort((a, b) => (b.stats.wins / ((b.stats.wins + b.stats.losses) || 1)) - (a.stats.wins / ((a.stats.wins + a.stats.losses) || 1)))
                 .map((t, i) => (
                   <div key={t.id} className="panel p-3 flex items-center gap-4">
                     <span className="stat-numeral text-sm text-muted-foreground w-6 text-center">{i + 1}</span>
                     <div className="flex-1">
                       <p className="text-sm font-medium">{t.name}</p>
                       <div className="flex items-center gap-2">
-                        <LeagueBadge leagueId={t.leagueId} />
-                        <span className="text-[10px] text-muted-foreground">{t.division}</span>
+                        <LeagueBadge leagueId={t.league_code.toLowerCase() as LeagueId} />
+                        <span className="text-[10px] text-muted-foreground">{t.division_name ?? 'Division'}</span>
                       </div>
                     </div>
                     <div className="flex items-center gap-4">
-                      <span className="stat-numeral text-sm text-success">{t.record.wins}W</span>
-                      <span className="stat-numeral text-sm text-destructive">{t.record.losses}L</span>
-                      <span className="stat-numeral text-sm">{((t.record.wins / (t.record.wins + t.record.losses)) * 100).toFixed(0)}%</span>
+                      <span className="stat-numeral text-sm text-success">{t.stats.wins}W</span>
+                      <span className="stat-numeral text-sm text-destructive">{t.stats.losses}L</span>
+                      <span className="stat-numeral text-sm">{((t.stats.wins / ((t.stats.wins + t.stats.losses) || 1)) * 100).toFixed(0)}%</span>
                     </div>
                   </div>
                 ))}
             </div>
           </div>
         </div>
+        )}
       </div>
     </div>
   );
