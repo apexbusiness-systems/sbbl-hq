@@ -339,6 +339,7 @@ async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
     title: String(cfg.title ?? "SBBL Live Stream"),
     viewerCount,
     gameId: activeGameId,
+    collectionId: String(cfg.collection_id ?? ""),
   });
 }
 
