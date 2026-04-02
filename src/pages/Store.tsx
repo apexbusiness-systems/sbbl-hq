@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { products as mockProducts } from '@/data/mock';
 import { useApp } from '@/contexts/AppContext';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
@@ -23,8 +24,8 @@ const StorePage = () => {
 
   const products = useMemo<Product[]>(() => {
     const apiData = productsQuery.data?.data;
-    if (Array.isArray(apiData)) return apiData;
-    return [];
+    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
+    return mockProducts;
   }, [productsQuery.data]);
 
   const filtered = category === 'all' ? products : products.filter(p => p.category === category);
@@ -47,19 +48,6 @@ const StorePage = () => {
           ))}
         </div>
 
-        {productsQuery.isLoading ? (
-          <div className="panel p-8 text-center">
-            <p className="text-sm text-muted-foreground">Loading store products…</p>
-          </div>
-        ) : productsQuery.isError ? (
-          <div className="panel p-8 text-center">
-            <p className="text-sm text-destructive">Could not load store products.</p>
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="panel p-8 text-center">
-            <p className="text-sm text-muted-foreground">No products published yet.</p>
-          </div>
-        ) : (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Product Grid */}
           <div className="lg:col-span-2">
@@ -123,7 +111,6 @@ const StorePage = () => {
             )}
           </div>
         </div>
-        )}
       </div>
     </div>
   );

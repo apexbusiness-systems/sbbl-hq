@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { mediaAssets as mockMediaAssets } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { useApp } from '@/contexts/AppContext';
@@ -51,8 +52,8 @@ const MediaPage = () => {
 
   const allMedia = useMemo<MediaAsset[]>(() => {
     const apiData = mediaQuery.data?.data;
-    if (Array.isArray(apiData)) return apiData;
-    return [];
+    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
+    return mockMediaAssets;
   }, [mediaQuery.data]);
 
   const filtered = allMedia.filter(m => {
@@ -136,15 +137,7 @@ const MediaPage = () => {
           ))}
         </div>
 
-        {mediaQuery.isLoading ? (
-          <div className="panel p-12 text-center">
-            <p className="text-sm text-muted-foreground">Loading media…</p>
-          </div>
-        ) : mediaQuery.isError ? (
-          <div className="panel p-12 text-center">
-            <p className="text-sm text-destructive">Could not load media.</p>
-          </div>
-        ) : filtered.length === 0 ? (
+        {filtered.length === 0 ? (
           <div className="panel p-12 text-center">
             <p className="text-sm text-muted-foreground">No media found for this filter.</p>
           </div>

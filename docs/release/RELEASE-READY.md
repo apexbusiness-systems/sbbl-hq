@@ -56,22 +56,3 @@ Scope in this pass: Phase 1 baseline verification + prioritized execution queue.
 3. Security/RLS validation pass.
 4. Tests (unit/integration/e2e) + migration smoke.
 5. Deploy-readiness verification and final verdict.
-
-## 3) PHASE EXECUTION UPDATE (Current Pass)
-
-### Closed in this pass
-- Removed production mock data fallback behavior from `Stats`, `Leaderboards`, `Store`, `Media`, and `Profiles` page data sources; these paths now render explicit loading/error/empty states instead of silently substituting local mock datasets.
-- Refactored `Profiles` to source teams/players/leagues from `/api/teams` + league registry rather than `src/data/mock`.
-
-### Still open
-- `Live`, `Home`, and `AppHome` still contain mock-bound production data paths and require replacement with live-backed sources.
-- Ack-only worker handlers still exist on multiple production routes.
-- Storage bucket usage still hardcoded to `media` in upload paths pending bucket contract reconciliation.
-- Playwright acceptance remains blocked by missing browser binary in this environment.
-
-### Verification rerun
-- `npm run lint` → PASS
-- `npm run typecheck` → PASS
-- `npm run build` → PASS
-- `npm run test` → PASS
-- `npx playwright test` → FAIL (Chromium executable missing)

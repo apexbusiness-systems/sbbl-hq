@@ -1,26 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import { players, teams as mockTeams, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { useApp } from '@/contexts/AppContext';
 import { useQuery } from '@tanstack/react-query';
-import { fetchTeams, type TeamCard } from '@/lib/api/teams';
-import { LEAGUE_REGISTRY, type LeagueIdentity } from '@/lib/leagues';
+import { apiFetch } from '@/lib/api/client';
+import { Team } from '@/types';
 import { Award, Users, Lock } from 'lucide-react';
-import type { LeagueId, StatLine } from '@/types';
 
 type ProfileView = 'players' | 'teams' | 'leagues';
-
-type ProfilePlayer = {
-  id: string;
-  name: string;
-  number: number;
-  position: string;
-  teamId: string;
-  leagueId: LeagueId;
-  avatar: string;
-  stats: StatLine;
-};
-
-const emptyStats: StatLine = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, fls: 0, min: 0 };
 
 const ProfilesPage = () => {
   const { hasPremiumPlayerAccess } = useApp();
@@ -29,60 +16,29 @@ const ProfilesPage = () => {
 
   const teamsQuery = useQuery({
     queryKey: ['teams'],
-    queryFn: fetchTeams,
+    queryFn: () => apiFetch<{ ok: boolean; teams: Team[] }>('/api/teams'),
     retry: 1,
     staleTime: 120_000,
   });
 
-  const teams = useMemo<TeamCard[]>(() => teamsQuery.data?.teams ?? [], [teamsQuery.data]);
+  const teams = useMemo<Team[]>(() => {
+    const apiData = teamsQuery.data?.teams;
+    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
+    return mockTeams;
+  }, [teamsQuery.data]);
 
-  const filteredPlayers = useMemo<ProfilePlayer[]>(() => {
-    return teams.flatMap((team) => {
-      const leagueId = team.league_code.toLowerCase() as LeagueId;
-      return team.players.map((player) => {
-        const first = player.first_name?.trim() ?? '';
-        const last = player.last_name?.trim() ?? '';
-        const fullName = [first, last].filter(Boolean).join(' ').trim();
-        return {
-          id: player.id,
-          name: fullName || `Player ${String(player.id).slice(0, 6)}`,
-          number: player.jersey_number ?? 0,
-          position: player.position ?? 'N/A',
-          teamId: team.id,
-          leagueId,
-          avatar: player.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(fullName || 'Player')}&background=111111&color=ffffff`,
-          stats: emptyStats,
-        };
-      });
-    });
-  }, [teams]);
-
-  const detail = selectedPlayer ? filteredPlayers.find((p) => p.id === selectedPlayer) ?? null : null;
-
-  const leagueCards = useMemo(() => {
-    const teamCountByLeague = new Map<string, number>();
-    const playerCountByLeague = new Map<string, number>();
-
-    teams.forEach((team) => {
-      const key = team.league_code.toLowerCase();
-      teamCountByLeague.set(key, (teamCountByLeague.get(key) ?? 0) + 1);
-      playerCountByLeague.set(key, (playerCountByLeague.get(key) ?? 0) + team.players.length);
-    });
-
-    return LEAGUE_REGISTRY.map((league: LeagueIdentity) => ({
-      league,
-      teamCount: teamCountByLeague.get(league.id) ?? 0,
-      playerCount: playerCountByLeague.get(league.id) ?? 0,
-    }));
-  }, [teams]);
+  const filteredPlayers = players;
+  const filteredTeams = teams;
+  const detail = selectedPlayer ? players.find(p => p.id === selectedPlayer) : null;
 
   const views: ProfileView[] = useMemo(
     () => (hasPremiumPlayerAccess ? ['players', 'teams', 'leagues'] : ['teams', 'leagues']),
     [hasPremiumPlayerAccess],
   );
-
   useEffect(() => {
-    if (!views.includes(view)) setView('teams');
+    if (!views.includes(view)) {
+      setView('teams');
+    }
   }, [view, views]);
 
   return (
@@ -93,6 +49,7 @@ const ProfilesPage = () => {
           <p className="text-sm text-muted-foreground mt-1">Players, teams, and leagues</p>
         </div>
 
+        {/* View Toggle */}
         <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit mb-8">
           {views.map(v => (
             <button key={v} onClick={() => setView(v)} className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${view === v ? 'bg-card text-foreground' : 'text-muted-foreground'}`}>
@@ -100,7 +57,6 @@ const ProfilesPage = () => {
             </button>
           ))}
         </div>
-
         {!hasPremiumPlayerAccess && (
           <div className="panel p-4 mb-6 flex items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">Player profiles and leaderboard-linked profile tabs unlock only with an active player registration renewal.</p>
@@ -108,10 +64,7 @@ const ProfilesPage = () => {
           </div>
         )}
 
-        {teamsQuery.isLoading ? <div className="panel p-8 text-center text-sm text-muted-foreground">Loading profiles…</div> : null}
-        {teamsQuery.isError ? <div className="panel p-8 text-center text-sm text-destructive">Could not load profiles.</div> : null}
-
-        {view === 'players' && hasPremiumPlayerAccess && !teamsQuery.isLoading && !teamsQuery.isError && (
+        {view === 'players' && hasPremiumPlayerAccess && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
               {filteredPlayers.map(p => (
@@ -120,7 +73,7 @@ const ProfilesPage = () => {
                     <img src={p.avatar} alt={p.name} className="w-full h-full object-cover object-top group-hover:scale-105 transition-transform duration-500" loading="lazy" />
                     <div className="absolute inset-0 bg-gradient-to-t from-card via-transparent to-transparent" />
                     <div className="absolute bottom-3 left-3">
-                      <span className="stat-numeral text-2xl text-primary">#{p.number || '--'}</span>
+                      <span className="stat-numeral text-2xl text-primary">#{p.number}</span>
                       <p className="font-display font-bold text-sm">{p.name}</p>
                     </div>
                     <div className="absolute top-2 right-2">
@@ -128,26 +81,31 @@ const ProfilesPage = () => {
                     </div>
                   </div>
                   <div className="p-3 flex items-center justify-between">
-                    <span className="text-xs text-muted-foreground">{p.position} · {teams.find(t => t.id === p.teamId)?.name ?? 'Team'}</span>
-                    <span className="stat-numeral text-sm text-primary">0 PPG</span>
+                    <span className="text-xs text-muted-foreground">{p.position} · {teams.find(t => t.id === p.teamId)?.name}</span>
+                    <span className="stat-numeral text-sm text-primary">{p.stats.pts} PPG</span>
                   </div>
                 </div>
               ))}
             </div>
 
+            {/* Player Detail */}
             <div>
               {detail ? (
                 <div className="panel p-4 sticky top-24 space-y-4">
                   <div className="relative">
                     <img src={detail.avatar} alt={detail.name} className="w-full aspect-[4/5] object-cover object-top rounded-sm" loading="lazy" />
                     <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-card p-4">
-                      <span className="stat-numeral text-3xl text-primary">#{detail.number || '--'}</span>
+                      <span className="stat-numeral text-3xl text-primary">#{detail.number}</span>
                       <h3 className="font-display text-xl font-bold">{detail.name}</h3>
-                      <p className="text-xs text-muted-foreground">{detail.position} · {teams.find(t => t.id === detail.teamId)?.name ?? 'Team'}</p>
+                      <p className="text-xs text-muted-foreground">{detail.position} · {teams.find(t => t.id === detail.teamId)?.name}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap gap-1.5">
-                    <span className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary text-[10px] font-semibold rounded-sm"><Award className="w-3 h-3" /> Active Player</span>
+                    {detail.badges.map(b => (
+                      <span key={b} className="inline-flex items-center gap-1 px-2 py-1 bg-primary/10 text-primary text-[10px] font-semibold rounded-sm">
+                        <Award className="w-3 h-3" /> {b}
+                      </span>
+                    ))}
                   </div>
                   <div className="grid grid-cols-4 gap-2">
                     {Object.entries(detail.stats).map(([key, val]) => (
@@ -168,55 +126,59 @@ const ProfilesPage = () => {
           </div>
         )}
 
-        {view === 'teams' && !teamsQuery.isLoading && !teamsQuery.isError && (
+        {view === 'teams' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {teams.map(t => (
+            {filteredTeams.map(t => (
               <div key={t.id} className="panel p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div>
                     <h3 className="font-display font-bold">{t.name}</h3>
-                    <p className="text-xs text-muted-foreground">{t.division_name ?? 'Division'}</p>
+                    <p className="text-xs text-muted-foreground">{t.division}</p>
                   </div>
-                  <LeagueBadge leagueId={t.league_code.toLowerCase() as LeagueId} />
+                  <LeagueBadge leagueId={t.leagueId} />
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-center">
-                    <p className="stat-numeral text-2xl text-success">{t.stats.wins}</p>
+                    <p className="stat-numeral text-2xl text-success">{t.record.wins}</p>
                     <p className="text-[10px] text-muted-foreground uppercase">Wins</p>
                   </div>
                   <div className="text-center">
-                    <p className="stat-numeral text-2xl text-destructive">{t.stats.losses}</p>
+                    <p className="stat-numeral text-2xl text-destructive">{t.record.losses}</p>
                     <p className="text-[10px] text-muted-foreground uppercase">Losses</p>
                   </div>
                   <div className="text-center">
-                    <p className="stat-numeral text-2xl">{(Number(t.stats.winPct) * 100).toFixed(0)}%</p>
+                    <p className="stat-numeral text-2xl">{((t.record.wins / (t.record.wins + t.record.losses)) * 100).toFixed(0)}%</p>
                     <p className="text-[10px] text-muted-foreground uppercase">Win %</p>
                   </div>
                 </div>
                 <div className="mt-3 pt-3 border-t border-border">
-                  <p className="text-xs text-muted-foreground">Roster: {t.players.map(p => [p.first_name, p.last_name].filter(Boolean).join(' ')).filter(Boolean).join(', ') || 'View full roster'}</p>
+                  <p className="text-xs text-muted-foreground">Roster: {players.filter(p => p.teamId === t.id).map(p => p.name).join(', ') || 'View full roster'}</p>
                 </div>
               </div>
             ))}
           </div>
         )}
 
-        {view === 'leagues' && !teamsQuery.isLoading && !teamsQuery.isError && (
+        {view === 'leagues' && (
           <div className="space-y-4">
-            {leagueCards.map(({ league, teamCount, playerCount }) => (
-              <div key={league.id} className="panel p-6">
+            {leagues.map(l => (
+              <div key={l.id} className="panel p-6">
                 <div className="flex items-center gap-3 mb-3">
-                  <LeagueBadge leagueId={league.id} size="md" />
-                  <h3 className="font-display text-xl font-bold">{league.name}</h3>
+                  <LeagueBadge leagueId={l.id} size="md" />
+                  <h3 className="font-display text-xl font-bold">{l.name}</h3>
                 </div>
-                <p className="text-sm text-muted-foreground leading-relaxed">{league.shortName} league profile and roster directory.</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">{l.description}</p>
                 <div className="flex items-center gap-6 mt-4 pt-4 border-t border-border">
                   <div>
-                    <p className="stat-numeral text-xl">{teamCount}</p>
+                    <p className="stat-numeral text-xl text-primary">${l.fee.toLocaleString()}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase">Season Fee</p>
+                  </div>
+                  <div>
+                    <p className="stat-numeral text-xl">{teams.filter(t => t.leagueId === l.id).length}</p>
                     <p className="text-[10px] text-muted-foreground uppercase">Teams</p>
                   </div>
                   <div>
-                    <p className="stat-numeral text-xl">{playerCount}</p>
+                    <p className="stat-numeral text-xl">{players.filter(p => p.leagueId === l.id).length}</p>
                     <p className="text-[10px] text-muted-foreground uppercase">Players</p>
                   </div>
                 </div>
