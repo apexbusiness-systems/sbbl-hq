@@ -36,7 +36,7 @@ const HomePage = () => {
     setState('loading');
     setErrorMsg(null);
     fetchPublicHome(leagueCodeFromId(resolvedLeague))
-      .then((result) => { if (!cancelled) { setData(result); setState('loaded'); } })
+      .then((result) => { if (!cancelled) { setData(result.data); setState('loaded'); } })
       .catch((err) => { if (!cancelled) { setErrorMsg(err instanceof Error ? err.message : 'Failed to load'); setState('error'); } });
     return () => { cancelled = true; };
   }, [resolvedLeague]);

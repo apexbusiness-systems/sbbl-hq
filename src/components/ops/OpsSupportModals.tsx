@@ -39,7 +39,7 @@ export function OpsEditModal({ entity, id, initialData, onClose }: EditModalProp
               <label className="block text-sm font-medium mb-1 capitalize">{key.replace('_', ' ')}</label>
               <input
                 name={key}
-                value={formData[key] || ''}
+                value={(formData[key] as string | number) || ''}
                 onChange={handleChange}
                 className="w-full bg-slate-800 border-slate-700 rounded px-3 py-2"
               />
