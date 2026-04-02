@@ -14,7 +14,7 @@ export type PublicHomeData = {
   featured_games: unknown[];
   news: unknown[];
   totalTeams?: number;
-  season?: string;
+  season?: { name: string };
   totalGames?: number;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   teams?: any[];
