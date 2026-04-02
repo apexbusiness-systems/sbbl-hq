@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
-import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord } from '@/lib/api/ops';
+import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord, manualOpsAction } from '@/lib/api/ops';
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit } from '@/lib/imageResize';
@@ -41,6 +41,33 @@ const OpsPage = () => {
   const [streamForm, setStreamForm] = useState({ collectionId: '', title: '', source: 'main' as 'main' | 'backup' | 'test' });
   const [reviewResolution, setReviewResolution] = useState<Record<string, 'resolved' | 'dismissed'>>({});
   const isSuperAdmin = roles.includes('super_admin');
+
+  // ── Admin CRUD form state ──────────────────────────────────────────────────
+  const [teamForm, setTeamForm] = useState({ name: '', leagueId: '', seasonId: '', divisionId: '' });
+  const [deleteTeamId, setDeleteTeamId] = useState('');
+
+  const [playerForm, setPlayerForm] = useState({ userId: '', teamId: '', leagueId: '', jerseyNumber: '', position: '' });
+  const [deletePlayerId, setDeletePlayerId] = useState('');
+  const [suspendPlayerId, setSuspendPlayerId] = useState('');
+  const [suspendPlayerReason, setSuspendPlayerReason] = useState('');
+
+  const [scheduleForm, setScheduleForm] = useState({ leagueId: '', seasonId: '', startsAt: '', endsAt: '' });
+  const [deleteScheduleId, setDeleteScheduleId] = useState('');
+
+  const [eventForm, setEventForm] = useState({ title: '', location: '', date: '', leagueId: '' });
+  const [deleteEventId, setDeleteEventId] = useState('');
+
+  const [storeBatchItems, setStoreBatchItems] = useState([
+    { title: '', price: '', category: 'apparel' },
+    { title: '', price: '', category: 'apparel' },
+    { title: '', price: '', category: 'apparel' },
+    { title: '', price: '', category: 'apparel' },
+  ]);
+  const [storeSuspendId, setStoreSuspendId] = useState('');
+  const [storeDeleteId, setStoreDeleteId] = useState('');
+
+  const updateStoreBatchItem = (i: number, field: string, value: string) =>
+    setStoreBatchItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
 
   const handlePotgImageUpload = async (file: File) => {
     setPotgParseState('parsing');
@@ -181,6 +208,134 @@ const OpsPage = () => {
       resolveReviewItem(id, resolution, await getAuthToken()),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['ops-stream-review'] });
+    },
+  });
+
+  // ── Admin CRUD mutations ───────────────────────────────────────────────
+  const createTeamMutation = useMutation({
+    mutationFn: () => manualOpsAction('team', 'create', {
+      name: teamForm.name,
+      leagueId: teamForm.leagueId,
+      seasonId: teamForm.seasonId,
+      divisionId: teamForm.divisionId || undefined,
+    }),
+    onSuccess: async () => {
+      setTeamForm({ name: '', leagueId: '', seasonId: '', divisionId: '' });
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const deleteTeamMutation = useMutation({
+    mutationFn: () => manualOpsAction('team', 'delete', { id: deleteTeamId }),
+    onSuccess: async () => {
+      setDeleteTeamId('');
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const createPlayerMutation = useMutation({
+    mutationFn: () => manualOpsAction('player', 'create', {
+      userId: playerForm.userId,
+      teamId: playerForm.teamId || undefined,
+      leagueId: playerForm.leagueId || undefined,
+      jerseyNumber: playerForm.jerseyNumber ? Number(playerForm.jerseyNumber) : undefined,
+      position: playerForm.position || undefined,
+    }),
+    onSuccess: async () => {
+      setPlayerForm({ userId: '', teamId: '', leagueId: '', jerseyNumber: '', position: '' });
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const suspendPlayerMutation = useMutation({
+    mutationFn: () => manualOpsAction('player', 'suspend', { id: suspendPlayerId, reason: suspendPlayerReason || undefined }),
+    onSuccess: async () => {
+      setSuspendPlayerId('');
+      setSuspendPlayerReason('');
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const deletePlayerMutation = useMutation({
+    mutationFn: () => manualOpsAction('player', 'delete', { id: deletePlayerId }),
+    onSuccess: async () => {
+      setDeletePlayerId('');
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const createScheduleMutation = useMutation({
+    mutationFn: () => manualOpsAction('schedule', 'create', {
+      leagueId: scheduleForm.leagueId,
+      seasonId: scheduleForm.seasonId,
+      startsAt: scheduleForm.startsAt,
+      endsAt: scheduleForm.endsAt || undefined,
+    }),
+    onSuccess: async () => {
+      setScheduleForm({ leagueId: '', seasonId: '', startsAt: '', endsAt: '' });
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const deleteScheduleMutation = useMutation({
+    mutationFn: () => manualOpsAction('schedule', 'delete', { id: deleteScheduleId }),
+    onSuccess: async () => {
+      setDeleteScheduleId('');
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const createEventMutation = useMutation({
+    mutationFn: () => manualOpsAction('event', 'create', {
+      title: eventForm.title,
+      location: eventForm.location || undefined,
+      date: eventForm.date || undefined,
+      leagueId: eventForm.leagueId || undefined,
+    }),
+    onSuccess: async () => {
+      setEventForm({ title: '', location: '', date: '', leagueId: '' });
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const deleteEventMutation = useMutation({
+    mutationFn: () => manualOpsAction('event', 'delete', { id: deleteEventId }),
+    onSuccess: async () => {
+      setDeleteEventId('');
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const storeBatchMutation = useMutation({
+    mutationFn: () => manualOpsAction('store', 'batch_create', {
+      items: storeBatchItems
+        .filter(it => it.title.trim())
+        .map(it => ({ title: it.title, price: Number(it.price) || 0, category: it.category })),
+    }),
+    onSuccess: async () => {
+      setStoreBatchItems([
+        { title: '', price: '', category: 'apparel' },
+        { title: '', price: '', category: 'apparel' },
+        { title: '', price: '', category: 'apparel' },
+        { title: '', price: '', category: 'apparel' },
+      ]);
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const storeSuspendMutation = useMutation({
+    mutationFn: () => manualOpsAction('store', 'suspend', { id: storeSuspendId }),
+    onSuccess: async () => {
+      setStoreSuspendId('');
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const storeDeleteMutation = useMutation({
+    mutationFn: () => manualOpsAction('store', 'delete', { id: storeDeleteId }),
+    onSuccess: async () => {
+      setStoreDeleteId('');
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
     },
   });
 
@@ -389,17 +544,23 @@ const OpsPage = () => {
               <div className="border border-border p-3 rounded-sm">
                 <h3 className="text-sm font-semibold mb-2">Create Team</h3>
                 <div className="space-y-2">
-                  <input placeholder="Team Name" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <input placeholder="Division" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Team</button>
+                  <input placeholder="Team Name *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.name} onChange={e => setTeamForm(f => ({ ...f, name: e.target.value }))} />
+                  <input placeholder="League ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.leagueId} onChange={e => setTeamForm(f => ({ ...f, leagueId: e.target.value }))} />
+                  <input placeholder="Season ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.seasonId} onChange={e => setTeamForm(f => ({ ...f, seasonId: e.target.value }))} />
+                  <input placeholder="Division ID (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.divisionId} onChange={e => setTeamForm(f => ({ ...f, divisionId: e.target.value }))} />
+                  <button disabled={!teamForm.name || !teamForm.leagueId || !teamForm.seasonId || createTeamMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createTeamMutation.mutate()}>{createTeamMutation.isPending ? 'Creating…' : 'Create Team'}</button>
+                  {createTeamMutation.error && <p className="text-xs text-destructive">{(createTeamMutation.error as Error).message}</p>}
+                  {createTeamMutation.isSuccess && <p className="text-xs text-success">Team created.</p>}
                 </div>
               </div>
               <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
                 <h3 className="text-sm font-semibold text-destructive mb-2">Delete Team</h3>
                 <div className="flex gap-2">
-                  <input placeholder="Team ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
+                  <input placeholder="Team ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={deleteTeamId} onChange={e => setDeleteTeamId(e.target.value)} />
+                  <button disabled={!deleteTeamId || deleteTeamMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteTeamMutation.mutate()}>{deleteTeamMutation.isPending ? '…' : 'Delete'}</button>
                 </div>
+                {deleteTeamMutation.error && <p className="text-xs text-destructive mt-1">{(deleteTeamMutation.error as Error).message}</p>}
+                {deleteTeamMutation.isSuccess && <p className="text-xs text-success mt-1">Team archived.</p>}
               </div>
             </div>
           )}
@@ -416,27 +577,38 @@ const OpsPage = () => {
               <div className="border border-border p-3 rounded-sm">
                 <h3 className="text-sm font-semibold mb-2">Create Player</h3>
                 <div className="space-y-2">
+                  <input placeholder="User ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={playerForm.userId} onChange={e => setPlayerForm(f => ({ ...f, userId: e.target.value }))} />
+                  <input placeholder="Team ID (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={playerForm.teamId} onChange={e => setPlayerForm(f => ({ ...f, teamId: e.target.value }))} />
+                  <input placeholder="League ID (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={playerForm.leagueId} onChange={e => setPlayerForm(f => ({ ...f, leagueId: e.target.value }))} />
                   <div className="grid grid-cols-2 gap-2">
-                    <input placeholder="First Name" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                    <input placeholder="Last Name" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                    <input placeholder="Jersey #" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={playerForm.jerseyNumber} onChange={e => setPlayerForm(f => ({ ...f, jerseyNumber: e.target.value }))} />
+                    <input placeholder="Position" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={playerForm.position} onChange={e => setPlayerForm(f => ({ ...f, position: e.target.value }))} />
                   </div>
-                  <input placeholder="Team ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Player</button>
+                  <button disabled={!playerForm.userId || createPlayerMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createPlayerMutation.mutate()}>{createPlayerMutation.isPending ? 'Creating…' : 'Create Player'}</button>
+                  {createPlayerMutation.error && <p className="text-xs text-destructive">{(createPlayerMutation.error as Error).message}</p>}
+                  {createPlayerMutation.isSuccess && <p className="text-xs text-success">Player created.</p>}
                 </div>
               </div>
               <div className="border border-warning/20 p-3 rounded-sm bg-warning/5">
                 <h3 className="text-sm font-semibold text-warning mb-2">Suspend Player</h3>
-                <div className="flex gap-2">
-                  <input placeholder="Player ID to Suspend" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="bg-warning hover:bg-warning/90 text-warning-foreground px-4 py-2 rounded-sm text-xs text-black">Suspend</button>
+                <div className="space-y-2">
+                  <div className="flex gap-2">
+                    <input placeholder="Player ID to Suspend" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={suspendPlayerId} onChange={e => setSuspendPlayerId(e.target.value)} />
+                    <button disabled={!suspendPlayerId || suspendPlayerMutation.isPending} className="bg-warning hover:bg-warning/90 text-warning-foreground px-4 py-2 rounded-sm text-xs text-black disabled:opacity-60" onClick={() => suspendPlayerMutation.mutate()}>{suspendPlayerMutation.isPending ? '…' : 'Suspend'}</button>
+                  </div>
+                  <input placeholder="Reason (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={suspendPlayerReason} onChange={e => setSuspendPlayerReason(e.target.value)} />
+                  {suspendPlayerMutation.error && <p className="text-xs text-destructive">{(suspendPlayerMutation.error as Error).message}</p>}
+                  {suspendPlayerMutation.isSuccess && <p className="text-xs text-success">Player suspended.</p>}
                 </div>
               </div>
               <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
                 <h3 className="text-sm font-semibold text-destructive mb-2">Delete Player</h3>
                 <div className="flex gap-2">
-                  <input placeholder="Player ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
+                  <input placeholder="Player ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={deletePlayerId} onChange={e => setDeletePlayerId(e.target.value)} />
+                  <button disabled={!deletePlayerId || deletePlayerMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deletePlayerMutation.mutate()}>{deletePlayerMutation.isPending ? '…' : 'Delete'}</button>
                 </div>
+                {deletePlayerMutation.error && <p className="text-xs text-destructive mt-1">{(deletePlayerMutation.error as Error).message}</p>}
+                {deletePlayerMutation.isSuccess && <p className="text-xs text-success mt-1">Player deleted.</p>}
               </div>
             </div>
           )}
@@ -452,25 +624,33 @@ const OpsPage = () => {
           ) : (
             <div className="space-y-4">
               <div className="border border-border p-3 rounded-sm">
-                <h3 className="text-sm font-semibold mb-2">Create Schedule Entry</h3>
+                <h3 className="text-sm font-semibold mb-2">Create Schedule Slot</h3>
                 <div className="space-y-2">
+                  <input placeholder="League ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={scheduleForm.leagueId} onChange={e => setScheduleForm(f => ({ ...f, leagueId: e.target.value }))} />
+                  <input placeholder="Season ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={scheduleForm.seasonId} onChange={e => setScheduleForm(f => ({ ...f, seasonId: e.target.value }))} />
                   <div className="grid grid-cols-2 gap-2">
-                    <input placeholder="Home Team ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                    <input placeholder="Away Team ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                    <div>
+                      <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Starts At *</label>
+                      <input type="datetime-local" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm mt-1" value={scheduleForm.startsAt} onChange={e => setScheduleForm(f => ({ ...f, startsAt: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Ends At</label>
+                      <input type="datetime-local" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm mt-1" value={scheduleForm.endsAt} onChange={e => setScheduleForm(f => ({ ...f, endsAt: e.target.value }))} />
+                    </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                    <input type="time" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  </div>
-                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Schedule</button>
+                  <button disabled={!scheduleForm.leagueId || !scheduleForm.seasonId || !scheduleForm.startsAt || createScheduleMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createScheduleMutation.mutate()}>{createScheduleMutation.isPending ? 'Creating…' : 'Create Schedule'}</button>
+                  {createScheduleMutation.error && <p className="text-xs text-destructive">{(createScheduleMutation.error as Error).message}</p>}
+                  {createScheduleMutation.isSuccess && <p className="text-xs text-success">Schedule slot created.</p>}
                 </div>
               </div>
               <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
                 <h3 className="text-sm font-semibold text-destructive mb-2">Delete Schedule Entry</h3>
                 <div className="flex gap-2">
-                  <input placeholder="Schedule ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
+                  <input placeholder="Schedule Slot ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={deleteScheduleId} onChange={e => setDeleteScheduleId(e.target.value)} />
+                  <button disabled={!deleteScheduleId || deleteScheduleMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteScheduleMutation.mutate()}>{deleteScheduleMutation.isPending ? '…' : 'Delete'}</button>
                 </div>
+                {deleteScheduleMutation.error && <p className="text-xs text-destructive mt-1">{(deleteScheduleMutation.error as Error).message}</p>}
+                {deleteScheduleMutation.isSuccess && <p className="text-xs text-success mt-1">Schedule slot deleted.</p>}
               </div>
             </div>
           )}
@@ -487,18 +667,23 @@ const OpsPage = () => {
               <div className="border border-border p-3 rounded-sm">
                 <h3 className="text-sm font-semibold mb-2">Create Event</h3>
                 <div className="space-y-2">
-                  <input placeholder="Event Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <input placeholder="Location" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Event</button>
+                  <input placeholder="Event Title *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventForm.title} onChange={e => setEventForm(f => ({ ...f, title: e.target.value }))} />
+                  <input placeholder="Location (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventForm.location} onChange={e => setEventForm(f => ({ ...f, location: e.target.value }))} />
+                  <input placeholder="League ID (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventForm.leagueId} onChange={e => setEventForm(f => ({ ...f, leagueId: e.target.value }))} />
+                  <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventForm.date} onChange={e => setEventForm(f => ({ ...f, date: e.target.value }))} />
+                  <button disabled={!eventForm.title || createEventMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createEventMutation.mutate()}>{createEventMutation.isPending ? 'Creating…' : 'Create Event'}</button>
+                  {createEventMutation.error && <p className="text-xs text-destructive">{(createEventMutation.error as Error).message}</p>}
+                  {createEventMutation.isSuccess && <p className="text-xs text-success">Event created.</p>}
                 </div>
               </div>
               <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
                 <h3 className="text-sm font-semibold text-destructive mb-2">Delete Event</h3>
                 <div className="flex gap-2">
-                  <input placeholder="Event ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
+                  <input placeholder="Event ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={deleteEventId} onChange={e => setDeleteEventId(e.target.value)} />
+                  <button disabled={!deleteEventId || deleteEventMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteEventMutation.mutate()}>{deleteEventMutation.isPending ? '…' : 'Delete'}</button>
                 </div>
+                {deleteEventMutation.error && <p className="text-xs text-destructive mt-1">{(deleteEventMutation.error as Error).message}</p>}
+                {deleteEventMutation.isSuccess && <p className="text-xs text-success mt-1">Event archived.</p>}
               </div>
             </div>
           )}
@@ -522,19 +707,20 @@ const OpsPage = () => {
                     {[0, 1, 2, 3].map(i => (
                       <div key={i} className="border border-secondary p-3 rounded-sm space-y-2 relative">
                         <div className="absolute top-2 right-2 text-[10px] text-muted-foreground font-semibold">Item {i+1}</div>
-                        <input placeholder="Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                        <input placeholder="Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={storeBatchItems[i].title} onChange={e => updateStoreBatchItem(i, 'title', e.target.value)} />
                         <div className="grid grid-cols-2 gap-2">
-                          <input type="number" placeholder="Price (USD)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                          <input type="number" placeholder="Inventory Qty" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                          <input type="number" placeholder="Price (USD)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={storeBatchItems[i].price} onChange={e => updateStoreBatchItem(i, 'price', e.target.value)} />
                         </div>
-                        <select className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm">
+                        <select className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={storeBatchItems[i].category} onChange={e => updateStoreBatchItem(i, 'category', e.target.value)}>
                           <option value="apparel">Apparel</option>
                           <option value="accessories">Accessories</option>
                           <option value="rewards">Rewards</option>
                         </select>
                       </div>
                     ))}
-                    <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Submit Batch</button>
+                    <button disabled={storeBatchItems.every(it => !it.title.trim()) || storeBatchMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => storeBatchMutation.mutate()}>{storeBatchMutation.isPending ? 'Submitting…' : 'Submit Batch'}</button>
+                    {storeBatchMutation.error && <p className="text-xs text-destructive">{(storeBatchMutation.error as Error).message}</p>}
+                    {storeBatchMutation.isSuccess && <p className="text-xs text-success">Products created.</p>}
                   </div>
                 </div>
 
@@ -544,13 +730,17 @@ const OpsPage = () => {
                   <div className="grid grid-cols-2 gap-2">
                     <div className="border border-warning/20 p-3 rounded-sm bg-warning/5">
                       <h4 className="text-[10px] font-semibold text-warning mb-2 uppercase tracking-widest">Suspend</h4>
-                      <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" />
-                      <button className="bg-warning hover:bg-warning/90 text-warning-foreground px-3 py-1.5 rounded-sm text-[10px] w-full text-black">Suspend</button>
+                      <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" value={storeSuspendId} onChange={e => setStoreSuspendId(e.target.value)} />
+                      <button disabled={!storeSuspendId || storeSuspendMutation.isPending} className="bg-warning hover:bg-warning/90 text-warning-foreground px-3 py-1.5 rounded-sm text-[10px] w-full text-black disabled:opacity-60" onClick={() => storeSuspendMutation.mutate()}>{storeSuspendMutation.isPending ? '…' : 'Suspend'}</button>
+                      {storeSuspendMutation.error && <p className="text-[10px] text-destructive mt-1">{(storeSuspendMutation.error as Error).message}</p>}
+                      {storeSuspendMutation.isSuccess && <p className="text-[10px] text-success mt-1">Product suspended.</p>}
                     </div>
                     <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
                       <h4 className="text-[10px] font-semibold text-destructive mb-2 uppercase tracking-widest">Delete</h4>
-                      <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" />
-                      <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-3 py-1.5 rounded-sm text-[10px] w-full">Delete</button>
+                      <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" value={storeDeleteId} onChange={e => setStoreDeleteId(e.target.value)} />
+                      <button disabled={!storeDeleteId || storeDeleteMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-3 py-1.5 rounded-sm text-[10px] w-full disabled:opacity-60" onClick={() => storeDeleteMutation.mutate()}>{storeDeleteMutation.isPending ? '…' : 'Delete'}</button>
+                      {storeDeleteMutation.error && <p className="text-[10px] text-destructive mt-1">{(storeDeleteMutation.error as Error).message}</p>}
+                      {storeDeleteMutation.isSuccess && <p className="text-[10px] text-success mt-1">Product archived.</p>}
                     </div>
                   </div>
                 </div>
