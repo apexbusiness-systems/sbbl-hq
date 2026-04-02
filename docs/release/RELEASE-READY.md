@@ -148,17 +148,3 @@ Scope in this pass: Phase 1 baseline verification + prioritized execution queue.
 ### Remaining blockers unchanged
 - Playwright e2e still blocked in this environment by missing OS shared library `libatk-1.0.so.0`.
 - Fresh DB migration + deploy smoke remain unproven due missing Supabase CLI and deploy credentials.
-
-## 8) ENVIRONMENT UNBLOCKING ACTIONS
-
-### Completed
-- Installed required Playwright runtime system libraries (GTK/ATK/X11 stack) via apt packages.
-- Installed Playwright Chromium binaries and re-ran e2e successfully.
-- Updated migration script to use `npx supabase db push` so Supabase CLI bootstrap is no longer a hard binary-path blocker.
-
-### Current status after unblocking
-- `npx playwright test` now PASS (8/8).
-- `npm run db:migrate` now reaches Supabase CLI but is blocked by project link/credentials (`Cannot find project ref. Have you run supabase link?`).
-
-### Residual release blocker
-- Fresh DB migration and deployment smoke require authenticated Supabase/Vercel project bindings not available in this environment.
