@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { leagues } from '@/data/mock';
-import type { PlayerProfile } from '@/types';
-const players: PlayerProfile[] = [];
+import { players, teams as mockTeams, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { useApp } from '@/contexts/AppContext';
 import { useQuery } from '@tanstack/react-query';
@@ -26,7 +24,7 @@ const ProfilesPage = () => {
   const teams = useMemo<Team[]>(() => {
     const apiData = teamsQuery.data?.teams;
     if (Array.isArray(apiData) && apiData.length > 0) return apiData;
-    return teamsQuery.data?.teams ?? [];
+    return mockTeams;
   }, [teamsQuery.data]);
 
   const filteredPlayers = players;
@@ -112,7 +110,7 @@ const ProfilesPage = () => {
                   <div className="grid grid-cols-4 gap-2">
                     {Object.entries(detail.stats).map(([key, val]) => (
                       <div key={key} className="text-center p-2 bg-secondary rounded-sm">
-                        <p className="stat-numeral text-base">{String(val)}</p>
+                        <p className="stat-numeral text-base">{val}</p>
                         <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{key}</p>
                       </div>
                     ))}

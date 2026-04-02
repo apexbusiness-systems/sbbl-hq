@@ -2,27 +2,13 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Play, ShoppingBag, ChevronRight, Trophy, Zap, Shield } from 'lucide-react';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api/client';
-import type { PlayerOfTheGame } from '@/types';
+import { products, playersOfTheGame } from '@/data/mock';
 import { PotgCard } from '@/components/ui/PotgCard';
 import { useApp } from '@/contexts/AppContext';
 
 const AppHomePage = () => {
   const { addToBag } = useApp();
-  const productsQuery = useQuery({
-    queryKey: ['public-products-home'],
-    queryFn: () => apiFetch<{ ok: boolean; data: Array<{ id: string; name: string; price: number; status: string; metadata?: Record<string, unknown> }> }>('/api/public/products'),
-    staleTime: 60_000,
-  });
-  const featuredProducts = (productsQuery.data?.data ?? []).slice(0, 3);
-
-  const potgQuery = useQuery({
-    queryKey: ['public-potg-home'],
-    queryFn: () => apiFetch<{ ok: boolean; data: PlayerOfTheGame[] }>('/api/public/potg?limit=4'),
-    staleTime: 60_000,
-  });
-  const recentPotg = potgQuery.data?.data ?? [];
+  const featuredProducts = products.filter(p => p.sale && p.price > 0).slice(0, 3);
 
   return (
     <div className="min-h-screen">
@@ -136,7 +122,7 @@ const AppHomePage = () => {
       </section>
 
       {/* ── POTG ACROSS ALL LEAGUES ────────────────────────────── */}
-      {recentPotg.length > 0 && (
+      {playersOfTheGame.length > 0 && (
         <section className="container py-14">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -150,7 +136,7 @@ const AppHomePage = () => {
             </Link>
           </div>
           <div className="flex gap-4 overflow-x-auto scrollbar-hidden pb-2">
-            {recentPotg.map((potg, i) => (
+            {playersOfTheGame.map((potg, i) => (
               <PotgCard key={potg.id} potg={potg} featured={i === 0} />
             ))}
           </div>
@@ -173,12 +159,12 @@ const AppHomePage = () => {
             {featuredProducts.map(p => (
               <div key={p.id} className="panel overflow-hidden group hover:border-primary/30 transition-colors">
                 <div className="relative aspect-square overflow-hidden bg-secondary">
-                  <img src={(p.metadata as Record<string, unknown>)?.image_url as string | undefined} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+                  <img src={p.image} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
                   <span className="absolute top-2 left-2 px-2 py-0.5 bg-primary text-primary-foreground text-[9px] font-bold uppercase tracking-wider rounded-sm">Sale</span>
                 </div>
                 <div className="p-4">
                   <p className="font-display font-bold text-sm">{p.name}</p>
-                  {(p.metadata as Record<string, unknown>)?.colors && <p className="text-[10px] text-muted-foreground mt-0.5">{((p.metadata as Record<string, unknown>)?.colors as string[])?.[0]}</p>}
+                  {p.colors && <p className="text-[10px] text-muted-foreground mt-0.5">{p.colors[0]}</p>}
                   <div className="flex items-center justify-between mt-3">
                     <span className="text-sm font-bold text-primary">${p.price.toLocaleString()}</span>
                     <button onClick={() => addToBag(p.id)} className="inline-flex items-center gap-1.5 px-3 py-1.5 gold-bg text-xs font-bold uppercase tracking-wider rounded-sm">
