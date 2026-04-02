@@ -107,9 +107,7 @@ const LivePage = () => {
     );
   }
 
-  if (!liveGame) return <NoLiveGame upcomingGames={upcomingGames} />;
-
-  const gameForPlayer = {
+  const gameForPlayer = liveGame ? {
     id: liveGame.id,
     leagueId: (LEAGUE_REGISTRY.find(l => l.code === liveGame.league_code)?.id ?? 'sbbl') as LeagueId,
     homeTeam: { id: liveGame.home_team_id ?? '', name: liveGame.home_team?.name ?? 'Home' },
@@ -121,7 +119,7 @@ const LivePage = () => {
     score: liveGame.home_score != null && liveGame.away_score != null
       ? { home: liveGame.home_score, away: liveGame.away_score } : undefined,
     ppvPrice: 2.50,
-  };
+  } : null;
 
   const sidebar = (
     <div className="space-y-4">
@@ -150,21 +148,40 @@ const LivePage = () => {
           </div>
         </div>
       )}
-      <div className="panel p-4">
-        <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1"><Radio className="w-3 h-3 text-primary animate-pulse" /> Live Score</p>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex-1 text-center">
-            <p className="text-xs text-muted-foreground truncate">{gameForPlayer.homeTeam.name}</p>
-            <p className="stat-numeral text-3xl text-primary">{gameForPlayer.score?.home ?? 0}</p>
+      {gameForPlayer ? (
+        <div className="panel p-4">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1"><Radio className="w-3 h-3 text-primary animate-pulse" /> Live Score</p>
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex-1 text-center">
+              <p className="text-xs text-muted-foreground truncate">{gameForPlayer.homeTeam.name}</p>
+              <p className="stat-numeral text-3xl text-primary">{gameForPlayer.score?.home ?? 0}</p>
+            </div>
+            <span className="text-xs text-muted-foreground font-bold">VS</span>
+            <div className="flex-1 text-center">
+              <p className="text-xs text-muted-foreground truncate">{gameForPlayer.awayTeam.name}</p>
+              <p className="stat-numeral text-3xl">{gameForPlayer.score?.away ?? 0}</p>
+            </div>
           </div>
-          <span className="text-xs text-muted-foreground font-bold">VS</span>
-          <div className="flex-1 text-center">
-            <p className="text-xs text-muted-foreground truncate">{gameForPlayer.awayTeam.name}</p>
-            <p className="stat-numeral text-3xl">{gameForPlayer.score?.away ?? 0}</p>
-          </div>
+          {gameForPlayer.venue && <p className="text-[10px] text-muted-foreground text-center mt-2">{gameForPlayer.venue}</p>}
         </div>
-        {gameForPlayer.venue && <p className="text-[10px] text-muted-foreground text-center mt-2">{gameForPlayer.venue}</p>}
-      </div>
+      ) : (
+        <div className="panel p-4">
+          <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-3 flex items-center gap-1"><Radio className="w-3 h-3 text-muted-foreground" /> Next Game</p>
+          {upcomingGames[0] ? (
+            <div>
+              <p className="font-display font-bold text-sm text-center">{upcomingGames[0].home_team?.name ?? 'TBD'} vs {upcomingGames[0].away_team?.name ?? 'TBD'}</p>
+              {upcomingGames[0].scheduled_at && (
+                <p className="text-xs text-muted-foreground mt-2 text-center flex items-center justify-center gap-1">
+                  <Clock className="w-3 h-3" />
+                  {new Date(upcomingGames[0].scheduled_at).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })}
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground text-center">No upcoming games</p>
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -174,7 +191,30 @@ const LivePage = () => {
         <div className="lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
           <div className="lg:col-span-2 flex flex-col">
             <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
-              <LiveStreamPlayer game={gameForPlayer as never} userId={user?.id ?? null} roles={roles} token={token} hasPremiumPlayerAccess={hasPremiumPlayerAccess} />
+              {liveGame ? (
+                <LiveStreamPlayer game={gameForPlayer as never} userId={user?.id ?? null} roles={roles} token={token} hasPremiumPlayerAccess={hasPremiumPlayerAccess} />
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-6 px-4 text-center py-24 bg-background">
+                  <div className="max-w-md w-full">
+                    <Radio className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+                    <h1 className="font-display text-2xl font-bold mb-2">No Live Game</h1>
+                    <p className="text-sm text-muted-foreground mb-6">No game is in progress right now. Check back when the next game starts.</p>
+                    {upcomingGames[0] && (
+                      <div className="border border-border rounded-sm p-4 text-left">
+                        <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1"><Calendar className="w-3 h-3" /> Next Game</p>
+                        <p className="font-display font-bold text-sm">{upcomingGames[0].home_team?.name ?? 'TBD'} vs {upcomingGames[0].away_team?.name ?? 'TBD'}</p>
+                        {upcomingGames[0].scheduled_at && (
+                          <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {new Date(upcomingGames[0].scheduled_at).toLocaleString('en-CA', { dateStyle: 'medium', timeStyle: 'short' })}
+                          </p>
+                        )}
+                        {upcomingGames[0].venue && <p className="text-[10px] text-muted-foreground mt-1">{upcomingGames[0].venue}</p>}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="container lg:px-0 py-4 space-y-4">
               <div className="flex items-center gap-3 flex-wrap">
