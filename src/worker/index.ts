@@ -1517,8 +1517,10 @@ async function handleOpsPatch(table: string, req: Request, admin: import("@supab
   await admin.from('audit_logs').insert({
     action: `ops_patch_${table}`,
     actor_id: requireAuth(req),
-    target_id: id,
-    changes: body,
+    ref_type: table,
+    ref_id: id,
+    payload: body,
+    idempotency_key: crypto.randomUUID(),
   });
 
   return json({ ok: true, data });
@@ -1543,7 +1545,10 @@ async function handleOpsDelete(table: string, req: Request, admin: import("@supa
   await admin.from('audit_logs').insert({
     action: `ops_archive_${table}`,
     actor_id: requireAuth(req),
-    target_id: id,
+    ref_type: table,
+    ref_id: id,
+    payload: {},
+    idempotency_key: crypto.randomUUID(),
   });
 
   return json({ ok: true, data });
@@ -2061,19 +2066,14 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
 
   if (jobError) throw new Error(jobError.message);
 
-  // If player is matched, also write stat record
+  // player_game_stats requires a non-null game_id FK (games.id).
+  // We don't have a game_id at POTG parse time, so we intentionally skip
+  // this upsert. The import_jobs record carries the full payload; a
+  // subsequent manual-match step will write the stat row once a game_id
+  // is available.
+  // DO NOT add a upsert({ game_id: null }) here — it violates the NOT NULL FK.
   if (profileData?.user_id) {
-    await ctx.admin.from("player_game_stats").upsert({
-      player_id: profileData.user_id,
-      game_id: null, // will be linked when game record exists
-      pts: body.pts,
-      reb: body.rebs,
-      ast: body.assts,
-      stl: null,
-      blk: null,
-      fls: null,
-      min: null,
-    });
+    // stat write deferred — see import_jobs.payload for pending record
   }
 
   try {
@@ -3246,6 +3246,23 @@ routes.push({
   path: "/ops/manual/:kind/:action",
   handler: handleManualOpsAction,
 });
+
+// B2 — register PATCH / DELETE / LIST routes that were defined but never wired
+routes.push(
+  { method: "PATCH",  path: "/ops/teams/:id",     handler: handleOpsPatchTeams },
+  { method: "PATCH",  path: "/ops/players/:id",   handler: handleOpsPatchPlayers },
+  { method: "PATCH",  path: "/ops/products/:id",  handler: handleOpsPatchProducts },
+  { method: "PATCH",  path: "/ops/events/:id",    handler: handleOpsPatchEvents },
+  { method: "PATCH",  path: "/ops/schedules/:id", handler: handleOpsPatchSchedules },
+  { method: "DELETE", path: "/ops/teams/:id",     handler: handleOpsDeleteTeams },
+  { method: "DELETE", path: "/ops/players/:id",   handler: handleOpsDeletePlayers },
+  { method: "DELETE", path: "/ops/products/:id",  handler: handleOpsDeleteProducts },
+  { method: "DELETE", path: "/ops/events/:id",    handler: handleOpsDeleteEvents },
+  { method: "GET",    path: "/ops/list/teams",    handler: handleOpsListTeams },
+  { method: "GET",    path: "/ops/list/players",  handler: handleOpsListPlayers },
+  { method: "GET",    path: "/ops/list/products", handler: handleOpsListProducts },
+  { method: "GET",    path: "/ops/list/events",   handler: handleOpsListEvents },
+);
 
 // Cron or background job logic for inventory retention/archival
 // Triggered periodically (e.g. daily cron) to safely archive products
