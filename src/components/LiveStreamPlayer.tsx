@@ -34,6 +34,7 @@ interface LiveStreamPlayerProps {
   roles: AppRole[];
   token: string | null;
   hasPremiumPlayerAccess: boolean;  // player role with active subscription → invite generation
+  collectionId: string;             // Switcher Studio broadcast ID — set in Ops → stored in DB → passed here
 }
 
 
@@ -201,6 +202,7 @@ export function LiveStreamPlayer({
   roles,
   token,
   hasPremiumPlayerAccess,
+  collectionId,
 }: LiveStreamPlayerProps) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
@@ -296,19 +298,21 @@ export function LiveStreamPlayer({
   if (hasAccess) {
     return (
       <div className="absolute inset-0 flex flex-col">
-        {/* Switcher Studio Player Embed */}
-        <script src="https://player.switcherstudio.com/embed.js" async />
-        {/* TODO: Replace YOUR_COLLECTION_ID_HERE with the real COLLECTION_ID */}
-        <div
-          data-switcher-collection="YOUR_COLLECTION_ID_HERE"
-          style={{ width: "100%", height: "100%" }}
-        />
+        {/* Switcher Studio Player — broadcast ID driven by Ops panel → DB → collectionId prop */}
+        <div className="relative w-full h-full bg-black">
+          <iframe
+            src={`https://player.switcherstudio.com/watch?b=${collectionId}`}
+            title="SBBL Live Broadcast"
+            allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+            allowFullScreen
+            style={{ width: "100%", height: "100%", border: "none", display: "block" }}
+          />
 
-        {/* Super Admin Control Panel */}
-        {isSuperAdminView && <SuperAdminPanel />}
+          {/* Super Admin Control Panel */}
+          {isSuperAdminView && <SuperAdminPanel />}
 
-        {/* Invite generator: shown to eligible roles only */}
-        {canGenerateInvite && (
+          {/* Invite generator: shown to eligible roles only */}
+          {canGenerateInvite && (
           <div className="absolute bottom-4 right-4 z-10">
             {generatedCode ? (
               /* Display generated code with copy button */
@@ -381,10 +385,11 @@ export function LiveStreamPlayer({
           </div>
         )}
 
-        {/* Watermark */}
-        <div className="absolute top-4 right-4 text-[10px] text-white/10 font-mono pointer-events-none select-none">
-          SESSION-BOUND · {userId.slice(0, 8).toUpperCase()}
-        </div>
+          {/* Watermark */}
+          <div className="absolute top-4 right-4 text-[10px] text-white/10 font-mono pointer-events-none select-none">
+            SESSION-BOUND · {userId.slice(0, 8).toUpperCase()}
+          </div>
+        </div>{/* /relative bg-black */}
       </div>
     );
   }

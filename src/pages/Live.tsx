@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
+import { fetchPublicStreamStatus } from '@/lib/api/stream';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
 import { games, players, products } from '@/data/mock';
@@ -15,6 +16,15 @@ const LivePage = () => {
   const token = session?.access_token ?? null;
 
   const liveGame = games.find(g => g.status === 'live') || games[0];
+
+  // Fetch public stream status — provides collectionId set by Ops panel
+  const streamStatusQuery = useQuery({
+    queryKey: ['stream-status', liveGame.id],
+    queryFn: () => fetchPublicStreamStatus(liveGame.id),
+    staleTime: 30_000,
+    refetchInterval: 30_000,
+  });
+  const collectionId = streamStatusQuery.data?.collectionId ?? '0fea533c-e97a-42e7-9424-48499ea1b81c';
 
   const [comments, setComments] = useState<{ user: string; text: string }[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -164,6 +174,7 @@ const LivePage = () => {
                 roles={roles}
                 token={token}
                 hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                collectionId={collectionId}
               />
             </div>
 
