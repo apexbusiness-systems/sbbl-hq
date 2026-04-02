@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync } from 'node:fs';
 
 describe('migration smoke', () => {
   it('contains critical tables and RPCs', () => {
