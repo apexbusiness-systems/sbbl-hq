@@ -1,7 +1,7 @@
 # SBBL HQ Documentation Hub
 
-**Documentation Version:** v1.2.0  
-**Last Updated (UTC):** 2026-04-02
+**Documentation Version:** v1.0.0  
+**Last Updated (UTC):** 2026-03-28
 
 This directory contains the operational and engineering documentation set for SBBL HQ.
 
@@ -13,8 +13,6 @@ This directory contains the operational and engineering documentation set for SB
 4. [Debugging Protocol](./protocols/DEBUGGING_PROTOCOL_v1.0.0.md)
 5. [Emergency Response Protocol](./protocols/EMERGENCY_RESPONSE_PROTOCOL_v1.0.0.md)
 6. [Production Status](./status/PRODUCTION_STATUS_2026-03-28_v1.0.0.md)
-7. [Release Readiness Index](./release/RELEASE-READY.md)
-8. [Release Readiness Report v1.2.0 (2026-04-02)](./release/RELEASE_READY_2026-04-02_v1.2.0.md)
 
 ## Documentation Governance
 
@@ -35,3 +33,4 @@ A practical release-quality 100/100 state in this repository is defined as:
 - No failing tests and no lint errors/warnings.
 - Build artifacts generated deterministically.
 - Remaining non-blocking risks documented with mitigation plans.
+

@@ -1,16 +1,164 @@
-# Release Readiness Index
+# RELEASE READY TRACKER
 
-- **Latest report:** `docs/release/RELEASE_READY_2026-04-02_v1.2.0.md`
-- **Last updated (UTC):** 2026-04-02
-- **Current release verdict:** **NOT READY**
+Date: 2026-04-02 (UTC)
+Branch: `work`
+Scope in this pass: Phase 1 baseline verification + prioritized execution queue.
 
-## Version History
+## 1) BASELINE STATUS
 
-| Version | Date (UTC) | File | Status |
-|---|---|---|---|
-| v1.2.0 | 2026-04-02 | `RELEASE_READY_2026-04-02_v1.2.0.md` | Active |
-| v1.1.0 | 2026-04-02 | `RELEASE_READY_2026-04-02_v1.1.0.md` | Superseded |
+### Current repo status
+- Working tree clean at start of phase.
+- No `sbbl-hq-main.zip` file exists in repository; snapshot cannot be diff-verified in this run.
 
-## Notes
-- This index is the canonical entrypoint for release-readiness records.
-- Detailed evidence lives in the linked versioned report files.
+### Verified blockers (code-evidence)
+- Production UI mock fallbacks are still present in critical pages (`Stats`, `Leaderboards`, `Store`, `Media`, `Profiles`, `Live`, `Home`, `AppHome`).
+- Worker has ack-only handlers on production API routes (`/api/games/:id/stat-sheet`, `/api/streams/:gameId/preview`, `/api/streams/:gameId/session`, `/api/cart/items/:itemId`, `/api/rewards/redeem`).
+- Media uploads currently write to `media` bucket in client admin flows and onboarding path; bucket contract reconciliation still required.
+- Placeholder marker exists in livestream player implementation (`TODO: Replace YOUR_COLLECTION_ID_HERE...`).
+
+### Baseline command results (exact)
+- `npm run lint` → PASS.
+- `npm run typecheck` → PASS.
+- `npm run build` → PASS.
+- `npm run test` → PASS (23 files, 75 tests).
+- `npx playwright test` → FAIL (environment: Playwright Chromium missing; requires `npx playwright install`).
+
+### Inventory snapshot (Phase 1)
+- Frontend routes (App Router map): `/`, `/league/:leagueId`, `/live`, `/schedules`, `/store`, `/profiles`, `/stats`, `/leaderboards`, `/media`, `/teams`, `/login`, `/onboarding`, `/billing`, `/settings`, `/ops`, `/support`.
+- Worker/API critical surfaces include auth/session, public home/products/media, stats/leaderboards RPC, cart/orders/billing, stream access/purchase/config, CSV imports, POTG parse/submit, stripe webhook, ingress/sync.
+- Existing contracts to preserve:
+  - Route paths in `src/App.tsx` and worker route table.
+  - API path contracts used in `src/lib/api/*.ts`.
+  - Existing component and hook contracts consumed by pages.
+  - Supabase schema + RLS policies in migration chain under `supabase/migrations`.
+  - Storage bucket interface currently hard-coded as `media` in upload flows.
+
+## 2) PRIORITIZED TASK QUEUE
+
+### P0 blockers (must close before release)
+1. Remove all production UI mock fallbacks in pages and replace with real loading/error/empty states.
+2. Replace/close ack-only production routes with persisted behavior or explicit non-production gating.
+3. Complete end-to-end admin CRUD persistence for players/teams/products/media/events (UI -> API -> DB/storage -> refresh).
+4. Validate and fix storage bucket contract mismatches (including POTG/store/avatar uploads).
+5. Verify POTG parse -> validate -> persist path against live schema and relational integrity.
+6. Verify/patch server-side validation and auth boundary enforcement for admin mutation routes.
+7. Execute DB migration validation on fresh database and capture evidence.
+8. Restore Playwright execution environment and add/verify required acceptance flows.
+
+### P1 blockers
+1. Strengthen regression coverage around changed contracts (selectors/DOM hooks/route compatibility).
+2. Expand smoke checks for deploy integrations (Supabase, Stripe, stream control).
+3. Produce final gate verdict with command evidence and rollback notes.
+
+### Execution order
+1. Purge UI mock fallbacks.
+2. Close backend ack/stub paths and complete CRUD wiring.
+3. Security/RLS validation pass.
+4. Tests (unit/integration/e2e) + migration smoke.
+5. Deploy-readiness verification and final verdict.
+
+## 3) PHASE EXECUTION UPDATE (Current Pass)
+
+### Closed in this pass
+- Removed production mock data fallback behavior from `Stats`, `Leaderboards`, `Store`, `Media`, and `Profiles` page data sources; these paths now render explicit loading/error/empty states instead of silently substituting local mock datasets.
+- Refactored `Profiles` to source teams/players/leagues from `/api/teams` + league registry rather than `src/data/mock`.
+
+### Still open
+- `Live`, `Home`, and `AppHome` still contain mock-bound production data paths and require replacement with live-backed sources.
+- Ack-only worker handlers still exist on multiple production routes.
+- Storage bucket usage still hardcoded to `media` in upload paths pending bucket contract reconciliation.
+- Playwright acceptance remains blocked by missing browser binary in this environment.
+
+### Verification rerun
+- `npm run lint` → PASS
+- `npm run typecheck` → PASS
+- `npm run build` → PASS
+- `npm run test` → PASS
+- `npx playwright test` → FAIL (Chromium executable missing)
+
+## 4) PHASE EXECUTION UPDATE (Follow-up Pass)
+
+### Closed in this pass
+- Removed mock-bound POTG/product feed wiring from `Home`, `AppHome`, and `Live`; these routes now avoid local mock data in production rendering paths.
+- Changed worker ack-only mutation handler from fake success to explicit `501 not_implemented` to eliminate false-positive mutation acknowledgements.
+
+### Still open
+- Critical operational paths remain unresolved for release readiness:
+  - ack routes still need real persistence implementations (currently honest hard-fail)
+  - storage bucket contract migration (`media` usage) still pending
+  - full admin CRUD parity not fully proven for all required entities
+  - fresh DB migration + deployed integration smoke evidence still pending
+  - Playwright acceptance still blocked by missing browser binary
+
+## 5) PHASE EXECUTION UPDATE (Ack Route Wiring Pass)
+
+### Closed in this pass
+- Replaced ack-only route placeholders with real handlers for:
+  - `GET /api/games/:id/stat-sheet`
+  - `GET /api/streams/:gameId/preview`
+  - `POST /api/streams/:gameId/session`
+  - `DELETE /api/cart/items/:itemId`
+  - `POST /api/rewards/redeem`
+- These routes now execute real DB reads/writes and return actual operational outcomes instead of fake success payloads.
+
+### Still open
+- Storage bucket contract migration (`media` usage) still pending.
+- Admin CRUD parity for all required entities is not fully proven end-to-end.
+- Fresh DB migration on clean environment and deploy smoke checks remain pending.
+- Playwright acceptance still blocked by missing Chromium binary in this environment.
+
+## 6) PHASE 5/6/7 EXECUTION RESULT
+
+### Phase 5 (Security + validation)
+- Server-side auth/idempotency validation is enforced on newly wired mutation handlers (`stream session`, `cart item delete`, `reward redeem`) and input-required checks are present for route params/body payloads.
+- Route behavior moved from ack-only to actual DB operations for the previously fake-success paths.
+
+### Phase 6 (Regression + verification)
+- Re-ran quality gates:
+  - `npm run lint` PASS
+  - `npm run typecheck` PASS
+  - `npm run test` PASS
+  - `npm run build` PASS
+- Playwright setup advanced: Chromium binaries installed successfully, but runtime still fails in this environment due missing OS shared library `libatk-1.0.so.0`.
+
+### Phase 7 (Deploy + release verdict inputs)
+- Fresh DB migration could not be executed in this environment because `supabase` CLI is unavailable (`supabase: not found`).
+- Deploy smoke (Vercel/Supabase/Stripe production) remains unverified due missing deploy credentials and runtime bindings in this environment.
+
+### Current gate status
+- Build/test gates: PASS (except Playwright environment dependency)
+- Migration/deploy/integration gates: UNPROVEN
+- Release verdict at this point: NOT READY (evidence gaps remain)
+
+## 7) TEST ITERATION EVIDENCE (Current Pass)
+
+### Added regression coverage
+- New test file: `src/test/worker-persistence-routes.test.ts`
+  - validates stat-sheet route returns DB rows
+  - validates stream session creation path
+  - validates reward redeem persistence path
+  - validates cart item delete ownership path
+
+### Gate rerun
+- `npm run lint` PASS
+- `npm run typecheck` PASS
+- `npm run test` PASS (24 files, 78 tests)
+- `npm run build` PASS
+
+### Remaining blockers unchanged
+- Playwright e2e still blocked in this environment by missing OS shared library `libatk-1.0.so.0`.
+- Fresh DB migration + deploy smoke remain unproven due missing Supabase CLI and deploy credentials.
+
+## 8) ENVIRONMENT UNBLOCKING ACTIONS
+
+### Completed
+- Installed required Playwright runtime system libraries (GTK/ATK/X11 stack) via apt packages.
+- Installed Playwright Chromium binaries and re-ran e2e successfully.
+- Updated migration script to use `npx supabase db push` so Supabase CLI bootstrap is no longer a hard binary-path blocker.
+
+### Current status after unblocking
+- `npx playwright test` now PASS (8/8).
+- `npm run db:migrate` now reaches Supabase CLI but is blocked by project link/credentials (`Cannot find project ref. Have you run supabase link?`).
+
+### Residual release blocker
+- Fresh DB migration and deployment smoke require authenticated Supabase/Vercel project bindings not available in this environment.
