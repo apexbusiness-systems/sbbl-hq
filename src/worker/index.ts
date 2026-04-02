@@ -317,30 +317,30 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
 }
 
 // Cache TTL for public stream status — 10 s keeps Supabase load flat
-// at 2,000 concurrent viewers polling every 15 s:
+// at 2,000 concurrent viewers polling every 15 s.
+// Uses Cloudflare Cache API (free, unlimited reads) instead of KV.
 //   without cache: ~267 DB queries/s  (hits PgBouncer pool limit)
-//   with cache:    ~1 DB query/10 s   (100% KV hit rate after first poll)
-const STREAM_STATUS_CACHE_KEY = "stream:public:status";
+//   with cache:    ~1 DB query/10 s   (negligible)
 const STREAM_STATUS_TTL_S = 10;
 
-async function handlePublicStreamStatus({ req, env, admin }: HandlerCtx) {
+function streamCacheUrl(gameId: string | null): string {
+  // Cache API requires a fully-qualified URL as the cache key
+  return gameId
+    ? `https://sbbl-hq.icu/__cache/stream-status?gameId=${gameId}`
+    : `https://sbbl-hq.icu/__cache/stream-status`;
+}
+
+async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const gameId = url.searchParams.get("gameId") ?? null;
-  const cacheKey = gameId
-    ? `${STREAM_STATUS_CACHE_KEY}:${gameId}`
-    : STREAM_STATUS_CACHE_KEY;
+  const cacheKey = new Request(streamCacheUrl(gameId));
 
-  // ── KV cache hit ─────────────────────────────────────────────────────────
-  // STREAM_CACHE may be absent in local dev (wrangler dev without KV binding)
-  const kv = (env as Env & { STREAM_CACHE?: KVNamespace }).STREAM_CACHE;
-  if (kv) {
-    const cached = await kv.get(cacheKey, "json") as Record<string, unknown> | null;
-    if (cached) {
-      return json({ ...cached, cached: true });
-    }
-  }
+  // ── Cache API hit (free, edge-local, unlimited) ───────────────────────────
+  const cache = caches.default;
+  const cachedRes = await cache.match(cacheKey);
+  if (cachedRes) return cachedRes;
 
-  // ── Cache miss — hit Supabase once, then cache the result ─────────────────
+  // ── Cache miss — hit Supabase once, write back, serve ────────────────────
   const cfg = await getOrCreateStreamConfig(admin);
   let viewerCount = 0;
   const activeGameId = gameId ?? (cfg.active_game_id as string | null) ?? null;
@@ -362,14 +362,19 @@ async function handlePublicStreamStatus({ req, env, admin }: HandlerCtx) {
     collectionId: String(cfg.collection_id ?? ""),
   };
 
-  // Write back to KV — fire-and-forget (don't block the response)
-  if (kv) {
-    kv.put(cacheKey, JSON.stringify(payload), {
-      expirationTtl: STREAM_STATUS_TTL_S,
-    }).catch(() => { /* non-fatal */ });
-  }
+  const response = new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      // Cache-Control tells Cloudflare edge to hold this for TTL seconds
+      "Cache-Control": `public, max-age=${STREAM_STATUS_TTL_S}`,
+    },
+  });
 
-  return json(payload);
+  // Write to edge cache — fire-and-forget
+  cache.put(cacheKey, response.clone()).catch(() => {});
+
+  return response;
 }
 
 async function handleGetStreamConfig({ req, admin }: HandlerCtx) {
@@ -416,9 +421,8 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
     .single();
   if (error) throw new Error(error.message);
 
-  // Bust KV cache so next poll picks up the new collectionId / title / source
-  const kv = (ctx.env as Env & { STREAM_CACHE?: KVNamespace }).STREAM_CACHE;
-  if (kv) kv.delete(STREAM_STATUS_CACHE_KEY).catch(() => {});
+  // Bust edge cache so next poll picks up new collectionId / title / source
+  caches.default.delete(new Request(streamCacheUrl(null))).catch(() => {});
 
   return json({
     ok: true,
@@ -469,10 +473,13 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
     });
   }
 
-  // Bust KV cache immediately so Go Live / End Broadcast is reflected
+  // Bust edge cache immediately so Go Live / End Broadcast is reflected
   // for all viewers on their next 15 s poll (not delayed by TTL)
-  const kv = (ctx.env as Env & { STREAM_CACHE?: KVNamespace }).STREAM_CACHE;
-  if (kv) kv.delete(STREAM_STATUS_CACHE_KEY).catch(() => {});
+  caches.default.delete(new Request(streamCacheUrl(null))).catch(() => {});
+  // Also bust game-scoped key if a gameId was provided
+  if (typeof body.gameId === "string") {
+    caches.default.delete(new Request(streamCacheUrl(body.gameId))).catch(() => {});
+  }
 
   return json({ ok: true, isLive: body.isLive, at: nowIso });
 }

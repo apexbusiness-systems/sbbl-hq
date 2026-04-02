@@ -12,5 +12,4 @@ interface Env {
   OPTIONAL_TURNSTILE_SECRET_KEY?: string;
   GROQ_API_KEY?: string;
   ASSETS: { fetch: (req: Request) => Promise<Response> };
-  STREAM_CACHE: KVNamespace;
 }
