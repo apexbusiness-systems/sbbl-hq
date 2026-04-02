@@ -36,7 +36,7 @@ const HomePage = () => {
     setState('loading');
     setErrorMsg(null);
     fetchPublicHome(leagueCodeFromId(resolvedLeague))
-      .then((result) => { if (!cancelled) { setData(result); setState('loaded'); } })
+      .then((result) => { if (!cancelled) { setData(result.data); setState('loaded'); } })
       .catch((err) => { if (!cancelled) { setErrorMsg(err instanceof Error ? err.message : 'Failed to load'); setState('error'); } });
     return () => { cancelled = true; };
   }, [resolvedLeague]);
@@ -49,7 +49,7 @@ const HomePage = () => {
   const isSeasonEmpty =
     state === 'loaded' &&
     data !== null &&
-    data.teams.length === 0 &&
+    (data.teams || []).length === 0 &&
     upcomingGames.length === 0 &&
     liveGames.length === 0 &&
     recentGames.length === 0 &&
@@ -153,11 +153,11 @@ const HomePage = () => {
                     <MetricCard label="Live" value={liveGames.length} icon={<Play className="w-3.5 h-3.5 text-live" />} highlight={hasLive} />
                   </div>
 
-                  {data.teams.length > 0 && (
+                  {(data.teams || []).length > 0 && (
                     <div className="mt-4">
                       <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2">Featured Teams</p>
                       <div className="space-y-1.5">
-                        {data.teams.slice(0, 4).map((team) => (
+                        {(data.teams || []).slice(0, 4).map((team) => (
                           <div key={team.id} className="flex items-center justify-between text-xs">
                             <span className="text-foreground/90 truncate">{team.name}</span>
                             <span className="text-muted-foreground tabular-nums">{team.roster_count} players</span>
@@ -167,7 +167,7 @@ const HomePage = () => {
                     </div>
                   )}
 
-                  {data.teams.length === 0 && (
+                  {(data.teams || []).length === 0 && (
                     <p className="mt-4 text-xs text-muted-foreground">No teams published for this league yet.</p>
                   )}
                 </>
@@ -320,7 +320,7 @@ const HomePage = () => {
         )}
 
         {/* Teams grid */}
-        {state === 'loaded' && data && data.teams.length > 0 && (
+        {state === 'loaded' && data && (data.teams || []).length > 0 && (
           <section>
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-display text-xl md:text-2xl font-bold uppercase tracking-tight">Teams</h2>
@@ -329,7 +329,7 @@ const HomePage = () => {
               </Link>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {data.teams.slice(0, 6).map((team) => (
+              {(data.teams || []).slice(0, 6).map((team) => (
                 <div key={team.id} className="panel p-4">
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="font-display font-bold text-sm">{team.name}</h3>
