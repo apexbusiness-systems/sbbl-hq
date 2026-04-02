@@ -349,9 +349,33 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
   return created.data as Record<string, unknown>;
 }
 
+// Cache TTL for public stream status — 10 s keeps Supabase load flat
+// at 2,000 concurrent viewers polling every 15 s.
+// Uses Cloudflare Cache API (free, unlimited reads) instead of KV.
+//   without cache: ~267 DB queries/s  (hits PgBouncer pool limit)
+//   with cache:    ~1 DB query/10 s   (negligible)
+const STREAM_STATUS_TTL_S = 10;
+
+function streamCacheUrl(gameId: string | null): string {
+  // Cache API requires a fully-qualified URL as the cache key
+  return gameId
+    ? `https://sbbl-hq.icu/__cache/stream-status?gameId=${gameId}`
+    : `https://sbbl-hq.icu/__cache/stream-status`;
+}
+
 async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
-  const gameId = url.searchParams.get("gameId");
+  const gameId = url.searchParams.get("gameId") ?? null;
+  const cacheKey = new Request(streamCacheUrl(gameId));
+
+  // ── Cache API hit (free, edge-local, unlimited) ───────────────────────────
+  // Cast: DOM lib's CacheStorage lacks .default; CF Workers runtime adds it.
+  const cfCaches = caches as unknown as { default: Cache };
+  const cache = cfCaches.default;
+  const cachedRes = await cache.match(cacheKey);
+  if (cachedRes) return cachedRes;
+
+  // ── Cache miss — hit Supabase once, write back, serve ────────────────────
   const cfg = await getOrCreateStreamConfig(admin);
   let viewerCount = 0;
   const activeGameId = gameId ?? (cfg.active_game_id as string | null) ?? null;
@@ -361,18 +385,31 @@ async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
       .select("id", { count: "exact", head: true })
       .eq("game_id", activeGameId)
       .eq("status", "active");
-    if (!viewers.error) {
-      viewerCount = viewers.count ?? 0;
-    }
+    if (!viewers.error) viewerCount = viewers.count ?? 0;
   }
 
-  return json({
+  const payload = {
     ok: true,
     isLive: Boolean(cfg.is_live),
     title: String(cfg.title ?? "SBBL Live Stream"),
     viewerCount,
     gameId: activeGameId,
+    collectionId: String(cfg.collection_id ?? ""),
+  };
+
+  const response = new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      // Cache-Control tells Cloudflare edge to hold this for TTL seconds
+      "Cache-Control": `public, max-age=${STREAM_STATUS_TTL_S}`,
+    },
   });
+
+  // Write to edge cache — fire-and-forget
+  cache.put(cacheKey, response.clone()).catch(() => {});
+
+  return response;
 }
 
 async function handleGetStreamConfig({ req, admin }: HandlerCtx) {
@@ -418,6 +455,10 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
     .select("collection_id,title,source,is_live,updated_at")
     .single();
   if (error) throw new Error(error.message);
+
+  // Bust edge cache so next poll picks up new collectionId / title / source
+  (caches as unknown as { default: Cache }).default.delete(new Request(streamCacheUrl(null))).catch(() => {});
+
   return json({
     ok: true,
     config: {
@@ -466,6 +507,16 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
       updated_by: session.userId,
     });
   }
+
+  // Bust edge cache immediately so Go Live / End Broadcast is reflected
+  // for all viewers on their next 15 s poll (not delayed by TTL)
+  const cfCachesLive = caches as unknown as { default: Cache };
+  cfCachesLive.default.delete(new Request(streamCacheUrl(null))).catch(() => {});
+  // Also bust game-scoped key if a gameId was provided
+  if (typeof body.gameId === "string") {
+    cfCachesLive.default.delete(new Request(streamCacheUrl(body.gameId))).catch(() => {});
+  }
+
   return json({ ok: true, isLive: body.isLive, at: nowIso });
 }
 
@@ -1559,8 +1610,10 @@ async function handleOpsPatch(table: string, req: Request, admin: import("@supab
   await admin.from('audit_logs').insert({
     action: `ops_patch_${table}`,
     actor_id: requireAuth(req),
-    target_id: id,
-    changes: body,
+    ref_type: table,
+    ref_id: id,
+    payload: body,
+    idempotency_key: crypto.randomUUID(),
   });
 
   return json({ ok: true, data });
@@ -1585,7 +1638,10 @@ async function handleOpsDelete(table: string, req: Request, admin: import("@supa
   await admin.from('audit_logs').insert({
     action: `ops_archive_${table}`,
     actor_id: requireAuth(req),
-    target_id: id,
+    ref_type: table,
+    ref_id: id,
+    payload: {},
+    idempotency_key: crypto.randomUUID(),
   });
 
   return json({ ok: true, data });
@@ -2087,19 +2143,14 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
 
   if (jobError) throw new Error(jobError.message);
 
-  // If player is matched, also write stat record
+  // player_game_stats requires a non-null game_id FK (games.id).
+  // We don't have a game_id at POTG parse time, so we intentionally skip
+  // this upsert. The import_jobs record carries the full payload; a
+  // subsequent manual-match step will write the stat row once a game_id
+  // is available.
+  // DO NOT add a upsert({ game_id: null }) here — it violates the NOT NULL FK.
   if (profileData?.user_id) {
-    await ctx.admin.from("player_game_stats").upsert({
-      player_id: profileData.user_id,
-      game_id: null, // will be linked when game record exists
-      pts: body.pts,
-      reb: body.rebs,
-      ast: body.assts,
-      stl: null,
-      blk: null,
-      fls: null,
-      min: null,
-    });
+    // stat write deferred — see import_jobs.payload for pending record
   }
 
   try {
@@ -2165,14 +2216,9 @@ async function handleInviteGenerate(ctx: HandlerCtx) {
   const gameId = body?.gameId;
   if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
 
-  // Verify the game exists
-  const { data: game, error: gameErr } = await ctx.admin
-    .from("games")
-    .select("id")
-    .eq("id", gameId)
-    .maybeSingle();
-  if (gameErr || !game)
-    return json({ ok: false, error: "game_not_found" }, 404);
+  // NOTE: game_id is now text (not UUID FK) — mock IDs like 'g1' are valid.
+  // Skip DB game existence check; the ppv_invites insert will succeed
+  // with any non-empty game identifier.
 
   // Check for an existing invite (idempotent — return same code on re-request)
   const { data: existing } = await ctx.admin
@@ -3272,6 +3318,23 @@ routes.push({
   path: "/ops/manual/:kind/:action",
   handler: handleManualOpsAction,
 });
+
+// B2 — register PATCH / DELETE / LIST routes that were defined but never wired
+routes.push(
+  { method: "PATCH",  path: "/ops/teams/:id",     handler: handleOpsPatchTeams },
+  { method: "PATCH",  path: "/ops/players/:id",   handler: handleOpsPatchPlayers },
+  { method: "PATCH",  path: "/ops/products/:id",  handler: handleOpsPatchProducts },
+  { method: "PATCH",  path: "/ops/events/:id",    handler: handleOpsPatchEvents },
+  { method: "PATCH",  path: "/ops/schedules/:id", handler: handleOpsPatchSchedules },
+  { method: "DELETE", path: "/ops/teams/:id",     handler: handleOpsDeleteTeams },
+  { method: "DELETE", path: "/ops/players/:id",   handler: handleOpsDeletePlayers },
+  { method: "DELETE", path: "/ops/products/:id",  handler: handleOpsDeleteProducts },
+  { method: "DELETE", path: "/ops/events/:id",    handler: handleOpsDeleteEvents },
+  { method: "GET",    path: "/ops/list/teams",    handler: handleOpsListTeams },
+  { method: "GET",    path: "/ops/list/players",  handler: handleOpsListPlayers },
+  { method: "GET",    path: "/ops/list/products", handler: handleOpsListProducts },
+  { method: "GET",    path: "/ops/list/events",   handler: handleOpsListEvents },
+);
 
 // Cron or background job logic for inventory retention/archival
 // Triggered periodically (e.g. daily cron) to safely archive products

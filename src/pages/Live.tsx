@@ -1,20 +1,78 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
+import { fetchPublicStreamStatus, fetchAdminStreamConfig, updateStreamConfig, setStreamLive } from '@/lib/api/stream';
+import { getAuthToken } from '@/lib/api/client';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
 import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { CASLNudge } from '@/components/CASLNudge';
-import { MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag } from 'lucide-react';
+import { MessageSquare, Share2, Scissors, ShoppingBag, Check, ChevronLeft, ChevronRight, Tag, Settings2, ExternalLink, Radio, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 
 const LivePage = () => {
+  const queryClient = useQueryClient();
   const { addToBag, hasPremiumPlayerAccess } = useApp();
   const { user, session, roles } = useAuth();
   const token = session?.access_token ?? null;
+  const isSuperAdmin = roles.includes('super_admin');
 
   const liveGame = games.find(g => g.status === 'live') || games[0];
+
+  // ── Stream status (public — no auth) ──────────────────────────────────────────────
+  const streamStatusQuery = useQuery({
+    queryKey: ['stream-status', liveGame.id],
+    queryFn: () => fetchPublicStreamStatus(liveGame.id),
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+  });
+  const collectionId = streamStatusQuery.data?.collectionId ?? '0fea533c-e97a-42e7-9424-48499ea1b81c';
+  const isStreamLive = streamStatusQuery.data?.isLive ?? false;
+  const viewerCount  = streamStatusQuery.data?.viewerCount ?? 0;
+
+  // ── Admin config (super_admin only) ────────────────────────────────────────────
+  const [adminOpen, setAdminOpen] = useState(false);
+  const [adminForm, setAdminForm] = useState({ collectionId: '', title: '', source: 'main' as 'main' | 'backup' | 'test' });
+  const [showGoLiveConfirm, setShowGoLiveConfirm] = useState(false);
+
+  const streamConfigQuery = useQuery({
+    queryKey: ['live-stream-config'],
+    queryFn: async () => fetchAdminStreamConfig(await getAuthToken()),
+    enabled: isSuperAdmin,
+  });
+
+  // Sync admin form from DB config
+  useEffect(() => {
+    const cfg = streamConfigQuery.data?.config;
+    if (!cfg) return;
+    setAdminForm(prev => {
+      if (prev.collectionId === cfg.collectionId && prev.title === cfg.title && prev.source === cfg.source) return prev;
+      return { collectionId: cfg.collectionId, title: cfg.title, source: cfg.source };
+    });
+  }, [streamConfigQuery.data?.config]);
+
+  const saveConfigMutation = useMutation({
+    mutationFn: async () => updateStreamConfig(adminForm, await getAuthToken()),
+    onSuccess: async (res) => {
+      setAdminForm({ collectionId: res.config.collectionId, title: res.config.title, source: res.config.source });
+      await queryClient.invalidateQueries({ queryKey: ['live-stream-config'] });
+      await queryClient.invalidateQueries({ queryKey: ['stream-status', liveGame.id] });
+      toast.success('Stream config saved');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const goLiveMutation = useMutation({
+    mutationFn: async (next: boolean) => setStreamLive(next, await getAuthToken()),
+    onSuccess: async (res) => {
+      await queryClient.invalidateQueries({ queryKey: ['stream-status', liveGame.id] });
+      await queryClient.invalidateQueries({ queryKey: ['live-stream-config'] });
+      toast.success(res.isLive ? 'Stream is now LIVE' : 'Stream ended');
+      setShowGoLiveConfirm(false);
+    },
+    onError: (e: Error) => { toast.error(e.message); setShowGoLiveConfirm(false); },
+  });
 
   const [comments, setComments] = useState<{ user: string; text: string }[]>([]);
   const [chatInput, setChatInput] = useState('');
@@ -164,12 +222,13 @@ const LivePage = () => {
                 roles={roles}
                 token={token}
                 hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                collectionId={collectionId}
               />
             </div>
 
             {/* Actions + Chat */}
             <div className="container lg:px-0 py-4 space-y-4">
-              {/* Reaction bar */}
+              {/* Reaction bar + Stream Admin Dropdown */}
               <div className="flex items-center gap-3 flex-wrap">
                 <button onClick={() => setReactions(r => ({ ...r, fire: r.fire + 1 }))} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   🔥 <span className="stat-numeral">{reactions.fire}</span>
@@ -190,6 +249,154 @@ const LivePage = () => {
                 <button onClick={handleShare} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   <Share2 className="w-3.5 h-3.5" /> Share
                 </button>
+
+                {/* Stream Admin Dropdown — super_admin only */}
+                {isSuperAdmin && (
+                  <div className="relative ml-auto">
+                    <button
+                      onClick={() => setAdminOpen(o => !o)}
+                      className={`panel px-3 py-2 text-xs flex items-center gap-1.5 transition-colors ${
+                        isStreamLive ? 'border-green-500/50 text-green-400' : 'hover:border-primary/30'
+                      }`}
+                    >
+                      <Radio className="w-3.5 h-3.5" />
+                      <span className="font-semibold uppercase tracking-wide">
+                        {isStreamLive ? 'LIVE' : 'OFFLINE'}
+                      </span>
+                      <ChevronDown className={`w-3.5 h-3.5 transition-transform ${adminOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {adminOpen && (
+                      <div className="absolute bottom-full mb-2 right-0 z-50 w-80 bg-zinc-950/95 backdrop-blur-md border border-zinc-800 rounded-xl shadow-2xl p-4 space-y-3">
+                        {/* Header */}
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                            <Settings2 className="w-3 h-3" /> Stream Admin
+                          </span>
+                          <div className={`flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest ${
+                            isStreamLive ? 'text-green-500' : 'text-red-500'
+                          }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              isStreamLive ? 'bg-green-500 animate-pulse' : 'bg-red-500'
+                            }`} />
+                            {isStreamLive ? 'Live' : 'Offline'}
+                          </div>
+                        </div>
+
+                        {/* Go Live / End Broadcast */}
+                        <button
+                          disabled={goLiveMutation.isPending}
+                          onClick={() => setShowGoLiveConfirm(true)}
+                          className={`w-full py-2.5 rounded-lg font-bold text-xs uppercase tracking-wider transition-colors disabled:opacity-60 ${
+                            isStreamLive
+                              ? 'bg-red-500/10 text-red-400 border border-red-500/40 hover:bg-red-500/20'
+                              : 'bg-green-500 text-black hover:bg-green-400'
+                          }`}
+                        >
+                          {goLiveMutation.isPending ? 'Updating…' : (isStreamLive ? 'End Broadcast' : 'Go Live')}
+                        </button>
+
+                        {/* Stats row */}
+                        <div className="flex gap-3 pt-1 border-t border-zinc-800/50">
+                          <div>
+                            <p className="text-[9px] text-zinc-500 uppercase tracking-widest">Viewers</p>
+                            <p className="font-mono text-sm text-white">{isStreamLive ? viewerCount.toLocaleString() : '—'}</p>
+                          </div>
+                        </div>
+
+                        {/* Collection ID */}
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-zinc-500 uppercase tracking-widest font-semibold">Switcher Broadcast ID</label>
+                          <input
+                            type="text"
+                            value={adminForm.collectionId}
+                            onChange={e => setAdminForm(f => ({ ...f, collectionId: e.target.value }))}
+                            placeholder="e.g. 0fea533c-e97a-42e7-..."
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs font-mono focus:outline-none focus:border-zinc-600"
+                          />
+                        </div>
+
+                        {/* Stream Title */}
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-zinc-500 uppercase tracking-widest font-semibold">Stream Title</label>
+                          <input
+                            type="text"
+                            value={adminForm.title}
+                            onChange={e => setAdminForm(f => ({ ...f, title: e.target.value }))}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-zinc-600"
+                          />
+                        </div>
+
+                        {/* Source */}
+                        <div className="space-y-1">
+                          <label className="text-[9px] text-zinc-500 uppercase tracking-widest font-semibold">Source</label>
+                          <select
+                            value={adminForm.source}
+                            onChange={e => setAdminForm(f => ({ ...f, source: e.target.value as 'main' | 'backup' | 'test' }))}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded-md px-2.5 py-1.5 text-xs focus:outline-none focus:border-zinc-600"
+                          >
+                            <option value="main">Main Feed</option>
+                            <option value="backup">Backup Feed</option>
+                            <option value="test">Test Loop</option>
+                          </select>
+                        </div>
+
+                        {/* Save Config */}
+                        <button
+                          disabled={saveConfigMutation.isPending}
+                          onClick={() => saveConfigMutation.mutate()}
+                          className="w-full py-2 rounded-lg font-bold text-xs uppercase tracking-wider bg-amber-500 text-black hover:bg-amber-400 transition-colors disabled:opacity-60"
+                        >
+                          {saveConfigMutation.isPending ? 'Saving…' : 'Save Config'}
+                        </button>
+
+                        {/* Quick links */}
+                        <div className="flex gap-2 pt-1 border-t border-zinc-800/50">
+                          <button
+                            onClick={() => window.open('https://studio.switcherstudio.com', '_blank')}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-zinc-400 hover:text-white bg-zinc-900 rounded-md transition-colors border border-zinc-800 hover:border-zinc-600"
+                          >
+                            <ExternalLink className="w-3 h-3" /> Switcher Studio
+                          </button>
+                          <button
+                            onClick={() => window.location.reload()}
+                            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-[10px] text-zinc-400 hover:text-white bg-zinc-900 rounded-md transition-colors border border-zinc-800 hover:border-zinc-600"
+                          >
+                            Refresh Feed
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Go Live / End confirmation modal */}
+                    {showGoLiveConfirm && (
+                      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm" onClick={() => setShowGoLiveConfirm(false)}>
+                        <div className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl max-w-sm w-full mx-4" onClick={e => e.stopPropagation()}>
+                          <h3 className="font-display font-bold text-lg mb-2">{isStreamLive ? 'End Broadcast?' : 'Go Live?'}</h3>
+                          <p className="text-zinc-400 text-sm mb-6">
+                            {isStreamLive
+                              ? 'This will take the stream offline. All active viewers will see the offline screen.'
+                              : 'This pushes the stream live for all viewers. Make sure Switcher Studio is ready and broadcasting.'}
+                          </p>
+                          <div className="flex justify-end gap-3">
+                            <button onClick={() => setShowGoLiveConfirm(false)} className="px-4 py-2 text-sm font-medium hover:bg-zinc-800 rounded-lg transition-colors">
+                              Cancel
+                            </button>
+                            <button
+                              disabled={goLiveMutation.isPending}
+                              onClick={() => goLiveMutation.mutate(!isStreamLive)}
+                              className={`px-4 py-2 text-sm font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-60 ${
+                                isStreamLive ? 'bg-red-500 text-white hover:bg-red-600' : 'bg-green-500 text-black hover:bg-green-400'
+                              }`}
+                            >
+                              {goLiveMutation.isPending ? 'Updating…' : (isStreamLive ? 'End Stream' : 'Confirm Go Live')}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Live Chat */}
