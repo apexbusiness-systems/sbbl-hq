@@ -40,7 +40,7 @@ CREATE POLICY "league_events_admin_all"
   ON league_events FOR ALL
   USING (
     EXISTS (
-      SELECT 1 FROM user_roles
+      SELECT 1 FROM public.user_role_assignments
       WHERE user_id = auth.uid()
         AND role IN ('super_admin', 'league_admin')
     )
