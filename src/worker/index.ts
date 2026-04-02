@@ -154,10 +154,17 @@ async function handleMe({ req }: HandlerCtx) {
 }
 
 async function handleMutationAck(ctx: HandlerCtx) {
+  // NOTE: this route intentionally returns a hard failure so production never
+  // reports success for unimplemented mutation paths.
   const { req, params } = ctx;
   await ensureMutation(req, ctx);
-  const userId = requireAuth(req);
-  return json({ ok: true, userId, route: params.route, params, at: new Date().toISOString() });
+  requireAuth(req);
+  return json({
+    ok: false,
+    error: 'not_implemented',
+    route: params.route ?? null,
+    message: 'Route exists but has no persistence handler yet.',
+  }, 501);
 }
 
 async function handleStats({ req, admin }: HandlerCtx) {
