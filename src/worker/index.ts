@@ -316,9 +316,31 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
   return created.data as Record<string, unknown>;
 }
 
-async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
+// Cache TTL for public stream status — 10 s keeps Supabase load flat
+// at 2,000 concurrent viewers polling every 15 s:
+//   without cache: ~267 DB queries/s  (hits PgBouncer pool limit)
+//   with cache:    ~1 DB query/10 s   (100% KV hit rate after first poll)
+const STREAM_STATUS_CACHE_KEY = "stream:public:status";
+const STREAM_STATUS_TTL_S = 10;
+
+async function handlePublicStreamStatus({ req, env, admin }: HandlerCtx) {
   const url = new URL(req.url);
-  const gameId = url.searchParams.get("gameId");
+  const gameId = url.searchParams.get("gameId") ?? null;
+  const cacheKey = gameId
+    ? `${STREAM_STATUS_CACHE_KEY}:${gameId}`
+    : STREAM_STATUS_CACHE_KEY;
+
+  // ── KV cache hit ─────────────────────────────────────────────────────────
+  // STREAM_CACHE may be absent in local dev (wrangler dev without KV binding)
+  const kv = (env as Env & { STREAM_CACHE?: KVNamespace }).STREAM_CACHE;
+  if (kv) {
+    const cached = await kv.get(cacheKey, "json") as Record<string, unknown> | null;
+    if (cached) {
+      return json({ ...cached, cached: true });
+    }
+  }
+
+  // ── Cache miss — hit Supabase once, then cache the result ─────────────────
   const cfg = await getOrCreateStreamConfig(admin);
   let viewerCount = 0;
   const activeGameId = gameId ?? (cfg.active_game_id as string | null) ?? null;
@@ -328,19 +350,26 @@ async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
       .select("id", { count: "exact", head: true })
       .eq("game_id", activeGameId)
       .eq("status", "active");
-    if (!viewers.error) {
-      viewerCount = viewers.count ?? 0;
-    }
+    if (!viewers.error) viewerCount = viewers.count ?? 0;
   }
 
-  return json({
+  const payload = {
     ok: true,
     isLive: Boolean(cfg.is_live),
     title: String(cfg.title ?? "SBBL Live Stream"),
     viewerCount,
     gameId: activeGameId,
     collectionId: String(cfg.collection_id ?? ""),
-  });
+  };
+
+  // Write back to KV — fire-and-forget (don't block the response)
+  if (kv) {
+    kv.put(cacheKey, JSON.stringify(payload), {
+      expirationTtl: STREAM_STATUS_TTL_S,
+    }).catch(() => { /* non-fatal */ });
+  }
+
+  return json(payload);
 }
 
 async function handleGetStreamConfig({ req, admin }: HandlerCtx) {
@@ -386,6 +415,11 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
     .select("collection_id,title,source,is_live,updated_at")
     .single();
   if (error) throw new Error(error.message);
+
+  // Bust KV cache so next poll picks up the new collectionId / title / source
+  const kv = (ctx.env as Env & { STREAM_CACHE?: KVNamespace }).STREAM_CACHE;
+  if (kv) kv.delete(STREAM_STATUS_CACHE_KEY).catch(() => {});
+
   return json({
     ok: true,
     config: {
@@ -434,6 +468,12 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
       updated_by: session.userId,
     });
   }
+
+  // Bust KV cache immediately so Go Live / End Broadcast is reflected
+  // for all viewers on their next 15 s poll (not delayed by TTL)
+  const kv = (ctx.env as Env & { STREAM_CACHE?: KVNamespace }).STREAM_CACHE;
+  if (kv) kv.delete(STREAM_STATUS_CACHE_KEY).catch(() => {});
+
   return json({ ok: true, isLive: body.isLive, at: nowIso });
 }
 
