@@ -1,0 +1,26 @@
+$ vite
+
+  VITE v5.4.19  ready in 720 ms
+
+  ➜  Local:   http://localhost:8080/
+  ➜  Network: http://192.168.0.2:8080/
+Browserslist: browsers data (caniuse-lite) is 10 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+
+PWA v1.2.0
+mode      generateSW
+precache  1 entries (0.00 KiB)
+files generated
+  dev-dist/sw.js
+  dev-dist/workbox-52f2a342.js
+warnings
+  One of the glob patterns doesn't match any files. Please remove or fix the following: {
+  "globDirectory": "/app/dev-dist",
+  "globPattern": "**/*.{js,wasm,css,html}",
+  "globIgnores": [
+    "**/node_modules/**/*",
+    "sw.js",
+    "workbox-*.js"
+  ]
+}

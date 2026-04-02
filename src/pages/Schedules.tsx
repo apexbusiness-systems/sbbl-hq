@@ -4,6 +4,8 @@ import { SCHEDULE_DATA, type ScheduleDay } from '@/data/schedules';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
 import { Calendar, MapPin, Clock } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { fetchPublicSchedule } from '@/lib/api/public';
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
@@ -21,6 +23,13 @@ const SchedulesPage = () => {
       ? (paramLeague as LeagueId | 'all')
       : (activeLeague || 'all')
   );
+  const { data: liveDataRes, isLoading } = useQuery({
+    queryKey: ['public-schedule', leagueFilter],
+    queryFn: () => fetchPublicSchedule(leagueFilter),
+    staleTime: 1000 * 60 * 5,
+  });
+  const liveSchedules = liveDataRes?.data || [];
+
   // Keep URL and local state in sync when user clicks page filters
   const handleLeagueFilterChange = (val: LeagueId | 'all') => {
     setLeagueFilter(val);
@@ -39,6 +48,42 @@ const SchedulesPage = () => {
   const filtered = leagueFilter === 'all'
     ? SCHEDULE_DATA
     : SCHEDULE_DATA.filter((s) => s.leagueId === leagueFilter);
+
+  // Safely map live schedules into ScheduleDay shape if we have them
+  // Group by league and date, then court
+  const groupedLive = liveSchedules.reduce((acc: any, curr: any) => {
+    const key = `${curr.league_id}-${curr.start_time.split('T')[0]}`;
+    if (!acc[key]) {
+      acc[key] = {
+        leagueId: curr.league_id,
+        season: 'Current Season',
+        week: '1',
+        date: curr.start_time.split('T')[0],
+        venue: curr.venue || 'TBA',
+        address: curr.address || 'TBA',
+        courts: {}
+      };
+    }
+    const courtName = curr.court || 'Main Court';
+    if (!acc[key].courts[courtName]) {
+      acc[key].courts[courtName] = [];
+    }
+    const time = new Date(curr.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    acc[key].courts[courtName].push({
+      time,
+      home: curr.home_team_id || 'TBA',
+      away: curr.away_team_id || 'TBA'
+    });
+    return acc;
+  }, {});
+
+  const mappedLiveSchedules: ScheduleDay[] = Object.values(groupedLive).map((g: any) => ({
+    ...g,
+    courts: Object.entries(g.courts).map(([name, games]) => ({ name, games: games as any[] }))
+  }));
+
+  const displayData = mappedLiveSchedules.length > 0 ? mappedLiveSchedules : filtered;
+
 
   return (
     <div className="min-h-screen">
@@ -80,8 +125,15 @@ const SchedulesPage = () => {
           </div>
         )}
 
+        {mappedLiveSchedules.length === 0 && !isLoading && (
+          <div className="mb-6 p-4 rounded-md border border-border bg-secondary/30 text-sm text-muted-foreground flex items-center gap-3">
+             <Calendar className="w-4 h-4 text-primary" />
+             <span>Showing scheduled season structure. Live game times will be updated when finalized.</span>
+          </div>
+        )}
+
         <div className="space-y-8">
-          {filtered.map((day) => (
+          {displayData.map((day) => (
             <ScheduleDayCard key={`${day.leagueId}-${day.date}`} day={day} />
           ))}
         </div>
