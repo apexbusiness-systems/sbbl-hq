@@ -1,39 +1,73 @@
 import { useQuery } from '@tanstack/react-query';
-import { fetchTeams, type TeamCard, type PlayerProfile, type CoachProfile } from '@/lib/api/teams';
+import { fetchTeams, type TeamCard } from '@/lib/api/teams';
+import { STATIC_TEAMS, type StaticTeam } from '@/data/teams';
 import { useApp } from '@/contexts/AppContext';
-import { LEAGUE_REGISTRY, getLeagueConfig, leagueCodeFromId } from '@/lib/leagues';
+import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
-import { Users, Calendar, MapPin, Trophy, Target, TargetIcon, Navigation, UserCircle, Briefcase, Activity, Shield } from 'lucide-react';
+import { Users, Trophy, Target, Activity, UserCircle, Briefcase, Shield } from 'lucide-react';
 import { useState, useMemo } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 
-type TabView = 'standings' | 'rosters' | 'stats';
+type TabView = 'overview' | 'standings' | 'rosters' | 'stats';
+
+/**
+ * Convert a parsed StaticTeam (from official league schedule graphics) into the
+ * TeamCard shape used by the Teams page views. This uses REAL team data — not mock.
+ */
+function staticTeamToTeamCard(team: StaticTeam, index: number): TeamCard {
+  const leagueEntry = LEAGUE_REGISTRY.find(l => l.id === team.leagueId);
+
+  return {
+    id: `static-${team.leagueCode}-${index}`,
+    name: team.name,
+    league_code: team.leagueCode,
+    league_name: leagueEntry?.name ?? team.leagueCode,
+    season_name: team.season,
+    division_name: team.season,
+    roster_count: 0,
+    players: [],
+    coaches: [],
+    stats: {
+      wins: 0,
+      losses: 0,
+      gamesPlayed: 0,
+      ptsFor: 0,
+      ptsAgainst: 0,
+      winPct: '.000',
+      diff: 0,
+    },
+  };
+}
 
 const TeamsPage = () => {
   const [searchParams] = useSearchParams();
   const paramLeague = searchParams.get('league') as LeagueId | null;
   const { activeLeague } = useApp();
 
-  // Resolve filter from URL param, fallback to activeLeague from context, default to 'all'
-  // Actually, if we're "Teams & Standings", filtering by the current context league makes sense.
-  // We'll allow "all" for global view but prioritize the context.
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(paramLeague && LEAGUE_REGISTRY.some(l => l.id === paramLeague) ? paramLeague : (activeLeague || 'all'));
-  const [activeTab, setActiveTab] = useState<TabView>('standings');
+  const [activeTab, setActiveTab] = useState<TabView>('overview');
 
-  const teamsQuery = useQuery({ queryKey: ['teams'], queryFn: () => fetchTeams() });
+  const teamsQuery = useQuery({ queryKey: ['teams'], queryFn: () => fetchTeams(), retry: 1, staleTime: 120_000 });
+
+  // Use API data if available, fall back to STATIC_TEAMS (real parsed data)
+  const allTeams = useMemo<TeamCard[]>(() => {
+    const apiTeams = teamsQuery.data?.teams;
+    if (Array.isArray(apiTeams) && apiTeams.length > 0) return apiTeams;
+    return STATIC_TEAMS.map((t, i) => staticTeamToTeamCard(t, i));
+  }, [teamsQuery.data?.teams]);
+
   const filteredTeams = useMemo(() => {
-    const apiTeams = teamsQuery.data?.teams ?? [];
-    if (leagueFilter === 'all') return apiTeams;
-    const code = getLeagueConfig(leagueFilter).code;
-    return apiTeams.filter(t => t.league_code === code);
-  }, [teamsQuery.data?.teams, leagueFilter]);
+    if (leagueFilter === 'all') return allTeams;
+    const entry = LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
+    const code = entry?.code ?? leagueFilter.toUpperCase();
+    return allTeams.filter(t => t.league_code === code);
+  }, [allTeams, leagueFilter]);
 
   const standings = useMemo(() => {
     return [...filteredTeams].sort((a, b) => {
-      // Sort by Win PCT descending, then wins descending, then diff descending
-      const winPctA = parseFloat(a.stats?.winPct || '0');
-      const winPctB = parseFloat(b.stats?.winPct || '0');
+      const winPctA = Number.parseFloat(a.stats?.winPct || '0');
+      const winPctB = Number.parseFloat(b.stats?.winPct || '0');
       if (winPctB !== winPctA) return winPctB - winPctA;
       if (b.stats?.wins !== a.stats?.wins) return (b.stats?.wins || 0) - (a.stats?.wins || 0);
       return (b.stats?.diff || 0) - (a.stats?.diff || 0);
@@ -42,14 +76,9 @@ const TeamsPage = () => {
 
   const statsLeaders = useMemo(() => {
     return [...filteredTeams].sort((a, b) => {
-      // Sort by Points For
       return (b.stats?.ptsFor || 0) - (a.stats?.ptsFor || 0);
     });
   }, [filteredTeams]);
-
-  const handleLogoError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
-    (e.target as HTMLImageElement).src = 'https://ui-avatars.com/api/?name=Team&background=random';
-  };
 
   const handleAvatarError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     (e.target as HTMLImageElement).src = 'https://ui-avatars.com/api/?name=Player&background=random';
@@ -92,6 +121,7 @@ const TeamsPage = () => {
           {/* View Tabs */}
           <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
             {[
+              { id: 'overview', label: 'Overview', icon: Users },
               { id: 'standings', label: 'Standings', icon: Trophy },
               { id: 'rosters', label: 'Rosters', icon: Users },
               { id: 'stats', label: 'Stats', icon: Activity },
@@ -118,6 +148,48 @@ const TeamsPage = () => {
         {!teamsQuery.isLoading && filteredTeams.length === 0 && (
           <div className="panel p-8 text-center border-dashed">
             <p className="text-muted-foreground text-sm">No teams found for the selected league.</p>
+          </div>
+        )}
+
+        {/* ── OVERVIEW VIEW (Team Cards — ported from Profiles) ─────── */}
+        {!teamsQuery.isLoading && activeTab === 'overview' && filteredTeams.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredTeams.map(t => (
+              <div key={t.id} className="panel p-4 hover:border-primary/20 transition-colors">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="font-display font-bold">{t.name}</h3>
+                    <p className="text-xs text-muted-foreground">{t.division_name || t.season_name}</p>
+                  </div>
+                  <LeagueBadge leagueId={t.league_code.toLowerCase() as LeagueId} />
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-center">
+                    <p className="stat-numeral text-2xl text-success">{t.stats?.wins || 0}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase">Wins</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="stat-numeral text-2xl text-destructive">{t.stats?.losses || 0}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase">Losses</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="stat-numeral text-2xl">
+                      {t.stats && t.stats.gamesPlayed > 0
+                        ? `${((t.stats.wins / t.stats.gamesPlayed) * 100).toFixed(0)}%`
+                        : '0%'}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground uppercase">Win %</p>
+                  </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-border">
+                  <p className="text-xs text-muted-foreground">
+                    Roster: {t.players && t.players.length > 0
+                      ? t.players.map(p => `${p.first_name || ''} ${p.last_name || ''}`.trim()).filter(Boolean).join(', ')
+                      : 'View full roster'}
+                  </p>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -159,9 +231,15 @@ const TeamsPage = () => {
                       <td className="px-4 py-3 text-center text-muted-foreground tabular-nums">{team.stats?.ptsFor || 0}</td>
                       <td className="px-4 py-3 text-center text-muted-foreground tabular-nums">{team.stats?.ptsAgainst || 0}</td>
                       <td className="px-4 py-3 text-center tabular-nums">
-                        <span className={(team.stats?.diff || 0) > 0 ? 'text-green-500' : (team.stats?.diff || 0) < 0 ? 'text-red-500' : 'text-muted-foreground'}>
-                          {(team.stats?.diff || 0) > 0 ? '+' : ''}{team.stats?.diff || 0}
-                        </span>
+                        {(() => {
+                          const diff = team.stats?.diff ?? 0;
+                          const diffClass = diff > 0 ? 'text-green-500' : diff < 0 ? 'text-red-500' : 'text-muted-foreground';
+                          return (
+                            <span className={diffClass}>
+                              {diff > 0 ? '+' : ''}{diff}
+                            </span>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}
@@ -226,7 +304,7 @@ const TeamsPage = () => {
                         {team.players.map(player => (
                           <div key={player.id} className="flex items-center gap-3">
                             <div className="w-8 h-8 rounded-sm bg-secondary border border-border flex items-center justify-center font-display font-bold text-sm text-muted-foreground flex-shrink-0">
-                              {player.jersey_number != null ? player.jersey_number : '-'}
+                              {player.jersey_number ?? '-'}
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="text-sm font-semibold truncate text-foreground leading-tight">

@@ -17,9 +17,10 @@ const staticNav = [
   { label: 'Support', path: '/support' },
 ];
 // These pages accept ?league= to pre-filter — injected dynamically in the component
-const leagueAwareNav = ['Teams', 'Stats', 'Leaderboards', 'Media'] as const;
+const leagueAwareNav = ['Scores', 'Teams', 'Stats', 'Leaderboards', 'Media'] as const;
 type LeagueAwareLabel = typeof leagueAwareNav[number];
 const leagueAwarePaths: Record<LeagueAwareLabel, string> = {
+  Scores: '/scores',
   Teams: '/teams',
   Stats: '/stats',
   Leaderboards: '/leaderboards',
