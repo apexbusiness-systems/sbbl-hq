@@ -2,33 +2,13 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Play, ShoppingBag, ChevronRight, Trophy, Zap, Shield } from 'lucide-react';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
+import { products, playersOfTheGame } from '@/data/mock';
 import { PotgCard } from '@/components/ui/PotgCard';
 import { useApp } from '@/contexts/AppContext';
-import { useQuery } from '@tanstack/react-query';
-import { apiFetch } from '@/lib/api/client';
-import type { Product } from '@/types';
 
 const AppHomePage = () => {
   const { addToBag } = useApp();
-  const productsQuery = useQuery({
-    queryKey: ['public-products'],
-    queryFn: () => apiFetch<{ ok: boolean; data: Product[] }>('/api/public/products'),
-    retry: 1,
-    staleTime: 60_000,
-  });
-  const featuredProducts = (productsQuery.data?.data ?? []).filter((p) => p.sale && p.price > 0).slice(0, 3);
-  const potgList: Array<{
-    id: string;
-    leagueId: 'sbbl' | 'wbl' | 'tgifbl';
-    playerName: string;
-    team: string;
-    pts: number;
-    rebs: number;
-    assts: number;
-    gameResult: string;
-    date: string;
-    image?: string;
-  }> = [];
+  const featuredProducts = products.filter(p => p.sale && p.price > 0).slice(0, 3);
 
   return (
     <div className="min-h-screen">
@@ -142,7 +122,7 @@ const AppHomePage = () => {
       </section>
 
       {/* ── POTG ACROSS ALL LEAGUES ────────────────────────────── */}
-      {potgList.length > 0 && (
+      {playersOfTheGame.length > 0 && (
         <section className="container py-14">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -156,7 +136,7 @@ const AppHomePage = () => {
             </Link>
           </div>
           <div className="flex gap-4 overflow-x-auto scrollbar-hidden pb-2">
-            {potgList.map((potg, i) => (
+            {playersOfTheGame.map((potg, i) => (
               <PotgCard key={potg.id} potg={potg} featured={i === 0} />
             ))}
           </div>
