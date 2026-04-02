@@ -3061,9 +3061,7 @@ routes.push({
 // Cron or background job logic for inventory retention/archival
 // Triggered periodically (e.g. daily cron) to safely archive products
 // that have been sold out for > 1 week.
-
-import type { SupabaseClient } from '@supabase/supabase-js';
-export async function handleStoreInventoryArchival(admin: SupabaseClient) {
+export async function handleStoreInventoryArchival(admin: any) {
   const oneWeekAgo = new Date();
   oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
 
