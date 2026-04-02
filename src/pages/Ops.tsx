@@ -378,189 +378,33 @@ const OpsPage = () => {
         </div>
       )}
 
-
-      {activeTab === 'teams' && (
-        <div className="panel p-4 max-w-xl">
-          <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Teams Manual Ops</h2>
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage teams.</p>
-          ) : (
-            <div className="space-y-4">
-              <div className="border border-border p-3 rounded-sm">
-                <h3 className="text-sm font-semibold mb-2">Create Team</h3>
-                <div className="space-y-2">
-                  <input placeholder="Team Name" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <input placeholder="Division" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Team</button>
-                </div>
-              </div>
-              <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
-                <h3 className="text-sm font-semibold text-destructive mb-2">Delete Team</h3>
-                <div className="flex gap-2">
-                  <input placeholder="Team ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'players' && (
-        <div className="panel p-4 max-w-xl">
-          <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Players Manual Ops</h2>
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage players.</p>
-          ) : (
-            <div className="space-y-4">
-              <div className="border border-border p-3 rounded-sm">
-                <h3 className="text-sm font-semibold mb-2">Create Player</h3>
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <input placeholder="First Name" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                    <input placeholder="Last Name" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  </div>
-                  <input placeholder="Team ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Player</button>
-                </div>
-              </div>
-              <div className="border border-warning/20 p-3 rounded-sm bg-warning/5">
-                <h3 className="text-sm font-semibold text-warning mb-2">Suspend Player</h3>
-                <div className="flex gap-2">
-                  <input placeholder="Player ID to Suspend" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="bg-warning hover:bg-warning/90 text-warning-foreground px-4 py-2 rounded-sm text-xs text-black">Suspend</button>
-                </div>
-              </div>
-              <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
-                <h3 className="text-sm font-semibold text-destructive mb-2">Delete Player</h3>
-                <div className="flex gap-2">
-                  <input placeholder="Player ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-
-      {activeTab === 'schedules' && (
-        <div className="panel p-4 max-w-xl">
-          <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Schedules Manual Ops</h2>
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage schedules.</p>
-          ) : (
-            <div className="space-y-4">
-              <div className="border border-border p-3 rounded-sm">
-                <h3 className="text-sm font-semibold mb-2">Create Schedule Entry</h3>
-                <div className="space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
-                    <input placeholder="Home Team ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                    <input placeholder="Away Team ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                    <input type="time" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  </div>
-                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Schedule</button>
-                </div>
-              </div>
-              <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
-                <h3 className="text-sm font-semibold text-destructive mb-2">Delete Schedule Entry</h3>
-                <div className="flex gap-2">
-                  <input placeholder="Schedule ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'events' && (
-        <div className="panel p-4 max-w-xl">
-          <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Events Manual Ops</h2>
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage events.</p>
-          ) : (
-            <div className="space-y-4">
-              <div className="border border-border p-3 rounded-sm">
-                <h3 className="text-sm font-semibold mb-2">Create Event</h3>
-                <div className="space-y-2">
-                  <input placeholder="Event Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <input placeholder="Location" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Event</button>
-                </div>
-              </div>
-              <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
-                <h3 className="text-sm font-semibold text-destructive mb-2">Delete Event</h3>
-                <div className="flex gap-2">
-                  <input placeholder="Event ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-
       {activeTab === 'store' && (
-        <div className="panel p-4 max-w-xl space-y-8">
-          <div>
-            <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Store Media & Product Ops</h2>
-            {!isSuperAdmin ? (
-              <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage store operations.</p>
-            ) : (
-              <div className="space-y-6">
-
-                {/* Batch Create Products */}
-                <div className="border border-border p-3 rounded-sm">
-                  <h3 className="text-sm font-semibold mb-3">Batch Create Products (Max 4)</h3>
-                  <div className="space-y-4">
-                    {[0, 1, 2, 3].map(i => (
-                      <div key={i} className="border border-secondary p-3 rounded-sm space-y-2 relative">
-                        <div className="absolute top-2 right-2 text-[10px] text-muted-foreground font-semibold">Item {i+1}</div>
-                        <input placeholder="Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                        <div className="grid grid-cols-2 gap-2">
-                          <input type="number" placeholder="Price (USD)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                          <input type="number" placeholder="Inventory Qty" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
-                        </div>
-                        <select className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm">
-                          <option value="apparel">Apparel</option>
-                          <option value="accessories">Accessories</option>
-                          <option value="rewards">Rewards</option>
-                        </select>
-                      </div>
-                    ))}
-                    <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Submit Batch</button>
-                  </div>
-                </div>
-
-                {/* Manage Products */}
-                <div className="border border-border p-3 rounded-sm">
-                  <h3 className="text-sm font-semibold mb-2">Manage Products</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="border border-warning/20 p-3 rounded-sm bg-warning/5">
-                      <h4 className="text-[10px] font-semibold text-warning mb-2 uppercase tracking-widest">Suspend</h4>
-                      <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" />
-                      <button className="bg-warning hover:bg-warning/90 text-warning-foreground px-3 py-1.5 rounded-sm text-[10px] w-full text-black">Suspend</button>
-                    </div>
-                    <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
-                      <h4 className="text-[10px] font-semibold text-destructive mb-2 uppercase tracking-widest">Delete</h4>
-                      <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" />
-                      <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-3 py-1.5 rounded-sm text-[10px] w-full">Delete</button>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-            )}
-          </div>
+        <div className="panel p-4 space-y-3 max-w-xl">
+          <h2 className="font-display text-xl">Store Media Upload</h2>
+          <input placeholder="Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.title} onChange={(e) => setStoreForm((s) => ({ ...s, title: e.target.value }))} />
+          <input placeholder="Price" className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.price} onChange={(e) => setStoreForm((s) => ({ ...s, price: e.target.value }))} />
+          <input placeholder="Category" className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.category} onChange={(e) => setStoreForm((s) => ({ ...s, category: e.target.value }))} />
+          <select className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.publishStatus} onChange={(e) => setStoreForm((s) => ({ ...s, publishStatus: e.target.value as 'draft' | 'published' }))}>
+            <option value="draft">Draft</option><option value="published">Published</option>
+          </select>
+          <input type="file" accept="image/*" onChange={(e) => setStoreForm((s) => ({ ...s, imageFile: e.target.files?.[0] ?? null }))} />
+          <label className="flex items-center gap-2 cursor-pointer select-none">
+            <div
+              onClick={() => setStoreForm(s => ({ ...s, sale: !s.sale }))}
+              className={`w-10 h-5 rounded-full relative transition-colors ${storeForm.sale ? 'bg-primary' : 'bg-secondary'}`}
+            >
+              <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-transform ${storeForm.sale ? 'translate-x-5 bg-primary-foreground' : 'translate-x-0.5 bg-muted-foreground'}`} />
+            </div>
+            <span className="text-xs font-medium">Feature in Live Stream Carousel <span className="text-muted-foreground">(mark as Sale)</span></span>
+          </label>
+          <button className="gold-bg px-4 py-2 rounded-sm" onClick={() => storeMutation.mutate()} disabled={storeMutation.isPending || !hasSupabaseClientConfig}>{storeMutation.isPending ? 'Uploading…' : 'Upload & Save'}</button>
+          {!hasSupabaseClientConfig && <p className="text-xs text-warning">Supabase client env missing; media uploads disabled.</p>}
+          {storeMutation.error && <p className="text-xs text-destructive">{(storeMutation.error as Error).message}</p>}
+          {storeMutation.data && <p className="text-xs text-success">Saved product {storeMutation.data.productId}</p>}
         </div>
       )}
-{activeTab === 'potg' && (
+
+      {activeTab === 'potg' && (
         <div className="panel p-4 space-y-5 max-w-xl">
           <div>
             <h2 className="font-display text-xl">POTG Image Parser</h2>
