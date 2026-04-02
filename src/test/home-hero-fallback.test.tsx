@@ -9,7 +9,7 @@ vi.mock('@/hooks/use-auth', () => ({
 }));
 
 vi.mock('@/lib/api/public', () => ({
-  fetchPublicHome: vi.fn().mockResolvedValue({
+  fetchPublicHome: vi.fn().mockResolvedValue({ ok: true, data: {
     ok: true,
     league: { id: 'l1', name: 'SBBL', code: 'SBBL' },
     season: { id: 's1', name: 'Season 1', status: 'active' },
@@ -21,7 +21,7 @@ vi.mock('@/lib/api/public', () => ({
     recentGames: [],
     totalGames: 0,
     leagues: [],
-  }),
+  } }),
 }));
 
 describe('home hero fallback', () => {
