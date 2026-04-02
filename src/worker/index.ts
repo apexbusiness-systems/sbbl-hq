@@ -336,7 +336,9 @@ async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   const cacheKey = new Request(streamCacheUrl(gameId));
 
   // ── Cache API hit (free, edge-local, unlimited) ───────────────────────────
-  const cache = caches.default;
+  // Cast: DOM lib's CacheStorage lacks .default; CF Workers runtime adds it.
+  const cfCaches = caches as unknown as { default: Cache };
+  const cache = cfCaches.default;
   const cachedRes = await cache.match(cacheKey);
   if (cachedRes) return cachedRes;
 
@@ -422,7 +424,7 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   if (error) throw new Error(error.message);
 
   // Bust edge cache so next poll picks up new collectionId / title / source
-  caches.default.delete(new Request(streamCacheUrl(null))).catch(() => {});
+  (caches as unknown as { default: Cache }).default.delete(new Request(streamCacheUrl(null))).catch(() => {});
 
   return json({
     ok: true,
@@ -475,10 +477,11 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
 
   // Bust edge cache immediately so Go Live / End Broadcast is reflected
   // for all viewers on their next 15 s poll (not delayed by TTL)
-  caches.default.delete(new Request(streamCacheUrl(null))).catch(() => {});
+  const cfCachesLive = caches as unknown as { default: Cache };
+  cfCachesLive.default.delete(new Request(streamCacheUrl(null))).catch(() => {});
   // Also bust game-scoped key if a gameId was provided
   if (typeof body.gameId === "string") {
-    caches.default.delete(new Request(streamCacheUrl(body.gameId))).catch(() => {});
+    cfCachesLive.default.delete(new Request(streamCacheUrl(body.gameId))).catch(() => {});
   }
 
   return json({ ok: true, isLive: body.isLive, at: nowIso });

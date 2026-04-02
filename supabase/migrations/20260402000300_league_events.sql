@@ -3,6 +3,11 @@
 -- The old worker incorrectly referenced a table named "events" which does not exist.
 -- The correct table is league_events (created here).
 
+-- Drop indexes first (idempotent re-run safety)
+DROP INDEX IF EXISTS league_events_league_id_idx;
+DROP INDEX IF EXISTS league_events_status_idx;
+DROP INDEX IF EXISTS league_events_event_date_idx;
+
 CREATE TABLE IF NOT EXISTS league_events (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   league_id     uuid REFERENCES leagues(id) ON DELETE SET NULL,
@@ -17,18 +22,37 @@ CREATE TABLE IF NOT EXISTS league_events (
   updated_at    timestamptz NOT NULL DEFAULT now()
 );
 
--- Index for common query patterns
-CREATE INDEX IF NOT EXISTS league_events_league_id_idx ON league_events (league_id);
-CREATE INDEX IF NOT EXISTS league_events_status_idx    ON league_events (status);
+-- Add status column if the table already existed without it (re-run safety)
+ALTER TABLE league_events
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'draft';
+
+-- Add constraint only if it doesn't exist
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.constraint_column_usage
+    WHERE table_name = 'league_events' AND constraint_name = 'league_events_status_check'
+  ) THEN
+    ALTER TABLE league_events
+      ADD CONSTRAINT league_events_status_check
+      CHECK (status IN ('draft', 'published', 'archived'));
+  END IF;
+END $$;
+
+-- Indexes
+CREATE INDEX IF NOT EXISTS league_events_league_id_idx  ON league_events (league_id);
+CREATE INDEX IF NOT EXISTS league_events_status_idx     ON league_events (status);
 CREATE INDEX IF NOT EXISTS league_events_event_date_idx ON league_events (event_date);
 
--- RLS: super_admin can write; authenticated users can read published events
+-- RLS
 ALTER TABLE league_events ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "league_events_select_published" ON league_events;
 CREATE POLICY "league_events_select_published"
   ON league_events FOR SELECT
   USING (status = 'published');
 
+DROP POLICY IF EXISTS "league_events_admin_all" ON league_events;
 CREATE POLICY "league_events_admin_all"
   ON league_events FOR ALL
   USING (
@@ -48,6 +72,7 @@ BEGIN
 END;
 $$;
 
+DROP TRIGGER IF EXISTS league_events_updated_at ON league_events;
 CREATE TRIGGER league_events_updated_at
   BEFORE UPDATE ON league_events
   FOR EACH ROW EXECUTE FUNCTION update_league_events_updated_at();
