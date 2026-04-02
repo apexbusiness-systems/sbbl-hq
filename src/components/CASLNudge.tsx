@@ -17,11 +17,21 @@ import type { AppRole } from '@/lib/auth/roles';
 
 const SESSION_KEY = 'casl_nudge_dismissed_v1';
 
+type PremiumRole = Exclude<AppRole, 'fan'>;
+
 // Roles that indicate the user already has premium access — no nudge needed
-const PREMIUM_ROLES: AppRole[] = ['paid_fan', 'player', 'team_manager', 'league_admin', 'media_operator', 'store_operator', 'super_admin'];
+const PREMIUM_ROLES: readonly PremiumRole[] = [
+  'paid_fan',
+  'player',
+  'team_manager',
+  'league_admin',
+  'media_operator',
+  'store_operator',
+  'super_admin',
+] as const;
 
 interface CASLNudgeProps {
-  roles: AppRole[];
+  readonly roles: AppRole[];
 }
 
 export function CASLNudge({ roles }: CASLNudgeProps) {
@@ -29,8 +39,8 @@ export function CASLNudge({ roles }: CASLNudgeProps) {
 
   useEffect(() => {
     // Gate: must be a registered fan without any premium role
-    const isFan        = roles.includes('fan');
-    const hasPremium   = roles.some((r) => PREMIUM_ROLES.includes(r));
+    const isFan = roles.includes('fan');
+    const hasPremium = roles.some((r) => PREMIUM_ROLES.includes(r as PremiumRole));
 
     if (!isFan || hasPremium) return;
 

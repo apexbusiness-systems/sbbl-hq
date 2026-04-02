@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { parseCsv } from '@/lib/parseCsv';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
@@ -9,10 +10,11 @@ import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
 import { resizeImageToFit } from '@/lib/imageResize';
 import type { LeagueId } from '@/types';
 
-type Tab = 'overview' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
+type Tab = 'overview' | 'streams' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'overview', label: 'Overview' },
+  { id: 'streams', label: 'Streams' },
   { id: 'teams', label: 'Teams' },
   { id: 'players', label: 'Players' },
   { id: 'schedules', label: 'Schedules' },
@@ -22,18 +24,6 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'history', label: 'Import History' },
 ];
 
-function parseCsv(raw: string) {
-  const lines = raw.split(/\r?\n/).filter(Boolean);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map((h) => h.trim());
-  return lines.slice(1).map((line) => {
-    const values = line.split(',').map((v) => v.trim());
-    return headers.reduce<Record<string, string>>((acc, key, idx) => {
-      acc[key] = values[idx] ?? '';
-      return acc;
-    }, {});
-  });
-}
 
 const OpsPage = () => {
   const queryClient = useQueryClient();
@@ -47,6 +37,9 @@ const OpsPage = () => {
   const [potgParseError, setPotgParseError] = useState<string | null>(null);
   const [potgImageFile, setPotgImageFile] = useState<File | null>(null);
   const [potgForm, setPotgForm] = useState({ playerName: '', team: '', pts: '', rebs: '', assts: '', gameResult: '', leagueId: 'wbl', date: new Date().toISOString().split('T')[0] });
+  const [streamForm, setStreamForm] = useState({ collectionId: '', title: '', source: 'main' as 'main' | 'backup' | 'test' });
+  const [reviewResolution, setReviewResolution] = useState<Record<string, 'resolved' | 'dismissed'>>({});
+  const isSuperAdmin = roles.includes('super_admin');
 
   const handlePotgImageUpload = async (file: File) => {
     setPotgParseState('parsing');
@@ -82,6 +75,23 @@ const OpsPage = () => {
 
   const bootstrapQuery = useQuery({ queryKey: ['ops-bootstrap'], queryFn: fetchOpsBootstrap });
   const historyQuery = useQuery({ queryKey: ['ops-import-history'], queryFn: fetchImportHistory });
+  const streamStatusQuery = useQuery({ queryKey: ['ops-stream-public-status'], queryFn: () => fetchPublicStreamStatus(), refetchInterval: 15000 });
+  const streamConfigQuery = useQuery({
+    queryKey: ['ops-stream-config'],
+    queryFn: async () => fetchAdminStreamConfig(await getAuthToken()),
+  });
+  const streamSessionsQuery = useQuery({
+    queryKey: ['ops-stream-sessions'],
+    queryFn: async () => fetchStreamSessions(await getAuthToken()),
+  });
+  const streamRevenueQuery = useQuery({
+    queryKey: ['ops-stream-revenue'],
+    queryFn: async () => fetchStreamRevenue(await getAuthToken()),
+  });
+  const reviewQueueQuery = useQuery({
+    queryKey: ['ops-stream-review'],
+    queryFn: async () => fetchReviewQueue(await getAuthToken()),
+  });
 
   const importMutation = useMutation({
     mutationFn: ({ kind, rows }: { kind: 'teams' | 'players' | 'schedules' | 'events'; rows: Record<string, string>[] }) =>
@@ -187,6 +197,117 @@ const OpsPage = () => {
         </div>
       )}
 
+      {activeTab === 'streams' && (
+        <div className="space-y-4">
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="panel p-4">
+              <p className="text-xs text-muted-foreground">Public stream status</p>
+              <p className={`stat-numeral text-3xl ${streamStatusQuery.data?.isLive ? 'text-success' : 'text-muted-foreground'}`}>
+                {streamStatusQuery.data?.isLive ? 'LIVE' : 'OFFLINE'}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">{streamStatusQuery.data?.title ?? 'No stream title set'}</p>
+            </div>
+            <div className="panel p-4">
+              <p className="text-xs text-muted-foreground">Viewer count</p>
+              <p className="stat-numeral text-3xl">{streamStatusQuery.data?.viewerCount ?? 0}</p>
+            </div>
+            <div className="panel p-4">
+              <p className="text-xs text-muted-foreground">PPV revenue</p>
+              <p className="stat-numeral text-3xl">{streamRevenueQuery.data?.totalPpvRevenue ?? 0}</p>
+              <p className="text-xs text-muted-foreground mt-1">Orders: {streamRevenueQuery.data?.totalPpvOrders ?? 0}</p>
+            </div>
+          </div>
+
+          <div className="panel p-4 space-y-3 max-w-2xl">
+            <h2 className="font-display text-xl">Admin Stream Controls</h2>
+            <p className="text-xs text-muted-foreground">Visible to admins. Live toggle and config save are restricted to super admins.</p>
+            <input
+              placeholder="Switcher collection ID"
+              className="w-full bg-secondary border border-border rounded-sm px-3 py-2"
+              value={streamForm.collectionId}
+              onChange={(e) => setStreamForm((s) => ({ ...s, collectionId: e.target.value }))}
+            />
+            <input
+              placeholder="Stream title"
+              className="w-full bg-secondary border border-border rounded-sm px-3 py-2"
+              value={streamForm.title}
+              onChange={(e) => setStreamForm((s) => ({ ...s, title: e.target.value }))}
+            />
+            <select
+              className="w-full bg-secondary border border-border rounded-sm px-3 py-2"
+              value={streamForm.source}
+              onChange={(e) => setStreamForm((s) => ({ ...s, source: e.target.value as 'main' | 'backup' | 'test' }))}
+            >
+              <option value="main">Main</option>
+              <option value="backup">Backup</option>
+              <option value="test">Test</option>
+            </select>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="gold-bg px-4 py-2 rounded-sm disabled:opacity-60"
+                disabled={!isSuperAdmin || streamConfigMutation.isPending}
+                onClick={() => streamConfigMutation.mutate()}
+              >
+                {streamConfigMutation.isPending ? 'Saving…' : 'Save Config'}
+              </button>
+              <button
+                className="px-4 py-2 rounded-sm border border-border disabled:opacity-60"
+                disabled={!isSuperAdmin || streamLiveMutation.isPending}
+                onClick={() => streamLiveMutation.mutate(!(streamStatusQuery.data?.isLive ?? false))}
+              >
+                {streamLiveMutation.isPending ? 'Updating…' : (streamStatusQuery.data?.isLive ? 'Go Offline' : 'Go Live')}
+              </button>
+            </div>
+            {!isSuperAdmin && <p className="text-xs text-warning">Super admin role required for live/config changes.</p>}
+            {(streamConfigMutation.error || streamLiveMutation.error) && (
+              <p className="text-xs text-destructive">{(streamConfigMutation.error as Error)?.message ?? (streamLiveMutation.error as Error)?.message}</p>
+            )}
+          </div>
+
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="panel p-4">
+              <h3 className="font-display text-lg mb-2">Review Queue</h3>
+              <div className="space-y-2 max-h-72 overflow-auto pr-1">
+                {(reviewQueueQuery.data?.queue ?? []).map((item) => (
+                  <div key={item.id} className="border border-border rounded-sm p-2 text-xs space-y-2">
+                    <p className="font-medium">{item.title}</p>
+                    <p className="text-muted-foreground">{item.type} · {item.status}</p>
+                    <div className="flex gap-2">
+                      <select
+                        className="bg-secondary border border-border rounded-sm px-2 py-1"
+                        value={reviewResolution[item.id] ?? 'resolved'}
+                        onChange={(e) => setReviewResolution((s) => ({ ...s, [item.id]: e.target.value as 'resolved' | 'dismissed' }))}
+                      >
+                        <option value="resolved">Resolve</option>
+                        <option value="dismissed">Dismiss</option>
+                      </select>
+                      <button
+                        className="px-2 py-1 border border-border rounded-sm disabled:opacity-60"
+                        disabled={resolveReviewMutation.isPending}
+                        onClick={() => resolveReviewMutation.mutate({ id: item.id, resolution: reviewResolution[item.id] ?? 'resolved' })}
+                      >
+                        Apply
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="panel p-4">
+              <h3 className="font-display text-lg mb-2">Session History</h3>
+              <div className="space-y-2 max-h-72 overflow-auto pr-1">
+                {(streamSessionsQuery.data?.sessions ?? []).map((s) => (
+                  <div key={s.id} className="border border-border rounded-sm p-2 text-xs">
+                    <p className="font-medium">Game {s.gameId}</p>
+                    <p className="text-muted-foreground">{s.startedAt} → {s.endedAt ?? 'active'}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {(['teams', 'players', 'schedules', 'events'] as const).includes(activeTab as never) && (
         <div className="panel p-4 space-y-3">
           <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
@@ -228,33 +349,189 @@ const OpsPage = () => {
         </div>
       )}
 
-      {activeTab === 'store' && (
-        <div className="panel p-4 space-y-3 max-w-xl">
-          <h2 className="font-display text-xl">Store Media Upload</h2>
-          <input placeholder="Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.title} onChange={(e) => setStoreForm((s) => ({ ...s, title: e.target.value }))} />
-          <input placeholder="Price" className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.price} onChange={(e) => setStoreForm((s) => ({ ...s, price: e.target.value }))} />
-          <input placeholder="Category" className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.category} onChange={(e) => setStoreForm((s) => ({ ...s, category: e.target.value }))} />
-          <select className="w-full bg-secondary border border-border rounded-sm px-3 py-2" value={storeForm.publishStatus} onChange={(e) => setStoreForm((s) => ({ ...s, publishStatus: e.target.value as 'draft' | 'published' }))}>
-            <option value="draft">Draft</option><option value="published">Published</option>
-          </select>
-          <input type="file" accept="image/*" onChange={(e) => setStoreForm((s) => ({ ...s, imageFile: e.target.files?.[0] ?? null }))} />
-          <label className="flex items-center gap-2 cursor-pointer select-none">
-            <div
-              onClick={() => setStoreForm(s => ({ ...s, sale: !s.sale }))}
-              className={`w-10 h-5 rounded-full relative transition-colors ${storeForm.sale ? 'bg-primary' : 'bg-secondary'}`}
-            >
-              <div className={`absolute top-0.5 w-4 h-4 rounded-full transition-transform ${storeForm.sale ? 'translate-x-5 bg-primary-foreground' : 'translate-x-0.5 bg-muted-foreground'}`} />
+
+      {activeTab === 'teams' && (
+        <div className="panel p-4 max-w-xl">
+          <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Teams Manual Ops</h2>
+          {!isSuperAdmin ? (
+            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage teams.</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="border border-border p-3 rounded-sm">
+                <h3 className="text-sm font-semibold mb-2">Create Team</h3>
+                <div className="space-y-2">
+                  <input placeholder="Team Name" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <input placeholder="Division" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Team</button>
+                </div>
+              </div>
+              <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
+                <h3 className="text-sm font-semibold text-destructive mb-2">Delete Team</h3>
+                <div className="flex gap-2">
+                  <input placeholder="Team ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
+                </div>
+              </div>
             </div>
-            <span className="text-xs font-medium">Feature in Live Stream Carousel <span className="text-muted-foreground">(mark as Sale)</span></span>
-          </label>
-          <button className="gold-bg px-4 py-2 rounded-sm" onClick={() => storeMutation.mutate()} disabled={storeMutation.isPending || !hasSupabaseClientConfig}>{storeMutation.isPending ? 'Uploading…' : 'Upload & Save'}</button>
-          {!hasSupabaseClientConfig && <p className="text-xs text-warning">Supabase client env missing; media uploads disabled.</p>}
-          {storeMutation.error && <p className="text-xs text-destructive">{(storeMutation.error as Error).message}</p>}
-          {storeMutation.data && <p className="text-xs text-success">Saved product {storeMutation.data.productId}</p>}
+          )}
         </div>
       )}
 
-      {activeTab === 'potg' && (
+      {activeTab === 'players' && (
+        <div className="panel p-4 max-w-xl">
+          <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Players Manual Ops</h2>
+          {!isSuperAdmin ? (
+            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage players.</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="border border-border p-3 rounded-sm">
+                <h3 className="text-sm font-semibold mb-2">Create Player</h3>
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input placeholder="First Name" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                    <input placeholder="Last Name" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  </div>
+                  <input placeholder="Team ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Player</button>
+                </div>
+              </div>
+              <div className="border border-warning/20 p-3 rounded-sm bg-warning/5">
+                <h3 className="text-sm font-semibold text-warning mb-2">Suspend Player</h3>
+                <div className="flex gap-2">
+                  <input placeholder="Player ID to Suspend" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <button className="bg-warning hover:bg-warning/90 text-warning-foreground px-4 py-2 rounded-sm text-xs text-black">Suspend</button>
+                </div>
+              </div>
+              <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
+                <h3 className="text-sm font-semibold text-destructive mb-2">Delete Player</h3>
+                <div className="flex gap-2">
+                  <input placeholder="Player ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+
+      {activeTab === 'schedules' && (
+        <div className="panel p-4 max-w-xl">
+          <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Schedules Manual Ops</h2>
+          {!isSuperAdmin ? (
+            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage schedules.</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="border border-border p-3 rounded-sm">
+                <h3 className="text-sm font-semibold mb-2">Create Schedule Entry</h3>
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input placeholder="Home Team ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                    <input placeholder="Away Team ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                    <input type="time" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  </div>
+                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Schedule</button>
+                </div>
+              </div>
+              <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
+                <h3 className="text-sm font-semibold text-destructive mb-2">Delete Schedule Entry</h3>
+                <div className="flex gap-2">
+                  <input placeholder="Schedule ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {activeTab === 'events' && (
+        <div className="panel p-4 max-w-xl">
+          <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Events Manual Ops</h2>
+          {!isSuperAdmin ? (
+            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage events.</p>
+          ) : (
+            <div className="space-y-4">
+              <div className="border border-border p-3 rounded-sm">
+                <h3 className="text-sm font-semibold mb-2">Create Event</h3>
+                <div className="space-y-2">
+                  <input placeholder="Event Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <input placeholder="Location" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Create Event</button>
+                </div>
+              </div>
+              <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
+                <h3 className="text-sm font-semibold text-destructive mb-2">Delete Event</h3>
+                <div className="flex gap-2">
+                  <input placeholder="Event ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                  <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs">Delete</button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+
+      {activeTab === 'store' && (
+        <div className="panel p-4 max-w-xl space-y-8">
+          <div>
+            <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Store Media & Product Ops</h2>
+            {!isSuperAdmin ? (
+              <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage store operations.</p>
+            ) : (
+              <div className="space-y-6">
+
+                {/* Batch Create Products */}
+                <div className="border border-border p-3 rounded-sm">
+                  <h3 className="text-sm font-semibold mb-3">Batch Create Products (Max 4)</h3>
+                  <div className="space-y-4">
+                    {[0, 1, 2, 3].map(i => (
+                      <div key={i} className="border border-secondary p-3 rounded-sm space-y-2 relative">
+                        <div className="absolute top-2 right-2 text-[10px] text-muted-foreground font-semibold">Item {i+1}</div>
+                        <input placeholder="Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                        <div className="grid grid-cols-2 gap-2">
+                          <input type="number" placeholder="Price (USD)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                          <input type="number" placeholder="Inventory Qty" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" />
+                        </div>
+                        <select className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm">
+                          <option value="apparel">Apparel</option>
+                          <option value="accessories">Accessories</option>
+                          <option value="rewards">Rewards</option>
+                        </select>
+                      </div>
+                    ))}
+                    <button className="gold-bg px-4 py-2 rounded-sm text-xs w-full">Submit Batch</button>
+                  </div>
+                </div>
+
+                {/* Manage Products */}
+                <div className="border border-border p-3 rounded-sm">
+                  <h3 className="text-sm font-semibold mb-2">Manage Products</h3>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="border border-warning/20 p-3 rounded-sm bg-warning/5">
+                      <h4 className="text-[10px] font-semibold text-warning mb-2 uppercase tracking-widest">Suspend</h4>
+                      <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" />
+                      <button className="bg-warning hover:bg-warning/90 text-warning-foreground px-3 py-1.5 rounded-sm text-[10px] w-full text-black">Suspend</button>
+                    </div>
+                    <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
+                      <h4 className="text-[10px] font-semibold text-destructive mb-2 uppercase tracking-widest">Delete</h4>
+                      <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" />
+                      <button className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-3 py-1.5 rounded-sm text-[10px] w-full">Delete</button>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+{activeTab === 'potg' && (
         <div className="panel p-4 space-y-5 max-w-xl">
           <div>
             <h2 className="font-display text-xl">POTG Image Parser</h2>

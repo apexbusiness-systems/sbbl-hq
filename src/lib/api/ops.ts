@@ -70,3 +70,22 @@ export async function uploadStoreMedia(payload: {
     body: JSON.stringify(payload),
   });
 }
+
+export async function fetchOpsList(entity: 'teams' | 'players' | 'products' | 'events') {
+  return apiFetch<{ ok: boolean; data: unknown[] }>(`/ops/list/${entity}`);
+}
+
+export async function patchOpsEntity(entity: 'teams' | 'players' | 'products' | 'events' | 'schedules', id: string, payload: Record<string, unknown>) {
+  return apiFetch<{ ok: boolean; data: unknown }>(`/ops/${entity}/${id}`, {
+    method: 'PATCH',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-patch-${entity}-${id}`) },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function deleteOpsEntity(entity: 'teams' | 'players' | 'products' | 'events', id: string) {
+  return apiFetch<{ ok: boolean; data: unknown }>(`/ops/${entity}/${id}`, {
+    method: 'DELETE',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-delete-${entity}-${id}`) },
+  });
+}

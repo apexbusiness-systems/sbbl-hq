@@ -14,14 +14,6 @@ begin
 end;
 $$ language plpgsql;
 
-create or replace function public.has_any_role(roles public.app_role[]) returns boolean
-language sql stable security definer set search_path = public as $$
-  select exists (
-    select 1 from public.user_role_assignments
-    where user_id = auth.uid() and role = any(roles)
-  )
-$$;
-
 create table if not exists public.profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique,
@@ -47,6 +39,14 @@ create table if not exists public.user_role_assignments (
   updated_by uuid,
   unique(user_id, league_id, role)
 );
+
+create or replace function public.has_any_role(roles public.app_role[]) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.user_role_assignments
+    where user_id = auth.uid() and role = any(roles)
+  )
+$$;
 
 create table if not exists public.devices (
   id uuid primary key default gen_random_uuid(),

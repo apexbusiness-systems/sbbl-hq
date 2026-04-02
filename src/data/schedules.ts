@@ -32,7 +32,7 @@ export const SCHEDULE_DATA: ScheduleDay[] = [
     leagueCode: 'SBBL',
     season: 'Season 1',
     week: 1,
-    date: '2026-04-03',
+    date: '2026-04-02',
     venue: 'Crawford School',
     address: '531 Finch Ave W',
     courts: [
