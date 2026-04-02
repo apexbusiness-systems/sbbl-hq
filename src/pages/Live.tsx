@@ -18,6 +18,8 @@ function AdminStreamControls({
   isLive, setIsLive,
   streamTitle, setStreamTitle,
   viewerCount,
+  streamSource, setStreamSource,
+  customStreamUrl, setCustomStreamUrl,
 }: {
   isLive: boolean;
   setIsLive: (v: boolean) => void;
