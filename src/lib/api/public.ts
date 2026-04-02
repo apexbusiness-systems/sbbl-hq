@@ -13,8 +13,21 @@ export type PublicHomeData = {
   hero: unknown;
   featured_games: unknown[];
   news: unknown[];
+  totalTeams?: number;
+  season?: string;
+  totalGames?: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  teams?: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  recentGames?: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  upcomingGames?: any[];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  liveGames?: any[];
+  totalRostered?: number;
 };
 
-export async function fetchPublicHome() {
-  return apiFetch<{ ok: boolean; data: PublicHomeData }>('/api/public/home');
+export async function fetchPublicHome(leagueCode?: string) {
+  const params = leagueCode ? `?league=${leagueCode}` : '';
+  return apiFetch<{ ok: boolean; data: PublicHomeData }>(`/api/public/home${params}`);
 }
