@@ -28,11 +28,8 @@ import type { AppRole } from '@/lib/auth/roles';
 
 const PPV_PRICE_USD = 4.99;
 
-// Switcher Studio embed configuration
-const SWITCHER_CATALOG_ID = '4f5ea6d3-17fd-449c-9c0d-09996f4805c8';
-const SWITCHER_EMBED_CLASS = 'dff402f7-5be0-4890-b831-95c5b63ddb42';
-const SWITCHER_HOSTNAME = 'https://player.switcherstudio.com';
-const SWITCHER_EMBED_SCRIPT = 'https://player.switcherstudio.com/embed.js';
+// Legacy Switcher Studio config removed.
+// ReactPlayer stream URL is configured via AdminStreamControls.
 
 interface LiveStreamPlayerProps {
   game: Game;
@@ -40,11 +37,8 @@ interface LiveStreamPlayerProps {
   roles: AppRole[];
   token: string | null;
   hasPremiumPlayerAccess: boolean;
-  /** Optional override for Switcher catalog ID from admin controls */
-  catalogId?: string;
   /** Whether admin has set stream to live */
   isStreamLive?: boolean;
-  streamSource?: 'switcher' | 'custom';
   customStreamUrl?: string;
 }
 
@@ -54,9 +48,7 @@ export function LiveStreamPlayer({
   roles,
   token,
   hasPremiumPlayerAccess,
-  catalogId,
   isStreamLive,
-  streamSource = 'switcher',
   customStreamUrl = '',
 }: LiveStreamPlayerProps) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
@@ -84,20 +76,8 @@ export function LiveStreamPlayer({
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
   const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
 
-  // ── Load Switcher Studio embed script ─────────────────────────────────
-  useEffect(() => {
-    if (!hasAccess || scriptLoaded.current || streamSource !== 'switcher') return;
-
-    // Only load the script once
-    const existingScript = document.querySelector(`script[src="${SWITCHER_EMBED_SCRIPT}"]`);
-    if (!existingScript) {
-      const script = document.createElement('script');
-      script.src = SWITCHER_EMBED_SCRIPT;
-      script.async = true;
-      document.body.appendChild(script);
-    }
-    scriptLoaded.current = true;
-  }, [hasAccess, streamSource]);
+  // ── No third-party embed scripts required ─────────────────────────────
+  // ReactPlayer handles HLS/YouTube/Twitch natively.
 
   // ── Fetch stream entitlement (skip if role already grants access) ─────────
   useEffect(() => {
@@ -151,36 +131,29 @@ export function LiveStreamPlayer({
 
   // ── Gate 2: Access granted → Player ──────────────────────
   if (hasAccess) {
-    const activeCatalogId = catalogId || SWITCHER_CATALOG_ID;
-
     return (
       <div className="absolute inset-0 flex flex-col relative z-0">
         {/* Stream Player Area */}
-        {streamSource === 'custom' && customStreamUrl ? (
+        {customStreamUrl ? (
           <div className="absolute inset-0 pointer-events-auto">
             <ReactPlayer
               url={customStreamUrl}
               playing={true}
-              controls={false}
+              controls={true}
               width="100%"
               height="100%"
               config={{
                 youtube: {
-                  playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 0 }
+                  playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1 }
                 }
               }}
               style={{ position: 'absolute', top: 0, left: 0 }}
             />
           </div>
         ) : (
-          <div
-            ref={embedRef}
-            className={`${SWITCHER_EMBED_CLASS} w-full h-full pointer-events-auto`}
-            data-hostname={SWITCHER_HOSTNAME}
-            data-path="/embed"
-            data-catalogid={activeCatalogId}
-            data-location="iframe"
-          />
+          <div className="absolute inset-0 flex items-center justify-center bg-black">
+            <p className="text-sm text-muted-foreground">Admin has not provided a stream URL.</p>
+          </div>
         )}
 
         {/* Offline overlay — shown when admin hasn't started the stream */}

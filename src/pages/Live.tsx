@@ -26,8 +26,8 @@ function AdminStreamControls({
   streamTitle: string;
   setStreamTitle: (v: string) => void;
   viewerCount: number;
-  streamSource: 'switcher' | 'custom';
-  setStreamSource: (v: 'switcher' | 'custom') => void;
+  streamSource: 'custom';
+  setStreamSource: (v: 'custom') => void;
   customStreamUrl: string;
   setCustomStreamUrl: (v: string) => void;
 }) {
@@ -80,40 +80,16 @@ function AdminStreamControls({
 
           {/* Stream settings */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Stream Source</label>
-              <select
-                value={streamSource}
-                onChange={e => setStreamSource(e.target.value as 'switcher' | 'custom')}
+            <div className="col-span-1 md:col-span-2">
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Custom Stream URL (ReactPlayer)</label>
+              <input
+                type="text"
+                value={customStreamUrl}
+                onChange={e => setCustomStreamUrl(e.target.value)}
                 className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-primary/50"
-              >
-                <option value="switcher">Switcher Studio Embed</option>
-                <option value="custom">Custom URL (YouTube/HLS)</option>
-              </select>
+                placeholder="e.g. https://youtu.be/..."
+              />
             </div>
-            {streamSource === 'custom' ? (
-              <div>
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Custom Stream URL</label>
-                <input
-                  type="text"
-                  value={customStreamUrl}
-                  onChange={e => setCustomStreamUrl(e.target.value)}
-                  className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-primary/50"
-                  placeholder="e.g. https://youtu.be/..."
-                />
-              </div>
-            ) : (
-              <div>
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Stream Title</label>
-                <input
-                  type="text"
-                  value={streamTitle}
-                  onChange={e => setStreamTitle(e.target.value)}
-                  className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-primary/50"
-                  placeholder="Live Game Broadcast"
-                />
-              </div>
-            )}
           </div>
 
           {/* Action buttons */}
@@ -131,15 +107,7 @@ function AdminStreamControls({
             >
               {isLive ? 'End Stream' : 'Go Live'}
             </button>
-            <a
-              href="https://app.switcherstudio.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="px-3 py-2.5 bg-secondary border border-border rounded-sm text-xs font-medium inline-flex items-center gap-1.5 hover:border-primary/30 transition-colors"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              Switcher Studio
-            </a>
+            {/* Switcher Studio link removed */}
           </div>
         </div>
       )}
@@ -160,7 +128,7 @@ const LivePage = () => {
   const [isStreamLive, setIsStreamLive] = useState(false);
   const [streamTitle, setStreamTitle] = useState('Live Game Broadcast');
   const [viewerCount] = useState(0);
-  const [streamSource, setStreamSource] = useState<'switcher' | 'custom'>('switcher');
+  const [streamSource, setStreamSource] = useState<'custom'>('custom');
   const [customStreamUrl, setCustomStreamUrl] = useState('');
 
   const [comments, setComments] = useState([
@@ -322,7 +290,6 @@ const LivePage = () => {
                 token={token}
                 hasPremiumPlayerAccess={hasPremiumPlayerAccess}
                 isStreamLive={isStreamLive}
-                streamSource={streamSource}
                 customStreamUrl={customStreamUrl}
               />
             </div>
