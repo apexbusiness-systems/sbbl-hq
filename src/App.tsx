@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -39,6 +39,16 @@ const RouteFallback = () => (
   </div>
 );
 
+/** /register → /login?mode=signup, preserving ?redirect= param */
+function RegisterRedirect() {
+  const [params] = useSearchParams();
+  const redirect = params.get('redirect');
+  const target = redirect
+    ? `/login?mode=signup&redirect=${encodeURIComponent(redirect)}`
+    : '/login?mode=signup';
+  return <Navigate to={target} replace />;
+}
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -67,6 +77,7 @@ const App = () => (
                     <Route path="/scores" element={<Scores />} />
                     <Route path="/teams" element={<Teams />} />
                     <Route path="/login" element={<Login />} />
+                    <Route path="/register" element={<RegisterRedirect />} />
                     <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
                     <Route path="/billing" element={<RequireAuth><Billing /></RequireAuth>} />
                     <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />

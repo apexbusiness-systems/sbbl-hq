@@ -9,7 +9,12 @@ import { Shield, BarChart3, Users, Zap, CheckCircle2 } from 'lucide-react';
 type Mode = 'signin' | 'signup';
 
 const LoginPage = () => {
-  const [mode, setMode] = useState<Mode>('signin');
+  const location = useLocation();
+  // Support ?mode=signup (used by /register redirect) and preserve redirect param
+  const urlParams = new URLSearchParams(location.search);
+  const initialMode: Mode = urlParams.get('mode') === 'signup' ? 'signup' : 'signin';
+
+  const [mode, setMode] = useState<Mode>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<string | null>(null);
@@ -17,11 +22,12 @@ const LoginPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const { isSignedIn, needsOnboarding, configAvailable, loading } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
 
+  // Redirect after login — respect ?redirect= param from /register flow
+  const redirectTo = urlParams.get('redirect');
   useEffect(() => {
-    if (isSignedIn) navigate(needsOnboarding ? '/onboarding' : '/');
-  }, [isSignedIn, needsOnboarding, navigate]);
+    if (isSignedIn) navigate(needsOnboarding ? '/onboarding' : (redirectTo || '/'));
+  }, [isSignedIn, needsOnboarding, navigate, redirectTo]);
 
   const switchMode = (next: Mode) => {
     setMode(next);

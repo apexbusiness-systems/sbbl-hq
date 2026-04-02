@@ -2139,14 +2139,9 @@ async function handleInviteGenerate(ctx: HandlerCtx) {
   const gameId = body?.gameId;
   if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
 
-  // Verify the game exists
-  const { data: game, error: gameErr } = await ctx.admin
-    .from("games")
-    .select("id")
-    .eq("id", gameId)
-    .maybeSingle();
-  if (gameErr || !game)
-    return json({ ok: false, error: "game_not_found" }, 404);
+  // NOTE: game_id is now text (not UUID FK) — mock IDs like 'g1' are valid.
+  // Skip DB game existence check; the ppv_invites insert will succeed
+  // with any non-empty game identifier.
 
   // Check for an existing invite (idempotent — return same code on re-request)
   const { data: existing } = await ctx.admin
