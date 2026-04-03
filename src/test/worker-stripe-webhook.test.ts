@@ -1,3 +1,12 @@
+
+if (typeof globalThis.caches === 'undefined') {
+  globalThis.caches = {
+    default: {
+      match: async () => undefined,
+      put: async () => undefined,
+    }
+  } as any;
+}
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const billingEvents: Array<Record<string, unknown>> = [];

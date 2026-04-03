@@ -1,10 +1,22 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { expect, describe, it, vi, beforeEach } from 'vitest';
+import worker from '@/worker/index';
+import * as jose from 'jose';
+
+globalThis.fetch = async (req: any) => {
+  return new Response(JSON.stringify({ keys: [] }), { status: 200 });
+};
+
+globalThis.caches = {
+  default: {
+    match: async () => undefined,
+    put: async () => undefined,
+  }
+} as any;
 
 const rpc = vi.fn();
 const insert = vi.fn();
 
-// Mock Supabase: getUser returns a valid user when a Bearer token is present,
-// simulating a successfully verified JWT session.
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     auth: {
@@ -18,7 +30,18 @@ vi.mock('@supabase/supabase-js', () => ({
   }),
 }));
 
-import worker from '@/worker/index';
+vi.mock('jose', async (importOriginal) => {
+  const actual: any = await importOriginal();
+  return {
+    ...actual,
+    jwtVerify: vi.fn().mockResolvedValue({
+      payload: {
+        sub: 'user-test-uuid-001',
+        app_metadata: { roles: ['fan'] }
+      }
+    })
+  };
+});
 
 const env = {
   SUPABASE_URL: 'https://example.supabase.co',
@@ -40,8 +63,6 @@ describe('worker omniport ingress routes', () => {
   });
 
   it('blocks blocked-risk ingress envelopes', async () => {
-    // Must supply a valid Bearer token — x-sbbl-user-id header is stripped
-    // as part of security hardening (fix #2). Session now requires JWT only.
     const res = await worker.fetch(new Request('https://local/api/ingress', {
       method: 'POST',
       headers: {

@@ -20,6 +20,8 @@ import { Link } from 'react-router-dom';
 import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import ReactPlayer from 'react-player';
+import { WHIPClient } from '@eyevinn/whip-web-client';
+import { WebRTCPlayer } from '@eyevinn/webrtc-player';
 import { apiFetch } from '@/lib/api/client';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';

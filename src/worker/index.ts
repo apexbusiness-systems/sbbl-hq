@@ -1,3 +1,4 @@
+import * as jose from 'jose';
 import { safeServerEnv } from "@/lib/env";
 import { readIdempotencyKey } from "@/lib/api/idempotency";
 import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
@@ -98,29 +99,51 @@ async function verifyStripeSignature(
 // SECURITY: session is established ONLY via a valid Supabase JWT Bearer token.
 // The x-sbbl-user-id fallback has been removed — any client-supplied identity
 // header is ignored. If JWT verification fails, session is null (unauthenticated).
-async function getSession(req: Request, env: Env) {
+async function getSession(req: Request, env: Env): Promise<{ userId: string; roles: string[] } | null> {
   const token = getBearerToken(req);
-  if (token && env.SUPABASE_PUBLISHABLE_KEY) {
-    const supabase = createClient(
-      env.SUPABASE_URL,
-      env.SUPABASE_PUBLISHABLE_KEY,
-      {
-        auth: { persistSession: false, autoRefreshToken: false },
-      },
-    );
-    const { data, error } = await supabase.auth.getUser(token);
-    if (!error && data.user) {
-      // Roles are fetched from DB on admin-gated routes via requireAdminSession().
-      // For non-admin routes, default to 'fan' unless the DB assignment is present.
-      return {
-        userId: data.user.id,
-        roles: ["fan"] as string[],
-      };
-    }
-  }
+  if (!token) return null;
 
-  // No fallback. No token = no session.
-  return null;
+  try {
+    const jwksUrl = new URL(`${env.SUPABASE_URL}/rest/v1/auth/v1/jwks`);
+    const cache = (caches as any).default;
+    let jwksData;
+
+    if (cache) {
+      const cachedResponse = await cache.match(new Request(jwksUrl));
+      if (cachedResponse) {
+        jwksData = await cachedResponse.json();
+      } else {
+        const response = await fetch(jwksUrl);
+        if (response.ok) {
+          jwksData = await response.json();
+          const cacheResponse = new Response(JSON.stringify(jwksData), {
+            headers: { 'Cache-Control': 's-maxage=3600', 'Content-Type': 'application/json' }
+          });
+          await cache.put(new Request(jwksUrl), cacheResponse);
+        }
+      }
+    } else {
+      const response = await fetch(jwksUrl);
+      if (response.ok) {
+        jwksData = await response.json();
+      }
+    }
+
+    if (!jwksData) {
+      return null;
+    }
+
+    const JWKS = jose.createLocalJWKSet(jwksData);
+    const { payload } = await jose.jwtVerify(token, JWKS);
+
+    return {
+      userId: payload.sub as string,
+      roles: (payload.app_metadata as any)?.roles || ["fan"],
+    };
+  } catch (error) {
+    console.error("JWT verification failed:", error);
+    return null;
+  }
 }
 
 function requireAuth(req: Request) {
