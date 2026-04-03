@@ -95,9 +95,22 @@ function AdminStreamControls({
           {/* Action buttons */}
           <div className="flex gap-2">
             <button
-              onClick={() => {
-                setIsLive(!isLive);
-                toast.success(isLive ? 'Stream set to offline' : 'Stream set to live');
+              onClick={async () => {
+                const nextLive = !isLive;
+                try {
+                  const { setStreamLive, updateStreamConfig } = await import('@/lib/api/stream');
+                  const token = await import('@/lib/api/client').then(m => m.getAuthToken());
+                  
+                  // Save the twitch URL
+                  await updateStreamConfig({ collectionId: customStreamUrl }, token);
+                  // Set database live status
+                  await setStreamLive(nextLive, token);
+                  
+                  setIsLive(nextLive);
+                  toast.success(nextLive ? 'Stream set to live' : 'Stream set to offline');
+                } catch (err: any) {
+                  toast.error(`Failed: ${err.message}`);
+                }
               }}
               className={`flex-1 py-2.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm transition-colors ${
                 isLive
@@ -107,7 +120,6 @@ function AdminStreamControls({
             >
               {isLive ? 'End Stream' : 'Go Live'}
             </button>
-            {/* Switcher Studio link removed */}
           </div>
         </div>
       )}
@@ -124,12 +136,48 @@ const LivePage = () => {
 
   const liveGame = games.find(g => g.status === 'live') || games[0];
 
-  // Admin stream state — passed to LiveStreamPlayer via props
+  // Admin stream state — fetched from backend
   const [isStreamLive, setIsStreamLive] = useState(false);
   const [streamTitle, setStreamTitle] = useState('Live Game Broadcast');
-  const [viewerCount] = useState(0);
+  const [viewerCount, setViewerCount] = useState(0);
   const [streamSource, setStreamSource] = useState<'custom'>('custom');
   const [customStreamUrl, setCustomStreamUrl] = useState('');
+
+  // Auto-sync stream status from backend
+  useEffect(() => {
+    let active = true;
+    const fetchStatus = async () => {
+      try {
+        if (isSuperAdmin) {
+          // Admin needs full config
+          const { fetchAdminStreamConfig } = await import('@/lib/api/stream');
+          const res = await fetchAdminStreamConfig(token);
+          if (active && res?.config) {
+            setIsStreamLive(res.config.isLive);
+            setStreamTitle(res.config.title);
+            setCustomStreamUrl(res.config.collectionId || ''); // Repurposing collectionId for Stream URL
+          }
+        } else {
+          // Public poller
+          const { fetchPublicStreamStatus } = await import('@/lib/api/stream');
+          const res = await fetchPublicStreamStatus();
+          if (active && res) {
+            setIsStreamLive(res.isLive);
+            setStreamTitle(res.title);
+            setCustomStreamUrl(res.collectionId || '');
+            setViewerCount(res.viewerCount);
+          }
+        }
+      } catch (err) {
+        // silently ignore poller errors
+      }
+    };
+    
+    void fetchStatus();
+    // Poll every 15 seconds for viewers
+    const id = setInterval(fetchStatus, 15000);
+    return () => { active = false; clearInterval(id); };
+  }, [isSuperAdmin, token]);
 
   const [comments, setComments] = useState([
     { user: 'CourtSide_Fan', text: 'Rivera is on fire tonight!' },

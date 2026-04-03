@@ -143,6 +143,11 @@ export function LiveStreamPlayer({
               width="100%"
               height="100%"
               config={{
+                twitch: {
+                  options: {
+                    parent: ['sbbl-hq.icu', 'www.sbbl-hq.icu', 'localhost']
+                  }
+                },
                 youtube: {
                   playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1 }
                 }
