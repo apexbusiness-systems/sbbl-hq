@@ -36,7 +36,7 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         registerType: "autoUpdate",
-        includeAssets: ["favicon.svg", "robots.txt", "icons/apple-touch-icon.svg"],
+        includeAssets: ["favicon.svg", "robots.txt", "icons/apple-touch-icon.svg", "icons/ios-app-icon-180.png"],
         manifest: {
           name: "SBBL HQ",
           short_name: "SBBL HQ",
@@ -47,8 +47,15 @@ export default defineConfig(({ mode }) => {
           orientation: "portrait-primary",
           start_url: "/",
           icons: [
-            { src: "/icons/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
-            { src: "/icons/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "maskable any" }
+            { src: "/icons/app-icon.png", sizes: "512x512", type: "image/png", purpose: "any" },
+            { src: "/icons/app-icon.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+            { src: "/icons/google-play-icon-36.png", sizes: "36x36", type: "image/png" },
+            { src: "/icons/google-play-icon-48.png", sizes: "48x48", type: "image/png" },
+            { src: "/icons/google-play-icon-72.png", sizes: "72x72", type: "image/png" },
+            { src: "/icons/google-play-icon-96.png", sizes: "96x96", type: "image/png" },
+            { src: "/icons/google-play-icon-144.png", sizes: "144x144", type: "image/png" },
+            { src: "/icons/google-play-icon-192.png", sizes: "192x192", type: "image/png" },
+            { src: "/icons/google-play-icon-512.png", sizes: "512x512", type: "image/png" }
           ]
         },
         workbox: {
