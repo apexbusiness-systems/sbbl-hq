@@ -1,4 +1,17 @@
-{
+const fs = require('fs');
+
+const pkgContent = fs.readFileSync('package.json', 'utf8');
+
+// We have conflicts like:
+// <<<<<<< HEAD
+//     "something": "1.0.0"
+// =======
+//     "somethingelse": "2.0.0"
+// >>>>>>> origin/main
+
+// It's easier to just take our package.json (from HEAD) and add "@marsidev/react-turnstile" and put vitest back to "^3.2.4" which main has, since those are the only differences seen in the diff.
+
+const basePkg = {
   "name": "vite_react_shadcn_ts",
   "private": true,
   "version": "0.0.0",
@@ -113,4 +126,6 @@
     "vitest": "^3.2.4",
     "wrangler": "^4.8.0"
   }
-}
+};
+
+fs.writeFileSync('package.json', JSON.stringify(basePkg, null, 2) + '\\n');
