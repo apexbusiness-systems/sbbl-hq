@@ -233,8 +233,8 @@ const HomePage = () => {
               {/* Flyer image */}
               <div className="md:w-[220px] flex-shrink-0 bg-black flex items-center justify-center overflow-hidden">
                 <img
-                  src="/assets/events/1v1-fred-vs-karl.jpg"
-                  alt="1v1 Event — Fred vs Karl"
+                  src="/images/promos/1v1-matchup-optimized.webp"
+                  alt="1v1 Event — Jay Echoppe vs John Joseph Junio"
                   className="w-full md:h-full object-cover object-top md:max-h-[320px]"
                   loading="lazy"
                   onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
@@ -244,10 +244,10 @@ const HomePage = () => {
               <div className="flex-1 p-6 flex flex-col justify-center">
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary mb-2">Featured Event · SBBL</p>
                 <h2 className="font-display text-3xl md:text-4xl font-bold uppercase leading-none mb-1">1V1</h2>
-                <p className="font-display text-xl md:text-2xl font-bold text-primary uppercase leading-none mb-4">Fred vs Karl</p>
+                <p className="font-display text-xl md:text-2xl font-bold text-primary uppercase leading-none mb-4">Jay Echoppe vs John Joseph Junio</p>
                 <div className="space-y-1 text-sm text-muted-foreground mb-6">
-                  <p className="font-medium text-foreground">Crawford School, 531 Finch Ave W</p>
-                  <p>Thursday, April 3, 2026 · 6:30 PM</p>
+                  <p className="font-medium text-foreground">Location TBD</p>
+                  <p>Saturday, April 11, 2026</p>
                 </div>
                 <Link
                   to="/schedules"

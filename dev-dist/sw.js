@@ -67,7 +67,7 @@ if (!self.define) {
     });
   };
 }
-define(['./workbox-52f2a342'], (function (workbox) { 'use strict';
+define(['./workbox-05f67e36'], (function (workbox) { 'use strict';
 
   self.skipWaiting();
   workbox.clientsClaim();
@@ -78,27 +78,60 @@ define(['./workbox-52f2a342'], (function (workbox) { 'use strict';
    * See https://goo.gl/S9QRab
    */
   workbox.precacheAndRoute([{
-    "url": "index.html",
-    "revision": "0.b5d5tbqoau"
+    "url": "/",
+    "revision": "0.tgh48ovm5f"
   }], {});
   workbox.cleanupOutdatedCaches();
-  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html"), {
+  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("/"), {
     allowlist: [/^\/$/]
   }));
-  workbox.registerRoute(/^https:\/\/sbbl-hq\.icu\/.*/i, new workbox.NetworkFirst({
-    "cacheName": "sbbl-hq-cache",
+  workbox.registerRoute(({
+    request
+  }) => request.mode === "navigate", new workbox.StaleWhileRevalidate({
+    "cacheName": "app-shell-cache",
     plugins: [new workbox.ExpirationPlugin({
-      maxEntries: 200
+      maxEntries: 50
+    }), new workbox.PrecacheFallbackPlugin({
+      fallbackURL: '/'
+    })]
+  }), 'GET');
+  workbox.registerRoute(({
+    request,
+    url
+  }) => request.destination === "script" || request.destination === "style" || request.destination === "font", new workbox.CacheFirst({
+    "cacheName": "static-assets-cache",
+    plugins: [new workbox.ExpirationPlugin({
+      maxEntries: 200,
+      maxAgeSeconds: 31536000
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
     })]
   }), 'GET');
   workbox.registerRoute(({
     request
   }) => request.destination === "image", new workbox.CacheFirst({
-    "cacheName": "sbblhq-images",
+    "cacheName": "dynamic-images-cache",
     plugins: [new workbox.ExpirationPlugin({
       maxEntries: 120,
-      maxAgeSeconds: 1209600
+      maxAgeSeconds: 2592000
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
     })]
   }), 'GET');
+  workbox.registerRoute(({
+    url,
+    request
+  }) => request.method === "GET" && (url.pathname.startsWith("/api/public/home") || url.pathname.startsWith("/api/streams/status")), new workbox.StaleWhileRevalidate({
+    "cacheName": "dynamic-api-reads-cache",
+    plugins: [new workbox.ExpirationPlugin({
+      maxEntries: 50,
+      maxAgeSeconds: 86400
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
+    })]
+  }), 'GET');
+  workbox.registerRoute(({
+    request
+  }) => request.method !== "GET", new workbox.NetworkOnly(), 'GET');
 
 }));
