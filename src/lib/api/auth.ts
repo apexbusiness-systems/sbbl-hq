@@ -22,12 +22,11 @@ export async function signInWithPassword(email: string, password: string) {
   if (error) throw error;
 }
 
-export async function signUpWithPassword(email: string, password: string, captchaToken?: string) {
+export async function signUpWithPassword(email: string, password: string) {
   const supabase = requireSupabaseClient();
   const { error } = await supabase.auth.signUp({
     email: email.trim().toLowerCase(),
     password,
-    options: captchaToken ? { captchaToken } : undefined,
   });
   if (error) throw error;
 }
