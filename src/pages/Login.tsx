@@ -1,14 +1,16 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { signInWithPassword, signUpWithPassword } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
 import { LEAGUE_CONFIGS } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { Shield, BarChart3, Users, Zap, CheckCircle2 } from 'lucide-react';
+import { Turnstile, type TurnstileInstance } from '@marsidev/react-turnstile';
 
 type Mode = 'signin' | 'signup';
 
 const LoginPage = () => {
+  const turnstileKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY) || '';
   const location = useLocation();
   // Support ?mode=signup (used by /register redirect) and preserve redirect param
   const urlParams = new URLSearchParams(location.search);
@@ -20,11 +22,26 @@ const LoginPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+  const [captchaError, setCaptchaError] = useState<boolean>(false);
+  const turnstileRef = useRef<TurnstileInstance>(null);
   const { isSignedIn, needsOnboarding, configAvailable, loading } = useAuth();
   const navigate = useNavigate();
 
   // Redirect after login — respect ?redirect= param from /register flow
   const redirectTo = urlParams.get('redirect');
+  useEffect(() => {
+    let timer: any;
+    if (mode === 'signup' && turnstileKey) {
+      setCaptchaError(false);
+      timer = setTimeout(() => {
+        if (!captchaToken) {
+          setCaptchaError(true);
+        }
+      }, 10000);
+    }
+    return () => clearTimeout(timer);
+  }, [mode, captchaToken, turnstileKey]);
   useEffect(() => {
     if (isSignedIn) navigate(needsOnboarding ? '/onboarding' : (redirectTo || '/'));
   }, [isSignedIn, needsOnboarding, navigate, redirectTo]);
@@ -34,6 +51,9 @@ const LoginPage = () => {
     setError(null);
     setMessage(null);
     setPassword('');
+    setCaptchaToken(null);
+    setCaptchaError(false);
+    turnstileRef.current?.reset();
   };
 
   const onSubmit = async (event: FormEvent) => {
@@ -46,7 +66,10 @@ const LoginPage = () => {
         await signInWithPassword(email, password);
         // AuthContext onAuthStateChange will handle the SIGNED_IN event and redirect
       } else {
-        await signUpWithPassword(email, password);
+        if (turnstileKey && !captchaToken) {
+          throw new Error('Security check failed. Please wait or refresh the page.');
+        }
+        await signUpWithPassword(email, password, captchaToken || undefined);
         setMessage('Account created — check your inbox to confirm your email, then sign in.');
         setMode('signin');
         setPassword('');
@@ -167,6 +190,20 @@ const LoginPage = () => {
                   minLength={6}
                 />
               </div>
+              {mode === 'signup' && turnstileKey && (
+                <div className="hidden">
+                  <Turnstile
+                    siteKey={turnstileKey}
+                    onSuccess={setCaptchaToken}
+                    onError={() => setCaptchaError(true)}
+                    options={{ theme: 'dark' }}
+                    ref={turnstileRef}
+                  />
+                </div>
+              )}
+              {captchaError && mode === 'signup' && (
+                <p className="text-sm text-destructive">Security check taking too long. Please disable ad-blockers or refresh the page.</p>
+              )}
               <button
                 type="submit"
                 disabled={!canSubmit}

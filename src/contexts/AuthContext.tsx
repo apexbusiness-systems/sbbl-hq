@@ -1,7 +1,40 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, useRef, type ReactNode } from 'react';
 import { initSupabaseClient, getSupabaseClient } from '@/lib/supabase/client';
 import { canAccessOps, type AppRole } from '@/lib/auth/roles';
 import { fetchProfileAndRoles, type AuthProfile } from '@/lib/api/auth';
+
+const PROFILE_CACHE_TTL = 5 * 60 * 1000;
+
+async function getCachedProfile(userId: string) {
+  const cacheKey = `auth_profile_cache_${userId}`;
+
+  // Try cache first
+  try {
+    const cached = sessionStorage.getItem(cacheKey);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Date.now() - parsed.timestamp < PROFILE_CACHE_TTL) {
+        // Fire background revalidation
+        fetchProfileAndRoles(userId).then(data => {
+          sessionStorage.setItem(cacheKey, JSON.stringify({ ...data, timestamp: Date.now() }));
+        }).catch(() => { /* silent */ });
+        return parsed.data;
+      }
+    }
+  } catch { /* ignore cache parse errors */ }
+
+  // Network fetch
+  try {
+    const data = await fetchProfileAndRoles(userId);
+    sessionStorage.setItem(cacheKey, JSON.stringify({ data, timestamp: Date.now() }));
+    return data;
+  } catch (err) {
+    // Graceful degradation: log silently
+    console.error('Failed to fetch profile', err);
+    return { profile: null, roles: [] };
+  }
+}
+
 import type { Session, User } from '@supabase/supabase-js';
 
 type AuthState = {
@@ -26,6 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AuthProfile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [configAvailable, setConfigAvailable] = useState(true);
+  const currentUserIdRef = useRef<string | null>(null);
 
   const load = async () => {
     const client = getSupabaseClient();
@@ -42,9 +76,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data } = await client.auth.getSession();
     setSession(data.session ?? null);
     setUser(data.session?.user ?? null);
+    currentUserIdRef.current = data.session?.user?.id ?? null;
 
     if (data.session?.user?.id) {
-      const details = await fetchProfileAndRoles(data.session.user.id);
+      const details = await getCachedProfile(data.session.user.id);
       setProfile(details.profile);
       setRoles(details.roles);
     } else {
@@ -83,13 +118,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // during the magic-link or password sign-in redirect window.
         setSession(nextSession ?? null);
         setUser(nextSession?.user ?? null);
+        const nextUserId = nextSession?.user?.id ?? null;
+        if (currentUserIdRef.current === nextUserId) return;
+        currentUserIdRef.current = nextUserId;
         if (nextSession?.user?.id) {
-          void fetchProfileAndRoles(nextSession.user.id).then(({ profile: p, roles: r }) => {
+          void getCachedProfile(nextSession.user.id).then(({ profile: p, roles: r }) => {
             setProfile(p);
             setRoles(r);
-          }).catch(() => {
-            setProfile(null);
-            setRoles([]);
           });
         } else {
           setProfile(null);
