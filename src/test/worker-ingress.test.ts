@@ -5,6 +5,12 @@ const insert = vi.fn();
 
 // Mock Supabase: getUser returns a valid user when a Bearer token is present,
 // simulating a successfully verified JWT session.
+// Mock the `jose` library since the worker uses it to verify the token now.
+vi.mock('jose', () => ({
+  createRemoteJWKSet: vi.fn(),
+  jwtVerify: vi.fn().mockResolvedValue({ payload: { sub: 'user-test-uuid-001' } }),
+}));
+
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
     auth: {
