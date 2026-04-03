@@ -108,8 +108,8 @@ function AdminStreamControls({
                   
                   setIsLive(nextLive);
                   toast.success(nextLive ? 'Stream set to live' : 'Stream set to offline');
-                } catch (err: any) {
-                  toast.error(`Failed: ${err.message}`);
+                } catch (err) {
+                  toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
                 }
               }}
               className={`flex-1 py-2.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm transition-colors ${
