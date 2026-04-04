@@ -17,9 +17,9 @@ type TurnstileApi = {
     execution?: 'execute' | 'render';
     appearance?: 'always' | 'execute' | 'interaction-only';
   }) => string;
-  execute: (widgetId: string) => void;
-  reset: (widgetId: string) => void;
-  remove: (widgetId: string) => void;
+  execute: (container: HTMLElement | string) => void;
+  reset: (container?: HTMLElement | string) => void;
+  remove: (container?: HTMLElement | string) => void;
 };
 
 declare global {
@@ -46,15 +46,15 @@ const LoginPage = () => {
   const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
   const shouldUseTurnstile = Boolean(turnstileSiteKey);
   const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
-  const widgetIdRef = useRef<string | null>(null);
+  const widgetReadyRef = useRef(false);
   const captchaWaitRef = useRef<{ resolve: (token: string) => void; reject: (reason?: unknown) => void } | null>(null);
 
   useEffect(() => {
     if (!shouldUseTurnstile || !turnstileContainerRef.current) return;
 
     const mountWidget = () => {
-      if (!window.turnstile || !turnstileContainerRef.current || widgetIdRef.current) return;
-      widgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
+      if (!window.turnstile || !turnstileContainerRef.current || widgetReadyRef.current) return;
+      window.turnstile.render(turnstileContainerRef.current, {
         sitekey: turnstileSiteKey!,
         execution: 'execute',
         appearance: 'interaction-only',
@@ -72,6 +72,7 @@ const LoginPage = () => {
           setCaptchaToken(null);
         },
       });
+      widgetReadyRef.current = true;
     };
 
     if (window.turnstile) {
@@ -98,24 +99,24 @@ const LoginPage = () => {
 
   useEffect(() => {
     return () => {
-      if (window.turnstile && widgetIdRef.current) {
-        window.turnstile.remove(widgetIdRef.current);
+      if (window.turnstile && turnstileContainerRef.current) {
+        window.turnstile.remove(turnstileContainerRef.current ?? undefined);
       }
-      widgetIdRef.current = null;
+      widgetReadyRef.current = false;
       captchaWaitRef.current = null;
     };
   }, []);
 
   const ensureCaptchaToken = async () => {
     if (!shouldUseTurnstile) return undefined;
-    if (!window.turnstile || !widgetIdRef.current) {
+    if (!window.turnstile || !turnstileContainerRef.current || !widgetReadyRef.current) {
       throw new Error('Captcha is still loading. Please wait a moment and try again.');
     }
     setCaptchaToken(null);
-    window.turnstile.reset(widgetIdRef.current);
+    window.turnstile.reset(turnstileContainerRef.current);
     const token = await new Promise<string>((resolve, reject) => {
       captchaWaitRef.current = { resolve, reject };
-      window.turnstile!.execute(widgetIdRef.current!);
+      window.turnstile!.execute(turnstileContainerRef.current!);
       window.setTimeout(() => {
         if (captchaWaitRef.current) {
           captchaWaitRef.current.reject(new Error('Captcha timed out. Please try again.'));
@@ -177,7 +178,7 @@ const LoginPage = () => {
 
   const isEmailValid = email.includes('@') && email.includes('.');
   const isPasswordValid = password.length >= 6;
-  const canSubmit = isEmailValid && isPasswordValid && !submitting && configAvailable && (!shouldUseTurnstile || Boolean(widgetIdRef.current || captchaToken));
+  const canSubmit = isEmailValid && isPasswordValid && !submitting && configAvailable && (!shouldUseTurnstile || widgetReadyRef.current || Boolean(captchaToken));
 
   return (
     <div className="min-h-[calc(100vh-6rem)] flex items-center justify-center px-4 py-10">
