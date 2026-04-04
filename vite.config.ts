@@ -19,6 +19,8 @@ export default defineConfig(({ mode }) => {
     env.VITE_SUPABASE_PUBLISHABLE_KEY ||
     env.VITE_SUPABASE_ANON_KEY ||
     'sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz';
+    const turnstileSiteKey =
+    env.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAACz241-XHmFaqRrM';
 
   // Sentry release: use git SHA injected by CI (VITE_APP_VERSION) or fall back
   // to a timestamp so every build produces a unique release string.
@@ -30,6 +32,7 @@ export default defineConfig(({ mode }) => {
       'import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify(supabaseKey),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseKey),
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
+            'import.meta.env.VITE_TURNSTILE_SITE_KEY': JSON.stringify(turnstileSiteKey),
     },
     server: {
       host: "::",
