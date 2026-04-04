@@ -2044,33 +2044,37 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
     );
   }
 
-  // Fetch games for standings
-  let gamesQuery = admin
-    .from("games")
-    .select(
-      "id,home_team_id,away_team_id,status,home_score,away_score,league_id,seasons(leagues(code))",
-    )
-    .eq("status", "final");
+  // Fetch pre-computed standings from mvw_standings (P2-D materialized view).
+  // Falls back to empty statsMap (teams.record column used as fallback below).
+  const statsMap = new Map<
+    string,
+    { wins: number; losses: number; ptsFor: number; ptsAgainst: number }
+  >();
+  try {
+    let standingsQuery = admin
+      .from("mvw_standings")
+      .select("team_id,wins,losses,pts_for,pts_against");
 
-  if (leagueId && isUuid) gamesQuery = gamesQuery.eq("league_id", leagueId);
+    if (leagueId && isUuid) {
+      standingsQuery = standingsQuery.eq("league_id", leagueId);
+    }
 
-  const { data: gamesData, error: gamesError } = await gamesQuery;
-  if (gamesError) throw new Error(gamesError.message);
-
-  let filteredGamesData =
-    (gamesData as unknown as Record<string, unknown>[]) ?? [];
-  if (leagueId && !isUuid) {
-    filteredGamesData = filteredGamesData.filter(
-      (g: Record<string, unknown>) =>
-        (
-          ((
-            (g.seasons as Record<string, unknown>)?.leagues as Record<
-              string,
-              unknown
-            >
-          )?.code as string) || ""
-        ).toLowerCase() === leagueId.toLowerCase(),
-    );
+    const { data: standingsData } = await standingsQuery;
+    if (standingsData) {
+      for (const row of standingsData as Array<Record<string, unknown>>) {
+        if (typeof row.team_id === "string") {
+          statsMap.set(row.team_id, {
+            wins:        Number(row.wins        ?? 0),
+            losses:      Number(row.losses      ?? 0),
+            ptsFor:      Number(row.pts_for     ?? 0),
+            ptsAgainst:  Number(row.pts_against ?? 0),
+          });
+        }
+      }
+    }
+  } catch {
+    // mvw_standings may not exist on older DB (migration not yet applied) —
+    // the dbRecord fallback below will fill in team records from teams.record.
   }
 
   const profileUserIds = Array.from(
@@ -2104,40 +2108,6 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
       []) {
       if (typeof profile.user_id === "string") {
         profileMap.set(profile.user_id, profile);
-      }
-    }
-  }
-
-  const statsMap = new Map<
-    string,
-    { wins: number; losses: number; ptsFor: number; ptsAgainst: number }
-  >();
-  for (const game of filteredGamesData) {
-    const hId = game.home_team_id as string | undefined;
-    const aId = game.away_team_id as string | undefined;
-    const hScore = game.home_score as number | undefined;
-    const aScore = game.away_score as number | undefined;
-
-    if (hId && aId && hScore != null && aScore != null) {
-      if (!statsMap.has(hId))
-        statsMap.set(hId, { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 });
-      if (!statsMap.has(aId))
-        statsMap.set(aId, { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 });
-
-      const homeStats = statsMap.get(hId)!;
-      const awayStats = statsMap.get(aId)!;
-
-      homeStats.ptsFor += hScore;
-      homeStats.ptsAgainst += aScore;
-      awayStats.ptsFor += aScore;
-      awayStats.ptsAgainst += hScore;
-
-      if (hScore > aScore) {
-        homeStats.wins += 1;
-        awayStats.losses += 1;
-      } else if (aScore > hScore) {
-        awayStats.wins += 1;
-        homeStats.losses += 1;
       }
     }
   }
