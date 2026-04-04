@@ -20,6 +20,7 @@ type TurnstileApi = {
   execute: (container: HTMLElement | string) => void;
   reset: (container?: HTMLElement | string) => void;
   remove: (container?: HTMLElement | string) => void;
+  getResponse?: (container?: HTMLElement | string) => string;
 };
 
 declare global {
@@ -58,8 +59,6 @@ const LoginPage = () => {
       if (!window.turnstile || !turnstileContainerRef.current || widgetReadyRef.current) return;
       turnstileWidgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
         sitekey: turnstileSiteKey!,
-        execution: 'execute',
-        appearance: 'interaction-only',
         callback: (token) => {
           setCaptchaToken(token);
           if (captchaTimeoutRef.current) {
@@ -127,6 +126,10 @@ const LoginPage = () => {
     if (!window.turnstile || !turnstileWidgetIdRef.current || !widgetReadyRef.current) {
       throw new Error('Captcha is still loading. Please wait a moment and try again.');
     }
+    // Use any currently valid token first (managed mode can issue token on render).
+    const existingToken = captchaToken || window.turnstile.getResponse?.(turnstileWidgetIdRef.current);
+    if (existingToken) return existingToken;
+
     setCaptchaToken(null);
     window.turnstile.reset(turnstileWidgetIdRef.current);
     const token = await new Promise<string>((resolve, reject) => {
@@ -267,7 +270,13 @@ const LoginPage = () => {
             )}
 
             <form onSubmit={onSubmit} className="mt-6 space-y-4">
-              {shouldUseTurnstile && <div ref={turnstileContainerRef} className="sr-only" aria-hidden />}
+              {shouldUseTurnstile && (
+                <div
+                  ref={turnstileContainerRef}
+                  aria-hidden
+                  className="absolute -left-[9999px] top-auto h-[65px] w-[300px] overflow-hidden"
+                />
+              )}
               <div>
                 <label htmlFor="login-email" className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Email address
