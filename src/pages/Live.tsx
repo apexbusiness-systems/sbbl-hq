@@ -16,6 +16,27 @@ import {
 import { toast } from 'sonner';
 import type { Game } from '@/types';
 
+// ── Helpers ───────────────────────────────────────────────────────────────
+function mapHomeGameToUi(row: Record<string, unknown>): Game {
+  const homeTeam = (row.home_team as Record<string, unknown> | null) ?? {};
+  const awayTeam = (row.away_team as Record<string, unknown> | null) ?? {};
+  const leagueCode = String(row.league_code ?? 'SBBL').toLowerCase();
+  const leagueId = leagueCode === 'wbl' ? 'wbl' : leagueCode === 'tgifbl' ? 'tgifbl' : 'sbbl';
+  return {
+    id: String(row.id),
+    leagueId,
+    homeTeam: { id: String(row.home_team_id ?? 'home'), name: String(homeTeam.name ?? 'Home'), leagueId, division: 'N/A', record: { wins: 0, losses: 0 } },
+    awayTeam: { id: String(row.away_team_id ?? 'away'), name: String(awayTeam.name ?? 'Away'), leagueId, division: 'N/A', record: { wins: 0, losses: 0 } },
+    venue: String(row.venue ?? 'TBA'),
+    court: String(row.court ?? 'Main Court'),
+    date: String(row.scheduled_at ?? ''),
+    time: String(row.scheduled_at ?? ''),
+    status: String(row.status ?? 'upcoming') as Game['status'],
+    score: { home: Number(row.home_score ?? 0), away: Number(row.away_score ?? 0) },
+    ppvPrice: 4.99,
+  };
+}
+
 // ── Admin Stream Controls (collapsible panel) ─────────────────────────────
 // Visible only to super_admin. Manages stream state passed to LiveStreamPlayer
 // via props — no embed logic duplicated here.
