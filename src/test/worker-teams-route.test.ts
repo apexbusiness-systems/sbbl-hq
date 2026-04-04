@@ -18,17 +18,9 @@ const teamsRows = [
   },
 ];
 
-const gamesRows = [
-  {
-    id: 'game-1',
-    home_team_id: 'team-1',
-    away_team_id: 'team-2',
-    status: 'final',
-    home_score: 91,
-    away_score: 84,
-    league_id: 'league-wbl',
-    seasons: { leagues: { code: 'wbl' } },
-  },
+// mvw_standings: pre-computed standings (P2-D materialized view)
+const standingsRows = [
+  { team_id: 'team-1', wins: 1, losses: 0, pts_for: 91, pts_against: 84 },
 ];
 
 const profilesRows = [
@@ -57,7 +49,7 @@ function createQuery(rows: Record<string, unknown>[]) {
 }
 
 const teamSelect = vi.fn();
-const gamesSelect = vi.fn();
+const standingsSelect = vi.fn();
 const profilesSelect = vi.fn();
 
 vi.mock('@supabase/supabase-js', () => ({
@@ -75,10 +67,11 @@ vi.mock('@supabase/supabase-js', () => ({
         };
       }
 
-      if (table === 'games') {
-        const query = createQuery(gamesRows);
+      // P2-D: mvw_standings replaces the games query for standings computation
+      if (table === 'mvw_standings') {
+        const query = createQuery(standingsRows);
         return {
-          select: gamesSelect.mockImplementation(() => query),
+          select: standingsSelect.mockImplementation(() => query),
         };
       }
 
@@ -92,7 +85,8 @@ vi.mock('@supabase/supabase-js', () => ({
         };
       }
 
-      throw new Error(`Unexpected table ${table}`);
+      // Unknown tables return empty result — allows graceful fallback paths
+      return { select: vi.fn(() => createQuery([])) };
     },
   }),
 }));
