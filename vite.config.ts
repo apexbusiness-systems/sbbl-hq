@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -19,11 +20,16 @@ export default defineConfig(({ mode }) => {
     env.VITE_SUPABASE_ANON_KEY ||
     'sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz';
 
+  // Sentry release: use git SHA injected by CI (VITE_APP_VERSION) or fall back
+  // to a timestamp so every build produces a unique release string.
+  const appVersion = env.VITE_APP_VERSION || `sbbl-hq@${Date.now()}`;
+
   return {
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify(supabaseKey),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseKey),
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
     },
     server: {
       host: "::",
@@ -131,6 +137,17 @@ export default defineConfig(({ mode }) => {
         devOptions: { enabled: true },
       }),
       mode === "development" && componentTagger(),
+      // Sentry source map upload — only runs when SENTRY_AUTH_TOKEN is set.
+      // Hidden source maps: uploaded to Sentry but NOT served publicly.
+      // Skip in dev (no auth token) and when explicitly disabled.
+      env.SENTRY_AUTH_TOKEN && sentryVitePlugin({
+        org: env.SENTRY_ORG || "apex-business-systems",
+        project: env.SENTRY_PROJECT || "sbbl-hq-frontend",
+        authToken: env.SENTRY_AUTH_TOKEN,
+        release: { name: appVersion },
+        sourcemaps: { filesToDeleteAfterUpload: ["dist/assets/*.js.map"] },
+        telemetry: false,
+      }),
     ].filter(Boolean),
 
     resolve: {
@@ -158,6 +175,10 @@ export default defineConfig(({ mode }) => {
     },
 
     build: {
+      // Hidden source maps: readable stack traces in Sentry without exposing
+      // source to end users. The sentryVitePlugin deletes .map files post-upload.
+      sourcemap: "hidden",
+
       // Silence warnings only on chunks we know are intentionally large (rxdb, media)
       chunkSizeWarningLimit: 600,
 

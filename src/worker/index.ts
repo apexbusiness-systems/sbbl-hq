@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/cloudflare";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { safeServerEnv } from "@/lib/env";
 import { readIdempotencyKey } from "@/lib/api/idempotency";
@@ -3705,7 +3706,15 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
-export default {
+export default Sentry.withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    enabled: Boolean(env.SENTRY_DSN),
+    tracesSampleRate: 0.05,
+    // Tag every Worker event with the deployment environment
+    environment: (env as Record<string, unknown>).ENVIRONMENT as string ?? "production",
+  }),
+  {
   async fetch(req: Request, env: Env): Promise<Response> {
         const parsed = safeServerEnv(env as unknown as Record<string, unknown>);
 
@@ -3783,6 +3792,12 @@ export default {
                   message.startsWith("Duplicate idempotency key")
                 ? 400
                 : 500;
+        // Report 5xx errors to Sentry; skip 4xx (expected auth/validation failures)
+        if (status === 500) {
+          Sentry.captureException(error, {
+            extra: { path: url.pathname, method: req.method },
+          });
+        }
         return json({ ok: false, error: message }, status);
       }
     }
@@ -3793,7 +3808,8 @@ export default {
 
     return json({ ok: false, error: "not_found" }, 404);
   },
-};
+  },
+);
 
 async function handleManualOpsAction(ctx: HandlerCtx) {
   const { req, admin } = ctx;
