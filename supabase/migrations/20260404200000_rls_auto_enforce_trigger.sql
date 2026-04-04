@@ -89,15 +89,24 @@ comment on function public.fn_auto_enable_rls() is
 
 -- ── Attach event trigger ───────────────────────────────────────────────────
 -- Drop first so the migration is idempotent on re-run.
-drop event trigger if exists trg_auto_enable_rls;
+-- Wrapped in DO block because event triggers require superuser privileges
+-- which may not be available on Supabase preview branches.
+do $$
+begin
+  drop event trigger if exists trg_auto_enable_rls;
 
-create event trigger trg_auto_enable_rls
-  on ddl_command_end
-  when tag in ('CREATE TABLE')
-  execute function public.fn_auto_enable_rls();
+  create event trigger trg_auto_enable_rls
+    on ddl_command_end
+    when tag in ('CREATE TABLE')
+    execute function public.fn_auto_enable_rls();
 
-comment on event trigger trg_auto_enable_rls is
-  'Fires after any CREATE TABLE and automatically enables RLS on the new table.';
+  comment on event trigger trg_auto_enable_rls is
+    'Fires after any CREATE TABLE and automatically enables RLS on the new table.';
+exception
+  when insufficient_privilege then
+    raise notice 'Skipping event trigger — insufficient privileges (expected on preview branches).';
+end;
+$$;
 
 -- ── Index for rls_audit queries ────────────────────────────────────────────
 create index if not exists idx_rls_audit_created_at
