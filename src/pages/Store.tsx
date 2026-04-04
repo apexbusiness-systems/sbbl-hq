@@ -55,7 +55,7 @@ const StorePage = () => {
               {filtered.map(p => (
                 <div key={p.id} onClick={() => { setSelectedProduct(p.id); if (p.colors?.length) setSelectedColor(p.colors[0]); }} className={`panel overflow-hidden cursor-pointer group transition-colors ${selectedProduct === p.id ? 'border-primary/50' : 'hover:border-border'}`}>
                   <div className="relative aspect-square overflow-hidden">
-                    <img src={p.image} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+                    <img src={p.image} alt={p.name} className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" loading="lazy" />
                     {p.badge && (
                       <span className="absolute top-2 left-2 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-sm bg-primary text-primary-foreground">{p.badge}</span>
                     )}
@@ -73,7 +73,7 @@ const StorePage = () => {
           <div className="lg:col-span-1">
             {detail ? (
               <div className="panel p-4 sticky top-24 space-y-4">
-                <img src={detail.image} alt={detail.name} className="w-full aspect-square object-cover rounded-sm" loading="lazy" />
+                <img src={detail.image} alt={detail.name} className="w-full aspect-square object-contain rounded-sm" loading="lazy" />
                 <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wider">{detail.category}</p>
                   <h3 className="font-display text-lg font-bold mt-1">{detail.name}</h3>
