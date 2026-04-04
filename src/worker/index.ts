@@ -2150,6 +2150,15 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     return json({ ok: false, error: "missing_required_fields" }, 400);
   }
 
+  // Resolve league code (e.g. 'wbl') to UUID for FK references
+  let leagueUuid: string | null = null;
+  const { data: leagueLookup } = await ctx.admin
+    .from("leagues")
+    .select("id")
+    .ilike("code", body.leagueId)
+    .maybeSingle();
+  leagueUuid = leagueLookup?.id ?? null;
+
   // Upsert player profile by display name + team within league
   const { data: profileData } = await ctx.admin
     .from("profiles")
@@ -2198,6 +2207,28 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
   // DO NOT add a upsert({ game_id: null }) here — it violates the NOT NULL FK.
   if (profileData?.user_id) {
     // stat write deferred — see import_jobs.payload for pending record
+  }
+
+  // Insert media_assets row so the POTG card renders on the Media page.
+  // Only create if we have a thumbnail image to display.
+  if (body.imageUrl) {
+    await ctx.admin.from("media_assets").insert({
+      league_id: leagueUuid,
+      title: `POTG — ${body.playerName} (${body.team})`,
+      status: "published",
+      metadata: {
+        type: "poster",
+        thumbnail: body.imageUrl,
+        date: body.date ?? new Date().toISOString().split("T")[0],
+        potg: true,
+        playerName: body.playerName,
+        team: body.team,
+        pts: body.pts,
+        rebs: body.rebs,
+        assts: body.assts,
+        gameResult: body.gameResult,
+      },
+    });
   }
 
   try {
@@ -3233,14 +3264,36 @@ async function handlePublicMedia({ req, admin }: HandlerCtx) {
   const leagueId = url.searchParams.get("leagueId");
   let query = admin
     .from("media_assets")
-    .select("id,title,status,league_id,metadata,created_at")
+    .select("id,title,status,league_id,metadata,created_at,leagues:leagues!league_id(code)")
     .eq("status", "published")
     .order("created_at", { ascending: false })
     .limit(50);
   if (leagueId) query = query.eq("league_id", leagueId);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return json({ ok: true, data: data ?? [] });
+
+  // Transform DB rows → MediaAsset shape expected by the frontend
+  const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+  const mapped = rows.map((r) => {
+    const meta = (r.metadata ?? {}) as Record<string, unknown>;
+    const leagueRow = r.leagues as { code?: string } | null;
+    const code = (leagueRow?.code ?? "").toLowerCase();
+    const leagueCode = code === "wbl" ? "wbl"
+      : code === "tgifbl" ? "tgifbl"
+      : code === "sbbl" ? "sbbl"
+      : "sbbl";
+    return {
+      id: String(r.id),
+      title: String(r.title ?? ""),
+      type: String(meta.type ?? "poster"),
+      thumbnail: String(meta.thumbnail ?? meta.image_url ?? ""),
+      leagueId: leagueCode,
+      status: String(r.status ?? "draft"),
+      date: String(meta.date ?? (r.created_at as string | null)?.split("T")[0] ?? ""),
+    };
+  });
+
+  return json({ ok: true, data: mapped });
 }
 
 async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
