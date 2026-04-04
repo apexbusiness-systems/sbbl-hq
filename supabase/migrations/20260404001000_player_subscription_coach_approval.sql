@@ -41,8 +41,8 @@ CREATE POLICY "coach_requests_self_insert" ON coach_approval_requests
 
 -- Admins can view all requests
 CREATE POLICY "coach_requests_admin_select" ON coach_approval_requests
-  FOR SELECT USING (has_any_role(auth.uid(), ARRAY['league_admin', 'super_admin']));
+  FOR SELECT USING (public.has_any_role(ARRAY['league_admin', 'super_admin']::public.app_role[]));
 
 -- Admins can update (approve/reject)
 CREATE POLICY "coach_requests_admin_update" ON coach_approval_requests
-  FOR UPDATE USING (has_any_role(auth.uid(), ARRAY['league_admin', 'super_admin']));
+  FOR UPDATE USING (public.has_any_role(ARRAY['league_admin', 'super_admin']::public.app_role[]));
