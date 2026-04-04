@@ -3552,21 +3552,20 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
   const leagueParam = url.searchParams.get("league");
   const statusParam = url.searchParams.get("status");
 
-  // Query only base-schema columns that exist in production.
-  // Columns added by migration 20260404004000 (category, game_date, event_name,
-  // participant1_label, participant2_label, notes) are read via a second query
-  // below so we degrade gracefully if that migration hasn't been applied yet.
+  // Query only base-schema columns guaranteed to exist in production.
+  // The extended columns (category, game_date, etc.) are now added by
+  // migration 20260404004000 — include them directly since migration is applied.
   let query = admin
     .from("games")
     .select(
-      "id, status, scheduled_at, venue, home_score, away_score, " +
+      "id, status, created_at, home_score, away_score, " +
       "home_team_id, away_team_id, " +
       "home_team:teams!home_team_id(name), " +
       "away_team:teams!away_team_id(name), " +
       "leagues!league_id(code, name), " +
       "seasons!season_id(name)"
     )
-    .order("scheduled_at", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(200);
 
   if (statusParam === "recent") {
@@ -3620,10 +3619,10 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
       : leagueCode === "sbbl" ? "sbbl"
       : undefined;
 
-    // Derive game date from scheduled_at when game_date column not yet available
-    const scheduledAt = r.scheduled_at as string | null;
+    // Derive game date: prefer explicit game_date column, fall back to created_at
+    const createdAt = r.created_at as string | null;
     const gameDate = (ext.game_date as string | null)
-      ?? (scheduledAt ? scheduledAt.split("T")[0] : undefined);
+      ?? (createdAt ? createdAt.split("T")[0] : undefined);
 
     return {
       id: String(r.id),
@@ -3639,7 +3638,6 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
       awayScore: r.away_score != null ? Number(r.away_score) : undefined,
       status: String(r.status ?? "upcoming"),
       gameDate,
-      venue: (r.venue as string | null) ?? undefined,
       notes: (ext.notes as string | null) ?? undefined,
     };
   });
@@ -3698,7 +3696,6 @@ async function handleScoreGameUpsert(ctx: HandlerCtx) {
     status: body.status ?? "upcoming",
     game_date: body.gameDate ?? null,
     event_name: body.eventName ?? null,
-    venue: body.venue ?? null,
     notes: body.notes ?? null,
   };
 
@@ -3758,7 +3755,6 @@ async function handleScoresCsvImport(ctx: HandlerCtx) {
         status: row.status || "final",
         game_date: row.game_date || null,
         event_name: row.event_name || null,
-        venue: row.venue || null,
         notes: row.notes || null,
       });
       if (error) { failed++; errors.push(`${row.home_label} vs ${row.away_label}: ${error.message}`); }

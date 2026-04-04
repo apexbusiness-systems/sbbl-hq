@@ -86,7 +86,6 @@ const OpsPage = () => {
     status: 'final',
     gameDate: new Date().toISOString().split('T')[0],
     eventName: '',
-    venue: '',
     notes: '',
   };
   const [scoresForm, setScoresForm] = useState(defaultScoreForm);
@@ -698,10 +697,6 @@ const OpsPage = () => {
                 <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Game Date</label>
                 <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={scoresForm.gameDate} onChange={e => setScoresForm(f => ({ ...f, gameDate: e.target.value }))} />
               </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Venue (optional)</label>
-                <input className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="Court / location" value={scoresForm.venue} onChange={e => setScoresForm(f => ({ ...f, venue: e.target.value }))} />
-              </div>
             </div>
 
             {/* Notes */}
@@ -727,7 +722,7 @@ const OpsPage = () => {
               <h2 className="font-display text-xl">CSV Bulk Import</h2>
               <p className="text-xs text-muted-foreground mt-1">
                 Required columns: <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">category, home_label, away_label, status</code>.
-                Optional: <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">league_id, home_score, away_score, game_date, event_name, venue, notes</code>
+                Optional: <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">league_id, home_score, away_score, game_date, event_name, notes</code>
               </p>
             </div>
             <input ref={scoresCsvFileRef} type="file" accept=".csv,text/csv" onChange={async e => {

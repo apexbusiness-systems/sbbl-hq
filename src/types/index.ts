@@ -120,7 +120,6 @@ export interface ScoreEntry {
   awayScore?: number;
   status: GameStatus;
   gameDate?: string;
-  venue?: string;
   notes?: string;
 }
 
