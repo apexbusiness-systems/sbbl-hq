@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "sbbl-hq",
+  "name": "sbbl-hq-worker",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-03-27",
   "compatibility_flags": ["nodejs_compat"],
