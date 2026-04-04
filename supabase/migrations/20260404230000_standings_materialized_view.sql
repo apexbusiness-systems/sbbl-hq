@@ -101,7 +101,11 @@ create index if not exists idx_mvw_standings_win_pct
   on public.mvw_standings (league_id, season_id, win_pct desc);
 
 -- ── RLS on mvw_standings (public read — standings are not sensitive) ──────────
-alter materialized view public.mvw_standings owner to postgres;
+-- Owner set to current role (postgres on Supabase hosted, may vary on preview)
+do $$ begin
+  alter materialized view public.mvw_standings owner to postgres;
+exception when others then null;
+end; $$;
 
 -- We rely on Postgres table security rather than RLS (materialized views don't
 -- support RLS policies directly). Grant SELECT to the anon and authenticated
@@ -162,7 +166,10 @@ begin
 exception
   -- Publication may not exist in all environments (e.g., local dev without
   -- Realtime configured). Silently skip rather than fail the migration.
+  -- wrong_object_type: materialized views cannot be added to publications.
   when undefined_object then null;
   when feature_not_supported then null;
+  when wrong_object_type then null;
+  when others then null;
 end;
 $$;
