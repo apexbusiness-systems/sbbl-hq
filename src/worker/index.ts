@@ -1219,8 +1219,7 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
         // Grant player role (upsert to avoid duplicates)
         await ctx.admin
           .from("user_role_assignments")
-          .upsert({ user_id: userId, role: 'player', league_id: null }, { onConflict: 'user_id,role' })
-          .select();
+          .upsert({ user_id: userId, role: 'player', league_id: null }, { onConflict: 'user_id,role' });
       } catch {
         /* non-critical */
       }
@@ -1372,7 +1371,7 @@ async function writeImportJob(
       failed_rows: job.failed_rows,
       error_summary: job.error_summary ?? null,
     })
-    .select("*")
+    .select("id,job_type,submitted_by,payload_summary,status,total_rows,inserted_rows,failed_rows,error_summary,created_at,updated_at")
     .single();
   if (error) throw new Error(error.message);
   return data;
@@ -1407,7 +1406,7 @@ async function handleOpsBootstrap({ req, admin }: HandlerCtx) {
     admin.from("venues").select("id,name").order("name").limit(300),
     admin
       .from("import_jobs")
-      .select("*")
+      .select("id,job_type,submitted_by,payload_summary,status,total_rows,inserted_rows,failed_rows,error_summary,created_at,updated_at")
       .order("created_at", { ascending: false })
       .limit(25),
   ]);
@@ -1661,7 +1660,7 @@ async function handleImportHistory({ req, admin }: HandlerCtx) {
   await requireAdminSession(req, admin);
   const { data, error } = await admin
     .from("import_jobs")
-    .select("*")
+    .select("id,job_type,submitted_by,payload_summary,status,total_rows,inserted_rows,failed_rows,error_summary,created_at,updated_at")
     .order("created_at", { ascending: false })
     .limit(100);
   if (error) throw new Error(error.message);
@@ -1794,7 +1793,7 @@ async function handleOpsPatch(table: string, req: Request, admin: import("@supab
   const body = await req.json().catch(() => null);
   if (!body || Object.keys(body).length === 0) throw new Error('Empty or invalid patch body');
 
-  const { data, error } = await admin.from(table).update(body).eq('id', id).select().single();
+  const { data, error } = await admin.from(table).update(body).eq('id', id).select('id').single();
   if (error) throw new Error(error.message);
 
   await admin.from('audit_logs').insert({
@@ -1822,7 +1821,7 @@ async function handleOpsDelete(table: string, req: Request, admin: import("@supa
   if (!id) throw new Error('Missing ID');
 
   // Prefer soft delete/archive over hard delete by setting status
-  const { data, error } = await admin.from(table).update({ status: 'archived' }).eq('id', id).select().single();
+  const { data, error } = await admin.from(table).update({ status: 'archived' }).eq('id', id).select('id,status').single();
   if (error) throw new Error(error.message);
 
   await admin.from('audit_logs').insert({
@@ -3959,6 +3958,9 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueParam = url.searchParams.get("league");
   const statusParam = url.searchParams.get("status");
+  // Keyset pagination: client sends ?before=<created_at ISO> from last row of previous page.
+  // Ordering is created_at DESC, so "before" means an earlier timestamp.
+  const beforeCursor = url.searchParams.get("before");
 
   // Query only base-schema columns guaranteed to exist in production.
   // The extended columns (category, game_date, etc.) are now added by
@@ -3974,12 +3976,17 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
       "seasons!season_id(name)"
     )
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(100);
 
   if (statusParam === "recent") {
     query = query.eq("status", "final");
   } else if (statusParam === "upcoming") {
     query = query.in("status", ["upcoming", "scheduled"]);
+  }
+
+  // Apply keyset cursor — only rows created before the cursor timestamp.
+  if (beforeCursor && /^\d{4}-\d{2}-\d{2}T/.test(beforeCursor)) {
+    query = query.lt("created_at", beforeCursor);
   }
 
   const { data, error } = await query;
@@ -4055,7 +4062,13 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
     ? games.filter((g) => g.leagueCode === leagueParam.toLowerCase())
     : games;
 
-  return json({ ok: true, games: filtered });
+  // Provide next-page cursor: created_at of the last row (ordering is DESC,
+  // so the client passes this as ?before= on the next request).
+  const nextCursor = filtered.length === 100
+    ? (rows[rows.length - 1]?.created_at as string | undefined) ?? null
+    : null;
+
+  return json({ ok: true, games: filtered, nextCursor });
 }
 
 /** POST /ops/scores/game — upsert a single game (super_admin only) */
