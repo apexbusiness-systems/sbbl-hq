@@ -16,12 +16,13 @@ import { WhepPlayer } from '@/components/WhepPlayer';
  * Uses Switcher Studio's script-based embed player.
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import ReactPlayer from 'react-player';
 import { apiFetch } from '@/lib/api/client';
+import { useTurnstile } from '@/hooks/use-turnstile';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
 import type { Game } from '@/types';
@@ -65,9 +66,7 @@ export function LiveStreamPlayer({
 
   const [playbackUrl, setPlaybackUrl] = useState('');
   const [playbackLoading, setPlaybackLoading] = useState(false);
-  const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
-  const turnstileWidgetIdRef = useRef<string | null>(null);
-  const turnstileWaitRef = useRef<{ resolve: (token: string) => void; reject: (error: Error) => void } | null>(null);
+  const { containerRef: turnstileRef, resolveToken } = useTurnstile();
 
   // ── Role classification ──────────────────────────────────────────────────
   const isPlayer    = roles.includes('player');
@@ -77,58 +76,6 @@ export function LiveStreamPlayer({
   const hasRoleAccess = isPlayer || isPaidFan || isSuperAdmin;
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
   const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
-
-  useEffect(() => {
-    const siteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
-    if (!siteKey || !turnstileContainerRef.current) return;
-    const mountWidget = () => {
-      const turnstile = (window as unknown as { turnstile?: { render: (...args: unknown[]) => string } }).turnstile;
-      if (!turnstile || !turnstileContainerRef.current || turnstileWidgetIdRef.current) return;
-      turnstileWidgetIdRef.current = turnstile.render(turnstileContainerRef.current, {
-        sitekey: siteKey,
-        execution: 'execute',
-        appearance: 'interaction-only',
-        callback: (tokenValue: string) => {
-          turnstileWaitRef.current?.resolve(tokenValue);
-          turnstileWaitRef.current = null;
-        },
-        'error-callback': () => {
-          turnstileWaitRef.current?.reject(new Error('captcha_failed'));
-          turnstileWaitRef.current = null;
-        },
-        'expired-callback': () => undefined,
-      } as unknown as Record<string, unknown>);
-    };
-    if ((window as unknown as { turnstile?: unknown }).turnstile) {
-      mountWidget();
-      return;
-    }
-    const script = document.createElement('script');
-    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-    script.async = true;
-    script.defer = true;
-    script.addEventListener('load', mountWidget);
-    document.head.appendChild(script);
-    return () => script.removeEventListener('load', mountWidget);
-  }, []);
-
-  async function resolveCaptchaToken() {
-    const siteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
-    if (!siteKey) return undefined;
-    const turnstile = (window as unknown as { turnstile?: { execute: (id: string) => void; reset: (id: string) => void } }).turnstile;
-    if (!turnstile || !turnstileWidgetIdRef.current) throw new Error('captcha_loading');
-    turnstile.reset(turnstileWidgetIdRef.current);
-    return await new Promise<string>((resolve, reject) => {
-      turnstileWaitRef.current = { resolve, reject: (error) => reject(error) };
-      turnstile.execute(turnstileWidgetIdRef.current!);
-      window.setTimeout(() => {
-        if (turnstileWaitRef.current) {
-          turnstileWaitRef.current.reject(new Error('captcha_timeout'));
-          turnstileWaitRef.current = null;
-        }
-      }, 15000);
-    });
-  }
 
   // ── Fetch stream entitlement (skip if role already grants access) ─────────
   useEffect(() => {
@@ -286,8 +233,7 @@ export function LiveStreamPlayer({
                     {generatedCode.slice(0, 8).toUpperCase()}…
                   </code>
                 </div>
-          <div ref={turnstileContainerRef} className="sr-only" aria-hidden />
-          <button
+                <button
                   onClick={async () => {
                     await navigator.clipboard.writeText(generatedCode);
                     setCodeCopied(true);
@@ -356,6 +302,8 @@ export function LiveStreamPlayer({
   // ── Gate 3: Preview — registered fan with no access ───────────────────────
   return (
     <div className="absolute inset-0">
+      {/* Hidden Turnstile widget — executed before PPV purchase or invite redeem */}
+      <div ref={turnstileRef} className="sr-only" aria-hidden="true" />
       <img
         src={gameAction}
         alt="Game preview"
@@ -392,7 +340,7 @@ export function LiveStreamPlayer({
                     ppvPrice: PPV_PRICE_USD,
                     successUrl: `${window.location.origin}/live?access=1`,
                     cancelUrl: `${window.location.origin}/live`,
-                    captchaToken: await resolveCaptchaToken(),
+                    captchaToken: await resolveToken(),
                   }),
                 },
                 token,
@@ -460,7 +408,7 @@ export function LiveStreamPlayer({
           body: JSON.stringify({
             code: inviteInput,
             gameId: game.id,
-            captchaToken: await resolveCaptchaToken(),
+            captchaToken: await resolveToken(),
           }),
         },
         token,
