@@ -1,3 +1,4 @@
+import * as Sentry from "@sentry/cloudflare";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { safeServerEnv } from "@/lib/env";
 import { readIdempotencyKey } from "@/lib/api/idempotency";
@@ -1219,8 +1220,7 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
         // Grant player role (upsert to avoid duplicates)
         await ctx.admin
           .from("user_role_assignments")
-          .upsert({ user_id: userId, role: 'player', league_id: null }, { onConflict: 'user_id,role' })
-          .select();
+          .upsert({ user_id: userId, role: 'player', league_id: null }, { onConflict: 'user_id,role' });
       } catch {
         /* non-critical */
       }
@@ -1372,7 +1372,7 @@ async function writeImportJob(
       failed_rows: job.failed_rows,
       error_summary: job.error_summary ?? null,
     })
-    .select("*")
+    .select("id,job_type,submitted_by,payload_summary,status,total_rows,inserted_rows,failed_rows,error_summary,created_at,updated_at")
     .single();
   if (error) throw new Error(error.message);
   return data;
@@ -1407,7 +1407,7 @@ async function handleOpsBootstrap({ req, admin }: HandlerCtx) {
     admin.from("venues").select("id,name").order("name").limit(300),
     admin
       .from("import_jobs")
-      .select("*")
+      .select("id,job_type,submitted_by,payload_summary,status,total_rows,inserted_rows,failed_rows,error_summary,created_at,updated_at")
       .order("created_at", { ascending: false })
       .limit(25),
   ]);
@@ -1661,7 +1661,7 @@ async function handleImportHistory({ req, admin }: HandlerCtx) {
   await requireAdminSession(req, admin);
   const { data, error } = await admin
     .from("import_jobs")
-    .select("*")
+    .select("id,job_type,submitted_by,payload_summary,status,total_rows,inserted_rows,failed_rows,error_summary,created_at,updated_at")
     .order("created_at", { ascending: false })
     .limit(100);
   if (error) throw new Error(error.message);
@@ -1794,7 +1794,7 @@ async function handleOpsPatch(table: string, req: Request, admin: import("@supab
   const body = await req.json().catch(() => null);
   if (!body || Object.keys(body).length === 0) throw new Error('Empty or invalid patch body');
 
-  const { data, error } = await admin.from(table).update(body).eq('id', id).select().single();
+  const { data, error } = await admin.from(table).update(body).eq('id', id).select('id').single();
   if (error) throw new Error(error.message);
 
   await admin.from('audit_logs').insert({
@@ -1822,7 +1822,7 @@ async function handleOpsDelete(table: string, req: Request, admin: import("@supa
   if (!id) throw new Error('Missing ID');
 
   // Prefer soft delete/archive over hard delete by setting status
-  const { data, error } = await admin.from(table).update({ status: 'archived' }).eq('id', id).select().single();
+  const { data, error } = await admin.from(table).update({ status: 'archived' }).eq('id', id).select('id,status').single();
   if (error) throw new Error(error.message);
 
   await admin.from('audit_logs').insert({
@@ -2045,33 +2045,37 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
     );
   }
 
-  // Fetch games for standings
-  let gamesQuery = admin
-    .from("games")
-    .select(
-      "id,home_team_id,away_team_id,status,home_score,away_score,league_id,seasons(leagues(code))",
-    )
-    .eq("status", "final");
+  // Fetch pre-computed standings from mvw_standings (P2-D materialized view).
+  // Falls back to empty statsMap (teams.record column used as fallback below).
+  const statsMap = new Map<
+    string,
+    { wins: number; losses: number; ptsFor: number; ptsAgainst: number }
+  >();
+  try {
+    let standingsQuery = admin
+      .from("mvw_standings")
+      .select("team_id,wins,losses,pts_for,pts_against");
 
-  if (leagueId && isUuid) gamesQuery = gamesQuery.eq("league_id", leagueId);
+    if (leagueId && isUuid) {
+      standingsQuery = standingsQuery.eq("league_id", leagueId);
+    }
 
-  const { data: gamesData, error: gamesError } = await gamesQuery;
-  if (gamesError) throw new Error(gamesError.message);
-
-  let filteredGamesData =
-    (gamesData as unknown as Record<string, unknown>[]) ?? [];
-  if (leagueId && !isUuid) {
-    filteredGamesData = filteredGamesData.filter(
-      (g: Record<string, unknown>) =>
-        (
-          ((
-            (g.seasons as Record<string, unknown>)?.leagues as Record<
-              string,
-              unknown
-            >
-          )?.code as string) || ""
-        ).toLowerCase() === leagueId.toLowerCase(),
-    );
+    const { data: standingsData } = await standingsQuery;
+    if (standingsData) {
+      for (const row of standingsData as Array<Record<string, unknown>>) {
+        if (typeof row.team_id === "string") {
+          statsMap.set(row.team_id, {
+            wins:        Number(row.wins        ?? 0),
+            losses:      Number(row.losses      ?? 0),
+            ptsFor:      Number(row.pts_for     ?? 0),
+            ptsAgainst:  Number(row.pts_against ?? 0),
+          });
+        }
+      }
+    }
+  } catch {
+    // mvw_standings may not exist on older DB (migration not yet applied) —
+    // the dbRecord fallback below will fill in team records from teams.record.
   }
 
   const profileUserIds = Array.from(
@@ -2105,40 +2109,6 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
       []) {
       if (typeof profile.user_id === "string") {
         profileMap.set(profile.user_id, profile);
-      }
-    }
-  }
-
-  const statsMap = new Map<
-    string,
-    { wins: number; losses: number; ptsFor: number; ptsAgainst: number }
-  >();
-  for (const game of filteredGamesData) {
-    const hId = game.home_team_id as string | undefined;
-    const aId = game.away_team_id as string | undefined;
-    const hScore = game.home_score as number | undefined;
-    const aScore = game.away_score as number | undefined;
-
-    if (hId && aId && hScore != null && aScore != null) {
-      if (!statsMap.has(hId))
-        statsMap.set(hId, { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 });
-      if (!statsMap.has(aId))
-        statsMap.set(aId, { wins: 0, losses: 0, ptsFor: 0, ptsAgainst: 0 });
-
-      const homeStats = statsMap.get(hId)!;
-      const awayStats = statsMap.get(aId)!;
-
-      homeStats.ptsFor += hScore;
-      homeStats.ptsAgainst += aScore;
-      awayStats.ptsFor += aScore;
-      awayStats.ptsAgainst += hScore;
-
-      if (hScore > aScore) {
-        homeStats.wins += 1;
-        awayStats.losses += 1;
-      } else if (aScore > hScore) {
-        awayStats.wins += 1;
-        homeStats.losses += 1;
       }
     }
   }
@@ -3736,7 +3706,15 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
-export default {
+export default Sentry.withSentry(
+  (env: Env) => ({
+    dsn: env.SENTRY_DSN,
+    enabled: Boolean(env.SENTRY_DSN),
+    tracesSampleRate: 0.05,
+    // Tag every Worker event with the deployment environment
+    environment: (env as Record<string, unknown>).ENVIRONMENT as string ?? "production",
+  }),
+  {
   async fetch(req: Request, env: Env): Promise<Response> {
         const parsed = safeServerEnv(env as unknown as Record<string, unknown>);
 
@@ -3814,6 +3792,12 @@ export default {
                   message.startsWith("Duplicate idempotency key")
                 ? 400
                 : 500;
+        // Report 5xx errors to Sentry; skip 4xx (expected auth/validation failures)
+        if (status === 500) {
+          Sentry.captureException(error, {
+            extra: { path: url.pathname, method: req.method },
+          });
+        }
         return json({ ok: false, error: message }, status);
       }
     }
@@ -3824,7 +3808,8 @@ export default {
 
     return json({ ok: false, error: "not_found" }, 404);
   },
-};
+  },
+);
 
 async function handleManualOpsAction(ctx: HandlerCtx) {
   const { req, admin } = ctx;
@@ -3959,6 +3944,9 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueParam = url.searchParams.get("league");
   const statusParam = url.searchParams.get("status");
+  // Keyset pagination: client sends ?before=<created_at ISO> from last row of previous page.
+  // Ordering is created_at DESC, so "before" means an earlier timestamp.
+  const beforeCursor = url.searchParams.get("before");
 
   // Query only base-schema columns guaranteed to exist in production.
   // The extended columns (category, game_date, etc.) are now added by
@@ -3974,12 +3962,17 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
       "seasons!season_id(name)"
     )
     .order("created_at", { ascending: false })
-    .limit(200);
+    .limit(100);
 
   if (statusParam === "recent") {
     query = query.eq("status", "final");
   } else if (statusParam === "upcoming") {
     query = query.in("status", ["upcoming", "scheduled"]);
+  }
+
+  // Apply keyset cursor — only rows created before the cursor timestamp.
+  if (beforeCursor && /^\d{4}-\d{2}-\d{2}T/.test(beforeCursor)) {
+    query = query.lt("created_at", beforeCursor);
   }
 
   const { data, error } = await query;
@@ -4055,7 +4048,13 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
     ? games.filter((g) => g.leagueCode === leagueParam.toLowerCase())
     : games;
 
-  return json({ ok: true, games: filtered });
+  // Provide next-page cursor: created_at of the last row (ordering is DESC,
+  // so the client passes this as ?before= on the next request).
+  const nextCursor = filtered.length === 100
+    ? (rows[rows.length - 1]?.created_at as string | undefined) ?? null
+    : null;
+
+  return json({ ok: true, games: filtered, nextCursor });
 }
 
 /** POST /ops/scores/game — upsert a single game (super_admin only) */

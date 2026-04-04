@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '@/contexts/AppContext';
+import { useBag } from '@/contexts/BagContext';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { signOut } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
@@ -27,7 +28,8 @@ const leagueAwarePaths: Record<LeagueAwareLabel, string> = {
 };
 
 export const Header = () => {
-  const { activeLeague, setActiveLeague, isAdmin, bagItems, setBagOpen } = useApp();
+  const { activeLeague, setActiveLeague, isAdmin } = useApp();
+  const { bagItems, setBagOpen } = useBag();
   const { isSignedIn, user } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();

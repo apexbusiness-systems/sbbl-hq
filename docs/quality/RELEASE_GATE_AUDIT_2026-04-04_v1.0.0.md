@@ -1,3 +1,4 @@
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
 # SBBL-HQ Release Gate Audit — 10K Concurrency Hardening
 
 **Date:** 2026-04-04  

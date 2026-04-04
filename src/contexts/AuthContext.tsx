@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import * as Sentry from '@sentry/react';
 import { initSupabaseClient, getSupabaseClient } from '@/lib/supabase/client';
 import { canAccessOps, type AppRole } from '@/lib/auth/roles';
 import { fetchProfileAndRoles, type AuthProfile } from '@/lib/api/auth';
@@ -47,9 +48,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const details = await fetchProfileAndRoles(data.session.user.id);
       setProfile(details.profile);
       setRoles(details.roles);
+      Sentry.setUser({
+        id: data.session.user.id,
+        email: data.session.user.email,
+        username: details.profile?.display_name ?? undefined,
+      });
     } else {
       setProfile(null);
       setRoles([]);
+      Sentry.setUser(null);
     }
     setLoading(false);
   };
@@ -87,6 +94,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           void fetchProfileAndRoles(nextSession.user.id).then(({ profile: p, roles: r }) => {
             setProfile(p);
             setRoles(r);
+            Sentry.setUser({
+              id: nextSession.user.id,
+              email: nextSession.user.email,
+              username: p?.display_name ?? undefined,
+            });
           }).catch(() => {
             setProfile(null);
             setRoles([]);
@@ -94,6 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } else {
           setProfile(null);
           setRoles([]);
+          Sentry.setUser(null);
         }
       });
       unsubscribe = () => data.subscription.unsubscribe();

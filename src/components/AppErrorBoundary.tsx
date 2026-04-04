@@ -1,18 +1,23 @@
 import { Component, type ErrorInfo, type ReactNode } from 'react';
+import * as Sentry from '@sentry/react';
 
 type Props = { children: ReactNode };
-type State = { hasError: boolean; message: string };
+type State = { hasError: boolean; message: string; eventId: string | null };
 
 export class AppErrorBoundary extends Component<Props, State> {
-  state: State = { hasError: false, message: '' };
+  state: State = { hasError: false, message: '', eventId: null };
 
-  static getDerivedStateFromError(error: Error): State {
+  static getDerivedStateFromError(error: Error): Partial<State> {
     return { hasError: true, message: error.message || 'Unexpected application error' };
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    // Keep a console trail so production debugging is still possible.
     console.error('AppErrorBoundary', error, info.componentStack);
+    // Report to Sentry with full component stack for React 18
+    const eventId = Sentry.captureException(error, {
+      extra: { componentStack: info.componentStack },
+    });
+    this.setState({ eventId });
   }
 
   render() {

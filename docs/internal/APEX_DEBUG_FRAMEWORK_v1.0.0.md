@@ -1,3 +1,4 @@
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
 ---
 name: apex-master-debug
 version: 1.0.0

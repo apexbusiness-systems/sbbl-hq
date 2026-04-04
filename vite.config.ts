@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { componentTagger } from "lovable-tagger";
 import { VitePWA } from "vite-plugin-pwa";
+import { sentryVitePlugin } from "@sentry/vite-plugin";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -19,11 +20,16 @@ export default defineConfig(({ mode }) => {
     env.VITE_SUPABASE_ANON_KEY ||
     'sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz';
 
+  // Sentry release: use git SHA injected by CI (VITE_APP_VERSION) or fall back
+  // to a timestamp so every build produces a unique release string.
+  const appVersion = env.VITE_APP_VERSION || `sbbl-hq@${Date.now()}`;
+
   return {
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify(supabaseKey),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseKey),
+      'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
     },
     server: {
       host: "::",
@@ -62,6 +68,17 @@ export default defineConfig(({ mode }) => {
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
+          // Serve /offline as the fallback for navigation requests that miss
+          // both the network and the app-shell-navigations cache.
+          navigateFallback: '/offline',
+          // Only apply the fallback to app routes — never to API, auth, or assets.
+          navigateFallbackDenylist: [
+            /^\/rest\/v1\//,
+            /^\/auth\//,
+            /^\/storage\//,
+            /^\/functions\//,
+            /^\/assets\//,
+          ],
           runtimeCaching: [
             // App shell navigations: Stale-While-Revalidate
             {
@@ -120,6 +137,17 @@ export default defineConfig(({ mode }) => {
         devOptions: { enabled: true },
       }),
       mode === "development" && componentTagger(),
+      // Sentry source map upload — only runs when SENTRY_AUTH_TOKEN is set.
+      // Hidden source maps: uploaded to Sentry but NOT served publicly.
+      // Skip in dev (no auth token) and when explicitly disabled.
+      env.SENTRY_AUTH_TOKEN && sentryVitePlugin({
+        org: env.SENTRY_ORG || "apex-business-systems",
+        project: env.SENTRY_PROJECT || "sbbl-hq-frontend",
+        authToken: env.SENTRY_AUTH_TOKEN,
+        release: { name: appVersion },
+        sourcemaps: { filesToDeleteAfterUpload: ["dist/assets/*.js.map"] },
+        telemetry: false,
+      }),
     ].filter(Boolean),
 
     resolve: {
@@ -127,6 +155,157 @@ export default defineConfig(({ mode }) => {
         "@": path.resolve(__dirname, "./src"),
       },
       dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
+    },
+
+    // Pre-bundle heavy deps in dev to eliminate cold-start waterfall
+    optimizeDeps: {
+      include: [
+        "react",
+        "react-dom",
+        "react-router-dom",
+        "@tanstack/react-query",
+        "@supabase/supabase-js",
+        "framer-motion",
+        "recharts",
+        "rxdb",
+        "rxjs",
+        "date-fns",
+        "zod",
+      ],
+    },
+
+    build: {
+      // Hidden source maps: readable stack traces in Sentry without exposing
+      // source to end users. The sentryVitePlugin deletes .map files post-upload.
+      sourcemap: "hidden",
+
+      // Silence warnings only on chunks we know are intentionally large (rxdb, media)
+      chunkSizeWarningLimit: 600,
+
+      rollupOptions: {
+        output: {
+          // Deterministic, cache-friendly names: stable name + content hash.
+          // The hash changes only when the chunk's own content changes,
+          // so react-vendor stays cached across app-code deploys.
+          chunkFileNames: "assets/[name]-[hash].js",
+          entryFileNames: "assets/[name]-[hash].js",
+          assetFileNames: "assets/[name]-[hash][extname]",
+
+          /**
+           * manualChunks — SBBL HQ bundle strategy
+           *
+           * Chunk                 Gzip target   Rationale
+           * ─────────────────────────────────────────────────────────────────
+           * react-vendor          ~50 KB        Core React runtime — near-zero
+           *                                     churn; max cache TTL
+           * query-vendor          ~20 KB        TanStack Query — API stable
+           * supabase-vendor       ~55 KB        Supabase SDK — auth + realtime
+           * ui-vendor             ~230 KB       All Radix + framer-motion +
+           *                                     icon set + UI utilities
+           * charts-vendor         ~90 KB        recharts + D3 sub-deps
+           * rxdb-vendor           ~200 KB       RxDB + RxJS + idb + jose —
+           *                                     offline sync, load once
+           * media-vendor          ~120 KB       WebRTC + react-player —
+           *                                     Live page only
+           * utils-vendor          ~45 KB        date-fns + zod + clsx
+           * forms-vendor          ~25 KB        react-hook-form + resolvers
+           */
+          manualChunks(id: string) {
+            if (!id.includes("node_modules")) return undefined;
+
+            // ── React core runtime ──────────────────────────────────────────
+            if (
+              id.includes("/node_modules/react/") ||
+              id.includes("/node_modules/react-dom/") ||
+              id.includes("/node_modules/react-router-dom/") ||
+              id.includes("/node_modules/@remix-run/") ||
+              id.includes("/node_modules/scheduler/")
+            ) {
+              return "react-vendor";
+            }
+
+            // ── TanStack Query ──────────────────────────────────────────────
+            if (id.includes("/node_modules/@tanstack/")) {
+              return "query-vendor";
+            }
+
+            // ── Supabase SDK (auth, realtime, postgrest, storage) ───────────
+            if (id.includes("/node_modules/@supabase/")) {
+              return "supabase-vendor";
+            }
+
+            // ── RxDB + RxJS + IndexedDB + jose (offline sync stack) ─────────
+            if (
+              id.includes("/node_modules/rxdb/") ||
+              id.includes("/node_modules/rxjs/") ||
+              id.includes("/node_modules/idb/") ||
+              id.includes("/node_modules/jose/") ||
+              id.includes("/node_modules/pwa-helpers/")
+            ) {
+              return "rxdb-vendor";
+            }
+
+            // ── Charts (recharts + D3 sub-deps) ─────────────────────────────
+            if (
+              id.includes("/node_modules/recharts/") ||
+              id.includes("/node_modules/d3") ||
+              id.includes("/node_modules/victory-vendor/")
+            ) {
+              return "charts-vendor";
+            }
+
+            // ── Media / WebRTC (Live page only) ──────────────────────────────
+            if (
+              id.includes("/node_modules/@eyevinn/") ||
+              id.includes("/node_modules/react-player/")
+            ) {
+              return "media-vendor";
+            }
+
+            // ── UI primitives + animation + icons ───────────────────────────
+            if (
+              id.includes("/node_modules/@radix-ui/") ||
+              id.includes("/node_modules/framer-motion/") ||
+              id.includes("/node_modules/lucide-react/") ||
+              id.includes("/node_modules/cmdk/") ||
+              id.includes("/node_modules/vaul/") ||
+              id.includes("/node_modules/sonner/") ||
+              id.includes("/node_modules/next-themes/") ||
+              id.includes("/node_modules/embla-carousel") ||
+              id.includes("/node_modules/react-resizable-panels/") ||
+              id.includes("/node_modules/react-day-picker/") ||
+              id.includes("/node_modules/input-otp/") ||
+              id.includes("/node_modules/class-variance-authority/") ||
+              id.includes("/node_modules/tailwind-merge/") ||
+              id.includes("/node_modules/tailwindcss-animate/")
+            ) {
+              return "ui-vendor";
+            }
+
+            // ── Utilities ────────────────────────────────────────────────────
+            if (
+              id.includes("/node_modules/date-fns/") ||
+              id.includes("/node_modules/zod/") ||
+              id.includes("/node_modules/clsx/")
+            ) {
+              return "utils-vendor";
+            }
+
+            // ── Forms ────────────────────────────────────────────────────────
+            if (
+              id.includes("/node_modules/react-hook-form/") ||
+              id.includes("/node_modules/@hookform/")
+            ) {
+              return "forms-vendor";
+            }
+
+            // All remaining node_modules fall through to Rollup's default
+            // chunking — this keeps Capacitor, turnstile, and other
+            // infrequently-used deps out of the critical-path chunks.
+            return undefined;
+          },
+        },
+      },
     },
   };
 });

@@ -8,7 +8,17 @@ vi.mock('@/hooks/use-auth', () => ({
 }));
 
 vi.mock('@/contexts/AppContext', () => ({
-  useApp: () => ({ addToBag: vi.fn(), hasPremiumPlayerAccess: false }),
+  useApp: () => ({ hasPremiumPlayerAccess: false }),
+}));
+
+vi.mock('@/contexts/BagContext', () => ({
+  useBag: () => ({
+    addToBag: vi.fn(),
+    bagItems: [],
+    removeFromBag: vi.fn(),
+    bagOpen: false,
+    setBagOpen: vi.fn(),
+  }),
 }));
 
 vi.mock('@/components/LiveStreamPlayer', () => ({
