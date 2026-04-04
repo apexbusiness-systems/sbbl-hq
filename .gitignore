@@ -33,3 +33,4 @@ package-lock.json
 *.zip
 apex-*.md
 omnidev-*.md
+supabase/.temp/

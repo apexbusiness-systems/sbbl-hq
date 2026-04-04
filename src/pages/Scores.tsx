@@ -5,7 +5,7 @@ import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId, ScoreCategory, ScoreEntry } from '@/types';
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Trophy, Users, Star, Calendar, MapPin } from 'lucide-react';
+import { Trophy, Users, Star, Calendar } from 'lucide-react';
 import { fetchScores } from '@/lib/api/scores';
 
 // ── Category config ────────────────────────────────────────────────────────
@@ -106,18 +106,12 @@ function ScoreCard({ entry }: { entry: ScoreEntry }) {
       </div>
 
       {/* Card footer */}
-      {(entry.gameDate || entry.venue || entry.notes) && (
+      {(entry.gameDate || entry.notes) && (
         <div className="px-4 pb-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/30 pt-2">
           {entry.gameDate && (
             <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
               <Calendar className="w-3 h-3" />
               {new Date(entry.gameDate).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
-            </span>
-          )}
-          {entry.venue && (
-            <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
-              <MapPin className="w-3 h-3 flex-shrink-0" />
-              {entry.venue}
             </span>
           )}
           {entry.notes && (

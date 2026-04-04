@@ -62,19 +62,26 @@ WITH ctx AS (
   SELECT l.id AS league_id, s.id AS season_id,
     d_a.id AS div_a, d_b.id AS div_b
   FROM public.leagues l
-  JOIN public.seasons s ON s.league_id = l.id AND s.name = 'Season 1'
+  JOIN public.seasons s   ON s.league_id = l.id AND s.name = 'Season 1'
   JOIN public.divisions d_a ON d_a.season_id = s.id AND d_a.name = 'Panalay A'
   JOIN public.divisions d_b ON d_b.season_id = s.id AND d_b.name = 'Panalay B'
   WHERE l.code = 'SBBL'
+),
+team_data(division_name, name, record) AS (VALUES
+  ('Panalay A', 'Panalay Kings',   '{"wins":8,"losses":2,"ptsFor":0,"ptsAgainst":0}'::jsonb),
+  ('Panalay A', 'Solid North',     '{"wins":7,"losses":3,"ptsFor":0,"ptsAgainst":0}'::jsonb),
+  ('Panalay A', 'Gensan Warriors', '{"wins":6,"losses":4,"ptsFor":0,"ptsAgainst":0}'::jsonb),
+  ('Panalay B', 'Rim Rattlers',    '{"wins":5,"losses":5,"ptsFor":0,"ptsAgainst":0}'::jsonb)
 )
 INSERT INTO public.teams (league_id, season_id, division_id, name, status, record)
-SELECT ctx.league_id, ctx.season_id, division_id, name, 'published', record
-FROM ctx, (VALUES
-  (ctx.div_a, 'Panalay Kings',   '{"wins":8,"losses":2,"ptsFor":0,"ptsAgainst":0}'::jsonb),
-  (ctx.div_a, 'Solid North',     '{"wins":7,"losses":3,"ptsFor":0,"ptsAgainst":0}'::jsonb),
-  (ctx.div_a, 'Gensan Warriors', '{"wins":6,"losses":4,"ptsFor":0,"ptsAgainst":0}'::jsonb),
-  (ctx.div_b, 'Rim Rattlers',    '{"wins":5,"losses":5,"ptsFor":0,"ptsAgainst":0}'::jsonb)
-) AS t(division_id, name, record)
+SELECT
+  ctx.league_id,
+  ctx.season_id,
+  CASE t.division_name WHEN 'Panalay A' THEN ctx.div_a ELSE ctx.div_b END,
+  t.name,
+  'published',
+  t.record
+FROM ctx CROSS JOIN team_data t
 ON CONFLICT (season_id, name) DO UPDATE SET record = EXCLUDED.record;
 
 -- ─────────────────────────────────────────────────────────────────────────────
