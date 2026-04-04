@@ -1,7 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
-import { players, products } from '@/data/mock';
+import { getSupabaseClient } from '@/lib/supabase/client';
+import { apiFetch } from '@/lib/api/client';
+import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { CASLNudge } from '@/components/CASLNudge';
 import { fetchPublicHome } from '@/lib/api/public';
@@ -13,6 +15,27 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Game } from '@/types';
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function mapHomeGameToUi(row: Record<string, unknown>): Game {
+  const homeTeam = (row.home_team as Record<string, unknown> | null) ?? {};
+  const awayTeam = (row.away_team as Record<string, unknown> | null) ?? {};
+  const leagueCode = String(row.league_code ?? 'SBBL').toLowerCase();
+  const leagueId = leagueCode === 'wbl' ? 'wbl' : leagueCode === 'tgifbl' ? 'tgifbl' : 'sbbl';
+  return {
+    id: String(row.id),
+    leagueId,
+    homeTeam: { id: String(row.home_team_id ?? 'home'), name: String(homeTeam.name ?? 'Home'), leagueId, division: 'N/A', record: { wins: 0, losses: 0 } },
+    awayTeam: { id: String(row.away_team_id ?? 'away'), name: String(awayTeam.name ?? 'Away'), leagueId, division: 'N/A', record: { wins: 0, losses: 0 } },
+    venue: String(row.venue ?? 'TBA'),
+    court: String(row.court ?? 'Main Court'),
+    date: String(row.scheduled_at ?? ''),
+    time: String(row.scheduled_at ?? ''),
+    status: String(row.status ?? 'upcoming') as Game['status'],
+    score: { home: Number(row.home_score ?? 0), away: Number(row.away_score ?? 0) },
+    ppvPrice: 4.99,
+  };
+}
 
 // ── Admin Stream Controls (collapsible panel) ─────────────────────────────
 // Visible only to super_admin. Manages stream state passed to LiveStreamPlayer
@@ -144,40 +167,7 @@ const LivePage = () => {
   const [viewerCount, setViewerCount] = useState(0);
   const [streamSource, setStreamSource] = useState<'custom' | 'cloudflare'>('custom');
   const [customStreamUrl, setCustomStreamUrl] = useState('');
-  const mapHomeGameToUi = (row: Record<string, unknown>): Game => {
-    const homeTeam = (row.home_team as Record<string, unknown> | null) ?? {};
-    const awayTeam = (row.away_team as Record<string, unknown> | null) ?? {};
-    const leagueCode = String(row.league_code ?? 'SBBL').toLowerCase();
-    const leagueId = leagueCode === 'wbl' ? 'wbl' : leagueCode === 'tgifbl' ? 'tgifbl' : 'sbbl';
-    return {
-      id: String(row.id),
-      leagueId,
-      homeTeam: {
-        id: String(row.home_team_id ?? 'home'),
-        name: String(homeTeam.name ?? 'Home'),
-        leagueId,
-        division: 'N/A',
-        record: { wins: 0, losses: 0 },
-      },
-      awayTeam: {
-        id: String(row.away_team_id ?? 'away'),
-        name: String(awayTeam.name ?? 'Away'),
-        leagueId,
-        division: 'N/A',
-        record: { wins: 0, losses: 0 },
-      },
-      venue: String(row.venue ?? 'TBA'),
-      court: String(row.court ?? 'Main Court'),
-      date: String(row.scheduled_at ?? ''),
-      time: String(row.scheduled_at ?? ''),
-      status: String(row.status ?? 'upcoming') as Game['status'],
-      score: {
-        home: Number(row.home_score ?? 0),
-        away: Number(row.away_score ?? 0),
-      },
-      ppvPrice: 4.99,
-    };
-  };
+  const [activeGameId, setActiveGameId] = useState<string | null>(null);
 
   // Auto-sync stream status from backend
   useEffect(() => {
@@ -206,6 +196,7 @@ const LivePage = () => {
             setIsStreamLive(res.isLive);
             setStreamTitle(res.title);
             setViewerCount(res.viewerCount);
+            if (res.gameId) setActiveGameId(res.gameId);
           }
         }
       } catch (err) {
@@ -221,7 +212,57 @@ const LivePage = () => {
 
   const [comments, setComments] = useState<Array<{ id: string; user: string; text: string }>>([]);
   const [chatInput, setChatInput] = useState('');
-  const [reactions, setReactions] = useState({ fire: 142, heart: 89, clap: 67 });
+
+  // ── Real reactions (persisted + Realtime-broadcast) ──────────────────────
+  const [reactions, setReactions] = useState({ fire: 0, heart: 0, clap: 0 });
+
+  // Fetch initial counts whenever the active game is known
+  useEffect(() => {
+    if (!activeGameId) return;
+    void apiFetch<{ ok: boolean; fire: number; heart: number; clap: number }>(
+      `/api/streams/${activeGameId}/reactions`,
+    ).then(data => {
+      if (data.ok) setReactions({ fire: data.fire, heart: data.heart, clap: data.clap });
+    }).catch(() => {});
+  }, [activeGameId]);
+
+  // Subscribe to Supabase Realtime — broadcast every new reaction to all viewers
+  useEffect(() => {
+    if (!activeGameId) return;
+    const client = getSupabaseClient();
+    if (!client) return;
+
+    const channel = client
+      .channel(`stream-reactions-${activeGameId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'stream_reactions', filter: `game_id=eq.${activeGameId}` },
+        (payload) => {
+          const type = (payload.new as { reaction_type: string }).reaction_type as 'fire' | 'heart' | 'clap';
+          if (['fire', 'heart', 'clap'].includes(type)) {
+            setReactions(r => ({ ...r, [type]: r[type] + 1 }));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => { void client.removeChannel(channel); };
+  }, [activeGameId]);
+
+  const postReaction = useCallback(async (type: 'fire' | 'heart' | 'clap') => {
+    // Optimistic update immediately
+    setReactions(r => ({ ...r, [type]: r[type] + 1 }));
+    // Persist to DB (auth required; silently skip if not signed in)
+    if (!user?.id || !activeGameId || !session?.access_token) return;
+    try {
+      await apiFetch(`/api/streams/${activeGameId}/react`, {
+        method: 'POST',
+        body: JSON.stringify({ type }),
+      });
+    } catch {
+      // non-critical — optimistic update already applied
+    }
+  }, [activeGameId, user?.id, session?.access_token]);
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -426,13 +467,13 @@ const LivePage = () => {
             <div className="container lg:px-0 py-4 space-y-4">
               {/* Reaction bar */}
               <div className="flex items-center gap-3 flex-wrap">
-                <button onClick={() => setReactions(r => ({ ...r, fire: r.fire + 1 }))} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
+                <button onClick={() => postReaction('fire')} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   🔥 <span className="stat-numeral">{reactions.fire}</span>
                 </button>
-                <button onClick={() => setReactions(r => ({ ...r, heart: r.heart + 1 }))} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
+                <button onClick={() => postReaction('heart')} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   ❤️ <span className="stat-numeral">{reactions.heart}</span>
                 </button>
-                <button onClick={() => setReactions(r => ({ ...r, clap: r.clap + 1 }))} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
+                <button onClick={() => postReaction('clap')} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   👏 <span className="stat-numeral">{reactions.clap}</span>
                 </button>
                 <button

@@ -104,7 +104,7 @@ export interface UserAccessLookup {
 /** Poll current stream status — no auth required */
 export async function fetchPublicStreamStatus(gameId?: string) {
   const qs = gameId ? `?gameId=${encodeURIComponent(gameId)}` : '';
-  return apiFetch<{ ok: boolean; isLive: boolean; title: string; viewerCount: number; gameId: string | null }>(
+  return apiFetch<{ ok: boolean; isLive: boolean; title: string; viewerCount: number; collectionId: string; gameId?: string }>(
     `/api/streams/status${qs}`,
   );
 }

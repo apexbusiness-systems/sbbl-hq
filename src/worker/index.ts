@@ -1462,10 +1462,17 @@ async function handleImportRoute(
         season_id: row.season_id,
         division_id: row.division_id || null,
         name: row.name,
-        status: "published",
+        status: row.status || "published",
+        record: row.wins != null ? {
+          wins: Number(row.wins),
+          losses: Number(row.losses ?? 0),
+          ptsFor: Number(row.pts_for ?? 0),
+          ptsAgainst: Number(row.pts_against ?? 0),
+        } : undefined,
       }));
-      // Using insert to avoid hallucinated unique constraint for upsert
-      const { error } = await ctx.admin.from("teams").insert(payload);
+      const { error } = await ctx.admin
+        .from("teams")
+        .upsert(payload, { onConflict: "season_id,name" });
       if (error) throw error;
     } else if (kind === "players") {
       const payload = rows.map((row) => ({
@@ -1993,7 +2000,7 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
   let query = admin
     .from("teams")
     .select(
-      "id,name,league_id,leagues(code,name),seasons(name),divisions(name)," +
+      "id,name,league_id,record,leagues(code,name),seasons(name),divisions(name)," +
         "players(id,jersey_number,position,user_id)," +
         "team_memberships(id,user_id,role)",
     )
@@ -2131,12 +2138,18 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
   }
 
   const teams = filteredTeamsData.map((row: Record<string, unknown>) => {
-    const stats = statsMap.get(row.id as string) || {
+    const dbRecord = row.record as { wins?: number; losses?: number; ptsFor?: number; ptsAgainst?: number } | null;
+    const stats = statsMap.get(row.id as string) || (dbRecord ? {
+      wins: dbRecord.wins ?? 0,
+      losses: dbRecord.losses ?? 0,
+      ptsFor: dbRecord.ptsFor ?? 0,
+      ptsAgainst: dbRecord.ptsAgainst ?? 0,
+    } : {
       wins: 0,
       losses: 0,
       ptsFor: 0,
       ptsAgainst: 0,
-    };
+    });
     const gp = stats.wins + stats.losses;
     let winPct = gp > 0 ? (stats.wins / gp).toFixed(3) : ".000";
     if (winPct.startsWith("1")) winPct = "1.000";
@@ -2581,6 +2594,79 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
   }
 
   return json({ ok: true, granted: true });
+}
+
+// ── STREAM REACTIONS ────────────────────────────────────────────────────────
+
+const REACTIONS_CACHE_TTL_S = 5;
+
+async function handleStreamReactions({ req, admin }: HandlerCtx) {
+  const url = new URL(req.url);
+  // Support /api/streams/:gameId/reactions and /api/streams/reactions?gameId=...
+  const pathGameId = req.url.match(/\/api\/streams\/([^/]+)\/reactions/)?.[1];
+  const gameId = (pathGameId && pathGameId !== 'reactions')
+    ? pathGameId
+    : url.searchParams.get('gameId') ?? null;
+
+  // Resolve 'current' to the active game from stream config
+  const resolvedGameId = gameId === 'current' || !gameId
+    ? await getOrCreateStreamConfig(admin).then(c => c.active_game_id as string | null).catch(() => null)
+    : gameId;
+
+  const cacheKey = new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${resolvedGameId ?? 'null'}`);
+  const cfCaches = caches as unknown as { default: Cache };
+  const cached = await cfCaches.default.match(cacheKey);
+  if (cached) return cached;
+
+  let fire = 0; let heart = 0; let clap = 0;
+  if (resolvedGameId) {
+    const { data } = await admin
+      .from('stream_reactions')
+      .select('reaction_type')
+      .eq('game_id', resolvedGameId);
+    for (const row of data ?? []) {
+      if (row.reaction_type === 'fire') fire++;
+      else if (row.reaction_type === 'heart') heart++;
+      else if (row.reaction_type === 'clap') clap++;
+    }
+  }
+
+  const payload = { ok: true, gameId: resolvedGameId, fire, heart, clap };
+  const res = new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'Cache-Control': `public, max-age=${REACTIONS_CACHE_TTL_S}`,
+    },
+  });
+  cfCaches.default.put(cacheKey, res.clone()).catch(() => {});
+  return res;
+}
+
+async function handleStreamReact(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const pathGameId = ctx.req.url.match(/\/api\/streams\/([^/]+)\/react/)?.[1];
+  if (!pathGameId) return json({ ok: false, error: 'game_id_required' }, 400);
+
+  const body = (await ctx.req.json().catch(() => null)) as { type?: string } | null;
+  const reactionType = body?.type;
+  if (!reactionType || !['fire', 'heart', 'clap'].includes(reactionType)) {
+    return json({ ok: false, error: 'invalid_reaction_type' }, 400);
+  }
+
+  const { error } = await ctx.admin.from('stream_reactions').insert({
+    game_id: pathGameId,
+    user_id: userId,
+    reaction_type: reactionType,
+  });
+  if (error) throw new Error(error.message);
+
+  // Bust the reactions cache so the next poll picks up fresh counts
+  const cfCaches = caches as unknown as { default: Cache };
+  cfCaches.default.delete(new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${pathGameId}`)).catch(() => {});
+
+  return json({ ok: true, gameId: pathGameId, type: reactionType });
 }
 
 // ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
@@ -3547,6 +3633,21 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "GET",
     path: "/api/streams/status",
     handler: handlePublicStreamStatus,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/reactions",
+    handler: handleStreamReactions,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/reactions",
+    handler: handleStreamReactions,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/react",
+    handler: handleStreamReact,
   },
   {
     method: "GET",
