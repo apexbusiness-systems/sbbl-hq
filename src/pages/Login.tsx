@@ -183,7 +183,13 @@ const LoginPage = () => {
         const firstMessage = firstAuthError instanceof Error ? firstAuthError.message.toLowerCase() : '';
         const isCaptchaVerificationError = shouldUseTurnstile && firstMessage.includes('captcha verification process failed');
         if (!isCaptchaVerificationError) throw firstAuthError;
-        // Retry one time with a fresh token to recover from race/expiry edge-cases.
+        // Retry one time with a fresh token. The failed token is still in state because
+        // Supabase errors don't trigger Turnstile's error-callback — clear it first so
+        // ensureCaptchaToken() doesn't reuse the same rejected token.
+        setCaptchaToken(null);
+        if (window.turnstile && turnstileWidgetIdRef.current) {
+          window.turnstile.reset(turnstileWidgetIdRef.current);
+        }
         const retryCaptchaToken = await ensureCaptchaToken();
         await runAuth(retryCaptchaToken);
       }
