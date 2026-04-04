@@ -148,19 +148,20 @@ create index if not exists idx_devices_user_id
   on public.devices (user_id, last_seen_at desc);
 
 -- ---------------------------------------------------------------------------
--- OMNIPORT OUTBOX: worker dequeue hot path.
--- (Table created in 202603290001_omniport_outbox.sql)
+-- EVENT OUTBOX: worker dequeue hot path.
+-- (Table created in 202603290001_omniport_outbox.sql as event_outbox)
 -- ---------------------------------------------------------------------------
-create index if not exists idx_omniport_outbox_status_created
-  on public.omniport_outbox (status, created_at asc)
+create index if not exists idx_event_outbox_status_pending
+  on public.event_outbox (status, created_at asc)
   where status = 'pending';
 
 -- ---------------------------------------------------------------------------
--- WORKER IDEMPOTENCY: deduplicate worker requests at scale.
--- (Table created in 202603270002_worker_idempotency.sql)
+-- API IDEMPOTENCY KEYS: deduplicate worker requests at scale.
+-- (Table created in 202603270002_worker_idempotency.sql as api_idempotency_keys)
+-- Columns: idempotency_key (unique), route, user_id, created_at
 -- ---------------------------------------------------------------------------
-create index if not exists idx_worker_idempotency_key_expires
-  on public.worker_idempotency (idempotency_key, expires_at);
+create index if not exists idx_api_idempotency_keys_key_created
+  on public.api_idempotency_keys (idempotency_key, created_at);
 
 -- ---------------------------------------------------------------------------
 -- SCHEDULES: public-facing schedule queries with time filtering.
