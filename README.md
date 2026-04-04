@@ -21,7 +21,7 @@ Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alber
 
 ## ⚠️ ENV VARS — AGENTS READ THIS FIRST
 
-Two separate systems. Mixing them breaks auth.
+2 separate systems. Mixing them breaks auth.
 
 ### Build-time (Vite — browser bundle)
 Set in `.env` locally. Set as GitHub Actions Secrets in CI.
