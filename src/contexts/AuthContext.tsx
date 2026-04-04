@@ -83,14 +83,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setConfigAvailable(true);
       await load();
 
-      const { data } = client.auth.onAuthStateChange((_event, nextSession) => {
-        // Use the session directly from the event — never call load() here.
-        // Calling load() from inside onAuthStateChange triggers a second
-        // getSession() which can transiently return null and wipe auth state
-        // during the magic-link or password sign-in redirect window.
+      const { data } = client.auth.onAuthStateChange((event, nextSession) => {
+        // INITIAL_SESSION fires immediately on subscribe — boot() already
+        // loaded session + profile, so skip to avoid a redundant fetch.
+        if (event === 'INITIAL_SESSION') return;
+
         setSession(nextSession ?? null);
         setUser(nextSession?.user ?? null);
+
         if (nextSession?.user?.id) {
+          // On SIGNED_IN, gate the loading state so Login.tsx waits for
+          // profile/roles before navigating (prevents wrong onboarding redirect
+          // when profile is still null).
+          const gateLoading = event === 'SIGNED_IN';
+          if (gateLoading) setLoading(true);
+
           void fetchProfileAndRoles(nextSession.user.id).then(({ profile: p, roles: r }) => {
             setProfile(p);
             setRoles(r);
@@ -102,6 +109,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }).catch(() => {
             setProfile(null);
             setRoles([]);
+          }).finally(() => {
+            if (gateLoading) setLoading(false);
           });
         } else {
           setProfile(null);
