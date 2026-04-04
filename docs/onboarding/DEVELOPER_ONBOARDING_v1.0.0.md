@@ -1,3 +1,4 @@
+<!-- Version: v1.0.1 | Date: 2026-04-04 | Status: Current -->
 # Developer Onboarding Guide
 
 **Version:** v1.0.1  

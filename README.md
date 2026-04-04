@@ -71,9 +71,17 @@ npm run cf:deploy           # production
 npm run cf:deploy:staging   # staging
 ```
 
-## Docs
+## Documentation
 
-- [`docs/architecture.md`](docs/architecture.md) — stack, data model, env var system
-- [`docs/onboarding/DEVELOPER_ONBOARDING_v1.0.0.md`](docs/onboarding/DEVELOPER_ONBOARDING_v1.0.0.md) — new dev setup
-- [`docs/runbooks/OPERATIONS_RUNBOOK_v1.0.0.md`](docs/runbooks/OPERATIONS_RUNBOOK_v1.0.0.md) — deploy + ops SOP
-- [`DEPLOY_CLOUDFLARE.md`](DEPLOY_CLOUDFLARE.md) — Cloudflare-specific deploy steps + env var reference
+All documentation lives in [`docs/`](docs/README.md). Key entry points:
+
+| Category | Document |
+|---|---|
+| Architecture | [Architecture Overview](docs/architecture/ARCHITECTURE_v1.1.0.md) · [DB Schema](docs/architecture/DB_SCHEMA_v1.1.0.md) · [API Reference](docs/architecture/API_REFERENCE_v1.1.0.md) |
+| Security | [Security Model](docs/security/SECURITY_MODEL_v1.1.0.md) · [RLS Matrix](docs/security/RLS_MATRIX_v1.1.0.md) |
+| Operations | [Operations Runbook](docs/operations/OPERATIONS_RUNBOOK_v1.2.0.md) · [External Bindings](docs/operations/EXTERNAL_BINDINGS_v1.0.0.md) |
+| Deployment | [Supabase Setup](docs/deployment/SUPABASE_SETUP_v1.1.0.md) · [Cloudflare Deploy](docs/deployment/DEPLOY_CLOUDFLARE_v1.1.0.md) · [PWA + Capacitor](docs/deployment/PWA_CAPACITOR_SETUP_v1.1.0.md) |
+| Onboarding | [Developer Onboarding](docs/onboarding/DEVELOPER_ONBOARDING_v1.0.0.md) |
+| Quality | [Release Gate Audit](docs/quality/RELEASE_GATE_AUDIT_2026-04-04_v1.0.0.md) |
+
+→ **[Full documentation index](docs/README.md)**

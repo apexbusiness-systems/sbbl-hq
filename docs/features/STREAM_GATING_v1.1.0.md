@@ -1,3 +1,4 @@
+<!-- Version: v1.1.0 | Date: 2026-04-04 | Status: Current -->
 # Stream Gating Notes
 
 - PPV entitlement records in `stream_entitlements`.
