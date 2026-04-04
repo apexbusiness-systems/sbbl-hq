@@ -1,7 +1,7 @@
-<!-- Version: v2.0.0 | Date: 2026-04-04 | Status: Current -->
+<!-- Version: v2.1.0 | Date: 2026-04-04 | Status: Current -->
 # SBBL HQ — Documentation Hub
 
-**Version:** v2.0.0
+**Version:** v2.1.0
 **Last Updated:** 2026-04-04
 **Maintainer:** APEX Business Systems Ltd. — Engineering Lead
 
@@ -33,8 +33,8 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
-| [ARCHITECTURE](./architecture/ARCHITECTURE_v1.1.0.md) | v1.1.0 | Full stack overview — Vite + React + Supabase + Vercel + Stripe |
-| [DB SCHEMA](./architecture/DB_SCHEMA_v1.1.0.md) | v1.1.0 | Core migration schema — all domains, triggers, indexes |
+| [ARCHITECTURE](./architecture/ARCHITECTURE_v1.2.0.md) | v1.2.0 | Full stack overview — Vite + React + Supabase + Cloudflare + Stripe + Sentry |
+| [DB SCHEMA](./architecture/DB_SCHEMA_v1.2.0.md) | v1.2.0 | Core schema + 28 migrations — tables, indexes, matviews, RLS helpers |
 | [API REFERENCE](./architecture/API_REFERENCE_v1.1.0.md) | v1.1.0 | Worker API endpoints, auth, idempotency |
 
 ---
@@ -43,8 +43,8 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
-| [SECURITY MODEL](./security/SECURITY_MODEL_v1.1.0.md) | v1.1.0 | Auth, RLS, privilege boundaries, audit logging |
-| [RLS MATRIX](./security/RLS_MATRIX_v1.1.0.md) | v1.1.0 | Row-Level Security access matrix — all table domains |
+| [SECURITY MODEL](./security/SECURITY_MODEL_v1.2.0.md) | v1.2.0 | Auth, RLS hardening, Turnstile, Stripe webhook security, defensive patterns |
+| [RLS MATRIX](./security/RLS_MATRIX_v1.2.0.md) | v1.2.0 | Row-Level Security access matrix — all table domains + helper functions |
 | [HEADSHOT POLICY](./security/HEADSHOT_POLICY_v1.1.0.md) | v1.1.0 | Image moderation outcomes and routing rules |
 
 ---
@@ -53,7 +53,7 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
-| [OPERATIONS RUNBOOK](./operations/OPERATIONS_RUNBOOK_v1.2.0.md) | v1.2.0 | Env setup, deployments, DB ops, emergency procedures |
+| [OPERATIONS RUNBOOK](./operations/OPERATIONS_RUNBOOK_v1.3.0.md) | v1.3.0 | Env setup, deployments, DB ops, CI/CD pipeline, emergency procedures |
 | [EXTERNAL BINDINGS](./operations/EXTERNAL_BINDINGS_v1.0.0.md) | v1.0.0 | Third-party secrets and service configuration checklist |
 | [OPERATIONS RUNBOOK (archived)](./operations/OPERATIONS_RUNBOOK_v1.0.0_archived.md) | v1.0.0 | Superseded — retained for historical reference |
 
@@ -64,7 +64,7 @@ docs/
 | Document | Version | Description |
 |---|---|---|
 | [SUPABASE SETUP](./deployment/SUPABASE_SETUP_v1.1.0.md) | v1.1.0 | Project link, migrations, storage, type generation |
-| [DEPLOY CLOUDFLARE](./deployment/DEPLOY_CLOUDFLARE_v1.1.0.md) | v1.1.0 | Cloudflare Workers — local, staging, production, rollback |
+| [DEPLOY CLOUDFLARE](./deployment/DEPLOY_CLOUDFLARE_v1.2.0.md) | v1.2.0 | Cloudflare Workers — local, staging, production, PWA, Sentry, rollback |
 | [PWA + CAPACITOR SETUP](./deployment/PWA_CAPACITOR_SETUP_v1.1.0.md) | v1.1.0 | Service worker config, iOS/Android native build |
 
 ---
@@ -73,8 +73,8 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
-| [STATS PIPELINE](./features/STATS_PIPELINE_v1.1.0.md) | v1.1.0 | 4-stage stat submission — draft → save → finalize → leaderboard |
-| [STREAM GATING](./features/STREAM_GATING_v1.1.0.md) | v1.1.0 | PPV entitlement, access sessions, watermark logging |
+| [STATS PIPELINE](./features/STATS_PIPELINE_v1.2.0.md) | v1.2.0 | 4-stage stat submission + materialized standings + react-window virtualization |
+| [STREAM GATING](./features/STREAM_GATING_v1.2.0.md) | v1.2.0 | PPV entitlement, invites, Turnstile, Stripe webhook, live chat, standings |
 
 ---
 
@@ -82,7 +82,7 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
-| [RELEASE GATE AUDIT 2026-04-04](./quality/RELEASE_GATE_AUDIT_2026-04-04_v1.0.0.md) | v1.0.0 | 10K concurrency hardening — gate decision: PASS |
+| [RELEASE GATE AUDIT 2026-04-04](./quality/RELEASE_GATE_AUDIT_2026-04-04_v1.1.0.md) | v1.1.0 | 10K concurrency hardening + CI pipeline fixes — gate decision: PASS |
 | [LIVESTREAM WORKFLOW AUDIT 2026-04-04](./quality/LIVESTREAM_WORKFLOW_AUDIT_2026-04-04.md) | v1.0.0 | Live page + stream control plane capacity and latency review |
 | [BUILD AUDIT 2026-03-28](./quality/BUILD_AUDIT_2026-03-28_v1.0.0.md) | v1.0.0 | End-to-end build audit — historical baseline |
 

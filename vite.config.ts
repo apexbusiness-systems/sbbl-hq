@@ -255,10 +255,10 @@ export default defineConfig(({ mode }) => {
             }
 
             // ── Media / WebRTC (Live page only) ──────────────────────────────
-            if (
-              id.includes("/node_modules/@eyevinn/") ||
-              id.includes("/node_modules/react-player/")
-            ) {
+            // NOTE: react-player calls React.lazy() at module init time.
+            // It MUST NOT be separated from React — left to default chunking
+            // so Rollup resolves the React dependency correctly.
+            if (id.includes("/node_modules/@eyevinn/")) {
               return "media-vendor";
             }
 
