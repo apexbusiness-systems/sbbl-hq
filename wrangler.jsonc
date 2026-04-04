@@ -21,14 +21,18 @@
   ],
   "vars": {
     "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
-    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz"
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz",
+    // Sentry DSN for the Worker — fill in after creating sbbl-hq-worker project in Sentry.
+    // Worker Sentry project: Sentry Dashboard → sbbl-hq-worker → Settings → Client Keys (DSN)
+    "SENTRY_DSN": ""
   },
   "env": {
     "staging": {
       "name": "sbbl-hq-staging",
       "vars": {
         "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
-        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz"
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz",
+        "SENTRY_DSN": ""
       }
     }
   }
