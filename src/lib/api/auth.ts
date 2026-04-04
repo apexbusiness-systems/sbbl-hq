@@ -11,6 +11,8 @@ export type AuthProfile = {
   avatar_url: string | null;
   preferred_league: string | null;
   primary_role_intent: string | null;
+  onboarding_completed_at: string | null;
+  stripe_customer_id: string | null;
 };
 
 export async function signInWithPassword(email: string, password: string, captchaToken?: string) {
@@ -48,7 +50,7 @@ export async function fetchProfileAndRoles(userId: string) {
   const [{ data: profile, error: profileError }, { data: roleRows, error: roleError }] = await Promise.all([
     supabase
       .from('profiles')
-      .select('id,user_id,display_name,full_name,bio,avatar_url,preferred_league,primary_role_intent')
+      .select('id,user_id,display_name,full_name,bio,avatar_url,preferred_league,primary_role_intent,onboarding_completed_at,stripe_customer_id')
       .eq('user_id', userId)
       .maybeSingle(),
     supabase
@@ -96,6 +98,7 @@ export async function saveOnboarding(payload: {
     preferred_league: payload.preferredLeague,
     bio: payload.bio || null,
     avatar_url: avatarUrl,
+    onboarding_completed_at: new Date().toISOString(),
   }, { onConflict: 'user_id' });
   if (error) throw error;
 

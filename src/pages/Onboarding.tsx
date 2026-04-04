@@ -4,21 +4,64 @@ import { saveOnboarding } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 
+type RoleIntent = 'fan' | 'player' | 'coach';
+
+const ROLE_OPTIONS: { value: RoleIntent; label: string; description: string }[] = [
+  {
+    value: 'fan',
+    label: 'Fan',
+    description: 'Follow games, watch streams, and engage with the league.',
+  },
+  {
+    value: 'player',
+    label: 'Player — $6.99 CAD/month',
+    description: 'Register as a player. Includes stats, leaderboard, player profile, highlight downloads, and a 10% store discount. Billed monthly.',
+  },
+  {
+    value: 'coach',
+    label: 'Coach — Free, pending approval',
+    description: 'Request coach access. A league admin will review and approve your request.',
+  },
+];
+
 const OnboardingPage = () => {
-  const { user, isSignedIn, isAdmin, refresh } = useAuth();
+  const { user, isSignedIn, isAdmin, needsOnboarding, loading, refresh } = useAuth();
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [coachSubmitted, setCoachSubmitted] = useState(false);
   const [form, setForm] = useState({
     displayName: '',
     fullName: '',
-    primaryRoleIntent: 'player',
+    primaryRoleIntent: 'fan' as RoleIntent,
     preferredLeague: 'SBBL',
     bio: '',
     avatarFile: null as File | null,
   });
 
+  if (loading) return <div className="container py-10 text-sm text-muted-foreground">Loading…</div>;
   if (!isSignedIn || !user) return <Navigate to="/login" replace />;
+  if (!needsOnboarding) return <Navigate to={isAdmin ? '/ops' : '/'} replace />;
+
+  if (coachSubmitted) {
+    return (
+      <div className="container max-w-lg py-16 text-center">
+        <div className="panel p-8">
+          <h1 className="font-display text-2xl text-primary mb-3">Coach Request Submitted</h1>
+          <p className="text-muted-foreground text-sm">
+            Your account is active. A league admin will review your coach request shortly.
+            You will be notified once approved.
+          </p>
+          <button
+            onClick={() => navigate('/')}
+            className="mt-6 gold-bg px-6 py-2 rounded-sm font-semibold text-sm"
+          >
+            Continue to App
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
@@ -40,7 +83,12 @@ const OnboardingPage = () => {
         avatarFile: form.avatarFile,
       });
       await refresh();
-      navigate(isAdmin ? '/ops' : '/');
+
+      if (form.primaryRoleIntent === 'coach') {
+        setCoachSubmitted(true);
+      } else {
+        navigate(isAdmin ? '/ops' : '/');
+      }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Onboarding failed');
     } finally {
@@ -51,25 +99,125 @@ const OnboardingPage = () => {
   return (
     <div className="container max-w-2xl py-10">
       <div className="panel p-6">
-        <h1 className="font-display text-3xl text-primary mb-4">Complete onboarding</h1>
+        <h1 className="font-display text-3xl text-primary mb-2">Welcome — let's set up your account</h1>
+        <p className="text-sm text-muted-foreground mb-6">
+          Fill in your details to get started. You can update them later in Settings.
+        </p>
         <form className="grid gap-4" onSubmit={onSubmit}>
-          <input className="bg-secondary border border-border rounded-sm px-3 py-2" placeholder="Display name" value={form.displayName} onChange={(e) => setForm((p) => ({ ...p, displayName: e.target.value }))} />
-          <input className="bg-secondary border border-border rounded-sm px-3 py-2" placeholder="Full name" value={form.fullName} onChange={(e) => setForm((p) => ({ ...p, fullName: e.target.value }))} />
-          <select className="bg-secondary border border-border rounded-sm px-3 py-2" value={form.primaryRoleIntent} onChange={(e) => setForm((p) => ({ ...p, primaryRoleIntent: e.target.value }))}>
-            <option value="player">Player</option>
-            <option value="team_manager">Team manager</option>
-            <option value="league_admin">League admin request</option>
-            <option value="fan">Fan</option>
-          </select>
-          <select className="bg-secondary border border-border rounded-sm px-3 py-2 min-h-[44px]" value={form.preferredLeague} onChange={(e) => setForm((p) => ({ ...p, preferredLeague: e.target.value }))}>
-            {LEAGUE_REGISTRY.map((l) => (
-              <option key={l.id} value={l.code}>{l.shortName} — {l.name}</option>
-            ))}
-          </select>
-          <textarea className="bg-secondary border border-border rounded-sm px-3 py-2 min-h-24" placeholder="Bio (optional)" value={form.bio} onChange={(e) => setForm((p) => ({ ...p, bio: e.target.value }))} />
-          <input type="file" accept="image/*" onChange={(e) => setForm((p) => ({ ...p, avatarFile: e.target.files?.[0] ?? null }))} />
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Display name <span className="text-destructive">*</span>
+            </label>
+            <input
+              className="mt-1 w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm"
+              placeholder="How you appear in the app"
+              value={form.displayName}
+              onChange={(e) => setForm((p) => ({ ...p, displayName: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Full name <span className="text-destructive">*</span>
+            </label>
+            <input
+              className="mt-1 w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm"
+              placeholder="Your legal name (for league records)"
+              value={form.fullName}
+              onChange={(e) => setForm((p) => ({ ...p, fullName: e.target.value }))}
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground mb-2 block">
+              I am joining as…
+            </label>
+            <div className="grid gap-2">
+              {ROLE_OPTIONS.map((opt) => (
+                <label
+                  key={opt.value}
+                  className={`flex items-start gap-3 p-3 rounded-sm border cursor-pointer transition-colors ${
+                    form.primaryRoleIntent === opt.value
+                      ? 'border-primary/60 bg-primary/5'
+                      : 'border-border bg-secondary/50 hover:border-border/80'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="roleIntent"
+                    value={opt.value}
+                    checked={form.primaryRoleIntent === opt.value}
+                    onChange={() => setForm((p) => ({ ...p, primaryRoleIntent: opt.value }))}
+                    className="mt-0.5 accent-primary"
+                  />
+                  <div>
+                    <div className="text-sm font-semibold">{opt.label}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{opt.description}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Preferred league
+            </label>
+            <select
+              className="mt-1 w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm"
+              value={form.preferredLeague}
+              onChange={(e) => setForm((p) => ({ ...p, preferredLeague: e.target.value }))}
+            >
+              {LEAGUE_REGISTRY.map((l) => (
+                <option key={l.id} value={l.code}>{l.shortName} — {l.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Bio <span className="text-muted-foreground/60">(optional)</span>
+            </label>
+            <textarea
+              className="mt-1 w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm min-h-20 resize-y"
+              placeholder="Tell the league a bit about yourself…"
+              value={form.bio}
+              onChange={(e) => setForm((p) => ({ ...p, bio: e.target.value }))}
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Profile photo <span className="text-muted-foreground/60">(optional)</span>
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              className="mt-1 text-sm"
+              onChange={(e) => setForm((p) => ({ ...p, avatarFile: e.target.files?.[0] ?? null }))}
+            />
+          </div>
+
           {error && <p className="text-xs text-destructive">{error}</p>}
-          <button disabled={submitting} className="gold-bg px-4 py-2 rounded-sm font-semibold w-full md:w-auto disabled:opacity-70">{submitting ? 'Saving…' : 'Finish onboarding'}</button>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="gold-bg px-4 py-3 rounded-sm font-display font-bold text-sm uppercase tracking-wider w-full disabled:opacity-70"
+          >
+            {submitting
+              ? 'Saving…'
+              : form.primaryRoleIntent === 'player'
+              ? 'Continue to Player Registration →'
+              : form.primaryRoleIntent === 'coach'
+              ? 'Submit Coach Request →'
+              : 'Finish Setup →'}
+          </button>
+
+          {form.primaryRoleIntent === 'player' && (
+            <p className="text-xs text-muted-foreground text-center -mt-2">
+              You'll be taken to checkout after saving your profile. $6.99 CAD/month. Cancel any time.
+            </p>
+          )}
         </form>
       </div>
     </div>
