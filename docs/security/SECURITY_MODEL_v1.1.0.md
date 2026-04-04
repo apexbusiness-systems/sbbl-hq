@@ -1,3 +1,4 @@
+<!-- Version: v1.1.0 | Date: 2026-04-04 | Status: Current -->
 # Security Model
 
 - Secrets are server-only and validated at runtime in `src/lib/env.ts`.

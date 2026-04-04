@@ -1,3 +1,4 @@
+<!-- Version: v1.1.0 | Date: 2026-04-04 | Status: Current -->
 # DB Schema Summary
 
 The migration `supabase/migrations/202603270001_core_schema.sql` creates identity, league core, stats, streaming, commerce, media, and ops domains.

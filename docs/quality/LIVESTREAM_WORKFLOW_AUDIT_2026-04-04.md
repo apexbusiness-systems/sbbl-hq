@@ -1,3 +1,4 @@
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
 # Livestream Workflow Audit — 2026-04-04
 
 ## Scope
