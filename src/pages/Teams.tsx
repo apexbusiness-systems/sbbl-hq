@@ -161,53 +161,50 @@ const TeamsPage = () => {
 
       {/* -- STANDINGS VIEW ------------------------------------------ */}
       {!teamsQuery.isLoading && activeTab === 'standings' && filteredTeams.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border border-border/40\">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-muted-foreground font-medium\">
-              <tr>
-                <th className="px-4 py-2 text-left\">Rank</th>
-                <th className="px-4 py-2 text-left\">Team</th>
-                <th className="px-2 py-2 text-center\">W</th>
-                <th className="px-2 py-2 text-center\">L</th>
-                <th className="px-2 py-2 text-center\">PCT</th>
-                <th className="px-2 py-2 text-center\">PF</th>
-                <th className="px-2 py-2 text-center\">PA</th>
-                <th className="px-2 py-2 text-center\">DIFF</th>
-              </tr>
-            </thead>
-            <tbody>
-              {standings.map((team, index) => (
-                <tr key={team.id} className="border-t border-border/30 hover:bg-muted/20 transition-colors\">
-                  <td className="px-4 py-3 text-muted-foreground font-medium\">{index + 1}</td>
-                  <td className="px-4 py-3\">
-                    <div className="flex items-center gap-2\">
-                      <div className="font-semibold">{team.name}</div>
-                      {leagueFilter === 'all' && (
-                        <LeagueBadge leagueId={team.league_code.toLowerCase() as LeagueId} size="sm" />
-                      )}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-0.5\">{team.season_name}</div>
-                  </td>
-                  <td className="px-2 py-3 text-center font-semibold\">{team.stats?.wins ?? 0}</td>
-                  <td className="px-2 py-3 text-center font-semibold\">{team.stats?.losses ?? 0}</td>
-                  <td className="px-2 py-3 text-center font-mono\">{team.stats?.winPct ?? ".000"}</td>
-                  <td className="px-2 py-3 text-center\">{team.stats?.ptsFor ?? 0}</td>
-                  <td className="px-2 py-3 text-center\">{team.stats?.ptsAgainst ?? 0}</td>
-                  <td
-                    className={`px-2 py-3 text-center font-semibold ${
-                      (team.stats?.diff ?? 0) > 0
-                        ? 'text-green-500'
-                        : (team.stats?.diff ?? 0) < 0
-                        ? 'text-red-500'
-                        : 'text-muted-foreground'
-                    }`}
-                  >
-                    {(team.stats?.diff ?? 0) > 0 ? '+' : ''}{team.stats?.diff ?? 0}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-2 max-w-3xl">
+          {standings.map((team, index) => {
+            const wins = team.stats?.wins ?? 0;
+            const losses = team.stats?.losses ?? 0;
+            const pct = parseFloat(team.stats?.winPct ?? '0');
+            const diff = team.stats?.diff ?? 0;
+            const leagueId = team.league_code.toLowerCase() as LeagueId;
+            return (
+              <div key={team.id} className={`panel p-3 flex items-center gap-4 transition-colors hover:border-border/60 ${index < 3 ? 'border-primary/20' : ''}`}>
+                {/* Rank */}
+                <span className="stat-numeral text-sm text-muted-foreground w-6 text-center flex-shrink-0">{index + 1}</span>
+
+                {/* Team info */}
+                <div className="flex-1 min-w-0">
+                  <p className="font-display font-bold text-sm truncate">{team.name}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <LeagueBadge leagueId={leagueId} size="sm" />
+                    {team.division_name && (
+                      <span className="text-[10px] text-muted-foreground truncate">{team.division_name}</span>
+                    )}
+                    {!team.division_name && team.season_name && (
+                      <span className="text-[10px] text-muted-foreground truncate">{team.season_name}</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Win% bar — desktop only */}
+                <div className="hidden md:block w-20">
+                  <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                    <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${pct * 100}%` }} />
+                  </div>
+                </div>
+
+                {/* Stats */}
+                <div className="flex items-center gap-3 flex-shrink-0 text-right">
+                  <span className="stat-numeral text-sm text-success">{wins}W</span>
+                  <span className="stat-numeral text-sm text-destructive">{losses}L</span>
+                  <span className={`stat-numeral text-sm font-bold w-10 text-right ${diff > 0 ? 'text-success' : diff < 0 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    {(pct * 100).toFixed(0)}%
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </div>
       )}
 

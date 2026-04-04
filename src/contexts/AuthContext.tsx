@@ -111,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     roles,
     isSignedIn: Boolean(user),
     isAdmin: canAccessOps(roles),
-    needsOnboarding: !loading && Boolean(user && !profile?.onboarding_completed_at),
+    needsOnboarding: !loading && Boolean(user && !profile?.onboarding_completed_at) && !canAccessOps(roles),
     configAvailable,
     refresh: load,
   }), [loading, session, user, profile, roles, configAvailable]);

@@ -90,6 +90,14 @@ export async function deleteOpsEntity(entity: 'teams' | 'players' | 'products' |
   });
 }
 
+export async function submitScoresImport(rows: Record<string, string>[]) {
+  return apiFetch<{ ok: boolean; inserted: number; failed: number; errors: string[] }>('/ops/scores/import', {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-scores-csv') },
+    body: JSON.stringify({ rows }),
+  });
+}
+
 export async function manualOpsAction(
   kind: 'team' | 'player' | 'schedule' | 'event' | 'store',
   action: 'create' | 'delete' | 'suspend' | 'batch_create',

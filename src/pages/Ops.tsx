@@ -10,19 +10,22 @@ import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit } from '@/lib/imageResize';
 import { fetchAdminStreamConfig, fetchPublicStreamStatus, fetchReviewQueue, fetchStreamRevenue, fetchStreamSessions, resolveReviewItem, setStreamLive, updateStreamConfig } from '@/lib/api/stream';
 import { getAuthToken } from '@/lib/api/client';
+import { fetchScores, submitScoreManual, submitScoresCsvImport, parseScoreboardImage } from '@/lib/api/scores';
+import type { ScoreCategory } from '@/types';
 
-type Tab = 'overview' | 'streams' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
+type Tab = 'overview' | 'streams' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
 
 const tabs: Array<{ id: Tab; label: string }> = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'streams', label: 'Streams' },
-  { id: 'teams', label: 'Teams' },
-  { id: 'players', label: 'Players' },
-  { id: 'schedules', label: 'Schedules' },
-  { id: 'events', label: 'Events' },
-  { id: 'store', label: 'Store Media' },
-  { id: 'potg', label: 'POTG Parser' },
-  { id: 'history', label: 'Import History' },
+  { id: 'overview',  label: 'Overview'       },
+  { id: 'streams',   label: 'Streams'        },
+  { id: 'scores',    label: 'Scores'         },
+  { id: 'teams',     label: 'Teams'          },
+  { id: 'players',   label: 'Players'        },
+  { id: 'schedules', label: 'Schedules'      },
+  { id: 'events',    label: 'Events'         },
+  { id: 'store',     label: 'Store Media'    },
+  { id: 'potg',      label: 'POTG Parser'    },
+  { id: 'history',   label: 'Import History' },
 ];
 
 
@@ -65,6 +68,28 @@ const OpsPage = () => {
   ]);
   const [storeSuspendId, setStoreSuspendId] = useState('');
   const [storeDeleteId, setStoreDeleteId] = useState('');
+
+  // ── Scores state ──────────────────────────────────────────────────────────
+  const scoreboardFileRef = useRef<HTMLInputElement>(null);
+  const scoresCsvFileRef = useRef<HTMLInputElement>(null);
+  const [scoresCsvRows, setScoresCsvRows] = useState<Record<string, string>[]>([]);
+  const [scoreboardImageFile, setScoreboardImageFile] = useState<File | null>(null);
+  const [scoreboardParseState, setScoreboardParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
+  const [scoreboardParseError, setScoreboardParseError] = useState<string | null>(null);
+  const defaultScoreForm = {
+    category: 'league' as ScoreCategory,
+    leagueId: 'sbbl',
+    homeLabel: '',
+    awayLabel: '',
+    homeScore: '',
+    awayScore: '',
+    status: 'final',
+    gameDate: new Date().toISOString().split('T')[0],
+    eventName: '',
+    venue: '',
+    notes: '',
+  };
+  const [scoresForm, setScoresForm] = useState(defaultScoreForm);
 
   const updateStoreBatchItem = (i: number, field: string, value: string) =>
     setStoreBatchItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
@@ -339,6 +364,78 @@ const OpsPage = () => {
     },
   });
 
+  // ── Scores mutations ───────────────────────────────────────────────────────
+  const scoresQuery = useQuery({
+    queryKey: ['ops-scores-list'],
+    queryFn: () => fetchScores(),
+    enabled: activeTab === 'scores',
+    staleTime: 30_000,
+  });
+
+  const scoreManualMutation = useMutation({
+    mutationFn: () => submitScoreManual({
+      category: scoresForm.category,
+      leagueId: scoresForm.category === 'league' ? scoresForm.leagueId : undefined,
+      participant1Label: scoresForm.homeLabel || undefined,
+      participant2Label: scoresForm.awayLabel || undefined,
+      homeScore: scoresForm.homeScore !== '' ? Number(scoresForm.homeScore) : undefined,
+      awayScore: scoresForm.awayScore !== '' ? Number(scoresForm.awayScore) : undefined,
+      status: scoresForm.status,
+      gameDate: scoresForm.gameDate || undefined,
+      eventName: scoresForm.eventName || undefined,
+      notes: scoresForm.notes || undefined,
+    }),
+    onSuccess: async () => {
+      setScoresForm(defaultScoreForm);
+      await queryClient.invalidateQueries({ queryKey: ['ops-scores-list'] });
+      await queryClient.invalidateQueries({ queryKey: ['scores'] });
+    },
+  });
+
+  const scoresCsvMutation = useMutation({
+    mutationFn: () => submitScoresCsvImport(scoresCsvRows),
+    onSuccess: async () => {
+      setScoresCsvRows([]);
+      if (scoresCsvFileRef.current) scoresCsvFileRef.current.value = '';
+      await queryClient.invalidateQueries({ queryKey: ['ops-scores-list'] });
+      await queryClient.invalidateQueries({ queryKey: ['scores'] });
+    },
+  });
+
+  const handleScoreboardImage = async (file: File) => {
+    setScoreboardParseState('parsing');
+    setScoreboardParseError(null);
+    setScoreboardImageFile(file);
+    try {
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      const imageBase64 = btoa(binary);
+      const result = await parseScoreboardImage(imageBase64, file.type);
+      if (result.ok && result.data) {
+        const d = result.data;
+        setScoresForm(f => ({
+          ...f,
+          homeLabel: d.homeLabel ?? f.homeLabel,
+          awayLabel: d.awayLabel ?? f.awayLabel,
+          homeScore: d.homeScore != null ? String(d.homeScore) : f.homeScore,
+          awayScore: d.awayScore != null ? String(d.awayScore) : f.awayScore,
+          gameDate: d.gameDate ?? f.gameDate,
+          eventName: d.eventName ?? f.eventName,
+          status: d.status ?? f.status,
+        }));
+        setScoreboardParseState('parsed');
+      } else {
+        setScoreboardParseError('Parse failed — fill in manually');
+        setScoreboardParseState('error');
+      }
+    } catch (e) {
+      setScoreboardParseError(e instanceof Error ? e.message : 'Unknown error');
+      setScoreboardParseState('error');
+    }
+  };
+
   useEffect(() => {
     const cfg = streamConfigQuery.data?.config;
     if (!cfg) return;
@@ -487,6 +584,206 @@ const OpsPage = () => {
                   </div>
                 ))}
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'scores' && (
+        <div className="space-y-6">
+          {!isSuperAdmin && <p className="text-sm text-destructive font-semibold panel p-4">Super Admin role required for score management.</p>}
+
+          {/* ── Scoreboard image OCR ──────────────────────────────── */}
+          <div className="panel p-4 space-y-4 max-w-2xl">
+            <div>
+              <h2 className="font-display text-xl flex items-center gap-2"><Upload className="w-5 h-5 text-primary" /> Scoreboard Image Parser</h2>
+              <p className="text-xs text-muted-foreground mt-1">Upload a scoreboard photo — Claude Vision auto-extracts team names and scores.</p>
+            </div>
+            <div
+              className="border-2 border-dashed border-border rounded-sm p-6 text-center cursor-pointer hover:border-primary/40 transition-colors"
+              onClick={() => scoreboardFileRef.current?.click()}
+              onDragOver={e => e.preventDefault()}
+              onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) void handleScoreboardImage(f); }}
+            >
+              <input ref={scoreboardFileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void handleScoreboardImage(f); }} />
+              {scoreboardParseState === 'parsing' ? (
+                <div className="flex flex-col items-center gap-2"><Loader2 className="w-6 h-6 text-primary animate-spin" /><p className="text-sm text-muted-foreground">Parsing with Claude Vision…</p></div>
+              ) : scoreboardParseState === 'parsed' ? (
+                <div className="flex flex-col items-center gap-1"><CheckCircle2 className="w-5 h-5 text-success" /><p className="text-xs text-success font-medium">Data extracted — review below</p><p className="text-[10px] text-muted-foreground">Click to parse another image</p></div>
+              ) : scoreboardParseState === 'error' ? (
+                <div className="flex flex-col items-center gap-1"><AlertCircle className="w-5 h-5 text-destructive" /><p className="text-xs text-destructive">{scoreboardParseError}</p><p className="text-[10px] text-muted-foreground">Fill in fields manually below</p></div>
+              ) : (
+                <div className="flex flex-col items-center gap-2"><Upload className="w-6 h-6 text-muted-foreground" /><p className="text-sm text-muted-foreground">Drop scoreboard photo or click to upload</p><p className="text-[10px] text-muted-foreground">PNG, JPG — reads team names, scores, date</p></div>
+              )}
+            </div>
+          </div>
+
+          {/* ── Manual score entry ────────────────────────────────── */}
+          <div className="panel p-4 space-y-4 max-w-2xl">
+            <h2 className="font-display text-xl flex items-center gap-2"><Trophy className="w-5 h-5 text-primary" /> Manual Score Entry</h2>
+
+            {/* Category */}
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Category</label>
+              <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
+                {(['league', '1v1', 'special_event'] as ScoreCategory[]).map(cat => (
+                  <button key={cat} type="button" onClick={() => setScoresForm(f => ({ ...f, category: cat }))}
+                    className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${scoresForm.category === cat ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+                    {cat === '1v1' ? '1-on-1' : cat === 'special_event' ? 'Special Event' : 'League'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* League selector — only for league games */}
+            {scoresForm.category === 'league' && (
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">League</label>
+                <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
+                  {LEAGUE_REGISTRY.map(l => (
+                    <button key={l.id} type="button" onClick={() => setScoresForm(f => ({ ...f, leagueId: l.id }))}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${scoresForm.leagueId === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}>
+                      <img src={l.logo} alt="" width={12} height={12} className="flex-shrink-0 opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                      {l.shortName}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Event name — for special events */}
+            {scoresForm.category === 'special_event' && (
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Event Name</label>
+                <input className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="e.g. SBBL All-Star Weekend" value={scoresForm.eventName} onChange={e => setScoresForm(f => ({ ...f, eventName: e.target.value }))} />
+              </div>
+            )}
+
+            {/* Teams / participants */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Away Team / Player</label>
+                <input className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="Away label" value={scoresForm.awayLabel} onChange={e => setScoresForm(f => ({ ...f, awayLabel: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Home Team / Player</label>
+                <input className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="Home label" value={scoresForm.homeLabel} onChange={e => setScoresForm(f => ({ ...f, homeLabel: e.target.value }))} />
+              </div>
+            </div>
+
+            {/* Scores */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Away Score</label>
+                <input type="number" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="—" value={scoresForm.awayScore} onChange={e => setScoresForm(f => ({ ...f, awayScore: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Home Score</label>
+                <input type="number" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="—" value={scoresForm.homeScore} onChange={e => setScoresForm(f => ({ ...f, homeScore: e.target.value }))} />
+              </div>
+            </div>
+
+            {/* Status + Date + Venue */}
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Status</label>
+                <select className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={scoresForm.status} onChange={e => setScoresForm(f => ({ ...f, status: e.target.value }))}>
+                  <option value="final">Final</option>
+                  <option value="upcoming">Upcoming</option>
+                  <option value="live">Live</option>
+                  <option value="postponed">Postponed</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Game Date</label>
+                <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={scoresForm.gameDate} onChange={e => setScoresForm(f => ({ ...f, gameDate: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Venue (optional)</label>
+                <input className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="Court / location" value={scoresForm.venue} onChange={e => setScoresForm(f => ({ ...f, venue: e.target.value }))} />
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Notes (optional)</label>
+              <input className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="e.g. OT, playoff game, mercy rule…" value={scoresForm.notes} onChange={e => setScoresForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+
+            <button
+              disabled={!isSuperAdmin || !scoresForm.homeLabel || !scoresForm.awayLabel || scoreManualMutation.isPending}
+              className="w-full gold-bg py-2.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm disabled:opacity-50 transition-opacity"
+              onClick={() => scoreManualMutation.mutate()}
+            >
+              {scoreManualMutation.isPending ? 'Saving…' : 'Save Score'}
+            </button>
+            {scoreManualMutation.error && <p className="text-xs text-destructive">{(scoreManualMutation.error as Error).message}</p>}
+            {scoreManualMutation.isSuccess && <p className="text-xs text-success">Score saved — game ID: {scoreManualMutation.data?.gameId?.slice(0, 8)}</p>}
+          </div>
+
+          {/* ── CSV bulk import ───────────────────────────────────── */}
+          <div className="panel p-4 space-y-3 max-w-2xl">
+            <div>
+              <h2 className="font-display text-xl">CSV Bulk Import</h2>
+              <p className="text-xs text-muted-foreground mt-1">
+                Required columns: <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">category, home_label, away_label, status</code>.
+                Optional: <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">league_id, home_score, away_score, game_date, event_name, venue, notes</code>
+              </p>
+            </div>
+            <input ref={scoresCsvFileRef} type="file" accept=".csv,text/csv" onChange={async e => {
+              const file = e.target.files?.[0];
+              if (!file) return;
+              const raw = await file.text();
+              setScoresCsvRows(parseCsv(raw));
+            }} />
+            <p className="text-xs text-muted-foreground">Rows loaded: {scoresCsvRows.length}</p>
+            {scoresCsvRows.length > 0 && (
+              <div className="max-h-44 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">
+                {scoresCsvRows.slice(0, 6).map((row, i) => <pre key={i} className="truncate">{JSON.stringify(row)}</pre>)}
+                {scoresCsvRows.length > 6 && <p className="text-muted-foreground mt-1">…and {scoresCsvRows.length - 6} more</p>}
+              </div>
+            )}
+            <button
+              disabled={!isSuperAdmin || scoresCsvRows.length === 0 || scoresCsvMutation.isPending}
+              className="gold-bg px-4 py-2 rounded-sm text-sm font-semibold disabled:opacity-60"
+              onClick={() => scoresCsvMutation.mutate()}
+            >
+              {scoresCsvMutation.isPending ? 'Importing…' : `Import ${scoresCsvRows.length} Row${scoresCsvRows.length !== 1 ? 's' : ''}`}
+            </button>
+            {scoresCsvMutation.error && <p className="text-xs text-destructive">{(scoresCsvMutation.error as Error).message}</p>}
+            {scoresCsvMutation.data && (
+              <p className="text-xs text-success">
+                Imported: {scoresCsvMutation.data.inserted} · Failed: {scoresCsvMutation.data.failed}
+                {scoresCsvMutation.data.errors?.length > 0 && (
+                  <span className="text-warning"> · {scoresCsvMutation.data.errors[0]}</span>
+                )}
+              </p>
+            )}
+          </div>
+
+          {/* ── Recent scores list ────────────────────────────────── */}
+          <div className="panel p-4 max-w-4xl">
+            <h2 className="font-display text-xl mb-3">Recent Scores</h2>
+            {scoresQuery.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+            {!scoresQuery.isLoading && (scoresQuery.data?.games ?? []).length === 0 && (
+              <p className="text-sm text-muted-foreground">No scores yet. Add them above or import a CSV.</p>
+            )}
+            <div className="space-y-2 max-h-96 overflow-auto pr-1">
+              {(scoresQuery.data?.games ?? []).slice(0, 20).map(g => (
+                <div key={g.id} className="border border-border rounded-sm p-3 text-xs flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`flex-shrink-0 px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase ${g.category === 'league' ? 'bg-blue-500/15 text-blue-400' : g.category === '1v1' ? 'bg-purple-500/15 text-purple-400' : 'bg-amber-500/15 text-amber-400'}`}>
+                      {g.category === '1v1' ? '1v1' : g.category === 'special_event' ? 'Event' : (g.leagueCode ?? g.leagueId ?? 'LGE').toUpperCase()}
+                    </span>
+                    <span className="truncate font-medium">{g.awayLabel} vs {g.homeLabel}</span>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <span className="stat-numeral text-sm">{g.awayScore ?? '—'} – {g.homeScore ?? '—'}</span>
+                    <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${g.status === 'final' ? 'text-green-400 bg-green-500/10' : g.status === 'live' ? 'text-red-400 bg-red-500/15' : 'text-muted-foreground bg-secondary'}`}>{g.status}</span>
+                    {g.gameDate && <span className="text-muted-foreground">{new Date(g.gameDate).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}</span>}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
