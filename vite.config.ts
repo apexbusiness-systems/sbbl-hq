@@ -59,30 +59,62 @@ export default defineConfig(({ mode }) => {
           ]
         },
         workbox: {
-          // globPatterns deliberately omitted — vite-plugin-pwa defaults to
-          // ["**/*.{js,css,html,ico,png,svg,jpg,jpeg}"] in production, and
-          // omitting it prevents a spurious dev-dist warning when the Vite
-          // dev server starts before the dist directory is populated.
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
           runtimeCaching: [
+            // App shell navigations: Stale-While-Revalidate
             {
-              urlPattern: /^https:\/\/sbbl-hq\.icu\/.*/i,
-              handler: "NetworkFirst",
+              urlPattern: ({ request }) => request.mode === 'navigate',
+              handler: 'StaleWhileRevalidate',
               options: {
-                cacheName: "sbbl-hq-cache",
-                expiration: { maxEntries: 200 },
+                cacheName: 'app-shell-navigations',
+                expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 * 7 }, // 1 week
               },
             },
+            // Hashed JS/CSS/Fonts: Cache-First
             {
-              urlPattern: ({ request }: { request: Request }) => request.destination === "image",
-              handler: "CacheFirst",
+              urlPattern: ({ request }) =>
+                request.destination === 'script' ||
+                request.destination === 'style' ||
+                request.destination === 'font',
+              handler: 'CacheFirst',
               options: {
-                cacheName: "sbblhq-images",
-                expiration: { maxEntries: 120, maxAgeSeconds: 60 * 60 * 24 * 14 },
+                cacheName: 'static-assets',
+                expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 }, // 30 days
+                cacheableResponse: { statuses: [0, 200] },
               },
             },
+            // Images: Cache-First with caps
+            {
+              urlPattern: ({ request }) => request.destination === 'image',
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'image-cache',
+                expiration: { maxEntries: 120, maxAgeSeconds: 60 * 60 * 24 * 14 }, // 14 days
+                cacheableResponse: { statuses: [0, 200] },
+              },
+            },
+            // Briefly stale-safe public API reads: Stale-While-Revalidate
+            {
+              urlPattern: ({ url, request }) =>
+                request.method === 'GET' &&
+                url.pathname.startsWith('/rest/v1/') &&
+                !url.pathname.includes('/auth/'),
+              handler: 'StaleWhileRevalidate',
+              options: {
+                cacheName: 'public-api-reads',
+                expiration: { maxEntries: 100, maxAgeSeconds: 60 * 5 }, // 5 minutes
+                cacheableResponse: { statuses: [0, 200] },
+              },
+            },
+            // Mutations / Auth / Protected: Network-Only
+            {
+              urlPattern: ({ request, url }) =>
+                request.method !== 'GET' ||
+                url.pathname.includes('/auth/'),
+              handler: 'NetworkOnly',
+            }
           ],
         },
         devOptions: { enabled: true },
