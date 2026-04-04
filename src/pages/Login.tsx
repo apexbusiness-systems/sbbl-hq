@@ -25,11 +25,13 @@ const LoginPage = () => {
   const { containerRef: turnstileRef, resolveToken, ready: captchaReady } = useTurnstile();
   const navigate = useNavigate();
 
-  // Redirect after login — respect ?redirect= param from /register flow
+  // Redirect after login — respect ?redirect= param from /register flow.
+  // Wait for loading to settle so profile/roles are known before deciding
+  // between /onboarding and the target page (avoids wrong redirect flash).
   const redirectTo = urlParams.get('redirect');
   useEffect(() => {
-    if (isSignedIn) navigate(needsOnboarding ? '/onboarding' : (redirectTo || '/'));
-  }, [isSignedIn, needsOnboarding, navigate, redirectTo]);
+    if (isSignedIn && !loading) navigate(needsOnboarding ? '/onboarding' : (redirectTo || '/'));
+  }, [isSignedIn, loading, needsOnboarding, navigate, redirectTo]);
 
   const switchMode = (next: Mode) => {
     setMode(next);
