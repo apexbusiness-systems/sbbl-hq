@@ -3984,7 +3984,7 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
   // that and fall back to defaults so scores always render.
   const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
   const ids = rows.map((r) => String(r.id));
-  let extMap = new Map<string, Record<string, unknown>>();
+  const extMap = new Map<string, Record<string, unknown>>();
   if (ids.length > 0) {
     try {
       const extRes = await admin
