@@ -1,6 +1,8 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
+import { getSupabaseClient } from '@/lib/supabase/client';
+import { apiFetch } from '@/lib/api/client';
 import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { CASLNudge } from '@/components/CASLNudge';
@@ -142,6 +144,7 @@ const LivePage = () => {
   const [viewerCount, setViewerCount] = useState(0);
   const [streamSource, setStreamSource] = useState<'custom' | 'cloudflare'>('custom');
   const [customStreamUrl, setCustomStreamUrl] = useState('');
+  const [activeGameId, setActiveGameId] = useState<string | null>(null);
 
   // Auto-sync stream status from backend
   useEffect(() => {
@@ -166,6 +169,7 @@ const LivePage = () => {
             setStreamTitle(res.title);
             setCustomStreamUrl(res.collectionId || '');
             setViewerCount(res.viewerCount);
+            if (res.gameId) setActiveGameId(res.gameId);
           }
         }
       } catch (err) {
@@ -186,7 +190,57 @@ const LivePage = () => {
     { user: 'DunkMaster', text: 'Block party at the rim!' },
   ]);
   const [chatInput, setChatInput] = useState('');
-  const [reactions, setReactions] = useState({ fire: 142, heart: 89, clap: 67 });
+
+  // ── Real reactions (persisted + Realtime-broadcast) ──────────────────────
+  const [reactions, setReactions] = useState({ fire: 0, heart: 0, clap: 0 });
+
+  // Fetch initial counts whenever the active game is known
+  useEffect(() => {
+    if (!activeGameId) return;
+    void apiFetch<{ ok: boolean; fire: number; heart: number; clap: number }>(
+      `/api/streams/${activeGameId}/reactions`,
+    ).then(data => {
+      if (data.ok) setReactions({ fire: data.fire, heart: data.heart, clap: data.clap });
+    }).catch(() => {});
+  }, [activeGameId]);
+
+  // Subscribe to Supabase Realtime — broadcast every new reaction to all viewers
+  useEffect(() => {
+    if (!activeGameId) return;
+    const client = getSupabaseClient();
+    if (!client) return;
+
+    const channel = client
+      .channel(`stream-reactions-${activeGameId}`)
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'stream_reactions', filter: `game_id=eq.${activeGameId}` },
+        (payload) => {
+          const type = (payload.new as { reaction_type: string }).reaction_type as 'fire' | 'heart' | 'clap';
+          if (['fire', 'heart', 'clap'].includes(type)) {
+            setReactions(r => ({ ...r, [type]: r[type] + 1 }));
+          }
+        },
+      )
+      .subscribe();
+
+    return () => { void client.removeChannel(channel); };
+  }, [activeGameId]);
+
+  const postReaction = useCallback(async (type: 'fire' | 'heart' | 'clap') => {
+    // Optimistic update immediately
+    setReactions(r => ({ ...r, [type]: r[type] + 1 }));
+    // Persist to DB (auth required; silently skip if not signed in)
+    if (!user?.id || !activeGameId || !session?.access_token) return;
+    try {
+      await apiFetch(`/api/streams/${activeGameId}/react`, {
+        method: 'POST',
+        body: JSON.stringify({ type }),
+      });
+    } catch {
+      // non-critical — optimistic update already applied
+    }
+  }, [activeGameId, user?.id, session?.access_token]);
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -347,13 +401,13 @@ const LivePage = () => {
             <div className="container lg:px-0 py-4 space-y-4">
               {/* Reaction bar */}
               <div className="flex items-center gap-3 flex-wrap">
-                <button onClick={() => setReactions(r => ({ ...r, fire: r.fire + 1 }))} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
+                <button onClick={() => postReaction('fire')} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   🔥 <span className="stat-numeral">{reactions.fire}</span>
                 </button>
-                <button onClick={() => setReactions(r => ({ ...r, heart: r.heart + 1 }))} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
+                <button onClick={() => postReaction('heart')} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   ❤️ <span className="stat-numeral">{reactions.heart}</span>
                 </button>
-                <button onClick={() => setReactions(r => ({ ...r, clap: r.clap + 1 }))} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
+                <button onClick={() => postReaction('clap')} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   👏 <span className="stat-numeral">{reactions.clap}</span>
                 </button>
                 <button
