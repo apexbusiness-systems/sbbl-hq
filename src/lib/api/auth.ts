@@ -17,22 +17,54 @@ export type AuthProfile = {
 
 export async function signInWithPassword(email: string, password: string, captchaToken?: string) {
   const supabase = requireSupabaseClient();
+  const normalized = email.trim().toLowerCase();
+
   const { error } = await supabase.auth.signInWithPassword({
-    email: email.trim().toLowerCase(),
+    email: normalized,
     password,
     options: captchaToken ? { captchaToken } : undefined,
   });
+
+  // If the failure is captcha-related and we sent a token, retry without it.
+  // This handles misconfigured Turnstile (wrong key pair, domain mismatch)
+  // when the Supabase project doesn't strictly require captcha.
+  if (error && captchaToken && isCaptchaError(error)) {
+    const { error: retryError } = await supabase.auth.signInWithPassword({
+      email: normalized,
+      password,
+    });
+    if (retryError) throw retryError;
+    return;
+  }
+
   if (error) throw error;
 }
 
 export async function signUpWithPassword(email: string, password: string, captchaToken?: string) {
   const supabase = requireSupabaseClient();
+  const normalized = email.trim().toLowerCase();
+
   const { error } = await supabase.auth.signUp({
-    email: email.trim().toLowerCase(),
+    email: normalized,
     password,
     options: captchaToken ? { captchaToken } : undefined,
   });
+
+  if (error && captchaToken && isCaptchaError(error)) {
+    const { error: retryError } = await supabase.auth.signUp({
+      email: normalized,
+      password,
+    });
+    if (retryError) throw retryError;
+    return;
+  }
+
   if (error) throw error;
+}
+
+function isCaptchaError(error: { message?: string }): boolean {
+  const msg = (error.message ?? '').toLowerCase();
+  return msg.includes('captcha') || msg.includes('security') || msg.includes('turnstile');
 }
 
 export async function signOut() {
