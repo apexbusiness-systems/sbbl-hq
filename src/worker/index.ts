@@ -3549,75 +3549,104 @@ routes.push(
 /** GET /api/scores — public, optionally filtered by league/category/status */
 async function handleScoresList({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
-  const league = url.searchParams.get("league");
-  const category = url.searchParams.get("category");
-  const status = url.searchParams.get("status");
+  const leagueParam = url.searchParams.get("league");
+  const statusParam = url.searchParams.get("status");
 
+  // Query only base-schema columns that exist in production.
+  // Columns added by migration 20260404004000 (category, game_date, event_name,
+  // participant1_label, participant2_label, notes) are read via a second query
+  // below so we degrade gracefully if that migration hasn't been applied yet.
   let query = admin
     .from("games")
-    .select(`
-      id, category, status, event_name, notes, game_date, venue,
-      home_score, away_score,
-      participant1_label, participant2_label,
-      home_team_id, away_team_id,
-      home_team:home_team_id(name),
-      away_team:away_team_id(name),
-      leagues!league_id(code, name),
-      seasons!season_id(name)
-    `)
-    .order("game_date", { ascending: false })
-    .limit(100);
+    .select(
+      "id, status, scheduled_at, venue, home_score, away_score, " +
+      "home_team_id, away_team_id, " +
+      "home_team:teams!home_team_id(name), " +
+      "away_team:teams!away_team_id(name), " +
+      "leagues!league_id(code, name), " +
+      "seasons!season_id(name)"
+    )
+    .order("scheduled_at", { ascending: false })
+    .limit(200);
 
-  if (category && category !== "all") query = query.eq("category", category);
-  if (league && league !== "all") {
-    // Filter by league code via subquery join
-    query = query.eq("leagues.code", league.toUpperCase());
-  }
-  if (status === "recent") {
+  if (statusParam === "recent") {
     query = query.eq("status", "final");
-  } else if (status === "upcoming") {
+  } else if (statusParam === "upcoming") {
     query = query.in("status", ["upcoming", "scheduled"]);
   }
 
   const { data, error } = await query;
   if (error) return json({ ok: false, error: error.message }, 500);
 
-  const games = (data ?? []).map((row) => {
-    const r = row as Record<string, unknown>;
-    const league = r.leagues as Record<string, unknown> | null;
+  // Attempt to also fetch extended columns from migration 20260404004000.
+  // On a DB that hasn't had the migration applied this will fail — we catch
+  // that and fall back to defaults so scores always render.
+  const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+  const ids = rows.map((r) => String(r.id));
+  let extMap = new Map<string, Record<string, unknown>>();
+  if (ids.length > 0) {
+    try {
+      const extRes = await admin
+        .from("games")
+        .select("id, category, game_date, event_name, participant1_label, participant2_label, notes")
+        .in("id", ids);
+      if (!extRes.error && extRes.data) {
+        for (const row of extRes.data as Array<Record<string, unknown>>) {
+          extMap.set(String(row.id), row);
+        }
+      }
+    } catch {
+      // Migration 20260404004000 not yet applied — fall back to defaults
+    }
+  }
+
+  const games = rows.map((r) => {
+    const ext = extMap.get(String(r.id)) ?? {};
+    const leagueRow = r.leagues as Record<string, unknown> | null;
     const season = r.seasons as Record<string, unknown> | null;
     const homeTeam = r.home_team as Record<string, unknown> | null;
     const awayTeam = r.away_team as Record<string, unknown> | null;
-    const homeLabel = r.participant1_label as string | null
+
+    const homeLabel = (ext.participant1_label as string | null)
       ?? (homeTeam ? String(homeTeam.name) : null)
       ?? "Home";
-    const awayLabel = r.participant2_label as string | null
+    const awayLabel = (ext.participant2_label as string | null)
       ?? (awayTeam ? String(awayTeam.name) : null)
       ?? "Away";
-    const leagueCode = league ? String(league.code ?? "").toLowerCase() : undefined;
-    const leagueId = leagueCode === "wbl" ? "wbl" : leagueCode === "tgifbl" ? "tgifbl" : leagueCode === "sbbl" ? "sbbl" : undefined;
+
+    const leagueCode = leagueRow ? String(leagueRow.code ?? "").toLowerCase() : undefined;
+    const leagueId = leagueCode === "wbl" ? "wbl"
+      : leagueCode === "tgifbl" ? "tgifbl"
+      : leagueCode === "sbbl" ? "sbbl"
+      : undefined;
+
+    // Derive game date from scheduled_at when game_date column not yet available
+    const scheduledAt = r.scheduled_at as string | null;
+    const gameDate = (ext.game_date as string | null)
+      ?? (scheduledAt ? scheduledAt.split("T")[0] : undefined);
+
     return {
       id: String(r.id),
-      category: String(r.category ?? "league"),
+      category: String(ext.category ?? "league"),
       leagueId,
       leagueCode,
-      leagueName: league ? String(league.name ?? "") : undefined,
+      leagueName: leagueRow ? String(leagueRow.name ?? "") : undefined,
       seasonName: season ? String(season.name ?? "") : undefined,
-      eventName: r.event_name as string | undefined,
+      eventName: (ext.event_name as string | null) ?? undefined,
       homeLabel,
       awayLabel,
       homeScore: r.home_score != null ? Number(r.home_score) : undefined,
       awayScore: r.away_score != null ? Number(r.away_score) : undefined,
       status: String(r.status ?? "upcoming"),
-      gameDate: r.game_date as string | undefined,
-      venue: r.venue as string | undefined,
-      notes: r.notes as string | undefined,
+      gameDate,
+      venue: (r.venue as string | null) ?? undefined,
+      notes: (ext.notes as string | null) ?? undefined,
     };
   });
 
-  // If league filter was requested, apply post-filter since the join may not filter
-  const filtered = league && league !== "all"
-    ? games.filter(g => g.leagueCode === league.toLowerCase())
+  // Post-filter by league code if requested
+  const filtered = leagueParam && leagueParam !== "all"
+    ? games.filter((g) => g.leagueCode === leagueParam.toLowerCase())
     : games;
 
   return json({ ok: true, games: filtered });
