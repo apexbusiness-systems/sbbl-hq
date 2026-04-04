@@ -5,6 +5,12 @@ import { readIdempotencyKey } from "@/lib/api/idempotency";
 import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
 import { signSyncPacket, type SyncPacket } from "@/lib/sync-packets";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import {
+  handlePublicConfig as _handlePublicConfig,
+  handlePublicHome as _handlePublicHome,
+  handlePublicSchedule as _handlePublicSchedule,
+  handlePublicPotg as _handlePublicPotg,
+} from "./routes/public";
 
 type HandlerCtx = {
   req: Request;
@@ -1127,6 +1133,12 @@ async function handleSyncDrain(ctx: HandlerCtx) {
 }
 
 async function handleStripeWebhook(ctx: HandlerCtx) {
+  // Rate-limit the webhook endpoint to prevent abuse (anonymous, mutation-heavy)
+  const clientIp = ctx.req.headers.get("cf-connecting-ip") ?? "unknown";
+  if (!checkRateLimit(clientIp)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
+
   const secret = ctx.env.STRIPE_WEBHOOK_SECRET;
   if (!secret)
     return json({ ok: false, error: "stripe_webhook_secret_missing" }, 503);
@@ -1730,27 +1742,9 @@ async function handleStoreMedia(ctx: HandlerCtx) {
   });
 }
 
-// SECURITY: Public config endpoint returns ONLY non-sensitive application metadata.
-// Supabase URL and publishable key are NOT returned here — the client SDK
-// initializes via environment-injected config at build time, not runtime API calls.
-// Add near handlePublicConfig or handleTeamsList
-async function handlePublicSchedule({ req, admin }: HandlerCtx) {
-  const url = new URL(req.url);
-  const leagueId = url.searchParams.get('leagueId');
-  let q = admin.from('schedules').select('*').eq('status', 'published');
-  if (leagueId) {
-    q = q.eq('league_id', leagueId);
-  }
-  const { data, error } = await q.order('start_time', { ascending: true });
-  if (error) throw new Error(error.message);
-  return json({ ok: true, data });
-}
-
-async function handlePublicPotg({ admin }: HandlerCtx) {
-  const { data, error } = await admin.from('potg_records').select('*').eq('status', 'approved').order('created_at', { ascending: false }).limit(20);
-  if (error) throw new Error(error.message);
-  return json({ ok: true, data });
-}
+// handlePublicSchedule, handlePublicPotg — extracted to src/worker/routes/public.ts
+const handlePublicSchedule = _handlePublicSchedule;
+const handlePublicPotg = _handlePublicPotg;
 
 // Ops List handlers
 function requireSuperAdmin(req: Request) {
@@ -1842,142 +1836,11 @@ async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete
 async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('events', ctx.req, ctx.admin, ctx.params); }
 
 
-async function handlePublicConfig({ env }: HandlerCtx) {
-  return json({
-    ok: true,
-    appName: "SBBL HQ",
-    defaultLeague: "SBBL",
-    supabaseUrl: env.SUPABASE_URL ?? null,
-    supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY ?? null,
-  });
-}
+// handlePublicConfig — extracted to src/worker/routes/public.ts
+const handlePublicConfig = _handlePublicConfig;
 
-async function handlePublicHome({ req, admin }: HandlerCtx) {
-  const url = new URL(req.url);
-  const leagueCode = (url.searchParams.get("league") ?? "SBBL").toUpperCase();
-
-  const [leaguesRes, teamsRes, gamesRes, seasonsRes] = await Promise.all([
-    admin.from("leagues").select("id,name,code").order("name"),
-    admin
-      .from("teams")
-      .select(
-        "id,name,leagues(name,code),seasons(name),divisions(name),players(id)",
-      )
-      .eq("status", "published")
-      .limit(200),
-    admin
-      .from("games")
-      .select(
-        "id,home_team_id,away_team_id,status,home_score,away_score,scheduled_at,venue_id,venues(name),courts(name),season_id,seasons(league_id,leagues(code))",
-      )
-      .in("status", ["live", "upcoming", "final"])
-      .order("scheduled_at", { ascending: true })
-      .limit(50),
-    admin
-      .from("seasons")
-      .select("id,name,league_id,leagues(code),status")
-      .order("created_at", { ascending: false })
-      .limit(20),
-  ]);
-
-  const leagues = (leaguesRes.data ?? []) as Array<{
-    id: string;
-    name: string;
-    code: string;
-  }>;
-  const activeLeague =
-    leagues.find((l) => l.code?.toUpperCase() === leagueCode) ??
-    leagues[0] ??
-    null;
-  const activeLeagueId = activeLeague?.id ?? null;
-
-  const allTeams = (teamsRes.data ?? []).map(
-    (row: Record<string, unknown>) => ({
-      id: String(row.id),
-      name: String(row.name),
-      league_code: (
-        (row.leagues as { code?: string } | null)?.code ?? ""
-      ).toUpperCase(),
-      league_name: String(
-        (row.leagues as { name?: string } | null)?.name ?? "",
-      ),
-      season_name: String(
-        (row.seasons as { name?: string } | null)?.name ?? "",
-      ),
-      division_name: (row.divisions as { name?: string } | null)?.name ?? null,
-      roster_count: Array.isArray(row.players) ? row.players.length : 0,
-    }),
-  );
-  const leagueTeams = activeLeagueId
-    ? allTeams.filter((t) => t.league_code === leagueCode)
-    : allTeams;
-
-  const allGames = (gamesRes.data ?? []).map((row: Record<string, unknown>) => {
-    const seasons = row.seasons as {
-      league_id?: string;
-      leagues?: { code?: string };
-    } | null;
-    return {
-      id: String(row.id),
-      home_team_id: row.home_team_id as string | null,
-      away_team_id: row.away_team_id as string | null,
-      status: String(row.status ?? "upcoming"),
-      home_score: row.home_score as number | null,
-      away_score: row.away_score as number | null,
-      scheduled_at: row.scheduled_at as string | null,
-      venue: (row.venues as { name?: string } | null)?.name ?? null,
-      court: (row.courts as { name?: string } | null)?.name ?? null,
-      league_code: (seasons?.leagues?.code ?? "").toUpperCase(),
-    };
-  });
-  const leagueGames = allGames.filter((g) => g.league_code === leagueCode);
-
-  const teamMap = new Map(allTeams.map((t) => [t.id, t]));
-  const enrichGame = (g: (typeof leagueGames)[0]) => ({
-    ...g,
-    home_team: teamMap.get(g.home_team_id ?? "") ?? null,
-    away_team: teamMap.get(g.away_team_id ?? "") ?? null,
-  });
-
-  const liveGames = leagueGames
-    .filter((g) => g.status === "live")
-    .map(enrichGame);
-  const upcomingGames = leagueGames
-    .filter((g) => g.status === "upcoming")
-    .slice(0, 5)
-    .map(enrichGame);
-  const recentGames = leagueGames
-    .filter((g) => g.status === "final")
-    .slice(0, 5)
-    .map(enrichGame);
-
-  const activeSeason = (seasonsRes.data ?? []).find(
-    (s: Record<string, unknown>) => {
-      const sLeagues = s.leagues as { code?: string } | null;
-      return (sLeagues?.code ?? "").toUpperCase() === leagueCode;
-    },
-  ) as { id: string; name: string; status: string } | undefined;
-
-  return json({
-    ok: true,
-    league: activeLeague,
-    season: activeSeason
-      ? {
-          id: activeSeason.id,
-          name: activeSeason.name,
-          status: activeSeason.status,
-        }
-      : null,
-    teams: leagueTeams,
-    totalTeams: leagueTeams.length,
-    totalRostered: leagueTeams.reduce((sum, t) => sum + t.roster_count, 0),
-    liveGames,
-    upcomingGames,
-    recentGames,
-    totalGames: leagueGames.length,
-    leagues: leagues.map((l) => ({ id: l.id, name: l.name, code: l.code })),
-  });
-}
+// handlePublicHome — extracted to src/worker/routes/public.ts
+const handlePublicHome = _handlePublicHome;
 
 function splitProfileName(profile: Record<string, unknown> | undefined) {
   const fullName =
@@ -3606,6 +3469,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/ops/potg/submit", handler: handleSubmitPotg },
   { method: "GET", path: "/api/public-config", handler: handlePublicConfig },
   { method: "GET", path: "/api/public/home", handler: handlePublicHome },
+  { method: "GET", path: "/api/public/schedule", handler: handlePublicSchedule },
+  { method: "GET", path: "/api/public/potg", handler: handlePublicPotg },
   { method: "GET", path: "/api/teams", handler: handleTeamsList },
   {
     method: "GET",
@@ -3696,7 +3561,23 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-Frame-Options', 'DENY');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  headers.set('X-XSS-Protection', '1; mode=block');   // CSP: restricts resource loading to trusted origins only.   // Prevents XSS, data exfiltration, and clickjacking at the browser level.   headers.set('Content-Security-Policy',     "default-src 'self'; " +     "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +     "style-src 'self' 'unsafe-inline'; " +     "img-src 'self' data: blob: https:; " +     "font-src 'self' data:; " +     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +     "frame-src https://challenges.cloudflare.com https://js.stripe.com; " +     "frame-ancestors 'none'; " +     "base-uri 'self'; " +     "form-action 'self' https://checkout.stripe.com;"   );   // HSTS: force HTTPS for 2 years, include subdomains, allow preloading.   headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  headers.set('X-XSS-Protection', '1; mode=block');
+  // CSP: restricts resource loading to trusted origins only.
+  // Prevents XSS, data exfiltration, and clickjacking at the browser level.
+  headers.set('Content-Security-Policy',
+    "default-src 'self'; " +
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
+    "style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: blob: https:; " +
+    "font-src 'self' data:; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com; " +
+    "frame-ancestors 'none'; " +
+    "base-uri 'self'; " +
+    "form-action 'self' https://checkout.stripe.com;"
+  );
+  // HSTS: force HTTPS for 2 years, include subdomains, allow preloading.
+  headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
@@ -3784,12 +3665,13 @@ export default Sentry.withSentry(
       });
 
       try {
-        return await route.handler({
+        const handlerResponse = await route.handler({
           req: enrichedRequest,
           env,
           params,
           admin,
         });
+        return addSecurityHeaders(handlerResponse);
       } catch (error) {
         const message =
           error instanceof Error ? error.message : "internal_error";
@@ -3808,7 +3690,7 @@ export default Sentry.withSentry(
             extra: { path: url.pathname, method: req.method },
           });
         }
-        return json({ ok: false, error: message }, status);
+        return addSecurityHeaders(json({ ok: false, error: message }, status));
       }
     }
 
@@ -3816,7 +3698,7 @@ export default Sentry.withSentry(
       return env.ASSETS.fetch(req);
     }
 
-    return json({ ok: false, error: "not_found" }, 404);
+    return addSecurityHeaders(json({ ok: false, error: "not_found" }, 404));
   },
   },
 );

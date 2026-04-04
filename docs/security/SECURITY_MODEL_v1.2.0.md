@@ -39,7 +39,8 @@ All helpers are `STABLE`, `SECURITY DEFINER`, and have `SET search_path = public
 
 ## Stripe Webhook Security
 
-- **Edge Function** (`supabase/functions/stripe-webhook/index.ts`): HMAC-SHA256 signature verification on raw request bytes using `STRIPE_WEBHOOK_SECRET`.
+- **Canonical handler:** Cloudflare Worker route `POST /webhooks/stripe` (`src/worker/index.ts`): HMAC-SHA256 signature verification on raw request bytes using `STRIPE_WEBHOOK_SECRET`. Rate-limited per IP.
+- **Archival handler:** Edge Function (`supabase/functions/stripe-webhook/index.ts`) — retained as reference/fallback, not the active ingress path.
 - **Idempotency:** Duplicate event detection via `stripe_events` table with UNIQUE constraint on `stripe_event_id`.
 - **Processing:** Route-separated handlers (registration vs sponsorship) with transactional RPC.
 

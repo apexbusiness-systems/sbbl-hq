@@ -7,7 +7,7 @@
  * Routes required in worker (see STREAM_OPS_WORKER_PATCH.md):
  *   GET  /api/streams/status            → public, poll for isLive + viewerCount
  *   GET  /ops/streams/config            → league_admin: read stream config
- *   POST /ops/streams/config            → super_admin:  update collection ID / title / source
+ *   POST /ops/streams/config            → super_admin:  update stream URL / title / source
  *   POST /ops/streams/status            → super_admin:  go live / end broadcast
  *   GET  /ops/streams/sessions          → league_admin: session history
  *   POST /ops/access/override           → super_admin:  grant / revoke PPV access
@@ -22,7 +22,8 @@ import { createIdempotencyKey, IDEMPOTENCY_HEADER } from '@/lib/api/idempotency'
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface StreamConfig {
-  collectionId: string;       // Switcher Studio collection ID
+  /** Stream URL (historically named collectionId for Switcher Studio; now repurposed as a direct stream/embed URL). */
+  collectionId: string;
   title: string;              // broadcast title shown in Ops panel
   source: 'main' | 'backup' | 'test';
   isLive: boolean;

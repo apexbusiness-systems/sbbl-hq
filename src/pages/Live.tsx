@@ -128,7 +128,7 @@ function AdminStreamControls({
                   const { setStreamLive, updateStreamConfig } = await import('@/lib/api/stream');
                   const token = await import('@/lib/api/client').then(m => m.getAuthToken());
                   
-                  // Save the twitch URL
+                  // Save the stream URL (stored in collectionId field)
                   await updateStreamConfig({ collectionId: customStreamUrl }, token);
                   // Set database live status
                   await setStreamLive(nextLive, token);
@@ -188,7 +188,7 @@ const LivePage = () => {
           if (active && res?.config) {
             setIsStreamLive(res.config.isLive);
             setStreamTitle(res.config.title);
-            setCustomStreamUrl(res.config.collectionId || ''); // Repurposing collectionId for Stream URL
+            setCustomStreamUrl(res.config.collectionId || ''); // collectionId stores the stream URL
           }
         } else {
           // Public poller
