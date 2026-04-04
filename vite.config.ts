@@ -62,6 +62,17 @@ export default defineConfig(({ mode }) => {
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
+          // Serve /offline as the fallback for navigation requests that miss
+          // both the network and the app-shell-navigations cache.
+          navigateFallback: '/offline',
+          // Only apply the fallback to app routes — never to API, auth, or assets.
+          navigateFallbackDenylist: [
+            /^\/rest\/v1\//,
+            /^\/auth\//,
+            /^\/storage\//,
+            /^\/functions\//,
+            /^\/assets\//,
+          ],
           runtimeCaching: [
             // App shell navigations: Stale-While-Revalidate
             {
