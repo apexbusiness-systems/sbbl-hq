@@ -3946,6 +3946,251 @@ routes.push(
   { method: "GET",    path: "/ops/list/events",   handler: handleOpsListEvents },
 );
 
+// ── Scores handlers ────────────────────────────────────────────────────────
+
+/** GET /api/scores — public, optionally filtered by league/category/status */
+async function handleScoresList({ req, admin }: HandlerCtx) {
+  const url = new URL(req.url);
+  const league = url.searchParams.get("league");
+  const category = url.searchParams.get("category");
+  const status = url.searchParams.get("status");
+
+  let query = admin
+    .from("games")
+    .select(`
+      id, category, status, event_name, notes, game_date, venue,
+      home_score, away_score,
+      participant1_label, participant2_label,
+      home_team_id, away_team_id,
+      home_team:home_team_id(name),
+      away_team:away_team_id(name),
+      leagues!league_id(code, name),
+      seasons!season_id(name)
+    `)
+    .order("game_date", { ascending: false })
+    .limit(100);
+
+  if (category && category !== "all") query = query.eq("category", category);
+  if (league && league !== "all") {
+    // Filter by league code via subquery join
+    query = query.eq("leagues.code", league.toUpperCase());
+  }
+  if (status === "recent") {
+    query = query.eq("status", "final");
+  } else if (status === "upcoming") {
+    query = query.in("status", ["upcoming", "scheduled"]);
+  }
+
+  const { data, error } = await query;
+  if (error) return json({ ok: false, error: error.message }, 500);
+
+  const games = (data ?? []).map((row) => {
+    const r = row as Record<string, unknown>;
+    const league = r.leagues as Record<string, unknown> | null;
+    const season = r.seasons as Record<string, unknown> | null;
+    const homeTeam = r.home_team as Record<string, unknown> | null;
+    const awayTeam = r.away_team as Record<string, unknown> | null;
+    const homeLabel = r.participant1_label as string | null
+      ?? (homeTeam ? String(homeTeam.name) : null)
+      ?? "Home";
+    const awayLabel = r.participant2_label as string | null
+      ?? (awayTeam ? String(awayTeam.name) : null)
+      ?? "Away";
+    const leagueCode = league ? String(league.code ?? "").toLowerCase() : undefined;
+    const leagueId = leagueCode === "wbl" ? "wbl" : leagueCode === "tgifbl" ? "tgifbl" : leagueCode === "sbbl" ? "sbbl" : undefined;
+    return {
+      id: String(r.id),
+      category: String(r.category ?? "league"),
+      leagueId,
+      leagueCode,
+      leagueName: league ? String(league.name ?? "") : undefined,
+      seasonName: season ? String(season.name ?? "") : undefined,
+      eventName: r.event_name as string | undefined,
+      homeLabel,
+      awayLabel,
+      homeScore: r.home_score != null ? Number(r.home_score) : undefined,
+      awayScore: r.away_score != null ? Number(r.away_score) : undefined,
+      status: String(r.status ?? "upcoming"),
+      gameDate: r.game_date as string | undefined,
+      venue: r.venue as string | undefined,
+      notes: r.notes as string | undefined,
+    };
+  });
+
+  // If league filter was requested, apply post-filter since the join may not filter
+  const filtered = league && league !== "all"
+    ? games.filter(g => g.leagueCode === league.toLowerCase())
+    : games;
+
+  return json({ ok: true, games: filtered });
+}
+
+/** POST /ops/scores/game — upsert a single game (super_admin only) */
+async function handleScoreGameUpsert(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    gameId?: string;
+    category?: string;
+    leagueId?: string;
+    seasonId?: string;
+    homeLabel?: string;
+    awayLabel?: string;
+    homeScore?: number;
+    awayScore?: number;
+    status?: string;
+    gameDate?: string;
+    eventName?: string;
+    venue?: string;
+    notes?: string;
+  } | null;
+
+  if (!body) return json({ ok: false, error: "body_required" }, 400);
+
+  // Resolve league_id UUID from league code if provided
+  let leagueUuid: string | null = null;
+  if (body.leagueId) {
+    const { data: leagueRow } = await ctx.admin
+      .from("leagues")
+      .select("id")
+      .ilike("code", body.leagueId)
+      .maybeSingle();
+    leagueUuid = leagueRow?.id ?? null;
+  }
+
+  const payload = {
+    ...(body.gameId ? {} : {}),
+    category: body.category ?? "league",
+    league_id: leagueUuid,
+    season_id: body.seasonId ?? null,
+    participant1_label: body.homeLabel ?? null,
+    participant2_label: body.awayLabel ?? null,
+    home_score: body.homeScore ?? null,
+    away_score: body.awayScore ?? null,
+    status: body.status ?? "upcoming",
+    game_date: body.gameDate ?? null,
+    event_name: body.eventName ?? null,
+    venue: body.venue ?? null,
+    notes: body.notes ?? null,
+  };
+
+  let gameId: string;
+  if (body.gameId) {
+    const { data, error } = await ctx.admin
+      .from("games")
+      .update(payload)
+      .eq("id", body.gameId)
+      .select("id")
+      .single();
+    if (error) return json({ ok: false, error: error.message }, 500);
+    gameId = data.id;
+  } else {
+    const { data, error } = await ctx.admin
+      .from("games")
+      .insert(payload)
+      .select("id")
+      .single();
+    if (error) return json({ ok: false, error: error.message }, 500);
+    gameId = data.id;
+  }
+
+  return json({ ok: true, gameId });
+}
+
+/** POST /ops/scores/import — bulk CSV import (super_admin only) */
+async function handleScoresCsvImport(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => null)) as { rows?: Array<Record<string, string>> } | null;
+  const rows = body?.rows ?? [];
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return json({ ok: false, error: "rows_required" }, 400);
+  }
+
+  let inserted = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const row of rows) {
+    try {
+      // Resolve league uuid if league_id code provided
+      let leagueUuid: string | null = null;
+      if (row.league_id) {
+        const { data: lr } = await ctx.admin.from("leagues").select("id").ilike("code", row.league_id).maybeSingle();
+        leagueUuid = lr?.id ?? null;
+      }
+      const { error } = await ctx.admin.from("games").insert({
+        category: row.category || "league",
+        league_id: leagueUuid,
+        participant1_label: row.home_label || null,
+        participant2_label: row.away_label || null,
+        home_score: row.home_score !== "" && row.home_score != null ? Number(row.home_score) : null,
+        away_score: row.away_score !== "" && row.away_score != null ? Number(row.away_score) : null,
+        status: row.status || "final",
+        game_date: row.game_date || null,
+        event_name: row.event_name || null,
+        venue: row.venue || null,
+        notes: row.notes || null,
+      });
+      if (error) { failed++; errors.push(`${row.home_label} vs ${row.away_label}: ${error.message}`); }
+      else inserted++;
+    } catch (e) {
+      failed++;
+      errors.push(e instanceof Error ? e.message : "unknown");
+    }
+  }
+
+  return json({ ok: true, inserted, failed, errors });
+}
+
+/** POST /ops/scores/parse-image — scoreboard OCR via Groq vision (super_admin only) */
+async function handleScoreboardImageParse(ctx: HandlerCtx) {
+  await requireAdminSession(ctx.req, ctx.admin);
+  const apiKey = ctx.env.GROQ_API_KEY;
+  if (!apiKey) return json({ ok: false, error: "groq_api_key_missing" }, 503);
+
+  const body = (await ctx.req.json().catch(() => null)) as { imageBase64: string; mimeType: string } | null;
+  if (!body?.imageBase64 || !body?.mimeType) return json({ ok: false, error: "image_required" }, 400);
+
+  const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "llama-3.2-11b-vision-preview",
+      max_tokens: 256,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:${body.mimeType};base64,${body.imageBase64}` } },
+          { type: "text", text: 'Extract scoreboard data. Return ONLY a JSON object with these keys: homeLabel (string), awayLabel (string), homeScore (number or null), awayScore (number or null), gameDate (YYYY-MM-DD or null), eventName (string or null), status ("final","live","upcoming"). No markdown, raw JSON only.' },
+        ],
+      }],
+    }),
+  });
+
+  if (!resp.ok) return json({ ok: false, error: "groq_error", status: resp.status }, 502);
+  const ai = (await resp.json()) as { choices: Array<{ message: { content: string } }> };
+  const raw = ai.choices[0]?.message?.content ?? "";
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return json({ ok: false, error: "parse_failed", raw }, 422);
+  try {
+    const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+    return json({ ok: true, data: parsed });
+  } catch {
+    return json({ ok: false, error: "invalid_json", raw }, 422);
+  }
+}
+
+// Register score routes
+routes.push(
+  { method: "GET",  path: "/api/scores",          handler: handleScoresList },
+  { method: "POST", path: "/ops/scores/game",      handler: handleScoreGameUpsert },
+  { method: "POST", path: "/ops/scores/import",    handler: handleScoresCsvImport },
+  { method: "POST", path: "/ops/scores/parse-image", handler: handleScoreboardImageParse },
+);
+
 // Cron or background job logic for inventory retention/archival
 // Triggered periodically (e.g. daily cron) to safely archive products
 // that have been sold out for > 1 week.

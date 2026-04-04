@@ -183,43 +183,6 @@ const LeaderboardsPage = () => {
             </div>
           )}
 
-          {/* Team Standings */}
-          <div className="mt-12">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-display text-xl font-bold">Team Standings</h2>
-              {leagueFilter !== 'all' && activeLeagueObj && (
-                <div className="flex items-center gap-1.5 text-xs font-semibold">
-                  <img src={activeLeagueObj.logo} alt="" width={16} height={16} className="opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  <span className={activeLeagueObj.accentClass}>{activeLeagueObj.shortName}</span>
-                </div>
-              )}
-              {leagueFilter === 'all' && (
-                <span className="text-xs text-muted-foreground">All leagues combined</span>
-              )}
-            </div>
-            <div className="space-y-2">
-              {teams
-                .filter(t => leagueFilter === 'all' || t.leagueId === leagueFilter)
-                .sort((a, b) => (b.record.wins / (b.record.wins + b.record.losses)) - (a.record.wins / (a.record.wins + a.record.losses)))
-                .map((t, i) => (
-                  <div key={t.id} className="panel p-3 flex items-center gap-4">
-                    <span className="stat-numeral text-sm text-muted-foreground w-6 text-center">{i + 1}</span>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{t.name}</p>
-                      <div className="flex items-center gap-2">
-                        <LeagueBadge leagueId={t.leagueId} />
-                        <span className="text-[10px] text-muted-foreground">{t.division}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <span className="stat-numeral text-sm text-success">{t.record.wins}W</span>
-                      <span className="stat-numeral text-sm text-destructive">{t.record.losses}L</span>
-                      <span className="stat-numeral text-sm">{((t.record.wins / (t.record.wins + t.record.losses)) * 100).toFixed(0)}%</span>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>
