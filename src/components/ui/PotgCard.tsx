@@ -23,7 +23,7 @@ export const PotgCard = ({ potg }: PotgCardProps) => {
         <img
           src={potg.image}
           alt={`${potg.playerName} — Player of the Game`}
-          className="w-full h-full object-cover object-top group-hover:scale-[1.03] transition-transform duration-500"
+          className="w-full h-full object-contain bg-black/50 group-hover:scale-[1.03] transition-transform duration-500"
           loading="lazy"
           onError={() => setImgFailed(true)}
         />
