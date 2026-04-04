@@ -3,7 +3,7 @@ import { WebRTCPlayer } from '@eyevinn/webrtc-player';
 
 export function WhepPlayer({ url }: { url: string }) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const playerRef = useRef<any>(null);
+  const playerRef = useRef<WebRTCPlayer | null>(null);
 
   useEffect(() => {
     if (videoRef.current && url) {
