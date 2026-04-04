@@ -13,7 +13,9 @@ describe('cn', () => {
   });
 
   it('handles conditional classes', () => {
-    expect(cn('base', true && 'active', false && 'inactive')).toBe('base active');
+    const isTrue = true;
+    const isFalse = false;
+    expect(cn('base', isTrue && 'active', isFalse && 'inactive')).toBe('base active');
   });
 
   it('supports array inputs', () => {
