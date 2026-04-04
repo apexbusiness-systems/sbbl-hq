@@ -6,6 +6,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { AppProvider } from '@/contexts/AppContext';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { BagProvider } from '@/contexts/BagContext';
 import { Header } from '@/components/layout/Header';
 import { BagDrawer } from '@/components/layout/BagDrawer';
 import { RequireAdmin, RequireAuth } from '@/components/auth/RouteGuards';
@@ -73,6 +74,7 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AuthProvider>
+        <BagProvider>
         <AppProvider>
           <Toaster />
           <Sonner />
@@ -110,6 +112,7 @@ const App = () => (
             </div>
           </BrowserRouter>
         </AppProvider>
+        </BagProvider>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>

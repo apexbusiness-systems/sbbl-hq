@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '@/contexts/AppContext';
+import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api/client';
@@ -155,7 +156,8 @@ function AdminStreamControls({
 
 // ── Main Live Page ─────────────────────────────────────────────────────────
 const LivePage = () => {
-  const { addToBag, hasPremiumPlayerAccess } = useApp();
+  const { hasPremiumPlayerAccess } = useApp();
+  const { addToBag } = useBag();
   const { user, session, roles } = useAuth();
   const token = session?.access_token ?? null;
   const isSuperAdmin = roles.includes('super_admin');
