@@ -1842,11 +1842,13 @@ async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete
 async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('events', ctx.req, ctx.admin, ctx.params); }
 
 
-async function handlePublicConfig(_ctx: HandlerCtx) {
+async function handlePublicConfig({ env }: HandlerCtx) {
   return json({
     ok: true,
     appName: "SBBL HQ",
     defaultLeague: "SBBL",
+    supabaseUrl: env.SUPABASE_URL ?? null,
+    supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY ?? null,
   });
 }
 
@@ -3943,26 +3945,29 @@ routes.push(
 async function handleScoresList({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueParam = url.searchParams.get("league");
+  const categoryParam = url.searchParams.get("category");
   const statusParam = url.searchParams.get("status");
-  // Keyset pagination: client sends ?before=<created_at ISO> from last row of previous page.
-  // Ordering is created_at DESC, so "before" means an earlier timestamp.
   const beforeCursor = url.searchParams.get("before");
 
-  // Query only base-schema columns guaranteed to exist in production.
-  // The extended columns (category, game_date, etc.) are now added by
-  // migration 20260404004000 — include them directly since migration is applied.
+  // Single query — migration 20260404004000 is applied so all columns exist.
   let query = admin
     .from("games")
     .select(
       "id, status, created_at, home_score, away_score, " +
+      "category, game_date, event_name, participant1_label, participant2_label, notes, " +
       "home_team_id, away_team_id, " +
       "home_team:teams!home_team_id(name), " +
       "away_team:teams!away_team_id(name), " +
-      "leagues!league_id(code, name), " +
-      "seasons!season_id(name)"
+      "leagues:leagues!league_id(code, name), " +
+      "seasons:seasons!season_id(name)"
     )
     .order("created_at", { ascending: false })
     .limit(100);
+
+  // Apply DB-level filters for category and status
+  if (categoryParam && categoryParam !== "all") {
+    query = query.eq("category", categoryParam);
+  }
 
   if (statusParam === "recent") {
     query = query.eq("status", "final");
@@ -3970,7 +3975,6 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
     query = query.in("status", ["upcoming", "scheduled"]);
   }
 
-  // Apply keyset cursor — only rows created before the cursor timestamp.
   if (beforeCursor && /^\d{4}-\d{2}-\d{2}T/.test(beforeCursor)) {
     query = query.lt("created_at", beforeCursor);
   }
@@ -3978,39 +3982,18 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
   const { data, error } = await query;
   if (error) return json({ ok: false, error: error.message }, 500);
 
-  // Attempt to also fetch extended columns from migration 20260404004000.
-  // On a DB that hasn't had the migration applied this will fail — we catch
-  // that and fall back to defaults so scores always render.
   const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
-  const ids = rows.map((r) => String(r.id));
-  const extMap = new Map<string, Record<string, unknown>>();
-  if (ids.length > 0) {
-    try {
-      const extRes = await admin
-        .from("games")
-        .select("id, category, game_date, event_name, participant1_label, participant2_label, notes")
-        .in("id", ids);
-      if (!extRes.error && extRes.data) {
-        for (const row of extRes.data as Array<Record<string, unknown>>) {
-          extMap.set(String(row.id), row);
-        }
-      }
-    } catch {
-      // Migration 20260404004000 not yet applied — fall back to defaults
-    }
-  }
 
   const games = rows.map((r) => {
-    const ext = extMap.get(String(r.id)) ?? {};
     const leagueRow = r.leagues as Record<string, unknown> | null;
     const season = r.seasons as Record<string, unknown> | null;
     const homeTeam = r.home_team as Record<string, unknown> | null;
     const awayTeam = r.away_team as Record<string, unknown> | null;
 
-    const homeLabel = (ext.participant1_label as string | null)
+    const homeLabel = (r.participant1_label as string | null)
       ?? (homeTeam ? String(homeTeam.name) : null)
       ?? "Home";
-    const awayLabel = (ext.participant2_label as string | null)
+    const awayLabel = (r.participant2_label as string | null)
       ?? (awayTeam ? String(awayTeam.name) : null)
       ?? "Away";
 
@@ -4020,26 +4003,25 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
       : leagueCode === "sbbl" ? "sbbl"
       : undefined;
 
-    // Derive game date: prefer explicit game_date column, fall back to created_at
     const createdAt = r.created_at as string | null;
-    const gameDate = (ext.game_date as string | null)
+    const gameDate = (r.game_date as string | null)
       ?? (createdAt ? createdAt.split("T")[0] : undefined);
 
     return {
       id: String(r.id),
-      category: String(ext.category ?? "league"),
+      category: String(r.category ?? "league"),
       leagueId,
       leagueCode,
       leagueName: leagueRow ? String(leagueRow.name ?? "") : undefined,
       seasonName: season ? String(season.name ?? "") : undefined,
-      eventName: (ext.event_name as string | null) ?? undefined,
+      eventName: (r.event_name as string | null) ?? undefined,
       homeLabel,
       awayLabel,
       homeScore: r.home_score != null ? Number(r.home_score) : undefined,
       awayScore: r.away_score != null ? Number(r.away_score) : undefined,
       status: String(r.status ?? "upcoming"),
       gameDate,
-      notes: (ext.notes as string | null) ?? undefined,
+      notes: (r.notes as string | null) ?? undefined,
     };
   });
 
@@ -4048,8 +4030,6 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
     ? games.filter((g) => g.leagueCode === leagueParam.toLowerCase())
     : games;
 
-  // Provide next-page cursor: created_at of the last row (ordering is DESC,
-  // so the client passes this as ?before= on the next request).
   const nextCursor = filtered.length === 100
     ? (rows[rows.length - 1]?.created_at as string | undefined) ?? null
     : null;
@@ -4067,8 +4047,10 @@ async function handleScoreGameUpsert(ctx: HandlerCtx) {
     category?: string;
     leagueId?: string;
     seasonId?: string;
-    homeLabel?: string;
-    awayLabel?: string;
+    homeTeamId?: string;
+    awayTeamId?: string;
+    participant1Label?: string;
+    participant2Label?: string;
     homeScore?: number;
     awayScore?: number;
     status?: string;
@@ -4092,12 +4074,13 @@ async function handleScoreGameUpsert(ctx: HandlerCtx) {
   }
 
   const payload = {
-    ...(body.gameId ? {} : {}),
     category: body.category ?? "league",
     league_id: leagueUuid,
     season_id: body.seasonId ?? null,
-    participant1_label: body.homeLabel ?? null,
-    participant2_label: body.awayLabel ?? null,
+    home_team_id: body.homeTeamId ?? null,
+    away_team_id: body.awayTeamId ?? null,
+    participant1_label: body.participant1Label ?? null,
+    participant2_label: body.participant2Label ?? null,
     home_score: body.homeScore ?? null,
     away_score: body.awayScore ?? null,
     status: body.status ?? "upcoming",
