@@ -3670,15 +3670,23 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/ops/coach/:id/resolve", handler: handleResolveCoachRequest },
 ];
 
-const compiled: Array<Route & { keys: string[] }> = routes.map((route) => {
-  const compiledPath = compilePath(route.path);
-  return {
-    method: route.method,
-    regex: compiledPath.regex,
-    handler: route.handler,
-    keys: compiledPath.keys,
-  };
-});
+// Lazy-compile: routes are registered via push() throughout the module,
+// so we compile on first access to capture all late-registered routes.
+let _compiled: Array<Route & { keys: string[] }> | null = null;
+function getCompiled() {
+  if (!_compiled) {
+    _compiled = routes.map((route) => {
+      const compiledPath = compilePath(route.path);
+      return {
+        method: route.method,
+        regex: compiledPath.regex,
+        handler: route.handler,
+        keys: compiledPath.keys,
+      };
+    });
+  }
+  return _compiled;
+}
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5MB request body limit
 
@@ -3765,7 +3773,7 @@ export default Sentry.withSentry(
         : cleanReq.headers,
     });
 
-    for (const route of compiled) {
+    for (const route of getCompiled()) {
       if (route.method !== req.method) continue;
       const match = url.pathname.match(route.regex);
       if (!match) continue;
