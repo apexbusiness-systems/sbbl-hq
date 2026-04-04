@@ -1749,9 +1749,10 @@ async function handlePublicPotg({ admin }: HandlerCtx) {
 
 // Ops List handlers
 function requireSuperAdmin(req: Request) {
-  const roles = req.headers.get('x-sbbl-roles-verified')?.split(',') ?? []('X-XSS-Protection', '1; mode=block');   // CSP: restricts resource loading to trusted origins only.   // Prevents XSS, data exfiltration, and clickjacking at the browser level.   headers.set('Content-Security-Policy',     "default-src 'self'; " +     "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +     "style-src 'self' 'unsafe-inline'; " +     "img-src 'self' data: blob: https:; " +     "font-src 'self' data:; " +     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +     "frame-src https://challenges.cloudflare.com https://js.stripe.com; " +     "frame-ancestors 'none'; " +     "base-uri 'self'; " +     "form-action 'self' https://checkout.stripe.com;"   );   // HSTS: force HTTPS for 2 years, include subdomains, allow preloading.   headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
-  req.headers.get('x-sbbl-roles-verified'); // SECURITY FIX: use JWT-verified header, not client-supplied x-user-role
-  return requireAuth(req);
+  const userId = requireAuth(req);
+  const roles = req.headers.get('x-sbbl-roles-verified')?.split(',') ?? [];
+  if (!roles.includes('super_admin')) throw new Error('forbidden');
+  return userId;
 }
 
 async function handleOpsListTeams({ req, admin }: HandlerCtx) {
@@ -3706,7 +3707,7 @@ export default Sentry.withSentry(
     enabled: Boolean(env.SENTRY_DSN),
     tracesSampleRate: 0.05,
     // Tag every Worker event with the deployment environment
-    environment: (env as Record<string, unknown>).ENVIRONMENT as string ?? "production",
+    environment: (env as unknown as Record<string, unknown>).ENVIRONMENT as string ?? "production",
   }),
   {
   async fetch(req: Request, env: Env): Promise<Response> {

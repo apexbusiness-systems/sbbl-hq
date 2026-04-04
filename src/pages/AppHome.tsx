@@ -4,10 +4,10 @@ import { Play, ShoppingBag, ChevronRight, Trophy, Zap, Shield } from 'lucide-rea
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { products, playersOfTheGame } from '@/data/mock';
 import { PotgCard } from '@/components/ui/PotgCard';
-import { useApp } from '@/contexts/AppContext';
+import { useBag } from '@/contexts/BagContext';
 
 const AppHomePage = () => {
-  const { addToBag } = useApp();
+  const { addToBag } = useBag();
   const featuredProducts = products.filter(p => p.sale && p.price > 0).slice(0, 3);
 
   return (

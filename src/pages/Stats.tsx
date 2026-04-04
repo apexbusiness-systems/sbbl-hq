@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, memo } from 'react';
+import { useState, useMemo, useEffect, useCallback, memo, type ReactElement } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { List, type RowComponentProps } from 'react-window';
 import { players as mockPlayers, teams } from '@/data/mock';
@@ -74,14 +74,14 @@ interface VirtualRowData {
   onSelect: (id: string) => void;
 }
 
-const VirtualStatsRow = memo(function VirtualStatsRow({
+function VirtualStatsRow({
   index,
   style,
   players,
   sortBy,
   selectedPlayer,
   onSelect,
-}: RowComponentProps<VirtualRowData>) {
+}: RowComponentProps<VirtualRowData>): ReactElement {
   const p = players[index];
   return (
     <div
@@ -104,7 +104,7 @@ const VirtualStatsRow = memo(function VirtualStatsRow({
       ))}
     </div>
   );
-});
+}
 
 // ── Page ─────────────────────────────────────────────────────────────────
 const StatsPage = () => {

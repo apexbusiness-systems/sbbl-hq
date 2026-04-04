@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useCallback, memo } from 'react';
+import { useState, useMemo, useEffect, useCallback, memo, type ReactElement } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { List, type RowComponentProps } from 'react-window';
 import { players as mockPlayers, teams } from '@/data/mock';
@@ -86,20 +86,20 @@ interface RowData {
   maxStat: number;
 }
 
-const VirtualLeaderboardRow = memo(function VirtualLeaderboardRow({
+function VirtualLeaderboardRow({
   index,
   style,
   players,
   activeCategory,
   maxStat,
-}: RowComponentProps<RowData>) {
+}: RowComponentProps<RowData>): ReactElement {
   const p = players[index];
   return (
     <div style={{ ...style, paddingBottom: 8 }}>
       <LeaderboardRow player={p} index={index} activeCategory={activeCategory} maxStat={maxStat} />
     </div>
   );
-});
+}
 
 // ── Page ─────────────────────────────────────────────────────────────────
 const LeaderboardsPage = () => {
