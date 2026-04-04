@@ -90,7 +90,7 @@ Navigate to: **Supabase Dashboard → Project → Reports**
 
 1. **Database → Query Performance**: Check for queries with `mean_exec_time > 100ms`. Investigate with `pg_stat_statements`.
 2. **Database → Connections**: Verify active connections < 80.
-3. **Edge Functions → stripe-webhook**: Verify error rate < 0.1%.
+3. **Stripe webhook** (canonical: Worker `POST /webhooks/stripe`): Verify error rate < 0.1%.
 4. **Billing → Usage**: Verify egress/row reads are tracking below weekly projection.
 
 ```sql

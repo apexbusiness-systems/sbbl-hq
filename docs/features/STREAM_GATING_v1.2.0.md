@@ -7,7 +7,7 @@
 ## PPV Entitlement Flow
 
 1. **Purchase:** User clicks Buy → `POST /api/streams/:gameId/purchase` → Stripe Checkout session created.
-2. **Webhook:** Stripe fires `checkout.session.completed` → Edge Function (`supabase/functions/stripe-webhook/index.ts`) verifies HMAC-SHA256 signature → calls `create_stream_entitlement` RPC → 24h access window.
+2. **Webhook:** Stripe fires `checkout.session.completed` → Worker `POST /webhooks/stripe` (`src/worker/index.ts`) verifies HMAC-SHA256 signature → calls `create_stream_entitlement` RPC → 24h access window.
 3. **Access check:** `can_user_view_stream(game_id, user_id)` RPC checks both `stream_entitlements` (Path A) and `ppv_invites` (Path B).
 4. **Session:** `POST /api/streams/:gameId/session` creates `stream_access_sessions` row with short-lived playback descriptor.
 5. **Heartbeat:** Client sends `POST /api/streams/:gameId/session/heartbeat` every ~25s.

@@ -502,7 +502,7 @@ const OpsPage = () => {
             <h2 className="font-display text-xl">Admin Stream Controls</h2>
             <p className="text-xs text-muted-foreground">Visible to admins. Live toggle and config save are restricted to super admins.</p>
             <input
-              placeholder="Switcher collection ID"
+              placeholder="Stream URL"
               className="w-full bg-secondary border border-border rounded-sm px-3 py-2"
               value={streamForm.collectionId}
               onChange={(e) => setStreamForm((s) => ({ ...s, collectionId: e.target.value }))}

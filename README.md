@@ -10,7 +10,7 @@ Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alber
 
 ## Stack
 
-- **Frontend:** Vite + React + TypeScript strict
+- **Frontend:** Vite + React + TypeScript (strict mode not yet enabled; see tsconfig.app.json)
 - **Styling:** Tailwind CSS (dark-first, `#C9A84C` gold accent)
 - **Database:** Supabase (PostgreSQL + Realtime + Auth + Storage)
 - **Hosting:** Cloudflare Workers — NOT Vercel
@@ -31,7 +31,9 @@ VITE_SUPABASE_URL=https://ezanilxygnpucwkwpsoc.supabase.co
 VITE_SUPABASE_ANON_KEY=eyJ...   ← anon JWT from Supabase dashboard → Project Settings → API
 ```
 
-> `VITE_SUPABASE_ANON_KEY` is canonical. `VITE_SUPABASE_PUBLISHABLE_KEY` is a dead alias. Never use it.
+> Both `VITE_SUPABASE_PUBLISHABLE_KEY` and `VITE_SUPABASE_ANON_KEY` are supported.
+> The code prefers `VITE_SUPABASE_PUBLISHABLE_KEY` and falls back to `VITE_SUPABASE_ANON_KEY`.
+> Either works — they resolve to the same Supabase anon/publishable key.
 
 ### Worker runtime (Cloudflare — never browser)
 Set in `.dev.vars` locally. Set via `wrangler secret put` in production.

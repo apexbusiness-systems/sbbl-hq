@@ -1,6 +1,11 @@
 /**
  * stripe-webhook — Supabase Edge Function (Deno)
  *
+ * DEPRECATED: The canonical Stripe webhook handler is now the Cloudflare Worker
+ * route at POST /webhooks/stripe (src/worker/index.ts). This Edge Function is
+ * retained as an archival reference and potential fallback. Do not add new
+ * functionality here — update the Worker handler instead.
+ *
  * P3-A: Stripe webhook idempotency handler.
  * P3-B: Route-separated (registration vs sponsorship), structured error
  *       reporting, one DB I/O per happy-path execution.

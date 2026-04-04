@@ -81,7 +81,7 @@ Deployed via Supabase CLI:
 supabase functions deploy stripe-webhook
 ```
 
-Located at `supabase/functions/stripe-webhook/index.ts`. Requires `STRIPE_WEBHOOK_SECRET` set in Supabase Edge Function secrets.
+**Note:** The canonical Stripe webhook handler is the Cloudflare Worker route `POST /webhooks/stripe` (`src/worker/index.ts`). The Edge Function at `supabase/functions/stripe-webhook/index.ts` is retained as an archival reference. `STRIPE_WEBHOOK_SECRET` must be set in the Worker environment.
 
 ---
 
@@ -284,7 +284,7 @@ Client heartbeat → POST /api/streams/:gameId/session/heartbeat every ~25s
     ↓
 Client teardown → POST /api/streams/:gameId/session/end
     ↓
-Stripe webhook → stripe-webhook Edge Function → create_stream_entitlement RPC (24h window)
+Stripe webhook → Worker POST /webhooks/stripe → create_stream_entitlement RPC (24h window)
 ```
 
 ### Collection ID

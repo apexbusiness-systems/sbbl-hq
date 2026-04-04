@@ -139,19 +139,19 @@ export default defineConfig(({ mode }) => {
         },
         devOptions: { enabled: true },
       }),
-      mode === "development" && componentTagger(),
+      ...(mode === "development" ? [componentTagger()] : []),
       // Sentry source map upload — only runs when SENTRY_AUTH_TOKEN is set.
       // Hidden source maps: uploaded to Sentry but NOT served publicly.
       // Skip in dev (no auth token) and when explicitly disabled.
-      env.SENTRY_AUTH_TOKEN && sentryVitePlugin({
+      ...(env.SENTRY_AUTH_TOKEN ? [sentryVitePlugin({
         org: env.SENTRY_ORG || "apex-business-systems",
         project: env.SENTRY_PROJECT || "sbbl-hq-frontend",
         authToken: env.SENTRY_AUTH_TOKEN,
         release: { name: appVersion },
         sourcemaps: { filesToDeleteAfterUpload: ["dist/assets/*.js.map"] },
         telemetry: false,
-      }),
-    ].filter(Boolean),
+      })] : []),
+    ],
 
     resolve: {
       alias: {
