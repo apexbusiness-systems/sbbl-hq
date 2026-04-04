@@ -2807,13 +2807,14 @@ export async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
   const body = (await req.json().catch(() => null)) as {
     successUrl?: string;
     cancelUrl?: string;
-    ppvPrice?: number;
     captchaToken?: string;
   } | null;
   if (!(await verifyTurnstileToken(env, body?.captchaToken, ip))) {
     return json({ ok: false, error: "captcha_failed" }, 403);
   }
-  const unitAmount = Math.round((body?.ppvPrice ?? 2.5) * 100);
+  // SECURITY: PPV price is hardcoded to $4.99 CAD (499 cents).
+  // Do NOT trust pricing from the client payload.
+  const unitAmount = 499;
   const reqUrlStr = req.url;
   const successUrl = getSafeRedirectUrl(
     body?.successUrl,

@@ -337,7 +337,6 @@ export function LiveStreamPlayer({
                 {
                   method: 'POST',
                   body: JSON.stringify({
-                    ppvPrice: PPV_PRICE_USD,
                     successUrl: `${window.location.origin}/live?access=1`,
                     cancelUrl: `${window.location.origin}/live`,
                     captchaToken: await resolveToken(),

@@ -34,7 +34,7 @@ describe('turnstile hardening', () => {
           'x-sbbl-user-id-verified': 'u1',
           'cf-connecting-ip': '2.2.2.2',
         },
-        body: JSON.stringify({ ppvPrice: 4.99 }),
+        body: JSON.stringify({ successUrl: 'https://local/success' }),
       }),
       env: {
         SUPABASE_URL: 'https://example.supabase.co',
