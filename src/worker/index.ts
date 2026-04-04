@@ -3712,7 +3712,7 @@ export default Sentry.withSentry(
     enabled: Boolean(env.SENTRY_DSN),
     tracesSampleRate: 0.05,
     // Tag every Worker event with the deployment environment
-    environment: (env as Record<string, unknown>).ENVIRONMENT as string ?? "production",
+    environment: (env as unknown as Record<string, unknown>).ENVIRONMENT as string ?? "production",
   }),
   {
   async fetch(req: Request, env: Env): Promise<Response> {
