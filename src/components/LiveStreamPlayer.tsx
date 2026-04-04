@@ -40,8 +40,6 @@ interface LiveStreamPlayerProps {
   hasPremiumPlayerAccess: boolean;
   /** Whether admin has set stream to live */
   isStreamLive?: boolean;
-  customStreamUrl?: string;
-  isCloudflareStream?: boolean;
 }
 
 export function LiveStreamPlayer({
@@ -51,7 +49,6 @@ export function LiveStreamPlayer({
   token,
   hasPremiumPlayerAccess,
   isStreamLive,
-  customStreamUrl = '',
 }: LiveStreamPlayerProps) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
@@ -66,8 +63,11 @@ export function LiveStreamPlayer({
   const [inviteInput, setInviteInput] = useState('');
   const [redeemingInvite, setRedeemingInvite] = useState(false);
 
-  const embedRef = useRef<HTMLDivElement>(null);
-  const scriptLoaded = useRef(false);
+  const [playbackUrl, setPlaybackUrl] = useState('');
+  const [playbackLoading, setPlaybackLoading] = useState(false);
+  const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
+  const turnstileWaitRef = useRef<{ resolve: (token: string) => void; reject: (error: Error) => void } | null>(null);
 
   // ── Role classification ──────────────────────────────────────────────────
   const isPlayer    = roles.includes('player');
@@ -78,8 +78,57 @@ export function LiveStreamPlayer({
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
   const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
 
-  // ── No third-party embed scripts required ─────────────────────────────
-  // ReactPlayer handles HLS/YouTube/Twitch natively.
+  useEffect(() => {
+    const siteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
+    if (!siteKey || !turnstileContainerRef.current) return;
+    const mountWidget = () => {
+      const turnstile = (window as unknown as { turnstile?: { render: (...args: unknown[]) => string } }).turnstile;
+      if (!turnstile || !turnstileContainerRef.current || turnstileWidgetIdRef.current) return;
+      turnstileWidgetIdRef.current = turnstile.render(turnstileContainerRef.current, {
+        sitekey: siteKey,
+        execution: 'execute',
+        appearance: 'interaction-only',
+        callback: (tokenValue: string) => {
+          turnstileWaitRef.current?.resolve(tokenValue);
+          turnstileWaitRef.current = null;
+        },
+        'error-callback': () => {
+          turnstileWaitRef.current?.reject(new Error('captcha_failed'));
+          turnstileWaitRef.current = null;
+        },
+        'expired-callback': () => undefined,
+      } as unknown as Record<string, unknown>);
+    };
+    if ((window as unknown as { turnstile?: unknown }).turnstile) {
+      mountWidget();
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.async = true;
+    script.defer = true;
+    script.addEventListener('load', mountWidget);
+    document.head.appendChild(script);
+    return () => script.removeEventListener('load', mountWidget);
+  }, []);
+
+  async function resolveCaptchaToken() {
+    const siteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
+    if (!siteKey) return undefined;
+    const turnstile = (window as unknown as { turnstile?: { execute: (id: string) => void; reset: (id: string) => void } }).turnstile;
+    if (!turnstile || !turnstileWidgetIdRef.current) throw new Error('captcha_loading');
+    turnstile.reset(turnstileWidgetIdRef.current);
+    return await new Promise<string>((resolve, reject) => {
+      turnstileWaitRef.current = { resolve, reject: (error) => reject(error) };
+      turnstile.execute(turnstileWidgetIdRef.current!);
+      window.setTimeout(() => {
+        if (turnstileWaitRef.current) {
+          turnstileWaitRef.current.reject(new Error('captcha_timeout'));
+          turnstileWaitRef.current = null;
+        }
+      }, 15000);
+    });
+  }
 
   // ── Fetch stream entitlement (skip if role already grants access) ─────────
   useEffect(() => {
@@ -95,6 +144,51 @@ export function LiveStreamPlayer({
       .catch(() => { /* network error — stay in preview; user can retry purchase */ })
       .finally(() => setAccessChecked(true));
   }, [userId, game.id, hasRoleAccess, token]);
+
+  useEffect(() => {
+    if (!hasAccess || !userId || !token) return;
+    let active = true;
+    let heartbeatId: number | null = null;
+    let sessionIdForCleanup: string | null = null;
+    setPlaybackLoading(true);
+    const sessionKey = `playback-${game.id}`;
+    const start = async () => {
+      try {
+        const res = await apiFetch<{
+          playback: { url: string; heartbeatIntervalSec: number };
+          session: { id: string };
+        }>(`/api/streams/${game.id}/session`, {
+          method: 'POST',
+          body: JSON.stringify({ sessionKey }),
+        }, token);
+        if (!active) return;
+        setPlaybackUrl(res.playback.url);
+        sessionIdForCleanup = res.session.id;
+        const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
+        heartbeatId = window.setInterval(() => {
+          void apiFetch(`/api/streams/${game.id}/session/heartbeat`, {
+            method: 'POST',
+            body: JSON.stringify({ sessionId: res.session.id }),
+          }, token).catch(() => {});
+        }, hbMs);
+      } catch {
+        if (active) toast.error('Unable to start secure playback session.');
+      } finally {
+        if (active) setPlaybackLoading(false);
+      }
+    };
+    void start();
+    return () => {
+      active = false;
+      if (heartbeatId) clearInterval(heartbeatId);
+      if (sessionIdForCleanup) {
+        void apiFetch(`/api/streams/${game.id}/session/end`, {
+          method: 'POST',
+          body: JSON.stringify({ sessionId: sessionIdForCleanup }),
+        }, token).catch(() => {});
+      }
+    };
+  }, [hasAccess, userId, token, game.id]);
 
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
@@ -136,10 +230,14 @@ export function LiveStreamPlayer({
     return (
       <div className="absolute inset-0 flex flex-col relative z-0">
         {/* Stream Player Area */}
-        {customStreamUrl ? (
+        {playbackLoading ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-black">
+            <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : playbackUrl ? (
           <div className="absolute inset-0 pointer-events-auto">
             <ReactPlayer
-              url={customStreamUrl}
+              url={playbackUrl}
               playing={true}
               controls={true}
               width="100%"
@@ -188,7 +286,8 @@ export function LiveStreamPlayer({
                     {generatedCode.slice(0, 8).toUpperCase()}…
                   </code>
                 </div>
-                <button
+          <div ref={turnstileContainerRef} className="sr-only" aria-hidden />
+          <button
                   onClick={async () => {
                     await navigator.clipboard.writeText(generatedCode);
                     setCodeCopied(true);
@@ -293,6 +392,7 @@ export function LiveStreamPlayer({
                     ppvPrice: PPV_PRICE_USD,
                     successUrl: `${window.location.origin}/live?access=1`,
                     cancelUrl: `${window.location.origin}/live`,
+                    captchaToken: await resolveCaptchaToken(),
                   }),
                 },
                 token,
@@ -357,7 +457,11 @@ export function LiveStreamPlayer({
         '/api/invite/redeem',
         {
           method: 'POST',
-          body: JSON.stringify({ code: inviteInput, gameId: game.id }),
+          body: JSON.stringify({
+            code: inviteInput,
+            gameId: game.id,
+            captchaToken: await resolveCaptchaToken(),
+          }),
         },
         token,
       );
