@@ -8,7 +8,6 @@ import storeHoodie from '@/assets/store-hoodie.svg';
 import storeCap from '@/assets/store-cap.svg';
 import storeTee from '@/assets/store-tee.svg';
 import storeAccessories from '@/assets/store-accessories.svg';
-import gameAction from '@/assets/game-action.svg';
 
 // Marketing assets — real photos & event graphics
 // Drop image files at these paths and they will auto-render throughout the app
@@ -108,16 +107,11 @@ export const products: Product[] = [
 export const mediaAssets: MediaAsset[] = [
   // SBBL marketing
   { id: 'm-sbbl-1v1', title: '1v1 Event — Fred vs Karl', type: 'poster', thumbnail: event1v1Sbbl, leagueId: 'sbbl', status: 'published', date: '2026-04-02' },
-  { id: 'm1', title: 'Rivera 40-Piece Performance', type: 'highlight', thumbnail: gameAction, leagueId: 'sbbl', status: 'published', date: '2026-03-22' },
-  { id: 'm4', title: 'All-Star Media Day Reel', type: 'highlight', thumbnail: gameAction, leagueId: 'sbbl', status: 'draft', date: '2026-03-26' },
   // WBL Player of the Game cards
   { id: 'm-wbl-potg-michael', title: 'POTG — Michael Ramos (Ball is Life)', type: 'poster', thumbnail: potgMichaelRamos, leagueId: 'wbl', status: 'published', date: '2026-03-29' },
   { id: 'm-wbl-potg-tata', title: 'POTG — Tata Ramon (OSY Phoenix)', type: 'poster', thumbnail: potgTataRamon, leagueId: 'wbl', status: 'published', date: '2026-03-29' },
   { id: 'm-wbl-potg-harold', title: 'POTG — Harold Casio (Rebelde)', type: 'poster', thumbnail: potgHaroldCasio, leagueId: 'wbl', status: 'published', date: '2026-03-22' },
   { id: 'm-wbl-potg-jt', title: 'POTG — JT Balangui (Splash)', type: 'poster', thumbnail: potgJtBalangui, leagueId: 'wbl', status: 'published', date: '2026-03-22' },
-  { id: 'm2', title: 'WBL Finals Preview', type: 'poster', thumbnail: gameAction, leagueId: 'wbl', status: 'ready', date: '2026-03-25' },
-  // TGIFBL
-  { id: 'm3', title: 'TGIFBL Player of the Week', type: 'clip', thumbnail: gameAction, leagueId: 'tgifbl', status: 'published', date: '2026-03-21' },
   // New Event
   { id: 'm-sbbl-s11', title: 'SBBL Season 11 Spring Edition Tip Off', type: 'poster', thumbnail: eventSbblSeason11, leagueId: 'sbbl', status: 'published', date: '2026-04-12' },
   // New POTGs
@@ -141,7 +135,6 @@ export const invoices: Invoice[] = [
   { id: 'inv5', description: 'TGIFBL Season Registration — Friday Flames', amount: 49, date: '2026-01-22', status: 'paid', leagueId: 'tgifbl' },
 ];
 
-export const gameActionImage = gameAction;
 
 export const playersOfTheGame: PlayerOfTheGame[] = [
   { id: 'potg-wbl-1', leagueId: 'wbl', playerName: 'Michael Ramos', playerId: 'p8', team: 'Ball is Life', pts: 24, rebs: 7, assts: 6, gameResult: 'NSD 82 vs Ball is Life 84', date: '2026-03-29', image: potgMichaelRamos },
