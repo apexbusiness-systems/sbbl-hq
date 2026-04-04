@@ -1,33 +1,13 @@
-import { FormEvent, useEffect, useRef, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { signInWithPassword, signUpWithPassword } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
+import { useTurnstile } from '@/hooks/use-turnstile';
 import { LEAGUE_CONFIGS } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { Shield, BarChart3, Users, Zap, CheckCircle2 } from 'lucide-react';
 
 type Mode = 'signin' | 'signup';
-
-type TurnstileApi = {
-  render: (container: HTMLElement, options: {
-    sitekey: string;
-    callback?: (token: string) => void;
-    'error-callback'?: () => void;
-    'expired-callback'?: () => void;
-    execution?: 'execute' | 'render';
-    appearance?: 'always' | 'execute' | 'interaction-only';
-  }) => string;
-  execute: (container: HTMLElement | string) => void;
-  reset: (container?: HTMLElement | string) => void;
-  remove: (container?: HTMLElement | string) => void;
-  getResponse?: (container?: HTMLElement | string) => string;
-};
-
-declare global {
-  interface Window {
-    turnstile?: TurnstileApi;
-  }
-}
 
 const LoginPage = () => {
   const location = useLocation();
@@ -41,109 +21,9 @@ const LoginPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const { isSignedIn, needsOnboarding, configAvailable, loading } = useAuth();
+  const { containerRef: turnstileRef, resolveToken, ready: captchaReady } = useTurnstile();
   const navigate = useNavigate();
-  const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
-  const shouldUseTurnstile = Boolean(turnstileSiteKey);
-  const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
-  const turnstileWidgetIdRef = useRef<string | null>(null);
-  const widgetReadyRef = useRef(false);
-  const captchaWaitRef = useRef<{ resolve: (token: string) => void; reject: (reason?: unknown) => void } | null>(null);
-  const captchaTimeoutRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!shouldUseTurnstile || !turnstileContainerRef.current) return;
-
-    const mountWidget = () => {
-      if (!window.turnstile || !turnstileContainerRef.current || widgetReadyRef.current) return;
-      turnstileWidgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
-        sitekey: turnstileSiteKey!,
-        callback: (token) => {
-          setCaptchaToken(token);
-          if (captchaTimeoutRef.current) {
-            window.clearTimeout(captchaTimeoutRef.current);
-            captchaTimeoutRef.current = null;
-          }
-          captchaWaitRef.current?.resolve(token);
-          captchaWaitRef.current = null;
-        },
-        'error-callback': () => {
-          setCaptchaToken(null);
-          if (captchaTimeoutRef.current) {
-            window.clearTimeout(captchaTimeoutRef.current);
-            captchaTimeoutRef.current = null;
-          }
-          captchaWaitRef.current?.reject(new Error('Captcha verification failed. Please try again.'));
-          captchaWaitRef.current = null;
-        },
-        'expired-callback': () => {
-          setCaptchaToken(null);
-        },
-      });
-      widgetReadyRef.current = true;
-    };
-
-    if (window.turnstile) {
-      mountWidget();
-      return;
-    }
-
-    const existingScript = document.querySelector<HTMLScriptElement>('script[data-turnstile-script="true"]');
-    if (existingScript) {
-      existingScript.addEventListener('load', mountWidget);
-      return () => existingScript.removeEventListener('load', mountWidget);
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
-    script.async = true;
-    script.defer = true;
-    script.dataset.turnstileScript = 'true';
-    script.addEventListener('load', mountWidget);
-    document.head.appendChild(script);
-
-    return () => script.removeEventListener('load', mountWidget);
-  }, [shouldUseTurnstile, turnstileSiteKey]);
-
-  useEffect(() => {
-    return () => {
-      if (window.turnstile && turnstileWidgetIdRef.current) {
-        window.turnstile.remove(turnstileWidgetIdRef.current);
-      }
-      widgetReadyRef.current = false;
-      turnstileWidgetIdRef.current = null;
-      if (captchaTimeoutRef.current) {
-        window.clearTimeout(captchaTimeoutRef.current);
-        captchaTimeoutRef.current = null;
-      }
-      captchaWaitRef.current = null;
-    };
-  }, []);
-
-  const ensureCaptchaToken = async () => {
-    if (!shouldUseTurnstile) return undefined;
-    if (!window.turnstile || !turnstileWidgetIdRef.current || !widgetReadyRef.current) {
-      throw new Error('Captcha is still loading. Please wait a moment and try again.');
-    }
-    // Use any currently valid token first (managed mode can issue token on render).
-    const existingToken = captchaToken || window.turnstile.getResponse?.(turnstileWidgetIdRef.current);
-    if (existingToken) return existingToken;
-
-    setCaptchaToken(null);
-    window.turnstile.reset(turnstileWidgetIdRef.current);
-    const token = await new Promise<string>((resolve, reject) => {
-      captchaWaitRef.current = { resolve, reject };
-      window.turnstile!.execute(turnstileWidgetIdRef.current!);
-      captchaTimeoutRef.current = window.setTimeout(() => {
-        if (captchaWaitRef.current) {
-          captchaWaitRef.current.reject(new Error('Captcha timed out. Please try again.'));
-          captchaWaitRef.current = null;
-        }
-      }, 15000);
-    });
-    return token;
-  };
 
   // Redirect after login — respect ?redirect= param from /register flow
   const redirectTo = urlParams.get('redirect');
@@ -164,33 +44,26 @@ const LoginPage = () => {
     setError(null);
     setMessage(null);
     try {
-      const runAuth = async (captcha?: string) => {
-        if (mode === 'signin') {
-          await signInWithPassword(email, password, captcha);
-          // AuthContext onAuthStateChange will handle the SIGNED_IN event and redirect
-          return;
-        }
-        await signUpWithPassword(email, password, captcha);
+      const captchaToken = await resolveToken();
+      if (mode === 'signin') {
+        await signInWithPassword(email, password, captchaToken);
+        // AuthContext onAuthStateChange will handle the SIGNED_IN event and redirect
+      } else {
+        await signUpWithPassword(email, password, captchaToken);
         setMessage('Account created — check your inbox to confirm your email, then sign in.');
         setMode('signin');
         setPassword('');
-      };
-
-      const verifiedCaptchaToken = await ensureCaptchaToken();
-      try {
-        await runAuth(verifiedCaptchaToken);
-      } catch (firstAuthError) {
-        const firstMessage = firstAuthError instanceof Error ? firstAuthError.message.toLowerCase() : '';
-        const isCaptchaVerificationError = shouldUseTurnstile && firstMessage.includes('captcha verification process failed');
-        if (!isCaptchaVerificationError) throw firstAuthError;
-        // Retry one time with a fresh token to recover from race/expiry edge-cases.
-        const retryCaptchaToken = await ensureCaptchaToken();
-        await runAuth(retryCaptchaToken);
       }
     } catch (submitError) {
       const raw = submitError instanceof Error ? submitError.message : 'Something went wrong';
-      // Surface friendly messages for common Supabase error strings
-      if (raw.toLowerCase().includes('invalid login') || raw.toLowerCase().includes('invalid credentials')) {
+      // Surface friendly messages for common Supabase and captcha error strings
+      if (raw === 'captcha_loading') {
+        setError('Security check is still loading. Please wait a moment and try again.');
+      } else if (raw === 'captcha_timeout') {
+        setError('Security check timed out. Please try again.');
+      } else if (raw === 'captcha_failed') {
+        setError('Security check failed. Please refresh the page and try again.');
+      } else if (raw.toLowerCase().includes('invalid login') || raw.toLowerCase().includes('invalid credentials')) {
         setError('Incorrect email or password. Please try again.');
       } else if (raw.toLowerCase().includes('email not confirmed')) {
         setError('Please confirm your email address before signing in. Check your inbox.');
@@ -199,6 +72,8 @@ const LoginPage = () => {
         setMode('signin');
       } else if (raw.toLowerCase().includes('password') && raw.toLowerCase().includes('characters')) {
         setError('Password must be at least 6 characters.');
+      } else if (raw.toLowerCase().includes('captcha')) {
+        setError('Security verification failed. Please refresh the page and try again.');
       } else {
         setError(raw);
       }
@@ -209,7 +84,7 @@ const LoginPage = () => {
 
   const isEmailValid = email.includes('@') && email.includes('.');
   const isPasswordValid = password.length >= 6;
-  const canSubmit = isEmailValid && isPasswordValid && !submitting && configAvailable && (!shouldUseTurnstile || widgetReadyRef.current || Boolean(captchaToken));
+  const canSubmit = isEmailValid && isPasswordValid && !submitting && configAvailable && captchaReady;
 
   return (
     <div className="min-h-[calc(100vh-6rem)] flex items-center justify-center px-4 py-10">
@@ -270,13 +145,6 @@ const LoginPage = () => {
             )}
 
             <form onSubmit={onSubmit} className="mt-6 space-y-4">
-              {shouldUseTurnstile && (
-                <div
-                  ref={turnstileContainerRef}
-                  aria-hidden
-                  className="absolute -left-[9999px] top-auto h-[65px] w-[300px] overflow-hidden"
-                />
-              )}
               <div>
                 <label htmlFor="login-email" className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Email address
@@ -310,6 +178,8 @@ const LoginPage = () => {
                   minLength={6}
                 />
               </div>
+              {/* Hidden Turnstile widget mount point — rendered invisibly, executed on submit */}
+              <div ref={turnstileRef} className="sr-only" aria-hidden="true" />
               <button
                 type="submit"
                 disabled={!canSubmit}
