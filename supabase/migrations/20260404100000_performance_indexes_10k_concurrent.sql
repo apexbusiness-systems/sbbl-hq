@@ -63,18 +63,19 @@ create index if not exists idx_stream_access_entitlement
   on public.stream_access_sessions (entitlement_id);
 
 -- ---------------------------------------------------------------------------
--- PPV INVITES: invite redemption + token lookup during high-concurrency events.
+-- PPV INVITES: invite redemption + lookup during high-concurrency events.
 -- (Table created in 20260331000200_ppv_invites.sql)
+-- Columns: id (uuid PK / invite code), generated_by, used_by, game_id, …
 -- ---------------------------------------------------------------------------
-create index if not exists idx_ppv_invites_token
-  on public.ppv_invites (token)
+create index if not exists idx_ppv_invites_id_unused
+  on public.ppv_invites (id)
   where used_at is null;
 
 create index if not exists idx_ppv_invites_game_id
   on public.ppv_invites (game_id);
 
 create index if not exists idx_ppv_invites_inviter
-  on public.ppv_invites (inviter_user_id);
+  on public.ppv_invites (generated_by);
 
 -- ---------------------------------------------------------------------------
 -- STREAM REACTIONS: written at very high volume during live events.
