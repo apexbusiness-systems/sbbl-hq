@@ -131,7 +131,7 @@ jobs:
             local limit_kb="$2"
             local chunk_name="$3"
             local file
-            file=$(ls "$DIST"/${pattern}-*.js 2>/dev/null | head -1)
+            file=$(ls "$DIST"/${pattern}-*.js 2>/dev/null | head -1 || true)
             if [ -z "$file" ]; then
               echo "⚠️  $chunk_name chunk not found — may be tree-shaken away (OK)"
               return 0
