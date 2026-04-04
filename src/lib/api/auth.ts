@@ -13,20 +13,22 @@ export type AuthProfile = {
   primary_role_intent: string | null;
 };
 
-export async function signInWithPassword(email: string, password: string) {
+export async function signInWithPassword(email: string, password: string, captchaToken?: string) {
   const supabase = requireSupabaseClient();
   const { error } = await supabase.auth.signInWithPassword({
     email: email.trim().toLowerCase(),
     password,
+    options: captchaToken ? { captchaToken } : undefined,
   });
   if (error) throw error;
 }
 
-export async function signUpWithPassword(email: string, password: string) {
+export async function signUpWithPassword(email: string, password: string, captchaToken?: string) {
   const supabase = requireSupabaseClient();
   const { error } = await supabase.auth.signUp({
     email: email.trim().toLowerCase(),
     password,
+    options: captchaToken ? { captchaToken } : undefined,
   });
   if (error) throw error;
 }
