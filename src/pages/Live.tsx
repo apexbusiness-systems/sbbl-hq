@@ -26,8 +26,8 @@ function AdminStreamControls({
   streamTitle: string;
   setStreamTitle: (v: string) => void;
   viewerCount: number;
-  streamSource: 'custom';
-  setStreamSource: (v: 'custom') => void;
+  streamSource: 'custom' | 'cloudflare';
+  setStreamSource: (v: 'custom' | 'cloudflare') => void;
   customStreamUrl: string;
   setCustomStreamUrl: (v: string) => void;
 }) {
@@ -140,7 +140,7 @@ const LivePage = () => {
   const [isStreamLive, setIsStreamLive] = useState(false);
   const [streamTitle, setStreamTitle] = useState('Live Game Broadcast');
   const [viewerCount, setViewerCount] = useState(0);
-  const [streamSource, setStreamSource] = useState<'custom'>('custom');
+  const [streamSource, setStreamSource] = useState<'custom' | 'cloudflare'>('custom');
   const [customStreamUrl, setCustomStreamUrl] = useState('');
 
   // Auto-sync stream status from backend
@@ -339,6 +339,7 @@ const LivePage = () => {
                 hasPremiumPlayerAccess={hasPremiumPlayerAccess}
                 isStreamLive={isStreamLive}
                 customStreamUrl={customStreamUrl}
+                isCloudflareStream={streamSource === "cloudflare"}
               />
             </div>
 
