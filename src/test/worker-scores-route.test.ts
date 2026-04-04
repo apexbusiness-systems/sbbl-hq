@@ -108,9 +108,7 @@ function createQuery(rows: Record<string, unknown>[]) {
     limit: vi.fn(() => query),
     order: vi.fn(() => query),
     select: vi.fn(() => query),
-    insert: vi.fn((row: Record<string, unknown>) => {
-      // Capture inserted data for assertion
-      (query as any).__lastInserted = row;
+    insert: vi.fn(() => {
       return { ...query, single: vi.fn(() => Promise.resolve({ data: { id: 'new-game-uuid' }, error: null })) };
     }),
     update: vi.fn(() => ({ ...query, single: vi.fn(() => Promise.resolve({ data: { id: 'existing-id' }, error: null })) })),
