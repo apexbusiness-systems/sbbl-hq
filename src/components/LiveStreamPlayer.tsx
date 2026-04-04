@@ -1,3 +1,4 @@
+import { WhepPlayer } from '@/components/WhepPlayer';
 /**
  * LiveStreamPlayer.tsx
  * Renders the live-stream broadcast area with a multi-layer access gate:

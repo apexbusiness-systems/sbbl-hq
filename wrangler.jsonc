@@ -3,6 +3,7 @@
   "name": "sbbl-hq",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-03-27",
+  "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "directory": "dist",
     "not_found_handling": "single-page-application",

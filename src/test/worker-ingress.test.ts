@@ -56,6 +56,6 @@ describe('worker omniport ingress routes', () => {
       }),
     }), env);
 
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
   });
 });

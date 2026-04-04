@@ -1,3 +1,4 @@
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { safeServerEnv } from "@/lib/env";
 import { readIdempotencyKey } from "@/lib/api/idempotency";
 import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
@@ -142,28 +143,33 @@ async function verifyTurnstileToken(
 // SECURITY: session is established ONLY via a valid Supabase JWT Bearer token.
 // The x-sbbl-user-id fallback has been removed — any client-supplied identity
 // header is ignored. If JWT verification fails, session is null (unauthenticated).
+let jwksClient: ReturnType<typeof createRemoteJWKSet> | null = null;
+
 async function getSession(req: Request, env: Env) {
   const token = getBearerToken(req);
-  if (token && env.SUPABASE_PUBLISHABLE_KEY) {
-    const supabase = createClient(
-      env.SUPABASE_URL,
-      env.SUPABASE_PUBLISHABLE_KEY,
-      {
-        auth: { persistSession: false, autoRefreshToken: false },
-      },
-    );
-    const { data, error } = await supabase.auth.getUser(token);
-    if (!error && data.user) {
-      // Roles are fetched from DB on admin-gated routes via requireAdminSession().
-      // For non-admin routes, default to 'fan' unless the DB assignment is present.
+  if (!token || !env.SUPABASE_URL) return null;
+
+  try {
+    if (!jwksClient) {
+      const url = new URL("/auth/v1/jwks", env.SUPABASE_URL);
+      jwksClient = createRemoteJWKSet(url);
+    }
+
+    const { payload } = await jwtVerify(token, jwksClient, {
+      issuer: `${env.SUPABASE_URL}/auth/v1`,
+      audience: "authenticated",
+    });
+
+    if (payload && payload.sub) {
       return {
-        userId: data.user.id,
-        roles: ["fan"] as string[],
+        userId: payload.sub,
+        roles: (payload.user_role ? [payload.user_role] : ["fan"]) as string[],
       };
     }
+  } catch (error) {
+    console.error("JWT Verification failed:", error);
   }
 
-  // No fallback. No token = no session.
   return null;
 }
 
