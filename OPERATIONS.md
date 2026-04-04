@@ -205,18 +205,36 @@ App polls GET /api/streams/status → { isLive: true, gameId }
 User hits GET /api/streams/:gameId/access → can_user_view_stream RPC
     ↓
 [No access] → Paywall gate → POST /api/streams/:gameId/purchase → Stripe Checkout
-[Has access] → LiveStreamPlayer renders embed (collection_id from stream_admin_config)
+[Has access] → POST /api/streams/:gameId/session (auth) → short-lived playback descriptor + session id
+    ↓
+Client heartbeat → POST /api/streams/:gameId/session/heartbeat every ~25s
+    ↓
+Client teardown → POST /api/streams/:gameId/session/end
     ↓
 Stripe webhook → create_stream_entitlement RPC (24h window)
 ```
 
 ### Collection ID
 
-The `collection_id` (Cloudflare Stream collection or equivalent embed ID) is stored in `stream_admin_config` and **only returned to authenticated ops users** via `GET /ops/streams/config`. It is **never** included in the public stream status response. The client-side player resolves the embed URL from the ops-managed config, not from public APIs.
+The `collection_id` (Cloudflare Stream collection or equivalent embed ID) is stored in `stream_admin_config` and returned only via authenticated ops routes (`GET /ops/streams/config`). Public `GET /api/streams/status` does not include playback source fields.
 
 ### Viewer count
 
-Viewer count is derived from `COUNT` of active `stream_entitlements` rows for the active game. It is included in `GET /api/streams/status` as `viewerCount` (unauthenticated, public-safe — counts do not leak user identity).
+Viewer count is derived from active playback presence: distinct `user_id` rows in `stream_access_sessions` where `status='active'` and `expires_at > now()`, scoped by `game_id`. It is included in `GET /api/streams/status` as `viewerCount`.
+
+### Chat/comments model
+
+- `GET /api/streams/:gameId/comments` returns recent active comments for the live room.
+- `POST /api/streams/:gameId/comments` writes authenticated comments with message length validation.
+- Comments are persisted in `stream_chat_messages` with moderation statuses: `active`, `hidden`, `removed`.
+
+### Anti-abuse controls
+
+- Purchase entry and invite redemption support Turnstile verification when `OPTIONAL_TURNSTILE_SECRET_KEY` is configured.
+- Worker-side in-memory rate limiting protects:
+  - stream purchase starts
+  - invite redemption attempts
+  - live chat posting bursts
 
 ---
 
