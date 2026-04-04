@@ -53,9 +53,12 @@ All mutating methods (`POST/PUT/PATCH/DELETE`) require a valid idempotency key p
 - `GET /api/streams/:gameId/preview`
 - `POST /api/streams/:gameId/purchase`
 - `GET /api/streams/:gameId/access`
-- `POST /api/streams/:gameId/session`
-
-All above currently return mutation-ack envelopes.
+- `POST /api/streams/:gameId/session` (secure playback session start)
+- `POST /api/streams/:gameId/session/heartbeat` (presence heartbeat)
+- `POST /api/streams/:gameId/session/end` (presence teardown)
+- `GET /api/streams/:gameId/comments`
+- `POST /api/streams/:gameId/comments`
+- `GET /api/streams/status` (public-safe stream state, no playback URL fields)
 
 ### Commerce
 - `GET /api/cart`
