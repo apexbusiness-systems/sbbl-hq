@@ -16,12 +16,30 @@ type Handler = (ctx: HandlerCtx) => Promise<Response>;
 
 type Route = { method: string; regex: RegExp; handler: Handler };
 const transientIdempotency = new Map<string, number>();
+const transientRateLimits = new Map<string, number[]>();
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+function enforceInMemoryRateLimit(
+  key: string,
+  limit: number,
+  windowMs: number,
+): boolean {
+  const now = Date.now();
+  const bucket = transientRateLimits.get(key) ?? [];
+  const recent = bucket.filter((ts) => now - ts <= windowMs);
+  if (recent.length >= limit) {
+    transientRateLimits.set(key, recent);
+    return false;
+  }
+  recent.push(now);
+  transientRateLimits.set(key, recent);
+  return true;
 }
 
 // SECURITY: roles are never read from client-supplied headers.
@@ -94,6 +112,32 @@ async function verifyStripeSignature(
   return parsed.signatures.some(
     (candidate) => candidate.toLowerCase() === expected,
   );
+}
+
+async function verifyTurnstileToken(
+  env: Env,
+  token: string | undefined,
+  remoteIp: string,
+): Promise<boolean> {
+  if (!env.OPTIONAL_TURNSTILE_SECRET_KEY) return true;
+  if (!token) return false;
+  const form = new URLSearchParams();
+  form.set("secret", env.OPTIONAL_TURNSTILE_SECRET_KEY);
+  form.set("response", token);
+  if (remoteIp && remoteIp !== "unknown") form.set("remoteip", remoteIp);
+  const res = await fetch(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    },
+  );
+  if (!res.ok) return false;
+  const payload = (await res.json().catch(() => null)) as
+    | { success?: boolean }
+    | null;
+  return Boolean(payload?.success);
 }
 
 // SECURITY: session is established ONLY via a valid Supabase JWT Bearer token.
@@ -336,7 +380,48 @@ function streamCacheUrl(gameId: string | null): string {
     : `https://sbbl-hq.icu/__cache/stream-status`;
 }
 
-async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
+async function getActiveViewerCount(admin: SupabaseClient, gameId: string | null) {
+  if (!gameId) return 0;
+  const activeSessions = await admin
+    .from("stream_access_sessions")
+    .select("user_id")
+    .eq("game_id", gameId)
+    .eq("status", "active")
+    .gt("expires_at", new Date().toISOString());
+  if (activeSessions.error) return 0;
+  return new Set((activeSessions.data ?? []).map((row: Record<string, unknown>) => String(row.user_id))).size;
+}
+
+async function refreshLiveSessionMetrics(
+  admin: SupabaseClient,
+  gameId: string | null,
+  activeViewers: number,
+) {
+  if (!gameId) return;
+  const liveSession = await admin
+    .from("stream_sessions")
+    .select("id,peak_viewers")
+    .eq("game_id", gameId)
+    .eq("status", "live")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (liveSession.error || !liveSession.data) return;
+  const peak = Math.max(
+    Number((liveSession.data as Record<string, unknown>).peak_viewers ?? 0),
+    activeViewers,
+  );
+  await admin
+    .from("stream_sessions")
+    .update({
+      current_viewers: activeViewers,
+      peak_viewers: peak,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", String((liveSession.data as Record<string, unknown>).id));
+}
+
+export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const gameId = url.searchParams.get("gameId") ?? null;
   const cacheKey = new Request(streamCacheUrl(gameId));
@@ -352,14 +437,8 @@ async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   const cfg = await getOrCreateStreamConfig(admin);
   let viewerCount = 0;
   const activeGameId = gameId ?? (cfg.active_game_id as string | null) ?? null;
-  if (activeGameId) {
-    const viewers = await admin
-      .from("stream_entitlements")
-      .select("id", { count: "exact", head: true })
-      .eq("game_id", activeGameId)
-      .eq("status", "active");
-    if (!viewers.error) viewerCount = viewers.count ?? 0;
-  }
+  viewerCount = await getActiveViewerCount(admin, activeGameId);
+  await refreshLiveSessionMetrics(admin, activeGameId, viewerCount);
 
   const payload = {
     ok: true,
@@ -367,7 +446,6 @@ async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
     title: String(cfg.title ?? "SBBL Live Stream"),
     viewerCount,
     gameId: activeGameId,
-    collectionId: String(cfg.collection_id ?? ""),
   };
 
   const response = new Response(JSON.stringify(payload), {
@@ -473,12 +551,54 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   if (error) throw new Error(error.message);
 
   if (typeof body.gameId === "string") {
-    await ctx.admin.from("stream_sessions").insert({
-      game_id: body.gameId,
-      status: body.isLive ? "live" : "ended",
-      created_by: session.userId,
-      updated_by: session.userId,
-    });
+    if (body.isLive) {
+      await ctx.admin.from("stream_sessions").insert({
+        game_id: body.gameId,
+        status: "live",
+        started_at: nowIso,
+        current_viewers: 0,
+        peak_viewers: 0,
+        created_by: session.userId,
+        updated_by: session.userId,
+      });
+    } else {
+      const activeViewers = await getActiveViewerCount(ctx.admin, body.gameId);
+      const currentLive = await ctx.admin
+        .from("stream_sessions")
+        .select("id,peak_viewers")
+        .eq("game_id", body.gameId)
+        .eq("status", "live")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (currentLive.data) {
+        const priorPeak = Number(
+          (currentLive.data as Record<string, unknown>).peak_viewers ?? 0,
+        );
+        await ctx.admin
+          .from("stream_sessions")
+          .update({
+            status: "ended",
+            ended_at: nowIso,
+            current_viewers: activeViewers,
+            peak_viewers: Math.max(priorPeak, activeViewers),
+            updated_at: nowIso,
+            updated_by: session.userId,
+          })
+          .eq("id", (currentLive.data as Record<string, unknown>).id as string);
+      } else {
+        await ctx.admin.from("stream_sessions").insert({
+          game_id: body.gameId,
+          status: "ended",
+          started_at: nowIso,
+          ended_at: nowIso,
+          current_viewers: activeViewers,
+          peak_viewers: activeViewers,
+          created_by: session.userId,
+          updated_by: session.userId,
+        });
+      }
+    }
   }
 
   // Bust edge cache immediately so Go Live / End Broadcast is reflected
@@ -497,7 +617,7 @@ async function handleStreamSessions({ req, admin }: HandlerCtx) {
   await requireAdminSession(req, admin);
   const { data, error } = await admin
     .from("stream_sessions")
-    .select("id,game_id,status,created_at,updated_at,games(league_id)")
+    .select("id,game_id,status,created_at,updated_at,started_at,ended_at,peak_viewers,current_viewers,games(league_id)")
     .order("updated_at", { ascending: false })
     .limit(50);
   if (error) throw new Error(error.message);
@@ -507,9 +627,9 @@ async function handleStreamSessions({ req, admin }: HandlerCtx) {
       id: s.id,
       gameId: s.game_id,
       leagueId: (s.games as Record<string, unknown> | null)?.league_id ?? null,
-      startedAt: s.created_at,
-      endedAt: s.status === "ended" ? s.updated_at : null,
-      peakViewers: 0,
+      startedAt: s.started_at ?? s.created_at,
+      endedAt: s.ended_at ?? (s.status === "ended" ? s.updated_at : null),
+      peakViewers: Number(s.peak_viewers ?? s.current_viewers ?? 0),
       totalPpvRevenue: 0,
       source: "main",
     })),
@@ -526,7 +646,7 @@ async function handleOpsRevenue({ req, admin }: HandlerCtx) {
     admin.from("ppv_invites").select("id"),
     admin
       .from("stream_sessions")
-      .select("id,game_id,status,created_at,updated_at")
+      .select("id,game_id,status,created_at,updated_at,started_at,ended_at,peak_viewers,current_viewers")
       .order("updated_at", { ascending: false })
       .limit(10),
   ]);
@@ -550,9 +670,9 @@ async function handleOpsRevenue({ req, admin }: HandlerCtx) {
       id: s.id,
       gameId: s.game_id,
       leagueId: null,
-      startedAt: s.created_at,
-      endedAt: s.status === "ended" ? s.updated_at : null,
-      peakViewers: 0,
+      startedAt: s.started_at ?? s.created_at,
+      endedAt: s.ended_at ?? (s.status === "ended" ? s.updated_at : null),
+      peakViewers: Number(s.peak_viewers ?? s.current_viewers ?? 0),
       totalPpvRevenue: 0,
       source: "main",
     })),
@@ -2359,15 +2479,22 @@ async function handleInviteGenerate(ctx: HandlerCtx) {
  * IP-mismatch on re-use → 403.  Different user on re-use → 403 (non-transferable).
  * Idempotent for same user + same IP (re-entry after page refresh).
  */
-async function handleInviteRedeem(ctx: HandlerCtx) {
+export async function handleInviteRedeem(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
   const ip = getClientIP(ctx.req);
+  if (!enforceInMemoryRateLimit(`invite-redeem:${userId}:${ip}`, 8, 60_000)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
 
   const body = (await ctx.req.json().catch(() => null)) as {
     code?: string;
     gameId?: string;
+    captchaToken?: string;
   } | null;
+  if (!(await verifyTurnstileToken(ctx.env, body?.captchaToken, ip))) {
+    return json({ ok: false, error: "captcha_failed" }, 403);
+  }
   const code = body?.code?.trim();
   const gameId = body?.gameId?.trim();
   if (!code || !gameId)
@@ -2556,6 +2683,257 @@ async function handleStreamAccess({ req, admin }: HandlerCtx) {
   return json({ ok: true, hasAccess, gameId, userId });
 }
 
+function parseCommentLimit(url: URL): number {
+  const raw = Number(url.searchParams.get("limit") ?? 40);
+  if (!Number.isFinite(raw)) return 40;
+  return Math.min(100, Math.max(1, Math.floor(raw)));
+}
+
+async function createOrRefreshPlaybackSession(
+  ctx: HandlerCtx,
+  gameId: string,
+  userId: string,
+  sessionKey: string,
+) {
+  const expiresAt = new Date(Date.now() + 70_000).toISOString();
+  const existing = await ctx.admin
+    .from("stream_access_sessions")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("game_id", gameId)
+    .eq("idempotency_key", sessionKey)
+    .maybeSingle();
+  if (existing.data) {
+    const { data, error } = await ctx.admin
+      .from("stream_access_sessions")
+      .update({
+        status: "active",
+        last_seen_at: new Date().toISOString(),
+        expires_at: expiresAt,
+        updated_at: new Date().toISOString(),
+        updated_by: userId,
+      })
+      .eq("id", (existing.data as Record<string, unknown>).id)
+      .select("id,expires_at")
+      .single();
+    if (error) throw new Error(error.message);
+    return { id: String(data.id), expiresAt: String(data.expires_at) };
+  }
+
+  const { data, error } = await ctx.admin
+    .from("stream_access_sessions")
+    .insert({
+      entitlement_id: null,
+      game_id: gameId,
+      user_id: userId,
+      status: "active",
+      expires_at: expiresAt,
+      last_seen_at: new Date().toISOString(),
+      idempotency_key: sessionKey,
+      created_by: userId,
+      updated_by: userId,
+    })
+    .select("id,expires_at")
+    .single();
+  if (error) throw new Error(error.message);
+  return { id: String(data.id), expiresAt: String(data.expires_at) };
+}
+
+export async function handlePlaybackSession(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const gameId = ctx.params.gameId;
+  const body = (await ctx.req.json().catch(() => null)) as {
+    sessionKey?: string;
+  } | null;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  if (!body?.sessionKey || body.sessionKey.length < 8) {
+    return json({ ok: false, error: "session_key_required" }, 400);
+  }
+  const roles = await getUserRolesFromDB(userId, ctx.admin);
+  const hasPrivilegedRole = roles.some(
+    (role) => role === "player" || role === "paid_fan" || role === "super_admin",
+  );
+  let hasAccess = hasPrivilegedRole;
+  if (!hasAccess) {
+    const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
+      p_game_id: gameId,
+      p_user_id: userId,
+    });
+    if (accessRpc.error) throw new Error(accessRpc.error.message);
+    hasAccess = Boolean(accessRpc.data);
+  }
+  if (!hasAccess) return json({ ok: false, error: "forbidden" }, 403);
+
+  const cfg = await getOrCreateStreamConfig(ctx.admin);
+  const playbackUrl = String(cfg.collection_id ?? "").trim();
+  if (!playbackUrl) {
+    return json({ ok: false, error: "stream_not_configured" }, 503);
+  }
+  const session = await createOrRefreshPlaybackSession(
+    ctx,
+    gameId,
+    userId,
+    body.sessionKey,
+  );
+  return json({
+    ok: true,
+    playback: {
+      type: "url",
+      url: playbackUrl,
+      expiresAt: session.expiresAt,
+      heartbeatIntervalSec: 25,
+    },
+    session: {
+      id: session.id,
+      gameId,
+    },
+  });
+}
+
+export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const gameId = ctx.params.gameId;
+  const body = (await ctx.req.json().catch(() => null)) as {
+    sessionId?: string;
+  } | null;
+  if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
+  const expiresAt = new Date(Date.now() + 70_000).toISOString();
+  const update = await ctx.admin
+    .from("stream_access_sessions")
+    .update({
+      expires_at: expiresAt,
+      status: "active",
+      last_seen_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
+    })
+    .eq("id", body.sessionId)
+    .eq("user_id", userId)
+    .eq("game_id", gameId)
+    .select("id")
+    .maybeSingle();
+  if (update.error) throw new Error(update.error.message);
+  if (!update.data) return json({ ok: false, error: "session_not_found" }, 404);
+  return json({ ok: true, sessionId: body.sessionId, expiresAt });
+}
+
+async function handleStreamSessionEnd(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const gameId = ctx.params.gameId;
+  const body = (await ctx.req.json().catch(() => null)) as {
+    sessionId?: string;
+  } | null;
+  if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
+  const endRes = await ctx.admin
+    .from("stream_access_sessions")
+    .update({
+      status: "ended",
+      expires_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
+    })
+    .eq("id", body.sessionId)
+    .eq("user_id", userId)
+    .eq("game_id", gameId)
+    .select("id")
+    .maybeSingle();
+  if (endRes.error) throw new Error(endRes.error.message);
+  return json({ ok: true, ended: Boolean(endRes.data) });
+}
+
+async function handleListComments(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const url = new URL(ctx.req.url);
+  const limit = parseCommentLimit(url);
+  const before = url.searchParams.get("before");
+  let query = ctx.admin
+    .from("stream_chat_messages")
+    .select("id,message,status,created_at,user_id")
+    .eq("game_id", gameId)
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (before) query = query.lt("created_at", before);
+  const res = await query;
+  if (res.error) throw new Error(res.error.message);
+
+  const rows = (res.data ?? []) as Array<Record<string, unknown>>;
+  const userIds = Array.from(new Set(rows.map((row) => String(row.user_id))));
+  const profiles = userIds.length
+    ? await ctx.admin
+        .from("profiles")
+        .select("user_id,display_name")
+        .in("user_id", userIds)
+    : { data: [] as Array<Record<string, unknown>>, error: null };
+  if (profiles.error) throw new Error(profiles.error.message);
+  const nameByUser = new Map<string, string>(
+    (profiles.data ?? []).map(
+      (row: Record<string, unknown>) =>
+        [String(row.user_id), String(row.display_name ?? "Fan")] as [string, string],
+    ),
+  );
+
+  return json({
+    ok: true,
+    comments: rows
+      .map((row) => ({
+        id: String(row.id),
+        message: String(row.message),
+        createdAt: String(row.created_at),
+        userId: String(row.user_id),
+        userDisplayName: nameByUser.get(String(row.user_id)) ?? "Fan",
+      }))
+      .reverse(),
+  });
+}
+
+export async function handlePostComment(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const ip = getClientIP(ctx.req);
+  if (!enforceInMemoryRateLimit(`chat:${userId}:${gameId}`, 10, 30_000)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
+  if (!enforceInMemoryRateLimit(`chat-ip:${ip}:${gameId}`, 20, 30_000)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
+  const body = (await ctx.req.json().catch(() => null)) as {
+    message?: string;
+  } | null;
+  const message = String(body?.message ?? "").trim().replace(/\s+/g, " ");
+  if (message.length < 1 || message.length > 400) {
+    return json({ ok: false, error: "invalid_message_length" }, 400);
+  }
+  const insert = await ctx.admin
+    .from("stream_chat_messages")
+    .insert({
+      game_id: gameId,
+      user_id: userId,
+      message,
+      status: "active",
+      created_by: userId,
+      updated_by: userId,
+    })
+    .select("id,message,created_at,user_id")
+    .single();
+  if (insert.error) throw new Error(insert.error.message);
+  return json({
+    ok: true,
+    comment: {
+      id: String(insert.data.id),
+      message: String(insert.data.message),
+      createdAt: String(insert.data.created_at),
+      userId: String(insert.data.user_id),
+    },
+  });
+}
+
 function getSafeRedirectUrl(
   url: string | undefined | null,
   fallback: string,
@@ -2574,9 +2952,13 @@ function getSafeRedirectUrl(
   return fallback;
 }
 
-async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
+export async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
   await ensureMutation(req, { req, env, admin, params: {} });
   const userId = requireAuth(req);
+  const ip = getClientIP(req);
+  if (!enforceInMemoryRateLimit(`stream-purchase:${userId}:${ip}`, 6, 60_000)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
   const gameId = new URL(req.url).pathname.split("/")[3];
   if (!env.STRIPE_SECRET_KEY)
     return json({ ok: false, error: "payments_not_configured" }, 503);
@@ -2585,7 +2967,11 @@ async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
     successUrl?: string;
     cancelUrl?: string;
     ppvPrice?: number;
+    captchaToken?: string;
   } | null;
+  if (!(await verifyTurnstileToken(env, body?.captchaToken, ip))) {
+    return json({ ok: false, error: "captcha_failed" }, 403);
+  }
   const unitAmount = Math.round((body?.ppvPrice ?? 2.5) * 100);
   const reqUrlStr = req.url;
   const successUrl = getSafeRedirectUrl(
@@ -3153,11 +3539,27 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   {
     method: "POST",
     path: "/api/streams/:gameId/session",
-    handler: (ctx) =>
-      handleMutationAck({
-        ...ctx,
-        params: { route: "streams-session", ...ctx.params },
-      }),
+    handler: handlePlaybackSession,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/session/heartbeat",
+    handler: handleStreamSessionHeartbeat,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/session/end",
+    handler: handleStreamSessionEnd,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/comments",
+    handler: handleListComments,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/comments",
+    handler: handlePostComment,
   },
   { method: "GET", path: "/api/cart", handler: handleGetCart },
   { method: "POST", path: "/api/cart/items", handler: handleAddCartItem },
