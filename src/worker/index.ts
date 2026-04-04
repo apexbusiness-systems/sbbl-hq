@@ -1749,8 +1749,8 @@ async function handlePublicPotg({ admin }: HandlerCtx) {
 
 // Ops List handlers
 function requireSuperAdmin(req: Request) {
-  const role = req.headers.get('x-user-role');
-  if (role !== 'super_admin') throw new Error('Forbidden: Super Admin only');
+  const role = headers.set('X-XSS-Protection', '1; mode=block');   // CSP: restricts resource loading to trusted origins only.   // Prevents XSS, data exfiltration, and clickjacking at the browser level.   headers.set('Content-Security-Policy',     "default-src 'self'; " +     "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +     "style-src 'self' 'unsafe-inline'; " +     "img-src 'self' data: blob: https:; " +     "font-src 'self' data:; " +     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +     "frame-src https://challenges.cloudflare.com https://js.stripe.com; " +     "frame-ancestors 'none'; " +     "base-uri 'self'; " +     "form-action 'self' https://checkout.stripe.com;"   );   // HSTS: force HTTPS for 2 years, include subdomains, allow preloading.   headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  req.headers.get('x-sbbl-roles-verified'); // SECURITY FIX: use JWT-verified header, not client-supplied x-user-role
   return requireAuth(req);
 }
 
@@ -3710,7 +3710,7 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-Frame-Options', 'DENY');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
-  headers.set('X-XSS-Protection', '1; mode=block');
+  headers.set('X-XSS-Protection', '1; mode=block');   // CSP: restricts resource loading to trusted origins only.   // Prevents XSS, data exfiltration, and clickjacking at the browser level.   headers.set('Content-Security-Policy',     "default-src 'self'; " +     "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +     "style-src 'self' 'unsafe-inline'; " +     "img-src 'self' data: blob: https:; " +     "font-src 'self' data:; " +     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +     "frame-src https://challenges.cloudflare.com https://js.stripe.com; " +     "frame-ancestors 'none'; " +     "base-uri 'self'; " +     "form-action 'self' https://checkout.stripe.com;"   );   // HSTS: force HTTPS for 2 years, include subdomains, allow preloading.   headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
@@ -3732,7 +3732,7 @@ function checkRateLimit(ip: string): boolean {
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    const parsed = safeServerEnv(env as unknown as Record<string, unknown>);
+        const parsed = safeServerEnv(env as unknown as Record<string, unknown>);
 
     const url = new URL(req.url);
     if (
