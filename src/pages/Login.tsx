@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { signInWithPassword, signUpWithPassword } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
@@ -7,6 +7,26 @@ import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { Shield, BarChart3, Users, Zap, CheckCircle2 } from 'lucide-react';
 
 type Mode = 'signin' | 'signup';
+
+type TurnstileApi = {
+  render: (container: HTMLElement, options: {
+    sitekey: string;
+    callback?: (token: string) => void;
+    'error-callback'?: () => void;
+    'expired-callback'?: () => void;
+    execution?: 'execute' | 'render';
+    appearance?: 'always' | 'execute' | 'interaction-only';
+  }) => string;
+  execute: (widgetId: string) => void;
+  reset: (widgetId: string) => void;
+  remove: (widgetId: string) => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
 
 const LoginPage = () => {
   const location = useLocation();
@@ -20,8 +40,91 @@ const LoginPage = () => {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
   const { isSignedIn, needsOnboarding, configAvailable, loading } = useAuth();
   const navigate = useNavigate();
+  const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
+  const shouldUseTurnstile = Boolean(turnstileSiteKey);
+  const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
+  const widgetIdRef = useRef<string | null>(null);
+  const captchaWaitRef = useRef<{ resolve: (token: string) => void; reject: (reason?: unknown) => void } | null>(null);
+
+  useEffect(() => {
+    if (!shouldUseTurnstile || !turnstileContainerRef.current) return;
+
+    const mountWidget = () => {
+      if (!window.turnstile || !turnstileContainerRef.current || widgetIdRef.current) return;
+      widgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
+        sitekey: turnstileSiteKey!,
+        execution: 'execute',
+        appearance: 'interaction-only',
+        callback: (token) => {
+          setCaptchaToken(token);
+          captchaWaitRef.current?.resolve(token);
+          captchaWaitRef.current = null;
+        },
+        'error-callback': () => {
+          setCaptchaToken(null);
+          captchaWaitRef.current?.reject(new Error('Captcha verification failed. Please try again.'));
+          captchaWaitRef.current = null;
+        },
+        'expired-callback': () => {
+          setCaptchaToken(null);
+        },
+      });
+    };
+
+    if (window.turnstile) {
+      mountWidget();
+      return;
+    }
+
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-turnstile-script="true"]');
+    if (existingScript) {
+      existingScript.addEventListener('load', mountWidget);
+      return () => existingScript.removeEventListener('load', mountWidget);
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    script.async = true;
+    script.defer = true;
+    script.dataset.turnstileScript = 'true';
+    script.addEventListener('load', mountWidget);
+    document.head.appendChild(script);
+
+    return () => script.removeEventListener('load', mountWidget);
+  }, [shouldUseTurnstile, turnstileSiteKey]);
+
+  useEffect(() => {
+    return () => {
+      if (window.turnstile && widgetIdRef.current) {
+        window.turnstile.remove(widgetIdRef.current);
+      }
+      widgetIdRef.current = null;
+      captchaWaitRef.current = null;
+    };
+  }, []);
+
+  const ensureCaptchaToken = async () => {
+    if (!shouldUseTurnstile) return undefined;
+    if (!window.turnstile || !widgetIdRef.current) {
+      throw new Error('Captcha is still loading. Please wait a moment and try again.');
+    }
+    setCaptchaToken(null);
+    window.turnstile.reset(widgetIdRef.current);
+    const token = await new Promise<string>((resolve, reject) => {
+      captchaWaitRef.current = { resolve, reject };
+      window.turnstile!.execute(widgetIdRef.current!);
+      window.setTimeout(() => {
+        if (captchaWaitRef.current) {
+          captchaWaitRef.current.reject(new Error('Captcha timed out. Please try again.'));
+          captchaWaitRef.current = null;
+        }
+      }, 15000);
+    });
+    return token;
+  };
 
   // Redirect after login — respect ?redirect= param from /register flow
   const redirectTo = urlParams.get('redirect');
@@ -42,11 +145,12 @@ const LoginPage = () => {
     setError(null);
     setMessage(null);
     try {
+      const verifiedCaptchaToken = await ensureCaptchaToken();
       if (mode === 'signin') {
-        await signInWithPassword(email, password);
+        await signInWithPassword(email, password, verifiedCaptchaToken);
         // AuthContext onAuthStateChange will handle the SIGNED_IN event and redirect
       } else {
-        await signUpWithPassword(email, password);
+        await signUpWithPassword(email, password, verifiedCaptchaToken);
         setMessage('Account created — check your inbox to confirm your email, then sign in.');
         setMode('signin');
         setPassword('');
@@ -73,7 +177,7 @@ const LoginPage = () => {
 
   const isEmailValid = email.includes('@') && email.includes('.');
   const isPasswordValid = password.length >= 6;
-  const canSubmit = isEmailValid && isPasswordValid && !submitting && configAvailable;
+  const canSubmit = isEmailValid && isPasswordValid && !submitting && configAvailable && (!shouldUseTurnstile || Boolean(widgetIdRef.current || captchaToken));
 
   return (
     <div className="min-h-[calc(100vh-6rem)] flex items-center justify-center px-4 py-10">
@@ -134,6 +238,7 @@ const LoginPage = () => {
             )}
 
             <form onSubmit={onSubmit} className="mt-6 space-y-4">
+              {shouldUseTurnstile && <div ref={turnstileContainerRef} className="sr-only" aria-hidden />}
               <div>
                 <label htmlFor="login-email" className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Email address
