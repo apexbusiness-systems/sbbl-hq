@@ -1,26 +1,89 @@
-import { supabaseClient } from '@/lib/supabase/client';
+import { getSupabaseClient } from '@/lib/supabase/client';
 
 const API_BASE = import.meta.env.VITE_WORKER_API_BASE?.trim() || '';
 
-export async function getAuthToken() {
+/**
+ * getAuthToken — always returns a fresh, non-expired Supabase JWT.
+ *
+ * ROOT CAUSE FIX: The previous implementation used `getSession()` which only
+ * reads the cached token from localStorage without checking expiry or
+ * refreshing it. If the magic-link session token had expired, the stale
+ * access_token was sent to the Worker, `jwtVerify()` failed, and the
+ * request was rejected with "unauthorized".
+ *
+ * Fix: use `getUser()` which makes a live round-trip to Supabase Auth and
+ * will automatically refresh the token via the refresh_token if the
+ * access_token is expired. After that, `getSession()` gives us the fresh
+ * token without an extra network call.
+ */
+export async function getAuthToken(): Promise<string | null> {
+  const supabaseClient = getSupabaseClient();
   if (!supabaseClient) return null;
+
+  // getUser() contacts the Supabase Auth server and auto-refreshes the
+  // access_token when it is expired (unlike getSession() which only reads
+  // the local cache and can return a stale, expired token).
+  const { error } = await supabaseClient.auth.getUser();
+  if (error) {
+    // If the refresh fails (e.g. refresh_token revoked / user logged out),
+    // return null so callers see a clean auth failure rather than a
+    // cryptic network error.
+    console.warn('[getAuthToken] Token refresh failed:', error.message);
+    return null;
+  }
+
+  // After getUser() the local session is guaranteed to be fresh.
   const { data } = await supabaseClient.auth.getSession();
   return data.session?.access_token ?? null;
 }
 
-export async function apiFetch<T>(path: string, init: RequestInit = {}, token?: string | null): Promise<T> {
-  const authToken = token ?? await getAuthToken();
-  const headers = new Headers(init.headers);
-  headers.set('content-type', headers.get('content-type') ?? 'application/json');
-  if (authToken) headers.set('authorization', `Bearer ${authToken}`);
-  // All mutating requests require an idempotency key — auto-generate one so
-  // callers don't have to manage this manually.
-  const method = (init.method ?? 'GET').toUpperCase();
-  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-    headers.set('x-idempotency-key', `${path}-${Date.now()}-${crypto.randomUUID()}`);
+/**
+ * apiFetch — typed fetch wrapper with automatic auth, idempotency keys,
+ * and a single-retry guardrail for transient 401s.
+ *
+ * GUARDRAIL: If the server returns 401, we proactively refresh the session
+ * and retry the request exactly once. This handles the edge-case where the
+ * token expired between the getAuthToken() call above and the network
+ * round-trip to the Worker (e.g. clock skew, very long request queuing).
+ */
+export async function apiFetch<T>(
+  path: string,
+  init: RequestInit = {},
+  token?: string | null,
+): Promise<T> {
+  const attempt = async (authToken: string | null): Promise<Response> => {
+    const headers = new Headers(init.headers);
+    headers.set('content-type', headers.get('content-type') ?? 'application/json');
+    if (authToken) headers.set('authorization', `Bearer ${authToken}`);
+
+    // All mutating requests require an idempotency key — auto-generate one so
+    // callers don't have to manage this manually.
+    const method = (init.method ?? 'GET').toUpperCase();
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+      headers.set('x-idempotency-key', `${path}-${Date.now()}-${crypto.randomUUID()}`);
+    }
+
+    return fetch(`${API_BASE}${path}`, { ...init, headers });
+  };
+
+  const authToken = token ?? (await getAuthToken());
+  let response = await attempt(authToken);
+
+  // GUARDRAIL: single retry on 401 — refresh session and try once more.
+  // This handles token expiry that occurs between getAuthToken() and the
+  // actual HTTP request reaching the Worker.
+  if (response.status === 401 && !token) {
+    console.warn('[apiFetch] 401 received, refreshing session and retrying:', path);
+    const supabaseClient = getSupabaseClient();
+    if (supabaseClient) {
+      const { data: refreshData } = await supabaseClient.auth.refreshSession();
+      const freshToken = refreshData.session?.access_token ?? null;
+      if (freshToken) {
+        response = await attempt(freshToken);
+      }
+    }
   }
 
-  const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
   const payload = await response.json().catch(() => ({ ok: false, error: 'invalid_json_response' }));
 
   if (!response.ok) {
