@@ -12,6 +12,7 @@ import { BagDrawer } from '@/components/layout/BagDrawer';
 import { RequireAdmin, RequireAuth } from '@/components/auth/RouteGuards';
 import { StickyMusicPlayer } from '@/components/marketing/StickyMusicPlayer';
 import { AppDownloadPill } from '@/components/marketing/AppDownloadPill';
+import { OfflineBanner } from '@/components/OfflineBanner';
 
 const AppHome = lazy(() => import('./pages/AppHome'));
 const Home = lazy(() => import('./pages/Home'));
@@ -31,6 +32,7 @@ const Settings = lazy(() => import('./pages/Settings'));
 const Ops = lazy(() => import('./pages/Ops'));
 const Support = lazy(() => import('./pages/Support'));
 const NotFound = lazy(() => import('./pages/NotFound'));
+const Offline = lazy(() => import('./pages/Offline'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -80,6 +82,7 @@ const App = () => (
           <Sonner />
           <BrowserRouter>
             <div className="min-h-screen bg-background">
+              <OfflineBanner />
               <Header />
               <BagDrawer />
               <StickyMusicPlayer />
@@ -105,6 +108,7 @@ const App = () => (
                     <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
                     <Route path="/ops" element={<RequireAdmin><Ops /></RequireAdmin>} />
                     <Route path="/support" element={<Support />} />
+                    <Route path="/offline" element={<Offline />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                 </Suspense>
