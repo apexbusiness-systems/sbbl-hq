@@ -11,13 +11,25 @@ export default defineConfig({
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     coverage: {
       provider: "istanbul",
+      // Enabled via CLI flag in CI: `vitest run --coverage`
+      // Local dev: `vitest run` skips coverage for speed.
       enabled: false,
-      include: ["src/worker/index.ts", "src/lib/api/stream.ts", "src/pages/Live.tsx"],
+      include: [
+        "src/worker/index.ts",
+        "src/lib/api/stream.ts",
+        "src/pages/Live.tsx",
+        "src/contexts/AppContext.tsx",
+        "src/contexts/AuthContext.tsx",
+        "src/contexts/BagContext.tsx",
+      ],
+      exclude: ["src/test/**", "src/**/*.test.{ts,tsx}", "src/**/*.spec.{ts,tsx}"],
+      reporter: ["text", "json", "html"],
+      reportsDirectory: "coverage",
       thresholds: {
-        lines: 35,
-        functions: 35,
-        branches: 30,
-        statements: 35,
+        lines: 50,
+        functions: 50,
+        branches: 40,
+        statements: 50,
       },
     },
   },
