@@ -20,6 +20,7 @@ type TurnstileApi = {
   execute: (container: HTMLElement | string) => void;
   reset: (container?: HTMLElement | string) => void;
   remove: (container?: HTMLElement | string) => void;
+  getResponse?: (container?: HTMLElement | string) => string;
 };
 
 declare global {
@@ -46,25 +47,33 @@ const LoginPage = () => {
   const turnstileSiteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
   const shouldUseTurnstile = Boolean(turnstileSiteKey);
   const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
   const widgetReadyRef = useRef(false);
   const captchaWaitRef = useRef<{ resolve: (token: string) => void; reject: (reason?: unknown) => void } | null>(null);
+  const captchaTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     if (!shouldUseTurnstile || !turnstileContainerRef.current) return;
 
     const mountWidget = () => {
       if (!window.turnstile || !turnstileContainerRef.current || widgetReadyRef.current) return;
-      window.turnstile.render(turnstileContainerRef.current, {
+      turnstileWidgetIdRef.current = window.turnstile.render(turnstileContainerRef.current, {
         sitekey: turnstileSiteKey!,
-        execution: 'execute',
-        appearance: 'interaction-only',
         callback: (token) => {
           setCaptchaToken(token);
+          if (captchaTimeoutRef.current) {
+            window.clearTimeout(captchaTimeoutRef.current);
+            captchaTimeoutRef.current = null;
+          }
           captchaWaitRef.current?.resolve(token);
           captchaWaitRef.current = null;
         },
         'error-callback': () => {
           setCaptchaToken(null);
+          if (captchaTimeoutRef.current) {
+            window.clearTimeout(captchaTimeoutRef.current);
+            captchaTimeoutRef.current = null;
+          }
           captchaWaitRef.current?.reject(new Error('Captcha verification failed. Please try again.'));
           captchaWaitRef.current = null;
         },
@@ -99,25 +108,34 @@ const LoginPage = () => {
 
   useEffect(() => {
     return () => {
-      if (window.turnstile && turnstileContainerRef.current) {
-        window.turnstile.remove(turnstileContainerRef.current ?? undefined);
+      if (window.turnstile && turnstileWidgetIdRef.current) {
+        window.turnstile.remove(turnstileWidgetIdRef.current);
       }
       widgetReadyRef.current = false;
+      turnstileWidgetIdRef.current = null;
+      if (captchaTimeoutRef.current) {
+        window.clearTimeout(captchaTimeoutRef.current);
+        captchaTimeoutRef.current = null;
+      }
       captchaWaitRef.current = null;
     };
   }, []);
 
   const ensureCaptchaToken = async () => {
     if (!shouldUseTurnstile) return undefined;
-    if (!window.turnstile || !turnstileContainerRef.current || !widgetReadyRef.current) {
+    if (!window.turnstile || !turnstileWidgetIdRef.current || !widgetReadyRef.current) {
       throw new Error('Captcha is still loading. Please wait a moment and try again.');
     }
+    // Use any currently valid token first (managed mode can issue token on render).
+    const existingToken = captchaToken || window.turnstile.getResponse?.(turnstileWidgetIdRef.current);
+    if (existingToken) return existingToken;
+
     setCaptchaToken(null);
-    window.turnstile.reset(turnstileContainerRef.current);
+    window.turnstile.reset(turnstileWidgetIdRef.current);
     const token = await new Promise<string>((resolve, reject) => {
       captchaWaitRef.current = { resolve, reject };
-      window.turnstile!.execute(turnstileContainerRef.current!);
-      window.setTimeout(() => {
+      window.turnstile!.execute(turnstileWidgetIdRef.current!);
+      captchaTimeoutRef.current = window.setTimeout(() => {
         if (captchaWaitRef.current) {
           captchaWaitRef.current.reject(new Error('Captcha timed out. Please try again.'));
           captchaWaitRef.current = null;
@@ -146,15 +164,28 @@ const LoginPage = () => {
     setError(null);
     setMessage(null);
     try {
-      const verifiedCaptchaToken = await ensureCaptchaToken();
-      if (mode === 'signin') {
-        await signInWithPassword(email, password, verifiedCaptchaToken);
-        // AuthContext onAuthStateChange will handle the SIGNED_IN event and redirect
-      } else {
-        await signUpWithPassword(email, password, verifiedCaptchaToken);
+      const runAuth = async (captcha?: string) => {
+        if (mode === 'signin') {
+          await signInWithPassword(email, password, captcha);
+          // AuthContext onAuthStateChange will handle the SIGNED_IN event and redirect
+          return;
+        }
+        await signUpWithPassword(email, password, captcha);
         setMessage('Account created — check your inbox to confirm your email, then sign in.');
         setMode('signin');
         setPassword('');
+      };
+
+      const verifiedCaptchaToken = await ensureCaptchaToken();
+      try {
+        await runAuth(verifiedCaptchaToken);
+      } catch (firstAuthError) {
+        const firstMessage = firstAuthError instanceof Error ? firstAuthError.message.toLowerCase() : '';
+        const isCaptchaVerificationError = shouldUseTurnstile && firstMessage.includes('captcha verification process failed');
+        if (!isCaptchaVerificationError) throw firstAuthError;
+        // Retry one time with a fresh token to recover from race/expiry edge-cases.
+        const retryCaptchaToken = await ensureCaptchaToken();
+        await runAuth(retryCaptchaToken);
       }
     } catch (submitError) {
       const raw = submitError instanceof Error ? submitError.message : 'Something went wrong';
@@ -239,7 +270,13 @@ const LoginPage = () => {
             )}
 
             <form onSubmit={onSubmit} className="mt-6 space-y-4">
-              {shouldUseTurnstile && <div ref={turnstileContainerRef} className="sr-only" aria-hidden />}
+              {shouldUseTurnstile && (
+                <div
+                  ref={turnstileContainerRef}
+                  aria-hidden
+                  className="absolute -left-[9999px] top-auto h-[65px] w-[300px] overflow-hidden"
+                />
+              )}
               <div>
                 <label htmlFor="login-email" className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Email address
