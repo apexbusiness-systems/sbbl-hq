@@ -15,8 +15,7 @@ export async function initSupabaseClient(): Promise<void> {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
     // Build-time env vars (injected by Cloudflare Pages at build) take precedence.
-    // The /api/public-config endpoint intentionally omits Supabase credentials
-    // for security, so we must read them from the bundle, not the runtime config.
+    // Falls back to /api/public-config which returns the publishable key at runtime.
     const envUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
     const envKey = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)
       ?? (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
