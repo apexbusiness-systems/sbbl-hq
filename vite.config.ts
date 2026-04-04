@@ -19,11 +19,34 @@ export default defineConfig(({ mode }) => {
     env.VITE_SUPABASE_ANON_KEY ||
     'sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz';
 
+  // The Supabase project has captcha (Cloudflare Turnstile) enabled in Auth settings.
+  // Without this key the bundle sends no captcha token and every sign-in/sign-up
+  // request returns a 500 "captcha verification process failed" from Supabase.
+  // Set VITE_TURNSTILE_SITE_KEY in GitHub Actions secrets and Cloudflare Pages
+  // build environment variables (Settings → Environment Variables → Build).
+  const turnstileSiteKey = env.VITE_TURNSTILE_SITE_KEY || '';
+  if (!turnstileSiteKey && mode !== 'test') {
+    // Print to process.stderr so it surfaces in CI logs and Cloudflare build logs
+    // even when stdout is piped/buffered.
+    process.stderr.write(
+      '\n[sbbl-hq] WARNING: VITE_TURNSTILE_SITE_KEY is not set.\n' +
+      '  The Supabase project requires captcha — all sign-in and sign-up\n' +
+      '  requests will fail with "captcha verification process failed".\n' +
+      '  Add this key to GitHub Actions secrets and Cloudflare Pages\n' +
+      '  build environment variables, then redeploy.\n\n',
+    );
+  }
+
   return {
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(supabaseUrl),
       'import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY': JSON.stringify(supabaseKey),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(supabaseKey),
+      // Explicit define so the value is always a string in the bundle, never
+      // `undefined`. When the env var is absent the empty string is falsy and
+      // useTurnstile() will skip captcha — but the build-time warning above
+      // ensures the missing key is caught before it reaches production.
+      'import.meta.env.VITE_TURNSTILE_SITE_KEY': JSON.stringify(turnstileSiteKey),
     },
     server: {
       host: "::",

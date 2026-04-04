@@ -73,7 +73,15 @@ const LoginPage = () => {
       } else if (raw.toLowerCase().includes('password') && raw.toLowerCase().includes('characters')) {
         setError('Password must be at least 6 characters.');
       } else if (raw.toLowerCase().includes('captcha')) {
-        setError('Security verification failed. Please refresh the page and try again.');
+        // Supabase returned a captcha error. If no site key is configured the
+        // widget never loaded and no token was sent — surface a config-specific
+        // message so the issue is actionable.
+        const hasSiteKey = Boolean((import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim());
+        setError(
+          hasSiteKey
+            ? 'Security verification failed. Please refresh the page and try again.'
+            : 'Authentication is misconfigured — VITE_TURNSTILE_SITE_KEY is not set. Add it to your build environment variables and redeploy.',
+        );
       } else {
         setError(raw);
       }
