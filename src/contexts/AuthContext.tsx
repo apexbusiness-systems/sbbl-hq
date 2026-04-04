@@ -40,6 +40,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     setLoading(true);
+
+    // GUARDRAIL: Always call getUser() first to force a live token refresh
+    // before reading the session. This prevents stale/expired access_tokens
+    // from being used in subsequent API calls (root cause of "unauthorized"
+    // errors on Save Config / Go Live).
+    //
+    // getSession() alone only reads from localStorage — it does NOT check
+    // expiry or refresh the token. getUser() performs a live Supabase Auth
+    // round-trip and auto-refreshes the access_token via the refresh_token
+    // if it has expired.
+    await client.auth.getUser().catch(() => null);
+
     const { data } = await client.auth.getSession();
     setSession(data.session ?? null);
     setUser(data.session?.user ?? null);
@@ -118,6 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           Sentry.setUser(null);
         }
       });
+
       unsubscribe = () => data.subscription.unsubscribe();
     };
 
@@ -125,18 +138,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe?.();
   }, []);
 
-  const value = useMemo<AuthState>(() => ({
-    loading,
-    session,
-    user,
-    profile,
-    roles,
-    isSignedIn: Boolean(user),
-    isAdmin: canAccessOps(roles),
-    needsOnboarding: !loading && Boolean(user && !profile?.onboarding_completed_at) && !canAccessOps(roles),
-    configAvailable,
-    refresh: load,
-  }), [loading, session, user, profile, roles, configAvailable]);
+  const value = useMemo(
+    () => ({
+      loading,
+      session,
+      user,
+      profile,
+      roles,
+      isSignedIn: Boolean(user),
+      isAdmin: canAccessOps(roles),
+      needsOnboarding:
+        !loading &&
+        Boolean(user && !profile?.onboarding_completed_at) &&
+        !canAccessOps(roles),
+      configAvailable,
+      refresh: load,
+    }),
+    [loading, session, user, profile, roles, configAvailable],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
