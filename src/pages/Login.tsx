@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { signInWithPassword, signUpWithPassword } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
+import { useTurnstile } from '@/hooks/use-turnstile';
 import { LEAGUE_CONFIGS } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { Shield, BarChart3, Users, Zap, CheckCircle2 } from 'lucide-react';
@@ -21,6 +22,7 @@ const LoginPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const { isSignedIn, needsOnboarding, configAvailable, loading } = useAuth();
+  const { containerRef: turnstileRef, resolveToken, ready: captchaReady } = useTurnstile();
   const navigate = useNavigate();
 
   // Redirect after login — respect ?redirect= param from /register flow
@@ -42,19 +44,26 @@ const LoginPage = () => {
     setError(null);
     setMessage(null);
     try {
+      const captchaToken = await resolveToken();
       if (mode === 'signin') {
-        await signInWithPassword(email, password);
+        await signInWithPassword(email, password, captchaToken);
         // AuthContext onAuthStateChange will handle the SIGNED_IN event and redirect
       } else {
-        await signUpWithPassword(email, password);
+        await signUpWithPassword(email, password, captchaToken);
         setMessage('Account created — check your inbox to confirm your email, then sign in.');
         setMode('signin');
         setPassword('');
       }
     } catch (submitError) {
       const raw = submitError instanceof Error ? submitError.message : 'Something went wrong';
-      // Surface friendly messages for common Supabase error strings
-      if (raw.toLowerCase().includes('invalid login') || raw.toLowerCase().includes('invalid credentials')) {
+      // Surface friendly messages for common Supabase and captcha error strings
+      if (raw === 'captcha_loading') {
+        setError('Security check is still loading. Please wait a moment and try again.');
+      } else if (raw === 'captcha_timeout') {
+        setError('Security check timed out. Please try again.');
+      } else if (raw === 'captcha_failed') {
+        setError('Security check failed. Please refresh the page and try again.');
+      } else if (raw.toLowerCase().includes('invalid login') || raw.toLowerCase().includes('invalid credentials')) {
         setError('Incorrect email or password. Please try again.');
       } else if (raw.toLowerCase().includes('email not confirmed')) {
         setError('Please confirm your email address before signing in. Check your inbox.');
@@ -63,6 +72,8 @@ const LoginPage = () => {
         setMode('signin');
       } else if (raw.toLowerCase().includes('password') && raw.toLowerCase().includes('characters')) {
         setError('Password must be at least 6 characters.');
+      } else if (raw.toLowerCase().includes('captcha')) {
+        setError('Security verification failed. Please refresh the page and try again.');
       } else {
         setError(raw);
       }
@@ -73,7 +84,7 @@ const LoginPage = () => {
 
   const isEmailValid = email.includes('@') && email.includes('.');
   const isPasswordValid = password.length >= 6;
-  const canSubmit = isEmailValid && isPasswordValid && !submitting && configAvailable;
+  const canSubmit = isEmailValid && isPasswordValid && !submitting && configAvailable && captchaReady;
 
   return (
     <div className="min-h-[calc(100vh-6rem)] flex items-center justify-center px-4 py-10">
@@ -167,6 +178,8 @@ const LoginPage = () => {
                   minLength={6}
                 />
               </div>
+              {/* Hidden Turnstile widget mount point — rendered invisibly, executed on submit */}
+              <div ref={turnstileRef} className="sr-only" aria-hidden="true" />
               <button
                 type="submit"
                 disabled={!canSubmit}

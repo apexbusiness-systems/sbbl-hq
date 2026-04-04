@@ -121,23 +121,28 @@ async function verifyTurnstileToken(
 ): Promise<boolean> {
   if (!env.OPTIONAL_TURNSTILE_SECRET_KEY) return true;
   if (!token) return false;
-  const form = new URLSearchParams();
-  form.set("secret", env.OPTIONAL_TURNSTILE_SECRET_KEY);
-  form.set("response", token);
-  if (remoteIp && remoteIp !== "unknown") form.set("remoteip", remoteIp);
-  const res = await fetch(
-    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-    {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: form.toString(),
-    },
-  );
-  if (!res.ok) return false;
-  const payload = (await res.json().catch(() => null)) as
-    | { success?: boolean }
-    | null;
-  return Boolean(payload?.success);
+  try {
+    const form = new URLSearchParams();
+    form.set("secret", env.OPTIONAL_TURNSTILE_SECRET_KEY);
+    form.set("response", token);
+    if (remoteIp && remoteIp !== "unknown") form.set("remoteip", remoteIp);
+    const res = await fetch(
+      "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+      {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: form.toString(),
+      },
+    );
+    if (!res.ok) return false;
+    const payload = (await res.json().catch(() => null)) as
+      | { success?: boolean }
+      | null;
+    return Boolean(payload?.success);
+  } catch (err) {
+    console.error("[turnstile] verification error:", err);
+    return false;
+  }
 }
 
 // SECURITY: session is established ONLY via a valid Supabase JWT Bearer token.
