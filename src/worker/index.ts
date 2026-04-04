@@ -752,6 +752,98 @@ async function handleAccessOverride(ctx: HandlerCtx) {
   });
 }
 
+async function handleCoachApprovalRequest(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const body = (await ctx.req.json().catch(() => null)) as {
+    preferredLeague?: string;
+    note?: string;
+  } | null;
+  const { error } = await ctx.admin
+    .from('coach_approval_requests')
+    .insert({
+      user_id: userId,
+      status: 'pending',
+      preferred_league: body?.preferredLeague ?? null,
+      note: body?.note ?? null,
+    });
+  if (error && !error.message.includes('duplicate')) throw new Error(error.message);
+  // Also enqueue a review_queue item so it surfaces in the ops console
+  await ctx.admin
+    .from('review_queue')
+    .insert({
+      review_type: 'coach_approval',
+      ref_id: userId,
+      payload: {
+        title: 'Coach Approval Request',
+        description: `User ${userId} has requested coach access.`,
+        user_id: userId,
+        preferred_league: body?.preferredLeague ?? null,
+        note: body?.note ?? null,
+        severity: 'medium',
+      },
+      status: 'pending',
+      idempotency_key: readIdempotencyKey(ctx.req.headers),
+    });
+  return json({ ok: true, status: 'pending' });
+}
+
+async function handleListCoachRequests({ req, admin }: HandlerCtx) {
+  await requireSuperAdminSession(req, admin);
+  const { data, error } = await admin
+    .from('coach_approval_requests')
+    .select('id,user_id,status,preferred_league,note,created_at,reviewed_at,reviewed_by')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) throw new Error(error.message);
+  return json({ ok: true, requests: data ?? [] });
+}
+
+async function handleResolveCoachRequest(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { id } = ctx.params;
+  const body = (await ctx.req.json().catch(() => null)) as {
+    action?: 'approve' | 'reject';
+  } | null;
+  if (!body?.action || !['approve', 'reject'].includes(body.action)) {
+    return json({ ok: false, error: 'action_required' }, 400);
+  }
+  const newStatus = body.action === 'approve' ? 'approved' : 'rejected';
+  const { data: reqRow, error: fetchErr } = await ctx.admin
+    .from('coach_approval_requests')
+    .update({ status: newStatus, reviewed_by: session.userId, reviewed_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('user_id')
+    .single();
+  if (fetchErr) throw new Error(fetchErr.message);
+
+  if (body.action === 'approve' && reqRow?.user_id) {
+    // Grant coach role
+    await ctx.admin
+      .from('user_role_assignments')
+      .upsert({ user_id: reqRow.user_id, role: 'coach', league_id: null }, { onConflict: 'user_id,role' });
+    // Resolve the review_queue item
+    await ctx.admin
+      .from('review_queue')
+      .update({ status: 'resolved' })
+      .eq('review_type', 'coach_approval')
+      .eq('status', 'pending')
+      .contains('payload', { user_id: reqRow.user_id });
+  }
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: session.userId,
+    action: `coach_approval_${body.action}`,
+    ref_type: 'coach_approval_requests',
+    ref_id: id,
+    payload: { action: body.action, target_user_id: reqRow?.user_id },
+    idempotency_key: readIdempotencyKey(ctx.req.headers),
+  });
+
+  return json({ ok: true, id, status: newStatus });
+}
+
 async function writeIngressFailure(
   admin: SupabaseClient,
   reason: string,
@@ -982,25 +1074,38 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
         ? metadata.purchase_type
         : null;
 
-    // Player registration: stamp subscription_ends_at (+30 days)
+    // Player registration (subscription): set subscription_ends_at + grant player role
     if (!purchaseType || purchaseType === "player_registration") {
       try {
-        const now = new Date();
-        now.setDate(now.getDate() + 30);
+        const subEndMs = typeof object.current_period_end === 'number'
+          ? object.current_period_end * 1000
+          : Date.now() + 31 * 24 * 60 * 60 * 1000;
+        const subEndsAt = new Date(subEndMs).toISOString();
+        const stripeCustomerId = typeof object.customer === 'string' ? object.customer : null;
+        const stripeSubId = typeof object.subscription === 'string' ? object.subscription : null;
         await ctx.admin
           .from("profiles")
-          .update({ subscription_ends_at: now.toISOString() })
+          .update({
+            subscription_ends_at: subEndsAt,
+            ...(stripeCustomerId ? { stripe_customer_id: stripeCustomerId } : {}),
+            ...(stripeSubId ? { stripe_subscription_id: stripeSubId } : {}),
+          })
           .eq("user_id", userId);
+        // Grant player role (upsert to avoid duplicates)
+        await ctx.admin
+          .from("user_role_assignments")
+          .upsert({ user_id: userId, role: 'player', league_id: null }, { onConflict: 'user_id,role' })
+          .select();
       } catch {
         /* non-critical */
       }
     }
 
-    // PPV purchase: create stream entitlement (24h access window)
+    // PPV purchase: create stream entitlement (6h access window)
     if (purchaseType === "ppv" && typeof metadata.game_id === "string") {
       try {
         const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + 24);
+        expiresAt.setHours(expiresAt.getHours() + 6);
         await ctx.admin.rpc("create_stream_entitlement", {
           p_game_id: metadata.game_id,
           p_user_id: userId,
@@ -1049,6 +1154,42 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
         /* non-critical */
       }
     }
+  }
+
+  // Player subscription renewed — extend subscription window
+  if (event.type === "customer.subscription.updated" && userId) {
+    const sub = event.data?.object ?? {};
+    const currentPeriodEnd = typeof (sub as Record<string, unknown>).current_period_end === 'number'
+      ? new Date((sub as Record<string, unknown>).current_period_end as number * 1000)
+      : null;
+    const status = typeof (sub as Record<string, unknown>).status === 'string'
+      ? (sub as Record<string, unknown>).status as string
+      : null;
+    if (currentPeriodEnd && status === 'active') {
+      try {
+        await ctx.admin
+          .from('profiles')
+          .update({ subscription_ends_at: currentPeriodEnd.toISOString() })
+          .eq('user_id', userId);
+      } catch { /* non-critical */ }
+    }
+  }
+
+  // Player subscription cancelled/expired — downgrade to fan (remove player role)
+  if ((event.type === "customer.subscription.deleted") && userId) {
+    try {
+      // Remove player role assignment — user reverts to fan
+      await ctx.admin
+        .from('user_role_assignments')
+        .delete()
+        .eq('user_id', userId)
+        .eq('role', 'player');
+      // Clear subscription end date
+      await ctx.admin
+        .from('profiles')
+        .update({ subscription_ends_at: null, stripe_subscription_id: null })
+        .eq('user_id', userId);
+    } catch { /* non-critical */ }
   }
 
   return json({
@@ -2380,9 +2521,9 @@ async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
     },
     body: new URLSearchParams({
       "payment_method_types[]": "card",
-      "line_items[0][price_data][currency]": "usd",
+      "line_items[0][price_data][currency]": "cad",
       "line_items[0][price_data][product_data][name]": "SBBL HQ PPV Access",
-      "line_items[0][price_data][unit_amount]": String(unitAmount),
+      "line_items[0][price_data][unit_amount]": String(unitAmount), // $4.99 CAD in cents
       "line_items[0][quantity]": "1",
       mode: "payment",
       success_url: successUrl,
@@ -2818,15 +2959,18 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
     },
     body: new URLSearchParams({
       "payment_method_types[]": "card",
-      "line_items[0][price_data][currency]": "usd",
-      "line_items[0][price_data][product_data][name]":
-        "SBBL HQ Player Registration",
-      "line_items[0][price_data][unit_amount]": "700",
+      "line_items[0][price_data][currency]": "cad",
+      "line_items[0][price_data][product_data][name]": "SBBL Player Membership",
+      "line_items[0][price_data][product_data][description]":
+        "Monthly player registration. Includes stats, leaderboard, player profile, highlight downloads, and 10% store discount.",
+      "line_items[0][price_data][unit_amount]": "699",
+      "line_items[0][price_data][recurring][interval]": "month",
       "line_items[0][quantity]": "1",
-      mode: "payment",
+      mode: "subscription",
       success_url: successUrl,
       cancel_url: cancelUrl,
       "metadata[user_id]": userId,
+      "metadata[purchase_type]": "player_registration",
     }),
   });
 
@@ -3040,6 +3184,9 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/api/ingress", handler: handleIngress },
   { method: "POST", path: "/sync/drain", handler: handleSyncDrain },
   { method: "POST", path: "/webhooks/stripe", handler: handleStripeWebhook },
+  { method: "POST", path: "/api/coach/request", handler: handleCoachApprovalRequest },
+  { method: "GET", path: "/ops/coach/requests", handler: handleListCoachRequests },
+  { method: "POST", path: "/ops/coach/:id/resolve", handler: handleResolveCoachRequest },
 ];
 
 const compiled: Array<Route & { keys: string[] }> = routes.map((route) => {
@@ -3051,6 +3198,34 @@ const compiled: Array<Route & { keys: string[] }> = routes.map((route) => {
     keys: compiledPath.keys,
   };
 });
+
+const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5MB request body limit
+
+function addSecurityHeaders(res: Response): Response {
+  const headers = new Headers(res.headers);
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  headers.set('X-XSS-Protection', '1; mode=block');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
+const ipRateMap = new Map<string, { count: number; windowStart: number }>();
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 120; // 120 req/min per IP
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = ipRateMap.get(ip);
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    ipRateMap.set(ip, { count: 1, windowStart: now });
+    return true;
+  }
+  entry.count += 1;
+  if (entry.count > RATE_LIMIT_MAX) return false;
+  return true;
+}
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
