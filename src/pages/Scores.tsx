@@ -71,18 +71,18 @@ const ScoresPage = () => {
     staleTime: 60_000,
   });
 
-  const games = scoresQuery.data?.games ?? [];
+  const gamesData = useMemo(() => scoresQuery.data?.games ?? [], [scoresQuery.data?.games]);
 
   // Group by category when viewing "All"
   const grouped = useMemo(() => {
-    if (category !== 'all') return { [category]: games } as Record<string, ScoreEntry[]>;
-    return games.reduce<Record<string, ScoreEntry[]>>((acc, g) => {
+    if (category !== 'all') return { [category]: gamesData } as Record<string, ScoreEntry[]>;
+    return gamesData.reduce<Record<string, ScoreEntry[]>>((acc, g) => {
       (acc[g.category] ??= []).push(g);
       return acc;
     }, {});
-  }, [games, category]);
+  }, [gamesData, category]);
 
-  const hasGames = games.length > 0;
+  const hasGames = gamesData.length > 0;
 
   const sectionLabel: Record<string, string> = {
     league:        'League Games',
