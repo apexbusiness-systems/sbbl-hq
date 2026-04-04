@@ -257,7 +257,7 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
-          # ── Job 6: Deploy to Cloudflare (main branch only) ──────────────────────────
+            # ── Job 6: Deploy to Cloudflare (main branch only) ──────────────────────────
   deploy:
     name: Deploy to Cloudflare
     runs-on: ubuntu-latest
@@ -272,7 +272,7 @@ jobs:
           cache: npm
       - name: Install dependencies
         run: npm ci
-              - name: Build
+      - name: Build
         run: npm run build
       - name: Deploy to Cloudflare Workers
         run: npx wrangler deploy --env=""
