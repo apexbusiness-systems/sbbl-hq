@@ -1,15 +1,18 @@
 import { useState, useRef, useEffect } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
-import { games, players, products } from '@/data/mock';
+import { players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { CASLNudge } from '@/components/CASLNudge';
+import { fetchPublicHome } from '@/lib/api/public';
+import { fetchStreamComments, postStreamComment } from '@/lib/api/stream';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag, ChevronDown, ChevronUp,
   Radio, Eye, DollarSign, ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import type { Game } from '@/types';
 
 // ── Admin Stream Controls (collapsible panel) ─────────────────────────────
 // Visible only to super_admin. Manages stream state passed to LiveStreamPlayer
@@ -133,8 +136,7 @@ const LivePage = () => {
   const { user, session, roles } = useAuth();
   const token = session?.access_token ?? null;
   const isSuperAdmin = roles.includes('super_admin');
-
-  const liveGame = games.find(g => g.status === 'live') || games[0];
+  const [liveGame, setLiveGame] = useState<Game | null>(null);
 
   // Admin stream state — fetched from backend
   const [isStreamLive, setIsStreamLive] = useState(false);
@@ -142,12 +144,51 @@ const LivePage = () => {
   const [viewerCount, setViewerCount] = useState(0);
   const [streamSource, setStreamSource] = useState<'custom'>('custom');
   const [customStreamUrl, setCustomStreamUrl] = useState('');
+  const mapHomeGameToUi = (row: Record<string, unknown>): Game => {
+    const homeTeam = (row.home_team as Record<string, unknown> | null) ?? {};
+    const awayTeam = (row.away_team as Record<string, unknown> | null) ?? {};
+    const leagueCode = String(row.league_code ?? 'SBBL').toLowerCase();
+    const leagueId = leagueCode === 'wbl' ? 'wbl' : leagueCode === 'tgifbl' ? 'tgifbl' : 'sbbl';
+    return {
+      id: String(row.id),
+      leagueId,
+      homeTeam: {
+        id: String(row.home_team_id ?? 'home'),
+        name: String(homeTeam.name ?? 'Home'),
+        leagueId,
+        division: 'N/A',
+        record: { wins: 0, losses: 0 },
+      },
+      awayTeam: {
+        id: String(row.away_team_id ?? 'away'),
+        name: String(awayTeam.name ?? 'Away'),
+        leagueId,
+        division: 'N/A',
+        record: { wins: 0, losses: 0 },
+      },
+      venue: String(row.venue ?? 'TBA'),
+      court: String(row.court ?? 'Main Court'),
+      date: String(row.scheduled_at ?? ''),
+      time: String(row.scheduled_at ?? ''),
+      status: String(row.status ?? 'upcoming') as Game['status'],
+      score: {
+        home: Number(row.home_score ?? 0),
+        away: Number(row.away_score ?? 0),
+      },
+      ppvPrice: 4.99,
+    };
+  };
 
   // Auto-sync stream status from backend
   useEffect(() => {
     let active = true;
     const fetchStatus = async () => {
       try {
+        const home = await fetchPublicHome();
+        const liveRows = (home.data?.liveGames ?? []) as Array<Record<string, unknown>>;
+        const upcomingRows = (home.data?.upcomingGames ?? []) as Array<Record<string, unknown>>;
+        const selected = liveRows[0] ?? upcomingRows[0] ?? null;
+        if (active && selected) setLiveGame(mapHomeGameToUi(selected));
         if (isSuperAdmin) {
           // Admin needs full config
           const { fetchAdminStreamConfig } = await import('@/lib/api/stream');
@@ -164,7 +205,6 @@ const LivePage = () => {
           if (active && res) {
             setIsStreamLive(res.isLive);
             setStreamTitle(res.title);
-            setCustomStreamUrl(res.collectionId || '');
             setViewerCount(res.viewerCount);
           }
         }
@@ -179,12 +219,7 @@ const LivePage = () => {
     return () => { active = false; clearInterval(id); };
   }, [isSuperAdmin, token]);
 
-  const [comments, setComments] = useState([
-    { user: 'CourtSide_Fan', text: 'Rivera is on fire tonight!' },
-    { user: 'HoopHead23', text: 'That crossover was nasty 🔥' },
-    { user: 'SBBL_Official', text: 'Kings lead entering Q4' },
-    { user: 'DunkMaster', text: 'Block party at the rim!' },
-  ]);
+  const [comments, setComments] = useState<Array<{ id: string; user: string; text: string }>>([]);
   const [chatInput, setChatInput] = useState('');
   const [reactions, setReactions] = useState({ fire: 142, heart: 89, clap: 67 });
   const [clipSaved, setClipSaved] = useState(false);
@@ -200,7 +235,32 @@ const LivePage = () => {
     return () => clearInterval(id);
   }, [featuredProducts.length]);
 
+  useEffect(() => {
+    if (!liveGame?.id) return;
+    let active = true;
+    const fetchComments = async () => {
+      try {
+        const res = await fetchStreamComments(liveGame.id, 60);
+        if (!active) return;
+        setComments(res.comments.map((comment) => ({
+          id: comment.id,
+          user: comment.userDisplayName ?? 'Fan',
+          text: comment.message,
+        })));
+      } catch {
+        // non-blocking for playback UX
+      }
+    };
+    void fetchComments();
+    const id = setInterval(fetchComments, 5000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+  }, [liveGame?.id]);
+
   const handleShare = async () => {
+    if (!liveGame) return;
     const shareData = {
       title: `${liveGame.homeTeam.name} vs ${liveGame.awayTeam.name} — Live on SBBL HQ`,
       text: `Watch the game live: ${liveGame.score?.home}–${liveGame.score?.away} in Q4`,
@@ -222,10 +282,25 @@ const LivePage = () => {
 
   const handleSendChat = () => {
     const text = chatInput.trim();
-    if (!text) return;
-    setComments(prev => [...prev, { user: 'You', text }]);
-    setChatInput('');
-    setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+    if (!text || !liveGame?.id || !token) return;
+    void postStreamComment(liveGame.id, text, token)
+      .then((res) => {
+        setComments(prev => [...prev, {
+          id: res.comment.id,
+          user: 'You',
+          text: res.comment.message,
+        }]);
+        setChatInput('');
+        setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : 'chat_failed';
+        if (message === 'rate_limited') {
+          toast.error('Chat is rate-limited. Please slow down.');
+        } else {
+          toast.error('Could not send message.');
+        }
+      });
   };
 
   const sidebar = (
@@ -331,15 +406,20 @@ const LivePage = () => {
 
             {/* Broadcast Area — access-gate logic lives inside LiveStreamPlayer */}
             <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
-              <LiveStreamPlayer
-                game={liveGame}
-                userId={user?.id ?? null}
-                roles={roles}
-                token={token}
-                hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-                isStreamLive={isStreamLive}
-                customStreamUrl={customStreamUrl}
-              />
+              {liveGame ? (
+                <LiveStreamPlayer
+                  game={liveGame}
+                  userId={user?.id ?? null}
+                  roles={roles}
+                  token={token}
+                  hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                  isStreamLive={isStreamLive}
+                />
+              ) : (
+                <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
+                  Loading live game data…
+                </div>
+              )}
             </div>
 
             {/* Actions + Chat */}
@@ -374,8 +454,8 @@ const LivePage = () => {
                   <span className="text-sm font-medium">Live Chat</span>
                 </div>
                 <div className="p-4 space-y-3 max-h-[300px] overflow-y-auto">
-                  {comments.map((c, i) => (
-                    <div key={i} className="flex gap-2">
+                  {comments.map((c) => (
+                    <div key={c.id} className="flex gap-2">
                       <span className="text-xs font-semibold shrink-0 text-primary">{c.user}</span>
                       <span className="text-xs text-foreground">{c.text}</span>
                     </div>
@@ -393,7 +473,7 @@ const LivePage = () => {
                   />
                   <button
                     onClick={handleSendChat}
-                    disabled={!chatInput.trim()}
+                    disabled={!chatInput.trim() || !token || !liveGame?.id}
                     className="px-3 py-2 text-xs bg-primary text-primary-foreground rounded-sm font-medium disabled:opacity-40 transition-opacity"
                   >
                     Send
