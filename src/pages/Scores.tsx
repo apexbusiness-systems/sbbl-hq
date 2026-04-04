@@ -165,8 +165,25 @@ const ScoresPage = () => {
         </div>
       )}
 
+      {/* ── Error state ─────────────────────────────────────────────── */}
+      {!scoresQuery.isLoading && scoresQuery.isError && (
+        <div className="panel p-12 text-center">
+          <Trophy className="w-10 h-10 text-red-400 mx-auto mb-4" />
+          <p className="text-lg font-semibold mb-1">Failed to load scores</p>
+          <p className="text-sm text-muted-foreground mb-4">
+            {scoresQuery.error instanceof Error ? scoresQuery.error.message : 'An unexpected error occurred.'}
+          </p>
+          <button
+            onClick={() => scoresQuery.refetch()}
+            className="px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:bg-primary/90 transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* ── Empty state ──────────────────────────────────────────────── */}
-      {!scoresQuery.isLoading && !hasGames && (
+      {!scoresQuery.isLoading && !scoresQuery.isError && !hasGames && (
         <div className="panel p-12 text-center">
           <Trophy className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
           <p className="text-lg font-semibold mb-1">No scores found</p>
