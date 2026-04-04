@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useCallback, memo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { List, type RowComponentProps } from 'react-window';
 import { players as mockPlayers, teams } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
@@ -11,6 +12,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 
 type StatKey = keyof StatLine;
+
 const categories: { key: StatKey; label: string }[] = [
   { key: 'pts', label: 'Points' },
   { key: 'reb', label: 'Rebounds' },
@@ -21,13 +23,91 @@ const categories: { key: StatKey; label: string }[] = [
   { key: 'min', label: 'Minutes' },
 ];
 
+// Virtualize once list length exceeds this threshold
+const VIRTUALIZE_THRESHOLD = 50;
+const ROW_HEIGHT = 72; // px — content (~64px) + gap (8px)
+const MAX_LIST_HEIGHT = 640; // px
+
+// ── Rank icon — module-level so it's never recreated ─────────────────────
+function rankIcon(i: number) {
+  if (i === 0) return <Crown className="w-4 h-4 text-primary" />;
+  if (i === 1) return <Medal className="w-4 h-4 text-wbl" />;
+  if (i === 2) return <Medal className="w-4 h-4 text-tgifbl" />;
+  return <span className="stat-numeral text-sm text-muted-foreground w-4 text-center">{i + 1}</span>;
+}
+
+// ── Memoized list row ────────────────────────────────────────────────────
+interface LeaderboardRowProps {
+  player: PlayerProfile;
+  index: number;
+  activeCategory: StatKey;
+  maxStat: number;
+}
+
+const LeaderboardRow = memo(function LeaderboardRow({
+  player: p,
+  index: i,
+  activeCategory,
+  maxStat,
+}: LeaderboardRowProps) {
+  return (
+    <div className={`panel p-3 flex items-center gap-4 ${i < 3 ? 'border-primary/20' : ''}`}>
+      <div className="w-6 flex justify-center">{rankIcon(i)}</div>
+      <img src={p.avatar} alt={p.name} className="w-10 h-10 rounded-full object-cover" loading="lazy" />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium">{p.name}</p>
+        <div className="flex items-center gap-2">
+          <LeagueBadge leagueId={p.leagueId} />
+          <span className="text-[10px] text-muted-foreground">
+            {p.position} · {teams.find(t => t.id === p.teamId)?.name}
+          </span>
+        </div>
+      </div>
+      <div className="text-right">
+        <p className="stat-numeral text-xl text-primary">{p.stats[activeCategory]}</p>
+      </div>
+      <div className="hidden md:block w-24">
+        <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+          <div
+            className="h-full bg-primary rounded-full transition-all duration-500"
+            style={{ width: `${(p.stats[activeCategory] / maxStat) * 100}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+});
+
+// ── react-window v2 row wrapper ───────────────────────────────────────────
+// rowProps are spread directly into the row component by react-window v2.
+interface RowData {
+  players: PlayerProfile[];
+  activeCategory: StatKey;
+  maxStat: number;
+}
+
+const VirtualLeaderboardRow = memo(function VirtualLeaderboardRow({
+  index,
+  style,
+  players,
+  activeCategory,
+  maxStat,
+}: RowComponentProps<RowData>) {
+  const p = players[index];
+  return (
+    <div style={{ ...style, paddingBottom: 8 }}>
+      <LeaderboardRow player={p} index={index} activeCategory={activeCategory} maxStat={maxStat} />
+    </div>
+  );
+});
+
+// ── Page ─────────────────────────────────────────────────────────────────
 const LeaderboardsPage = () => {
   const { hasPremiumPlayerAccess, activeLeague, setActiveLeague } = useApp();
   const { isSignedIn } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeCategory, setActiveCategory] = useState<StatKey>('pts');
 
-  // Initialise from URL param; fall back to current active league
   const paramLeague = searchParams.get('league');
   const initialFilter: LeagueId | 'all' =
     paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))
@@ -36,12 +116,11 @@ const LeaderboardsPage = () => {
 
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(initialFilter);
 
-  // Keep URL in sync when filter changes
-  const handleFilterChange = (val: LeagueId | 'all') => {
+  const handleFilterChange = useCallback((val: LeagueId | 'all') => {
     setLeagueFilter(val);
     if (val !== 'all') setActiveLeague(val);
     setSearchParams({ league: val }, { replace: true });
-  };
+  }, [setActiveLeague, setSearchParams]);
 
   const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague));
 
@@ -53,7 +132,6 @@ const LeaderboardsPage = () => {
     }
   }, [activeLeague, paramLeague, isValidParam]);
 
-  // Fetch live leaderboard data from the worker; fall back to mock if API unavailable
   const leaderboardsQuery = useQuery({
     queryKey: ['leaderboards', leagueFilter],
     queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/leaderboards'),
@@ -74,16 +152,19 @@ const LeaderboardsPage = () => {
     const list = leagueFilter === 'all' ? players : players.filter(p => p.leagueId === leagueFilter);
     return [...list].sort((a, b) => b.stats[activeCategory] - a.stats[activeCategory]);
   }, [leagueFilter, activeCategory, players]);
+
   const visible = hasPremiumPlayerAccess ? filtered : filtered.slice(0, 3);
 
-  const rankIcon = (i: number) => {
-    if (i === 0) return <Crown className="w-4 h-4 text-primary" />;
-    if (i === 1) return <Medal className="w-4 h-4 text-wbl" />;
-    if (i === 2) return <Medal className="w-4 h-4 text-tgifbl" />;
-    return <span className="stat-numeral text-sm text-muted-foreground w-4 text-center">{i + 1}</span>;
-  };
-
   const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
+
+  // Stable itemData for react-window — avoids re-creating the object on every render
+  const maxStat = visible[0]?.stats[activeCategory] ?? 1;
+  const rowData = useMemo<RowData>(
+    () => ({ players: visible, activeCategory, maxStat }),
+    [visible, activeCategory, maxStat],
+  );
+
+  const listHeight = Math.min(visible.length * ROW_HEIGHT, MAX_LIST_HEIGHT);
 
   return (
     <div className="min-h-screen">
@@ -100,7 +181,7 @@ const LeaderboardsPage = () => {
           <Trophy className="w-5 h-5 text-primary" />
         </div>
 
-        {/* League filter — LEAGUE_REGISTRY driven with logos */}
+        {/* League filter */}
         <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit mb-6 overflow-x-auto">
           <button
             onClick={() => handleFilterChange('all')}
@@ -118,7 +199,15 @@ const LeaderboardsPage = () => {
                   : 'text-muted-foreground hover:text-foreground'
               }`}
             >
-              <img src={l.logo} alt="" width={14} height={14} className="flex-shrink-0 opacity-80" style={{ aspectRatio: '1/1' }} onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+              <img
+                src={l.logo}
+                alt=""
+                width={14}
+                height={14}
+                className="flex-shrink-0 opacity-80"
+                style={{ aspectRatio: '1/1' }}
+                onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
+              />
               {l.shortName}
             </button>
           ))}
@@ -127,15 +216,18 @@ const LeaderboardsPage = () => {
         {/* Category tabs */}
         <div className="flex gap-2 mb-8 overflow-x-auto scrollbar-hidden pb-2">
           {categories.map(c => (
-            <button key={c.key} onClick={() => setActiveCategory(c.key)} className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider rounded-sm whitespace-nowrap transition-colors ${activeCategory === c.key ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'}`}>
+            <button
+              key={c.key}
+              onClick={() => setActiveCategory(c.key)}
+              className={`px-4 py-2 text-xs font-semibold uppercase tracking-wider rounded-sm whitespace-nowrap transition-colors ${activeCategory === c.key ? 'bg-primary text-primary-foreground' : 'bg-secondary text-secondary-foreground'}`}
+            >
               {c.label}
             </button>
           ))}
         </div>
 
-        {/* Leaderboard */}
         <div className="max-w-3xl">
-          {/* Top 3 Spotlight */}
+          {/* Top 3 Spotlight — always rendered without virtualization */}
           {visible.length >= 3 && (
             <div className="grid grid-cols-3 gap-4 mb-8">
               {visible.slice(0, 3).map((p, i) => (
@@ -145,44 +237,48 @@ const LeaderboardsPage = () => {
                   <p className="font-display font-bold text-sm">{p.name}</p>
                   <LeagueBadge leagueId={p.leagueId} />
                   <p className="stat-numeral text-3xl text-primary mt-2">{p.stats[activeCategory]}</p>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{categories.find(c => c.key === activeCategory)?.label}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    {categories.find(c => c.key === activeCategory)?.label}
+                  </p>
                 </div>
               ))}
             </div>
           )}
 
-          {/* Full list */}
-          <div className="space-y-2">
-            {visible.map((p, i) => (
-              <div key={p.id} className={`panel p-3 flex items-center gap-4 ${i < 3 ? 'border-primary/20' : ''}`}>
-                <div className="w-6 flex justify-center">{rankIcon(i)}</div>
-                <img src={p.avatar} alt={p.name} className="w-10 h-10 rounded-full object-cover" loading="lazy" />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">{p.name}</p>
-                  <div className="flex items-center gap-2">
-                    <LeagueBadge leagueId={p.leagueId} />
-                    <span className="text-[10px] text-muted-foreground">{p.position} · {teams.find(t => t.id === p.teamId)?.name}</span>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="stat-numeral text-xl text-primary">{p.stats[activeCategory]}</p>
-                </div>
-                {/* Mini stat bar */}
-                <div className="hidden md:block w-24">
-                  <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-                    <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${(p.stats[activeCategory] / visible[0].stats[activeCategory]) * 100}%` }} />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-          {!hasPremiumPlayerAccess && (
-            <div className="mt-4 panel p-4 flex items-center justify-between gap-3">
-              <p className="text-xs text-muted-foreground">Minimal leaderboard mode is shown for fans and players without an active registration renewal.</p>
-              <span className="inline-flex items-center gap-1 text-xs text-primary font-semibold"><Lock className="w-3 h-3" /> Full rankings require active player tier</span>
+          {/* Full list — virtualized when >VIRTUALIZE_THRESHOLD items */}
+          {visible.length > VIRTUALIZE_THRESHOLD ? (
+            <div style={{ height: listHeight }}>
+              <List
+                rowCount={visible.length}
+                rowHeight={ROW_HEIGHT}
+                rowComponent={VirtualLeaderboardRow}
+                rowProps={rowData}
+              />
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {visible.map((p, i) => (
+                <LeaderboardRow
+                  key={p.id}
+                  player={p}
+                  index={i}
+                  activeCategory={activeCategory}
+                  maxStat={maxStat}
+                />
+              ))}
             </div>
           )}
 
+          {!hasPremiumPlayerAccess && (
+            <div className="mt-4 panel p-4 flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                Minimal leaderboard mode is shown for fans and players without an active registration renewal.
+              </p>
+              <span className="inline-flex items-center gap-1 text-xs text-primary font-semibold">
+                <Lock className="w-3 h-3" /> Full rankings require active player tier
+              </span>
+            </div>
+          )}
         </div>
       </div>
     </div>

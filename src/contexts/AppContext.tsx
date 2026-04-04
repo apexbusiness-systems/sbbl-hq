@@ -7,6 +7,8 @@ import { leagueIdFromCode, persistLeague, loadPersistedLeague } from '@/lib/leag
 import { readClientEnv } from '@/lib/env';
 import { getSupabaseClient } from '@/lib/supabase/client';
 
+// Bag state is intentionally split into BagContext so shopping-bag mutations
+// do not cascade re-renders to league/stats/scores/live consumers.
 interface AppState {
   activeLeague: LeagueId;
   setActiveLeague: (l: LeagueId) => void;
@@ -18,11 +20,6 @@ interface AppState {
   isPlayerSubscriptionActive: boolean;
   hasPremiumPlayerAccess: boolean;
   renewPlayerTier: () => void;
-  bagItems: string[];
-  addToBag: (id: string) => void;
-  removeFromBag: (id: string) => void;
-  bagOpen: boolean;
-  setBagOpen: (o: boolean) => void;
 }
 
 const AppContext = createContext<AppState | null>(null);
@@ -49,8 +46,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
   const [activeLeague, setActiveLeagueRaw] = useState<LeagueId>(resolveDefaultLeague);
   const [authRoleOverride, setAuthRoleOverride] = useState<AppRole | null>(null);
   const [playerSubscriptionEndsAt, setPlayerSubscriptionEndsAt] = useState<string | null>(null);
-  const [bagItems, setBagItems] = useState<string[]>([]);
-  const [bagOpen, setBagOpen] = useState(false);
 
   // Effective role: prototype toggle overrides JWT role when set
   const authRole: AppRole = authRoleOverride ?? ((roles[0] ?? 'fan') as AppRole);
@@ -93,15 +88,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       });
   }, [user?.id]);
 
-  const addToBag = (id: string) => {
-    setBagItems((prev) => [...prev, id]);
-    setBagOpen(true);
-  };
-
-  const removeFromBag = (id: string) => {
-    setBagItems((prev) => prev.filter((i) => i !== id));
-  };
-
   return (
     <AppContext.Provider value={{
       activeLeague,
@@ -114,11 +100,6 @@ export const AppProvider = ({ children }: { children: ReactNode }) => {
       isPlayerSubscriptionActive: isPlayerSubscriptionActive(playerSubscriptionEndsAt),
       hasPremiumPlayerAccess: hasPremiumPlayerAccess(authRole, playerSubscriptionEndsAt),
       renewPlayerTier,
-      bagItems,
-      addToBag,
-      removeFromBag,
-      bagOpen,
-      setBagOpen,
     }}>
       {children}
     </AppContext.Provider>

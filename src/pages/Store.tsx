@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { products as mockProducts } from '@/data/mock';
-import { useApp } from '@/contexts/AppContext';
+import { useBag } from '@/contexts/BagContext';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 import { Product } from '@/types';
@@ -9,7 +9,7 @@ import { ShoppingBag, Filter } from 'lucide-react';
 type Category = 'all' | 'tees' | 'hoodies' | 'jerseys' | 'caps' | 'accessories' | 'rewards';
 
 const StorePage = () => {
-  const { addToBag } = useApp();
+  const { addToBag } = useBag();
   const [category, setCategory] = useState<Category>('all');
   const [selectedProduct, setSelectedProduct] = useState<string | null>(null);
   const [selectedSize, setSelectedSize] = useState<string>('M');
