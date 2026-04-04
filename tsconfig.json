@@ -10,7 +10,8 @@
       ]
     },
     "skipLibCheck": true,
-    "strictNullChecks": false
+    "strictNullChecks": false,
+    "target": "ES2022"
   },
   "files": [],
   "references": [

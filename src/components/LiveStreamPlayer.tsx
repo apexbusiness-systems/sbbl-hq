@@ -1,3 +1,4 @@
+import { WhepPlayer } from '@/components/WhepPlayer';
 /**
  * LiveStreamPlayer.tsx
  * Renders the live-stream broadcast area with a multi-layer access gate:
@@ -40,6 +41,7 @@ interface LiveStreamPlayerProps {
   /** Whether admin has set stream to live */
   isStreamLive?: boolean;
   customStreamUrl?: string;
+  isCloudflareStream?: boolean;
 }
 
 export function LiveStreamPlayer({
