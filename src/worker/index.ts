@@ -1200,6 +1200,16 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
   if (!event.id || !event.type)
     return json({ ok: false, error: "invalid_stripe_event" }, 400);
 
+  // Fast dedup: insert into stripe_events; ON CONFLICT = already processed → 200 no-op.
+  // This is cheaper than calling the full process_stripe_webhook RPC for replayed events.
+  const { error: dedupErr } = await ctx.admin
+    .from("stripe_events")
+    .insert({ event_id: event.id, type: event.type, payload: event, status: "received" });
+  if (dedupErr && dedupErr.code === "23505") {
+    // Duplicate event — already seen and processed (or in-progress). Return 200 immediately.
+    return json({ ok: true, eventId: event.id, status: "duplicate_ignored" });
+  }
+
   const object = event.data?.object ?? {};
   const metadata =
     (object.metadata as Record<string, unknown> | undefined) ?? {};
@@ -1344,6 +1354,16 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
         .eq('user_id', userId);
     } catch { /* non-critical */ }
   }
+
+  // Mark event as processed in stripe_events (best-effort, non-blocking)
+  try {
+    void Promise.resolve(
+      ctx.admin
+        .from("stripe_events")
+        .update({ processed_at: new Date().toISOString(), status: "processed" })
+        .eq("event_id", event.id)
+    ).catch(() => {});
+  } catch { /* stripe_events update is non-critical */ }
 
   return json({
     ok: true,
@@ -3388,6 +3408,52 @@ async function handleBillingHistory({ req, admin }: HandlerCtx) {
   return json({ ok: true, data: data ?? [] });
 }
 
+// ── Observability: /ops/health + /ops/metrics-lite ───────────────────────────
+// Lightweight endpoints for uptime checks and basic operational metrics.
+// /ops/health: no auth required (used by external monitors / load balancers).
+// /ops/metrics-lite: no auth required (best-effort rolling counters from Worker memory).
+
+const metricsCounters = { requests: 0, status429: 0, status5xx: 0, startedAt: Date.now() };
+const latencyWindow: number[] = [];
+const MAX_LATENCY_SAMPLES = 1000;
+
+function recordMetrics(status: number, latencyMs: number) {
+  metricsCounters.requests++;
+  if (status === 429) metricsCounters.status429++;
+  if (status >= 500) metricsCounters.status5xx++;
+  latencyWindow.push(latencyMs);
+  if (latencyWindow.length > MAX_LATENCY_SAMPLES) latencyWindow.shift();
+}
+
+function computeP95(): number {
+  if (latencyWindow.length === 0) return 0;
+  const sorted = [...latencyWindow].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length * 0.95)] ?? 0;
+}
+
+async function handleOpsHealth({ env }: HandlerCtx) {
+  return json({
+    ok: true,
+    version: "2026.04-hardened",
+    commit: (env as unknown as Record<string, unknown>).CF_PAGES_COMMIT_SHA ?? "unknown",
+    supabase_url: env.SUPABASE_URL ? env.SUPABASE_URL.replace(/https?:\/\//, "").split(".")[0] + "...[redacted]" : "not_set",
+    time: new Date().toISOString(),
+    uptime_s: Math.floor((Date.now() - metricsCounters.startedAt) / 1000),
+  });
+}
+
+async function handleOpsMetricsLite(_ctx: HandlerCtx) {
+  return json({
+    ok: true,
+    total_requests: metricsCounters.requests,
+    status_429_count: metricsCounters.status429,
+    status_5xx_count: metricsCounters.status5xx,
+    p95_latency_ms: computeP95(),
+    sample_window_size: latencyWindow.length,
+    uptime_s: Math.floor((Date.now() - metricsCounters.startedAt) / 1000),
+  });
+}
+
 const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "GET", path: "/auth/session", handler: handleAuthSession },
   { method: "GET", path: "/api/profile/me", handler: handleMe },
@@ -3607,6 +3673,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "GET", path: "/ops/headshots", handler: handleHeadshotQueue },
   { method: "POST", path: "/api/ingress", handler: handleIngress },
   { method: "POST", path: "/sync/drain", handler: handleSyncDrain },
+  { method: "GET", path: "/ops/health", handler: handleOpsHealth },
+  { method: "GET", path: "/ops/metrics-lite", handler: handleOpsMetricsLite },
   { method: "POST", path: "/webhooks/stripe", handler: handleStripeWebhook },
   { method: "POST", path: "/api/coach/request", handler: handleCoachApprovalRequest },
   { method: "GET", path: "/ops/coach/requests", handler: handleListCoachRequests },
@@ -3642,14 +3710,15 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
+  // Facebook domains required for /live page embed (Switcher Studio → FB Live).
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net; " +
     "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: blob: https:; " +
     "font-src 'self' data:; " +
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://www.youtube.com https://player.vimeo.com; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
     "form-action 'self' https://checkout.stripe.com;"
@@ -3685,6 +3754,7 @@ export default Sentry.withSentry(
   }),
   {
   async fetch(req: Request, env: Env): Promise<Response> {
+    const _fetchStart = Date.now();
         const parsed = safeServerEnv(env as unknown as Record<string, unknown>);
 
     const url = new URL(req.url);
@@ -3749,6 +3819,7 @@ export default Sentry.withSentry(
           params,
           admin,
         });
+        recordMetrics(handlerResponse.status, Date.now() - _fetchStart);
         return addSecurityHeaders(handlerResponse);
       } catch (error) {
         const message =
@@ -3768,12 +3839,31 @@ export default Sentry.withSentry(
             extra: { path: url.pathname, method: req.method },
           });
         }
+        recordMetrics(status, Date.now() - _fetchStart);
         return addSecurityHeaders(json({ ok: false, error: message }, status));
       }
     }
 
     if (env.ASSETS) {
-      return env.ASSETS.fetch(req);
+      const assetRes = await env.ASSETS.fetch(req);
+      // Edge-cache static SPA shell: short TTL for HTML (revalidate quickly),
+      // long TTL for hashed assets (immutable via Vite content hashing).
+      if (assetRes.status === 200) {
+        const ct = assetRes.headers.get("content-type") ?? "";
+        const isHtml = ct.includes("text/html");
+        const cacheHeaders = new Headers(assetRes.headers);
+        if (isHtml) {
+          // HTML shell: cache 60s at edge, stale-while-revalidate for viral traffic resilience
+          cacheHeaders.set("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=600");
+        }
+        // Hashed assets already have immutable cache headers from Vite build
+        return addSecurityHeaders(new Response(assetRes.body, {
+          status: assetRes.status,
+          statusText: assetRes.statusText,
+          headers: cacheHeaders,
+        }));
+      }
+      return addSecurityHeaders(assetRes);
     }
 
     return addSecurityHeaders(json({ ok: false, error: "not_found" }, 404));

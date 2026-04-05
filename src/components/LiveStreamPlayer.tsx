@@ -253,8 +253,16 @@ export function LiveStreamPlayer({
             />
           </div>
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center bg-black">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3">
             <p className="text-sm text-muted-foreground">Admin has not provided a stream URL.</p>
+            <a
+              href="https://www.facebook.com/SBBLhq/live"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-[#1877F2] text-white text-xs font-bold uppercase tracking-wider rounded-sm hover:bg-[#166FE5] transition-colors"
+            >
+              Watch on Facebook
+            </a>
           </div>
         )}
 
@@ -278,7 +286,15 @@ export function LiveStreamPlayer({
               <Play className="w-8 h-8 text-muted-foreground" />
             </div>
             <h3 className="font-display text-xl font-bold mb-1">Stream Starting Soon</h3>
-            <p className="text-sm text-muted-foreground">The broadcast will begin shortly. Stay tuned.</p>
+            <p className="text-sm text-muted-foreground mb-3">The broadcast will begin shortly. Stay tuned.</p>
+            <a
+              href="https://www.facebook.com/SBBLhq/live"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-4 py-2 bg-[#1877F2] text-white text-xs font-bold uppercase tracking-wider rounded-sm hover:bg-[#166FE5] transition-colors"
+            >
+              Watch on Facebook
+            </a>
           </div>
         )}
 
