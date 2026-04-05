@@ -1,5 +1,8 @@
+import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '@/contexts/AppContext';
+import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
 import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -18,6 +21,8 @@ import { toast } from 'sonner';
 import type { Game } from '@/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+const LEAGUE_IDS = ['sbbl', 'wbl', 'tgifbl'];
+
 function mapHomeGameToUi(row: Record<string, unknown>): Game {
   const homeTeam = (row.home_team as Record<string, unknown> | null) ?? {};
   const awayTeam = (row.away_team as Record<string, unknown> | null) ?? {};
@@ -158,6 +163,49 @@ function AdminStreamControls({
 const LivePage = () => {
   const { hasPremiumPlayerAccess } = useApp();
   const { addToBag } = useBag();
+
+  // --- Top Performers Carousel Logic ---
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+
+  const { data: allPlayers = [] } = useQuery({
+    queryKey: ['public-players', 'all'],
+    queryFn: () => apiFetch('/api/public/players?league=all').then(res => res.data || []),
+    staleTime: 1000 * 60 * 5, // 5 min
+  });
+
+  const [activeLeagueIdx, setActiveLeagueIdx] = useState(0);
+  // leagueIds is moved outside to avoid dependency array issues
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setActiveLeagueIdx((prev) => (prev + 1) % LEAGUE_IDS.length);
+    }, 60000); // 60 seconds
+    return () => clearInterval(interval);
+  }, []);
+
+  const topPerformers = useMemo(() => {
+    const activeLeagueId = LEAGUE_IDS[activeLeagueIdx];
+    // Filter players by league, ensure they have stats, sort by points descending
+    const leaguePlayers = allPlayers.filter((p: PlayerProfile | any) => String(p.league_id || '').toLowerCase() === activeLeagueId);
+
+    // Sort logic mimicking typical PTS calculation if available, or fallback to mock if no data to not break dev layout
+
+    const sorted = leaguePlayers.sort((a: Record<string, any>, b: Record<string, any>) => {
+      const aPts = a.stats?.pts || 0;
+      const bPts = b.stats?.pts || 0;
+      return bPts - aPts;
+    });
+
+    return sorted.slice(0, 3).map((p: PlayerProfile | any) => ({
+      id: p.id,
+      name: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
+      avatar: p.avatar_url,
+      position: p.position || 'N/A',
+      pts: p.stats?.pts || 0,
+      league_id: p.league_id,
+    }));
+  }, [allPlayers, activeLeagueIdx]);
+
   const { user, session, roles } = useAuth();
   const token = session?.access_token ?? null;
   const isSuperAdmin = roles.includes('super_admin');
@@ -408,16 +456,21 @@ const LivePage = () => {
       {/* Top Performers */}
       <div className="panel p-4">
         <h3 className="font-display font-bold text-sm mb-3">Top Performers</h3>
-        {players.slice(0, 3).map(p => (
+        {topPerformers.length > 0 ? topPerformers.map((p: PlayerProfile | any) => (
           <div key={p.id} className="flex items-center gap-3 py-2 border-b border-border last:border-0">
-            <img src={p.avatar} alt={p.name} className="w-8 h-8 rounded-full object-cover" loading="lazy" />
+            <PlayerAvatar src={p.avatar} alt={p.name} className="w-8 h-8" />
             <div className="flex-1 min-w-0">
-              <p className="text-xs font-medium truncate">{p.name}</p>
+              <div className="flex items-center gap-2">
+                 <p className="text-xs font-medium truncate">{p.name || 'Unknown Player'}</p>
+                 <span className="text-[8px] px-1 py-0.5 rounded-sm bg-muted text-muted-foreground uppercase">{p.league_id}</span>
+              </div>
               <p className="text-[10px] text-muted-foreground">{p.position}</p>
             </div>
-            <span className="stat-numeral text-sm text-primary">{p.stats.pts} PTS</span>
+            <span className="stat-numeral text-sm text-primary">{p.pts ? p.pts.toFixed(1) : '0.0'} PTS</span>
           </div>
-        ))}
+        )) : (
+          <div className="text-xs text-muted-foreground py-4 text-center">Loading players...</div>
+        )}
       </div>
     </div>
   );

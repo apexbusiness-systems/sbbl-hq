@@ -1,3 +1,4 @@
+import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
 import { useState, useMemo, useEffect, useCallback, memo, type ReactElement } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { List, type RowComponentProps } from 'react-window';
@@ -53,7 +54,7 @@ const LeaderboardRow = memo(function LeaderboardRow({
   return (
     <div className={`panel p-3 flex items-center gap-4 ${i < 3 ? 'border-primary/20' : ''}`}>
       <div className="w-6 flex justify-center">{rankIcon(i)}</div>
-      <img src={p.avatar} alt={p.name} className="w-10 h-10 rounded-full object-cover" loading="lazy" />
+      <PlayerAvatar src={p.avatar} alt={p.name} className="w-10 h-10" />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium">{p.name}</p>
         <div className="flex items-center gap-2">
@@ -233,7 +234,7 @@ const LeaderboardsPage = () => {
               {visible.slice(0, 3).map((p, i) => (
                 <div key={p.id} className={`panel p-4 text-center ${i === 0 ? 'border-primary/30' : ''}`}>
                   <div className="flex justify-center mb-2">{rankIcon(i)}</div>
-                  <img src={p.avatar} alt={p.name} className="w-16 h-16 rounded-full object-cover mx-auto mb-2" loading="lazy" />
+                  <PlayerAvatar src={p.avatar} alt={p.name} className="w-16 h-16 mx-auto mb-2" />
                   <p className="font-display font-bold text-sm">{p.name}</p>
                   <LeagueBadge leagueId={p.leagueId} />
                   <p className="stat-numeral text-3xl text-primary mt-2">{p.stats[activeCategory]}</p>
