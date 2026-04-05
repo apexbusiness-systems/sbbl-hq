@@ -1,0 +1,8 @@
+## Docker Compose override: Custom PostgreSQL tuning (Phase 2)
+## Usage: docker compose -f docker-compose.yml -f docker-compose.db-tuning.yml up -d
+
+services:
+  db:
+    volumes:
+      - ./volumes/db/conf/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf

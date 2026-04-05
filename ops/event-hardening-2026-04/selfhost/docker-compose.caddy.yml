@@ -1,0 +1,52 @@
+# SBBL-HQ — Caddy TLS overlay for sbbl-hq.icu
+# Usage: docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d
+version: "3.8"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: supabase-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3 QUIC
+    volumes:
+      - ./volumes/proxy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    networks:
+      - supabase_network_public
+    depends_on:
+      - kong
+      - studio
+      - realtime
+      - storage
+    environment:
+      - PROXY_DOMAIN=sbbl-hq.icu
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Disable Kong's external HTTP/HTTPS bindings ──────────
+  # (Caddy takes 80/443; Kong listens only on the internal network)
+  kong:
+    ports: !reset []
+    expose:
+      - "8000"
+      - "8443"
+
+volumes:
+  caddy_data:
+    external: false
+  caddy_config:
+    external: false
+  caddy_logs:
+    external: false
+
+networks:
+  supabase_network_public:
+    external: true

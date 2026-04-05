@@ -35,3 +35,4 @@ package-lock.json
 apex-*.md
 omnidev-*.md
 supabase/.temp/
+ops/event-hardening-2026-04/selfhost/.env
