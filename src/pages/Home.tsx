@@ -231,10 +231,10 @@ const HomePage = () => {
           >
             <div className="flex flex-col md:flex-row gap-0">
               {/* Flyer image */}
-              <div className="md:w-[220px] flex-shrink-0 bg-black flex items-center justify-center overflow-hidden">
+              <div className="md:w-1/2 lg:w-[480px] flex-shrink-0 bg-black flex items-center justify-center overflow-hidden">
                 <img
-                  src="/assets/events/1v1-fred-vs-karl.jpg"
-                  alt="1v1 Event — Fred vs Karl"
+                  src="/assets/events/sbbl-2v2.jpg"
+                  alt="2v2 Event — Fred Cuison & Mark Cayabyab vs Yllbiee Barut & Justin Itabac"
                   className="w-full md:h-full object-contain object-top md:max-h-[320px]"
                   loading="lazy"
                   onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
@@ -243,11 +243,11 @@ const HomePage = () => {
               {/* Info */}
               <div className="flex-1 p-6 flex flex-col justify-center">
                 <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary mb-2">Featured Event · SBBL</p>
-                <h2 className="font-display text-3xl md:text-4xl font-bold uppercase leading-none mb-1">1V1</h2>
-                <p className="font-display text-xl md:text-2xl font-bold text-primary uppercase leading-none mb-4">Fred vs Karl</p>
+                <h2 className="font-display text-3xl md:text-4xl font-bold uppercase leading-none mb-1">2V2</h2>
+                <p className="font-display text-xl md:text-2xl font-bold text-primary uppercase leading-none mb-4">Fred & Mark vs Yllbiee & Justin</p>
                 <div className="space-y-1 text-sm text-muted-foreground mb-6">
                   <p className="font-medium text-foreground">Crawford School, 531 Finch Ave W</p>
-                  <p>Thursday, April 3, 2026 · 6:30 PM</p>
+                  <p>Saturday, April 11, 2026</p>
                 </div>
                 <Link
                   to="/schedules"
