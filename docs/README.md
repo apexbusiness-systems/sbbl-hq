@@ -1,8 +1,8 @@
-<!-- Version: v2.1.0 | Date: 2026-04-04 | Status: Current -->
+<!-- Version: v2.2.0 | Date: 2026-04-05 | Status: Current -->
 # SBBL HQ — Documentation Hub
 
-**Version:** v2.1.0
-**Last Updated:** 2026-04-04
+**Version:** v2.2.0
+**Last Updated:** 2026-04-05
 **Maintainer:** APEX Business Systems Ltd. — Engineering Lead
 
 > Single source of truth for all SBBL HQ engineering, operational, and product documentation.
@@ -35,7 +35,7 @@ docs/
 |---|---|---|
 | [ARCHITECTURE](./architecture/ARCHITECTURE_v1.2.0.md) | v1.2.0 | Full stack overview — Vite + React + Supabase + Cloudflare + Stripe + Sentry |
 | [DB SCHEMA](./architecture/DB_SCHEMA_v1.2.0.md) | v1.2.0 | Core schema + 28 migrations — tables, indexes, matviews, RLS helpers |
-| [API REFERENCE](./architecture/API_REFERENCE_v1.1.0.md) | v1.1.0 | Worker API endpoints, auth, idempotency |
+| [API REFERENCE](./architecture/API_REFERENCE_v1.2.0.md) | v1.2.0 | Worker API endpoints, JWT-only auth, idempotency, full route inventory |
 
 ---
 
@@ -53,7 +53,7 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
-| [OPERATIONS RUNBOOK](./operations/OPERATIONS_RUNBOOK_v1.3.0.md) | v1.3.0 | Env setup, deployments, DB ops, CI/CD pipeline, emergency procedures |
+| [OPERATIONS RUNBOOK](./operations/OPERATIONS_RUNBOOK_v1.4.0.md) | v1.4.0 | Env setup, deployments, DB ops, CI/CD, emergency procedures, livestream ops |
 | [EXTERNAL BINDINGS](./operations/EXTERNAL_BINDINGS_v1.0.0.md) | v1.0.0 | Third-party secrets and service configuration checklist |
 | [OPERATIONS RUNBOOK (archived)](./operations/OPERATIONS_RUNBOOK_v1.0.0_archived.md) | v1.0.0 | Superseded — retained for historical reference |
 
@@ -74,7 +74,7 @@ docs/
 | Document | Version | Description |
 |---|---|---|
 | [STATS PIPELINE](./features/STATS_PIPELINE_v1.2.0.md) | v1.2.0 | 4-stage stat submission + materialized standings + react-window virtualization |
-| [STREAM GATING](./features/STREAM_GATING_v1.2.0.md) | v1.2.0 | PPV entitlement, invites, Turnstile, Stripe webhook, live chat, standings |
+| [STREAM GATING](./features/STREAM_GATING_v1.3.0.md) | v1.3.0 | PPV entitlement, invites, Turnstile, Stripe webhook, live chat, auth auto-refresh, circuit breaker |
 | [PIPELINE MAP](./features/PIPELINE_MAP_v1.0.0.md) | v1.0.0 | Super-Admin Ops Console data upload pipeline flowchart |
 
 ## Quality
@@ -82,7 +82,7 @@ docs/
 | Document | Version | Description |
 |---|---|---|
 | [RELEASE GATE AUDIT 2026-04-04](./quality/RELEASE_GATE_AUDIT_2026-04-04_v1.1.0.md) | v1.1.0 | 10K concurrency hardening + CI pipeline fixes — gate decision: PASS |
-| [LIVESTREAM WORKFLOW AUDIT 2026-04-04](./quality/LIVESTREAM_WORKFLOW_AUDIT_2026-04-04.md) | v1.0.0 | Live page + stream control plane capacity and latency review |
+| [LIVESTREAM WORKFLOW AUDIT 2026-04-05](./quality/LIVESTREAM_WORKFLOW_AUDIT_2026-04-04.md) | v2.0.0 | Livestream pipeline audit — 20K hardening pass complete, all gaps resolved |
 | [BUILD AUDIT 2026-03-28](./quality/BUILD_AUDIT_2026-03-28_v1.0.0.md) | v1.0.0 | End-to-end build audit — historical baseline |
 
 ---
@@ -109,6 +109,8 @@ docs/
 | Document | Version | Description |
 |---|---|---|
 | [PRODUCTION STATUS 2026-03-28](./status/PRODUCTION_STATUS_2026-03-28_v1.0.0.md) | v1.0.0 | Point-in-time readiness snapshot |
+| [LIVESTREAM HARDENING 2026-04-05](./status/LIVESTREAM_HARDENING_2026-04-05_v1.0.0.md) | v1.0.0 | Livestream pipeline hardening — 20K stress validated, zero errors |
+| [LOAD TESTING 20K AUDIT 2026-04-05](./status/LOAD_TESTING_20k_AUDIT_2026-04-05_v1.0.0.md) | v1.0.0 | 20K concurrent user load test — bottleneck identification and fixes |
 
 ---
 
