@@ -72,4 +72,58 @@
   - Postgres CPU > 80%
   - EBS disk > 80%
   - Replication lag > 5s
+
+## Script Inventory
+
+| Script | Purpose | Status |
+|--------|---------|--------|
+| `01-generate-keys.sh` | Generate JWT keys (ANON_KEY, SERVICE_ROLE_KEY) | Ready |
+| `02-migrate-auth.sh` | Migrate auth.users + identities from Cloud | Ready |
+| `03-validate-auth.sh` | Smoke test auth: HIBP, CAPTCHA, password policy | Ready |
+| `04-fix-ssh-security-group.sh` | Replace ephemeral CloudShell IP in SG | Ready |
+| `05-post-deploy-validate.sh` | Full post-deploy health check | Ready |
+| `06-start-supabase-primary.sh` | SSH to primary, docker compose up -d, verify | Ready |
+| `07-open-api-studio-ports.sh` | Open port 8000/3000 in SG for Studio access | Ready |
+| `08-setup-hot-standby.sh` | Configure streaming replication on replica | Ready |
+| `09-cutover.sh` | CF Worker secrets + DNS cutover + smoke test | Ready |
+| `10-backup-nightly.sh` | pg_dump auth schema nightly to S3/local | Ready |
+| `11-verify-backup.sh` | Restore backup into test instance + verify | Ready |
+| `12-prune-backups.sh` | Delete backups older than 30 days | Ready |
+| `13-promote-replica.sh` | Failover: promote standby to primary + DNS flip | Ready |
+| `14-ebs-dlm-setup.sh` | AWS DLM nightly EBS snapshots (7-day retention) | Ready |
+| `15-monitoring-alerts.sh` | CloudWatch alarms: CPU, disk, lag, errors | Ready |
+
+## Load Test Inventory
+
+| Test | Target | SLO |
+|------|--------|-----|
+| `tests/load-auth.js` | Auth: signup/login/OAuth under 5k VU | p95 < 600ms, error < 1% |
+| `tests/load-realtime.js` | WebSocket: score subscriptions under 5k VU | p95 connect < 500ms, msg lag < 300ms |
+| `tests/load-live-page.js` | Live page + standings + stream-status under 10k VU | p95 page < 500ms, p99 < 1500ms |
+
+## Run Order (Event Day -3)
+
+```
+1. ./scripts/04-fix-ssh-security-group.sh <YOUR_IP>
+2. ./scripts/06-start-supabase-primary.sh
+3. ./scripts/07-open-api-studio-ports.sh
+4. ./scripts/08-setup-hot-standby.sh
+5. ./scripts/14-ebs-dlm-setup.sh
+6. ./scripts/15-monitoring-alerts.sh
+7. ./scripts/05-post-deploy-validate.sh
+8. k6 run --env SUPABASE_URL=https://sbbl-hq.icu tests/load-auth.js
+9. k6 run --env SUPABASE_URL=https://sbbl-hq.icu tests/load-live-page.js
+10. k6 run --env SUPABASE_URL=https://sbbl-hq.icu tests/load-realtime.js
+11. ./scripts/09-cutover.sh   # when all gates pass
+```
+
+## Failover Runbook (Emergency)
+
+```
+# If primary 52.21.231.157 is unreachable:
+1. REPLICA_HOST=3.83.9.123 ./scripts/13-promote-replica.sh
+2. Verify: curl -I https://sbbl-hq.icu/auth/v1/  # should 401
+3. Update Worker secrets: echo 'https://sbbl-hq.icu' | wrangler secret put SUPABASE_URL
+4. Once primary recovered: reconfigure as new replica via 08-setup-hot-standby.sh
+```
   - 5xx rate > 1%
