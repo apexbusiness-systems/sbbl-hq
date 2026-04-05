@@ -25,10 +25,10 @@ type Route = { method: string; regex: RegExp; handler: Handler };
 const transientIdempotency = new Map<string, number>();
 const transientRateLimits = new Map<string, number[]>();
 
-function json(data: unknown, status = 200) {
+function json(data: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "content-type": "application/json; charset=utf-8" },
+    headers: { "content-type": "application/json; charset=utf-8", ...extraHeaders },
   });
 }
 
@@ -38,6 +38,22 @@ function enforceInMemoryRateLimit(
   windowMs: number,
 ): boolean {
   const now = Date.now();
+
+  // Sweep stale rate limits to prevent OOM under extreme load (20k+ concurrents)
+  // Run sweep approx 10% of the time to avoid CPU block
+  if (Math.random() < 0.1) {
+    for (const [k, v] of transientRateLimits.entries()) {
+      const valid = v.filter((ts) => now - ts <= windowMs);
+      if (valid.length === 0) transientRateLimits.delete(k);
+      else transientRateLimits.set(k, valid);
+    }
+
+    // Also sweep idempotency map which grows unbounded
+    for (const [k, v] of transientIdempotency.entries()) {
+       if (now - v > 60_000) transientIdempotency.delete(k);
+    }
+  }
+
   const bucket = transientRateLimits.get(key) ?? [];
   const recent = bucket.filter((ts) => now - ts <= windowMs);
   if (recent.length >= limit) {
@@ -296,7 +312,7 @@ async function handleStats({ req, admin }: HandlerCtx) {
     p_filters: filters,
   });
   if (error) throw new Error(error.message);
-  return json({ ok: true, userId, data });
+  return json({ ok: true, userId, data }, 200, { "Cache-Control": "public, s-maxage=60, max-age=30" });
 }
 
 async function handleLeaderboards({ req, admin }: HandlerCtx) {
@@ -306,7 +322,7 @@ async function handleLeaderboards({ req, admin }: HandlerCtx) {
     p_filters: filters,
   });
   if (error) throw new Error(error.message);
-  return json({ ok: true, userId, data });
+  return json({ ok: true, userId, data }, 200, { "Cache-Control": "public, s-maxage=60, max-age=30" });
 }
 
 async function handleDraft(ctx: HandlerCtx) {
@@ -2062,7 +2078,7 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
     };
   });
 
-  return json({ ok: true, teams });
+  return json({ ok: true, teams }, 200, { "Cache-Control": "public, s-maxage=60, max-age=30" });
 }
 
 function compilePath(path: string) {
@@ -3185,6 +3201,10 @@ async function handlePayOrder(ctx: HandlerCtx) {
 // Accepts line items from the client (no DB variant records required).
 // Used by BagDrawer until real DB products/variants are seeded.
 async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
+  const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "unknown";
+  if (!enforceInMemoryRateLimit(`store-checkout:${ip}`, 10, 60_000)) {
+    return json({ ok: false, error: "rate_limit_exceeded" }, 429);
+  }
   await ensureMutation(req, { req, env, admin, params: {} });
   const userId = requireAuth(req);
   if (!env.STRIPE_SECRET_KEY)
@@ -3257,7 +3277,7 @@ async function handlePublicProducts({ req, admin }: HandlerCtx) {
   if (leagueId) query = query.eq("league_id", leagueId);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return json({ ok: true, data: data ?? [] });
+  return json({ ok: true, data: data ?? [] }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
 }
 
 async function handlePublicMedia({ req, admin }: HandlerCtx) {
@@ -3294,12 +3314,16 @@ async function handlePublicMedia({ req, admin }: HandlerCtx) {
     };
   });
 
-  return json({ ok: true, data: mapped });
+  return json({ ok: true, data: mapped }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
 }
 
 async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
-  await ensureMutation(req, { req, env, admin, params: {} });
   const userId = requireAuth(req);
+  const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "unknown";
+  if (!enforceInMemoryRateLimit(`player-checkout:${userId}:${ip}`, 6, 60_000)) {
+    return json({ ok: false, error: "rate_limit_exceeded" }, 429);
+  }
+  await ensureMutation(req, { req, env, admin, params: {} });
   if (!env.STRIPE_SECRET_KEY)
     return json({ ok: false, error: "payments_not_configured" }, 503);
   const body = (await req.json().catch(() => null)) as {
@@ -3978,7 +4002,7 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
     ? (rows[rows.length - 1]?.created_at as string | undefined) ?? null
     : null;
 
-  return json({ ok: true, games: filtered, nextCursor });
+  return json({ ok: true, games: filtered, nextCursor }, 200, { "Cache-Control": "public, s-maxage=60, max-age=30" });
 }
 
 /** POST /ops/scores/game — upsert a single game (super_admin only) */
