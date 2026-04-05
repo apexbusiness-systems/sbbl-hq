@@ -4,7 +4,7 @@ import { useApp } from '@/contexts/AppContext';
 import { useAuth } from '@/hooks/use-auth';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
-import { PLAYER_REGISTRATION_PRICE_USD } from '@/lib/auth/subscription';
+import { PLAYER_REGISTRATION_PRICE_CAD } from '@/lib/auth/subscription';
 import { toast } from 'sonner';
 
 interface Order {
@@ -67,7 +67,7 @@ const BillingPage = () => {
             <CreditCard className="w-4 h-4 text-muted-foreground" /> Player Registration Tier
           </h3>
           <p className="text-xs text-muted-foreground">
-            Player-only tier costs ${PLAYER_REGISTRATION_PRICE_USD.toFixed(2)} / month. Active players get leaderboard/profile inclusion and free livestream access.
+            Player-only tier costs ${PLAYER_REGISTRATION_PRICE_CAD.toFixed(2)} / month. Active players get leaderboard/profile inclusion and free livestream access.
           </p>
           <div className="mt-3 p-3 bg-secondary rounded-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div>
@@ -85,7 +85,7 @@ const BillingPage = () => {
                 className="gold-bg px-4 py-2 text-xs font-semibold rounded-sm uppercase tracking-wider inline-flex items-center gap-2 disabled:opacity-60"
               >
                 {checkoutLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <ExternalLink className="w-3 h-3" />}
-                Pay ${PLAYER_REGISTRATION_PRICE_USD.toFixed(2)} & Renew
+                Pay ${PLAYER_REGISTRATION_PRICE_CAD.toFixed(2)} & Renew
               </button>
             )}
           </div>

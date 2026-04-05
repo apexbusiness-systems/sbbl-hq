@@ -3,12 +3,6 @@ import { AppRole } from '@/lib/auth/roles';
 /** Player membership: $6.99 CAD / month recurring subscription */
 export const PLAYER_REGISTRATION_PRICE_CAD = 6.99;
 
-/**
- * @deprecated Use PLAYER_REGISTRATION_PRICE_CAD.
- * Kept for backwards-compatibility with existing test expectations.
- */
-export const PLAYER_REGISTRATION_PRICE_USD = PLAYER_REGISTRATION_PRICE_CAD;
-
 /** PPV single-stream access: $4.99 CAD, token valid for 6 hours from first use */
 export const PPV_PRICE_CAD = 4.99;
 export const PPV_ACCESS_HOURS = 6;

@@ -3,7 +3,6 @@ import {
   hasPremiumPlayerAccess,
   isPlayerSubscriptionActive,
   PLAYER_REGISTRATION_PRICE_CAD,
-  PLAYER_REGISTRATION_PRICE_USD,
   PPV_PRICE_CAD,
   PPV_ACCESS_HOURS,
   PLAYER_STORE_DISCOUNT_PERCENT,
@@ -13,8 +12,6 @@ import {
 describe('player subscription access', () => {
   it('player registration is $6.99 CAD/month', () => {
     expect(PLAYER_REGISTRATION_PRICE_CAD).toBe(6.99);
-    // backwards compat alias
-    expect(PLAYER_REGISTRATION_PRICE_USD).toBe(PLAYER_REGISTRATION_PRICE_CAD);
   });
 
   it('PPV is $4.99 CAD with 6-hour access window', () => {
