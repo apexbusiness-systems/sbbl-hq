@@ -65,6 +65,17 @@ const OpsPage = () => {
   const [storeDeleteId, setStoreDeleteId] = useState('');
 
   // ── Scores state ──────────────────────────────────────────────────────────
+
+  // --- Event Graphics Parser State ---
+  const eventFileRef = useRef<HTMLInputElement>(null);
+  const [eventParseState, setEventParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
+  const [eventParseError, setEventParseError] = useState('');
+  const [eventGraphicForm, setEventGraphicForm] = useState({
+    title: '',
+    location: '',
+    date: '',
+    leagueId: 'sbbl',
+  });
   const scoreboardFileRef = useRef<HTMLInputElement>(null);
   const scoresCsvFileRef = useRef<HTMLInputElement>(null);
   const [scoresCsvRows, setScoresCsvRows] = useState<Record<string, string>[]>([]);
@@ -350,6 +361,68 @@ const OpsPage = () => {
     },
   });
 
+
+  const handleEventImageUpload = async (file: File) => {
+    if (!file) return;
+    setEventParseState('parsing');
+    setEventParseError('');
+    try {
+      const reader = new FileReader();
+      const b64 = await new Promise<string>((resolve, reject) => {
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const dataUrl = b64.startsWith('data:') ? b64 : `data:${file.type};base64,${b64}`;
+
+      const promptText = `Extract event details from this image.
+Return valid JSON only, no markdown.
+{
+  "title": "String, name of the event (e.g. '2v2 Fred & Mark vs Yllbiee & Justin')",
+  "location": "String, location if present",
+  "date": "String, event date and time if present",
+  "leagueId": "String, league abbreviation if present (wbl, tgif, sbbl)"
+}`;
+
+      const reqBody = {
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: dataUrl } },
+            { type: "text", text: promptText }
+          ]
+        }]
+      };
+
+      const aiUrl = 'https://ai.peak-services.workers.dev/v1/chat/completions';
+      const aiRes = await fetch(aiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reqBody)
+      });
+      if (!aiRes.ok) throw new Error(`AI service returned ${aiRes.status}`);
+
+      const aiData = await aiRes.json();
+      const contentStr = aiData.choices?.[0]?.message?.content || '{}';
+
+      const match = contentStr.match(/\{.*?\}/s);
+      const cleaned = match ? match[0] : '{}';
+      const parsed = JSON.parse(cleaned);
+
+      setEventGraphicForm({
+        title: parsed.title || '',
+        location: parsed.location || '',
+        date: parsed.date || '',
+        leagueId: (parsed.leagueId || 'sbbl').toLowerCase(),
+      });
+      setEventParseState('parsed');
+
+    } catch (err: Error | unknown) {
+      console.error('Event extraction failed:', err);
+      setEventParseError((err as Error).message || 'Failed to parse image');
+      setEventParseState('error');
+    }
+  };
   const handleScoreboardImage = async (file: File) => {
     setScoreboardParseState('parsing');
     setScoreboardParseError(null);
@@ -795,6 +868,67 @@ const OpsPage = () => {
                   <button disabled={!eventForm.title || createEventMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createEventMutation.mutate()}>{createEventMutation.isPending ? 'Creating…' : 'Create Event'}</button>
                   {createEventMutation.error && <p className="text-xs text-destructive">{(createEventMutation.error as Error).message}</p>}
                   {createEventMutation.isSuccess && <p className="text-xs text-success">Event created.</p>}
+                </div>
+              </div>
+
+              <div className="border border-border p-3 rounded-sm mt-6 mb-4">
+                <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                  <Upload className="w-4 h-4 text-primary" />
+                  Event Graphic Parser
+                </h3>
+                <p className="text-xs text-muted-foreground mb-4">Upload a flyer/graphic to automatically extract event details.</p>
+
+                <div
+                  className="border-2 border-dashed border-border rounded-sm p-6 text-center cursor-pointer hover:border-primary/40 transition-colors mb-4"
+                  onClick={() => eventFileRef.current?.click()}
+                  onDragOver={(e: React.DragEvent) => e.preventDefault()}
+                  onDrop={(e: React.DragEvent) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) { void handleEventImageUpload(f); } }}
+                >
+                  <input ref={eventFileRef} type="file" accept="image/*" className="hidden" onChange={(e: React.ChangeEvent<HTMLInputElement>) => { const f = e.target.files?.[0]; if (f) { void handleEventImageUpload(f); } }} />
+                  {eventParseState === 'parsing' ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                      <p className="text-sm text-muted-foreground">Extracting event details…</p>
+                    </div>
+                  ) : eventParseState === 'parsed' ? (
+                    <div className="flex flex-col items-center gap-1">
+                      <CheckCircle2 className="w-5 h-5 text-success" />
+                      <p className="text-xs text-success font-medium">Extracted successfully</p>
+                      <p className="text-[10px] text-muted-foreground">Review fields below</p>
+                    </div>
+                  ) : eventParseState === 'error' ? (
+                    <div className="flex flex-col items-center gap-1">
+                      <AlertCircle className="w-5 h-5 text-destructive" />
+                      <p className="text-xs text-destructive">{eventParseError}</p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2">
+                      <Upload className="w-6 h-6 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">Drop flyer image or click to upload</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="space-y-2 bg-secondary/30 p-3 rounded-sm border border-border">
+                  <input placeholder="Event Title *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventGraphicForm.title} onChange={(e) => setEventGraphicForm(f => ({ ...f, title: e.target.value }))} />
+                  <input placeholder="Location" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventGraphicForm.location} onChange={(e) => setEventGraphicForm(f => ({ ...f, location: e.target.value }))} />
+                  <input placeholder="League ID (e.g. wbl, sbbl)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventGraphicForm.leagueId} onChange={(e) => setEventGraphicForm(f => ({ ...f, leagueId: e.target.value }))} />
+                  <input placeholder="Date / Time" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventGraphicForm.date} onChange={(e) => setEventGraphicForm(f => ({ ...f, date: e.target.value }))} />
+                  <button
+                    disabled={!eventGraphicForm.title || createEventMutation.isPending}
+                    className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60 flex justify-center items-center gap-2"
+                    onClick={() => {
+                      setEventForm({
+                         title: eventGraphicForm.title,
+                         location: eventGraphicForm.location,
+                         date: eventGraphicForm.date,
+                         leagueId: eventGraphicForm.leagueId
+                      });
+                      setTimeout(() => createEventMutation.mutate(), 0);
+                    }}
+                  >
+                    {createEventMutation.isPending ? 'Creating…' : 'Create Event from Extraction'}
+                  </button>
                 </div>
               </div>
               <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
