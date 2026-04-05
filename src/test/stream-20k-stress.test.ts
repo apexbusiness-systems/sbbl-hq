@@ -25,6 +25,13 @@
  *   - All users hit handlers concurrently within each wave
  */
 import { describe, it, expect, beforeAll } from 'vitest';
+
+// ── CI Gate ─────────────────────────────────────────────────────────────────
+// This is a load test, not a unit test. It exercises 20K concurrent users and
+// takes ~90s on a fast machine. Skip in CI to avoid timeout/OOM on GitHub
+// Actions runners. Run on-demand: STRESS=1 npx vitest run src/test/stream-20k-stress.test.ts
+const SKIP = !process.env.STRESS;
+const describeStress = SKIP ? describe.skip : describe;
 import {
   handlePublicStreamStatus,
   handlePlaybackSession,
@@ -371,7 +378,7 @@ beforeAll(() => {
 
 // ── THE STRESS TEST ─────────────────────────────────────────────────────────
 
-describe('20,000 Concurrent User Stress Battery', () => {
+describeStress('20,000 Concurrent User Stress Battery', () => {
   const db = new InMemorySupabase();
   const admin = db as unknown as any;
 
