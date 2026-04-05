@@ -24,9 +24,8 @@ const eventSbblSeason11 = '/assets/events/sbbl-season-11.jpg';
 const potgRexManalo = '/assets/potg/wbl-rex-aldous-manalo.jpg';
 const potgAngeloFrez = '/assets/potg/wbl-angelo-frez.jpg';
 const potgShawnCox = '/assets/potg/wbl-shawn-cox.jpg';
-const potgJtBalanguiApr04 = '/assets/potg/wbl-jt-balangui-apr04.jpg';
 const potgJayceeMasilungan = '/assets/potg/wbl-jaycee-masilungan.jpg';
-const potgBrFabiana = '/assets/potg/wbl-br-fabiana.jpg';
+const potgBrFabiana = '/assets/potg/wbl-rr-fabiana.jpg';
 const potgTeejayReymundo = '/assets/potg/wbl-teejay-reymundo.jpg';
 const potgRobertOcampo = '/assets/potg/wbl-robert-ocampo.jpg';
 
@@ -131,7 +130,7 @@ export const mediaAssets: MediaAsset[] = [
   { id: 'm-wbl-potg-rex', title: 'POTG — Rex Aldous Manalo (Rebelde Jrs)', type: 'poster', thumbnail: potgRexManalo, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
   { id: 'm-wbl-potg-angelo', title: 'POTG — Angelo Frez (Blacksmith)', type: 'poster', thumbnail: potgAngeloFrez, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
   { id: 'm-wbl-potg-shawn', title: 'POTG — Shawn Cox (Serviteurs)', type: 'poster', thumbnail: potgShawnCox, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
-  { id: 'm-wbl-potg-jt-apr04', title: 'POTG — JT Balangui (Splash)', type: 'poster', thumbnail: potgJtBalanguiApr04, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
+  { id: 'm-wbl-potg-jt-apr04', title: 'POTG — JT Balangui (Splash)', type: 'poster', thumbnail: potgJtBalangui, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
   { id: 'm-wbl-potg-jaycee', title: 'POTG — Jaycee Masilungan (Harina x Wild Dogs)', type: 'poster', thumbnail: potgJayceeMasilungan, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
   { id: 'm-wbl-potg-br', title: 'POTG — BR Fabiana (Rebelde)', type: 'poster', thumbnail: potgBrFabiana, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
   { id: 'm-wbl-potg-teejay', title: 'POTG — Tee Jay Reymundo (Crosslinx Warriors)', type: 'poster', thumbnail: potgTeejayReymundo, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
@@ -166,7 +165,7 @@ export const playersOfTheGame: PlayerOfTheGame[] = [
   { id: 'potg-wbl-8', leagueId: 'wbl', playerName: 'Rex Aldous Manalo', team: 'Rebelde Jrs', pts: 24, rebs: 6, assts: 6, gameResult: 'OSY 80 VS REBELDE JRS 85', date: '2026-04-04', image: potgRexManalo },
   { id: 'potg-wbl-9', leagueId: 'wbl', playerName: 'Angelo Frez', team: 'Blacksmith', pts: 30, rebs: 6, assts: 7, gameResult: 'BLACKSMITH 84 VS LA LIGA ELITE 80', date: '2026-04-04', image: potgAngeloFrez },
   { id: 'potg-wbl-10', leagueId: 'wbl', playerName: 'Shawn Cox', team: 'Serviteurs', pts: 20, rebs: 7, assts: 6, gameResult: 'KANTO BOYS 43 VS SERVITEURS 62', date: '2026-04-04', image: potgShawnCox },
-  { id: 'potg-wbl-11', leagueId: 'wbl', playerName: 'JT Balangui', team: 'Splash', pts: 20, rebs: 6, assts: 8, gameResult: 'SPG 77 VS SPLASH 80', date: '2026-04-04', image: potgJtBalanguiApr04 },
+  { id: 'potg-wbl-11', leagueId: 'wbl', playerName: 'JT Balangui', team: 'Splash', pts: 20, rebs: 6, assts: 8, gameResult: 'SPG 77 VS SPLASH 80', date: '2026-04-04', image: potgJtBalangui },
   { id: 'potg-wbl-12', leagueId: 'wbl', playerName: 'Jaycee Masilungan', team: 'Harina x Wild Dogs', pts: 22, rebs: 6, assts: 5, gameResult: 'LA LIGA ELITE 65 VS HARINA X WILD DOGS 95', date: '2026-04-04', image: potgJayceeMasilungan },
   { id: 'potg-wbl-13', leagueId: 'wbl', playerName: 'BR Fabiana', team: 'Rebelde', pts: 18, rebs: 3, assts: 4, gameResult: 'DOWNTOWN 62 VS REBELDE 67', date: '2026-04-04', image: potgBrFabiana },
   { id: 'potg-wbl-14', leagueId: 'wbl', playerName: 'Tee Jay Reymundo', team: 'Crosslinx Warriors', pts: 30, rebs: 4, assts: 4, gameResult: 'SOLID NORTH 56 VS CROSSLINX 63', date: '2026-04-04', image: potgTeejayReymundo },
