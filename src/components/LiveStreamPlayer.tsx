@@ -1,4 +1,3 @@
-import { WhepPlayer } from '@/components/WhepPlayer';
 /**
  * LiveStreamPlayer.tsx
  * Renders the live-stream broadcast area with a multi-layer access gate:
@@ -37,7 +36,6 @@ interface LiveStreamPlayerProps {
   game: Game;
   userId: string | null;
   roles: AppRole[];
-  token: string | null;
   hasPremiumPlayerAccess: boolean;
   /** Whether admin has set stream to live */
   isStreamLive?: boolean;
@@ -47,7 +45,6 @@ export function LiveStreamPlayer({
   game,
   userId,
   roles,
-  token,
   hasPremiumPlayerAccess,
   isStreamLive,
 }: LiveStreamPlayerProps) {
@@ -78,22 +75,26 @@ export function LiveStreamPlayer({
   const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
 
   // ── Fetch stream entitlement (skip if role already grants access) ─────────
+  // Pass null instead of explicit token — apiFetch auto-fetches a fresh JWT
+  // via getAuthToken(), preventing stale-token 401 loops.
   useEffect(() => {
     if (!userId || hasRoleAccess) {
       setAccessChecked(true);
       return;
     }
 
-    apiFetch<{ hasAccess: boolean }>(`/api/streams/${game.id}/access`, {}, token)
+    apiFetch<{ hasAccess: boolean }>(`/api/streams/${game.id}/access`, {}, null)
       .then(res => {
         if (res.hasAccess) setPpvEntitled(true);
       })
       .catch(() => { /* network error — stay in preview; user can retry purchase */ })
       .finally(() => setAccessChecked(true));
-  }, [userId, game.id, hasRoleAccess, token]);
+  }, [userId, game.id, hasRoleAccess]);
 
+  // Start playback session — all API calls use null token so apiFetch
+  // auto-refreshes the JWT, preventing stale-token 401 loops.
   useEffect(() => {
-    if (!hasAccess || !userId || !token) return;
+    if (!hasAccess || !userId) return;
     let active = true;
     let heartbeatId: number | null = null;
     let sessionIdForCleanup: string | null = null;
@@ -107,7 +108,7 @@ export function LiveStreamPlayer({
         }>(`/api/streams/${game.id}/session`, {
           method: 'POST',
           body: JSON.stringify({ sessionKey }),
-        }, token);
+        }, null);
         if (!active) return;
         setPlaybackUrl(res.playback.url);
         sessionIdForCleanup = res.session.id;
@@ -116,7 +117,7 @@ export function LiveStreamPlayer({
           void apiFetch(`/api/streams/${game.id}/session/heartbeat`, {
             method: 'POST',
             body: JSON.stringify({ sessionId: res.session.id }),
-          }, token).catch(() => {});
+          }, null).catch(() => {});
         }, hbMs);
       } catch {
         if (active) toast.error('Unable to start secure playback session.');
@@ -132,10 +133,10 @@ export function LiveStreamPlayer({
         void apiFetch(`/api/streams/${game.id}/session/end`, {
           method: 'POST',
           body: JSON.stringify({ sessionId: sessionIdForCleanup }),
-        }, token).catch(() => {});
+        }, null).catch(() => {});
       }
     };
-  }, [hasAccess, userId, token, game.id]);
+  }, [hasAccess, userId, game.id]);
 
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
@@ -261,7 +262,7 @@ export function LiveStreamPlayer({
                         method: 'POST',
                         body: JSON.stringify({ gameId: game.id }),
                       },
-                      token,
+                      null,
                     );
                     setGeneratedCode(res.code);
                     toast.success(
@@ -342,7 +343,7 @@ export function LiveStreamPlayer({
                     captchaToken: await resolveToken(),
                   }),
                 },
-                token,
+                null,
               );
               if (res.url) window.location.href = res.url;
             } catch {
@@ -410,7 +411,7 @@ export function LiveStreamPlayer({
             captchaToken: await resolveToken(),
           }),
         },
-        token,
+        null,
       );
       setInviteGranted(true);
       toast.success('Invite accepted — enjoy the game!');
