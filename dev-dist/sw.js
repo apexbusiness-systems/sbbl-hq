@@ -67,7 +67,7 @@ if (!self.define) {
     });
   };
 }
-define(['./workbox-52f2a342'], (function (workbox) { 'use strict';
+define(['./workbox-529b8e9d'], (function (workbox) { 'use strict';
 
   self.skipWaiting();
   workbox.clientsClaim();
@@ -78,27 +78,61 @@ define(['./workbox-52f2a342'], (function (workbox) { 'use strict';
    * See https://goo.gl/S9QRab
    */
   workbox.precacheAndRoute([{
-    "url": "index.html",
-    "revision": "0.53klr34g598"
+    "url": "/offline",
+    "revision": "0.3ciki3dkc38"
   }], {});
   workbox.cleanupOutdatedCaches();
-  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html"), {
-    allowlist: [/^\/$/]
+  workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("/offline"), {
+    allowlist: [/^\/$/],
+    denylist: [/^\/rest\/v1\//, /^\/auth\//, /^\/storage\//, /^\/functions\//, /^\/assets\//]
   }));
-  workbox.registerRoute(/^https:\/\/sbbl-hq\.icu\/.*/i, new workbox.NetworkFirst({
-    "cacheName": "sbbl-hq-cache",
+  workbox.registerRoute(({
+    request
+  }) => request.mode === "navigate", new workbox.StaleWhileRevalidate({
+    "cacheName": "app-shell-navigations",
     plugins: [new workbox.ExpirationPlugin({
-      maxEntries: 200
+      maxEntries: 50,
+      maxAgeSeconds: 604800
+    })]
+  }), 'GET');
+  workbox.registerRoute(({
+    request
+  }) => request.destination === "script" || request.destination === "style" || request.destination === "font", new workbox.CacheFirst({
+    "cacheName": "static-assets",
+    plugins: [new workbox.ExpirationPlugin({
+      maxEntries: 200,
+      maxAgeSeconds: 2592000
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
     })]
   }), 'GET');
   workbox.registerRoute(({
     request
   }) => request.destination === "image", new workbox.CacheFirst({
-    "cacheName": "sbblhq-images",
+    "cacheName": "image-cache",
     plugins: [new workbox.ExpirationPlugin({
       maxEntries: 120,
       maxAgeSeconds: 1209600
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
     })]
   }), 'GET');
+  workbox.registerRoute(({
+    url,
+    request
+  }) => request.method === "GET" && url.pathname.startsWith("/rest/v1/") && !url.pathname.includes("/auth/"), new workbox.StaleWhileRevalidate({
+    "cacheName": "public-api-reads",
+    plugins: [new workbox.ExpirationPlugin({
+      maxEntries: 100,
+      maxAgeSeconds: 300
+    }), new workbox.CacheableResponsePlugin({
+      statuses: [0, 200]
+    })]
+  }), 'GET');
+  workbox.registerRoute(({
+    request,
+    url
+  }) => request.method !== "GET" || url.pathname.includes("/auth/"), new workbox.NetworkOnly(), 'GET');
 
 }));
+//# sourceMappingURL=sw.js.map
