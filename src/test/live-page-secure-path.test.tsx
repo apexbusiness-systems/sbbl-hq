@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
@@ -58,9 +59,11 @@ vi.mock('@/lib/api/stream', () => ({
 describe('Live page secure path', () => {
   it('binds live stream player to backend-resolved game id', async () => {
     render(
-      <MemoryRouter>
-        <LivePage />
-      </MemoryRouter>,
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <LivePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
     );
 
     await waitFor(() => {

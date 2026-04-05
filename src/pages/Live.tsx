@@ -18,7 +18,7 @@ import {
   Radio, Eye, DollarSign, ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Game } from '@/types';
+import type { Game, PlayerProfile } from '@/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const LEAGUE_IDS = ['sbbl', 'wbl', 'tgifbl'];
@@ -169,7 +169,7 @@ const LivePage = () => {
 
   const { data: allPlayers = [] } = useQuery({
     queryKey: ['public-players', 'all'],
-    queryFn: () => apiFetch('/api/public/players?league=all').then(res => res.data || []),
+    queryFn: () => apiFetch('/api/public/players?league=all').then((res: any) => res.data || []),
     staleTime: 1000 * 60 * 5, // 5 min
   });
 
