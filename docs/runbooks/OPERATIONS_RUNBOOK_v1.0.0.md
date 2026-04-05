@@ -96,6 +96,12 @@ npm run cf:deploy:staging
 - [ ] Test suite and build pass.
 - [ ] PWA service worker generated.
 
+
+### Verification & Validation Post-Deployment
+- [ ] Verify Turnstile site key is present in environment variables (`VITE_TURNSTILE_SITE_KEY`).
+- [ ] Validate new accounts can be created (simulating legitimate user traffic).
+- [ ] Monitor Supabase connection pool usage under heavy load.
+
 ## 5) Escalation
 
 - **P1 outage:** engage emergency protocol immediately.
