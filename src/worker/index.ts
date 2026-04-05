@@ -1200,11 +1200,12 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
   if (!event.id || !event.type)
     return json({ ok: false, error: "invalid_stripe_event" }, 400);
 
-  // Fast dedup: insert into stripe_events; ON CONFLICT = already processed → 200 no-op.
+  // Fast dedup: insert into stripe_events; ON CONFLICT on stripe_event_id UNIQUE
+  // constraint = already processed → 200 no-op.
   // This is cheaper than calling the full process_stripe_webhook RPC for replayed events.
   const { error: dedupErr } = await ctx.admin
     .from("stripe_events")
-    .insert({ event_id: event.id, type: event.type, payload: event, status: "received" });
+    .insert({ stripe_event_id: event.id, event_type: event.type, payload: event, status: "received" });
   if (dedupErr && dedupErr.code === "23505") {
     // Duplicate event — already seen and processed (or in-progress). Return 200 immediately.
     return json({ ok: true, eventId: event.id, status: "duplicate_ignored" });
@@ -1361,7 +1362,7 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
       ctx.admin
         .from("stripe_events")
         .update({ processed_at: new Date().toISOString(), status: "processed" })
-        .eq("event_id", event.id)
+        .eq("stripe_event_id", event.id)
     ).catch(() => {});
   } catch { /* stripe_events update is non-critical */ }
 
