@@ -22,7 +22,7 @@ CROSS JOIN (VALUES
   ('Batang Kanto',   'Serviteurs',         43, 62, '2026-04-04', 'POTG: Shawn Cox (Serviteurs) — 20 PTS, 7 REBS, 6 ASSTS'),
   ('SPG',            'Splash',             77, 80, '2026-04-04', 'POTG: JT Balangui (Splash) — 20 PTS, 6 REBS, 8 ASSTS'),
   ('La Liga Elite',  'Harina x Wild Dogs', 65, 95, '2026-04-04', 'POTG: Jaycee Masilungan (Harina x Wild Dogs) — 22 PTS, 6 REBS, 5 ASSTS'),
-  ('Downtown',       'Rebelde',            62, 67, '2026-04-04', 'POTG: BR Fabiana (Rebelde) — 18 PTS, 3 REBS, 4 ASSTS'),
+  ('Downtown',       'Rebelde',            62, 67, '2026-04-04', 'POTG: RR Fabiana (Rebelde) — 18 PTS, 3 REBS, 4 ASSTS'),
   ('Solid North',    'Crosslinx Warriors', 56, 63, '2026-04-04', 'POTG: Tee Jay Reymundo (Crosslinx Warriors) — 30 PTS, 4 REBS, 4 ASSTS'),
   ('NSD',            '4Lifers',            65, 71, '2026-04-04', 'POTG: Robert Ocampo (4Lifers) — 22 PTS, 8 REBS, 7 ASSTS')
 ) AS g(hn, an, hs, as_, gd, n)
