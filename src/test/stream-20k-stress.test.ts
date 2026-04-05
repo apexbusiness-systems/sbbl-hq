@@ -115,6 +115,7 @@ class InMemorySupabase {
   }
 
   _query(table: string) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias -- required for nested closure access to class instance
     const self = this;
     const filters: Array<(row: Row) => boolean> = [];
     const api: any = {

@@ -335,7 +335,7 @@ const LivePage = () => {
     } catch {
       // non-critical — optimistic update already applied
     }
-  }, [activeGameId, user?.id, session?.access_token]);
+  }, [activeGameId, user?.id, session]);
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
