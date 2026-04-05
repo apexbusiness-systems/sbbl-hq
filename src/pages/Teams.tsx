@@ -1,3 +1,4 @@
+import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
 import { useQuery } from '@tanstack/react-query';
 import { fetchTeams } from '@/lib/api/teams';
 import { useApp } from '@/contexts/AppContext';
@@ -240,12 +241,7 @@ const TeamsPage = () => {
                     {team.coaches.map((coach) => (
                       <div key={coach.id} className="flex items-center gap-3 p-2 rounded-sm border border-border/30\">
                         {coach.avatar_url ? (
-                          <img
-                            src={coach.avatar_url}
-                            alt="avatar\"
-                            className="w-10 h-10 rounded-full object-cover\"
-                            onError={handleAvatarError}
-                          />
+                          <PlayerAvatar src={coach.avatar_url} alt="avatar" className="w-10 h-10" />
                         ) : (
                           <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center\">
                             <Briefcase className="w-5 h-5 text-muted-foreground\" />

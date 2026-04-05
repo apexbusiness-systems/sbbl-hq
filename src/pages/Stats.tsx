@@ -1,3 +1,4 @@
+import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
 import { useState, useMemo, useEffect, useCallback, memo, type ReactElement } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { List, type RowComponentProps } from 'react-window';
@@ -43,7 +44,7 @@ const StatsTableRow = memo(function StatsTableRow({
     >
       <td className="p-3">
         <div className="flex items-center gap-2">
-          <img src={p.avatar} alt={p.name} className="w-8 h-8 rounded-full object-cover" loading="lazy" />
+          <PlayerAvatar src={p.avatar} alt={p.name} className="w-8 h-8" />
           <div>
             <p className="text-sm font-medium">{p.name}</p>
             <div className="flex items-center gap-1">
@@ -89,7 +90,7 @@ function VirtualStatsRow({
       onClick={() => onSelect(p.id)}
       className={`flex items-center gap-2 px-3 border-b border-border cursor-pointer transition-colors hover:bg-secondary/50 ${selectedPlayer === p.id ? 'bg-secondary' : ''}`}
     >
-      <img src={p.avatar} alt={p.name} className="w-8 h-8 rounded-full object-cover flex-shrink-0" loading="lazy" />
+      <PlayerAvatar src={p.avatar} alt={p.name} className="w-8 h-8 flex-shrink-0" />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium truncate">{p.name}</p>
         <div className="flex items-center gap-1">
@@ -302,7 +303,7 @@ const StatsPage = () => {
             {detail && hasPremiumPlayerAccess ? (
               <div className="panel p-4 sticky top-24 space-y-4">
                 <div className="flex items-center gap-3">
-                  <img src={detail.avatar} alt={detail.name} className="w-16 h-16 rounded-full object-cover" loading="lazy" />
+                  <PlayerAvatar src={detail.avatar} alt={detail.name} className="w-16 h-16" />
                   <div>
                     <h3 className="font-display font-bold">{detail.name}</h3>
                     <p className="text-xs text-muted-foreground">{detail.position} · #{detail.number}</p>
