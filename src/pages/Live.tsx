@@ -14,8 +14,8 @@ import { fetchPublicHome } from '@/lib/api/public';
 import { fetchStreamComments, postStreamComment } from '@/lib/api/stream';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
-  ChevronLeft, ChevronRight, Tag, ChevronDown, ChevronUp,
-  Radio, Eye, DollarSign, ExternalLink,
+  ChevronLeft, ChevronRight, Tag,
+  Radio, Eye, DollarSign, Settings, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Game, PlayerProfile } from '@/types';
@@ -43,14 +43,14 @@ function mapHomeGameToUi(row: Record<string, unknown>): Game {
   };
 }
 
-// ── Admin Stream Controls (collapsible panel) ─────────────────────────────
-// Visible only to super_admin. Manages stream state passed to LiveStreamPlayer
-// via props — no embed logic duplicated here.
-function AdminStreamControls({
+// ── Admin Stream Overlay ──────────────────────────────────────────────────
+// Single source of truth for stream management. Renders as a gear-icon
+// dropdown overlay on the video wrapper — no duplicate controls anywhere.
+// Visible only to super_admin.
+function AdminStreamOverlay({
   isLive, setIsLive,
   streamTitle, setStreamTitle,
   viewerCount,
-  streamSource, setStreamSource,
   customStreamUrl, setCustomStreamUrl,
 }: {
   isLive: boolean;
@@ -58,104 +58,124 @@ function AdminStreamControls({
   streamTitle: string;
   setStreamTitle: (v: string) => void;
   viewerCount: number;
-  streamSource: 'custom' | 'cloudflare';
-  setStreamSource: (v: 'custom' | 'cloudflare') => void;
   customStreamUrl: string;
   setCustomStreamUrl: (v: string) => void;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleGoLive = async () => {
+    const nextLive = !isLive;
+    setSaving(true);
+    try {
+      const { setStreamLive, updateStreamConfig } = await import('@/lib/api/stream');
+      const token = await import('@/lib/api/client').then(m => m.getAuthToken());
+      await updateStreamConfig({ collectionId: customStreamUrl, title: streamTitle }, token);
+      await setStreamLive(nextLive, token);
+      setIsLive(nextLive);
+      toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
+      if (nextLive) setOpen(false);
+    } catch (err) {
+      toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
-    <div className="panel border-primary/30 mb-4 overflow-hidden">
-      {/* Header — always visible */}
+    <>
+      {/* Gear button — always visible in top-left of video wrapper */}
       <button
-        onClick={() => setCollapsed(c => !c)}
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-secondary/30 transition-colors"
+        onClick={() => setOpen(o => !o)}
+        className="absolute top-3 left-3 z-30 w-9 h-9 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center hover:bg-black/80 transition-colors group"
+        title="Stream controls"
       >
-        <div className="flex items-center gap-3">
-          <span className="font-display font-bold text-sm uppercase tracking-wider">Super Admin</span>
-          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${isLive ? 'bg-red-500/20 text-red-400' : 'bg-secondary text-muted-foreground'}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-red-500 animate-pulse' : 'bg-muted-foreground'}`} />
-            {isLive ? 'Live' : 'Offline'}
-          </span>
-        </div>
-        {collapsed ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronUp className="w-4 h-4 text-muted-foreground" />}
+        <Settings className={`w-4.5 h-4.5 text-white/80 group-hover:text-white transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
 
-      {/* Controls — collapsible */}
-      {!collapsed && (
-        <div className="px-4 pb-4 space-y-4 border-t border-border">
-          {/* Stats row */}
-          <div className="grid grid-cols-3 gap-3 pt-3">
-            <div className="text-center p-2 bg-secondary/50 rounded-sm">
-              <div className="flex items-center justify-center gap-1 mb-1">
-                <Radio className="w-3 h-3 text-muted-foreground" />
-              </div>
-              <p className="stat-numeral text-lg">{isLive ? 'LIVE' : 'OFF'}</p>
-              <p className="text-[9px] text-muted-foreground uppercase">Stream</p>
-            </div>
-            <div className="text-center p-2 bg-secondary/50 rounded-sm">
-              <div className="flex items-center justify-center gap-1 mb-1">
-                <Eye className="w-3 h-3 text-muted-foreground" />
-              </div>
-              <p className="stat-numeral text-lg">{viewerCount}</p>
-              <p className="text-[9px] text-muted-foreground uppercase">Viewers</p>
-            </div>
-            <div className="text-center p-2 bg-secondary/50 rounded-sm">
-              <div className="flex items-center justify-center gap-1 mb-1">
-                <DollarSign className="w-3 h-3 text-muted-foreground" />
-              </div>
-              <p className="stat-numeral text-lg">0</p>
-              <p className="text-[9px] text-muted-foreground uppercase">PPV Rev</p>
-            </div>
+      {/* Live badge — top-right */}
+      <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
+        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider backdrop-blur-sm ${
+          isLive ? 'bg-red-600/90 text-white' : 'bg-black/60 text-white/70'
+        }`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${isLive ? 'bg-white animate-pulse' : 'bg-white/50'}`} />
+          {isLive ? 'Live' : 'Offline'}
+        </span>
+        {viewerCount > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-bold bg-black/60 text-white/80 backdrop-blur-sm">
+            <Eye className="w-3 h-3" /> {viewerCount}
+          </span>
+        )}
+      </div>
+
+      {/* Dropdown panel */}
+      {open && (
+        <div className="absolute top-14 left-3 z-30 w-80 max-w-[calc(100%-24px)] bg-black/90 backdrop-blur-md border border-white/10 rounded-lg shadow-2xl overflow-hidden animate-fade-in">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
+            <span className="font-display font-bold text-xs uppercase tracking-wider text-white/90">Broadcast Controls</span>
+            <button onClick={() => setOpen(false)} className="text-white/50 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
           </div>
 
-          {/* Stream settings */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="col-span-1 md:col-span-2">
-              <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Custom Stream URL (ReactPlayer)</label>
+          <div className="p-4 space-y-3">
+            {/* Stats row */}
+            <div className="grid grid-cols-3 gap-2">
+              <div className="text-center p-1.5 bg-white/5 rounded">
+                <Radio className={`w-3 h-3 mx-auto mb-0.5 ${isLive ? 'text-red-400' : 'text-white/40'}`} />
+                <p className="stat-numeral text-xs text-white/90">{isLive ? 'LIVE' : 'OFF'}</p>
+              </div>
+              <div className="text-center p-1.5 bg-white/5 rounded">
+                <Eye className="w-3 h-3 mx-auto mb-0.5 text-white/40" />
+                <p className="stat-numeral text-xs text-white/90">{viewerCount}</p>
+              </div>
+              <div className="text-center p-1.5 bg-white/5 rounded">
+                <DollarSign className="w-3 h-3 mx-auto mb-0.5 text-white/40" />
+                <p className="stat-numeral text-xs text-white/90">$0</p>
+              </div>
+            </div>
+
+            {/* Stream URL */}
+            <div>
+              <label className="text-[9px] uppercase tracking-wider text-white/50 block mb-1">Stream URL</label>
               <input
                 type="text"
                 value={customStreamUrl}
                 onChange={e => setCustomStreamUrl(e.target.value)}
-                className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm focus:outline-none focus:border-primary/50"
-                placeholder="e.g. https://youtu.be/..."
+                className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50"
+                placeholder="YouTube, Twitch, or direct URL…"
               />
             </div>
-          </div>
 
-          {/* Action buttons */}
-          <div className="flex gap-2">
+            {/* Stream Title */}
+            <div>
+              <label className="text-[9px] uppercase tracking-wider text-white/50 block mb-1">Broadcast Title</label>
+              <input
+                type="text"
+                value={streamTitle}
+                onChange={e => setStreamTitle(e.target.value)}
+                className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50"
+                placeholder="e.g. SBBL Finals Game 3"
+              />
+            </div>
+
+            {/* Go Live / End Stream */}
             <button
-              onClick={async () => {
-                const nextLive = !isLive;
-                try {
-                  const { setStreamLive, updateStreamConfig } = await import('@/lib/api/stream');
-                  const token = await import('@/lib/api/client').then(m => m.getAuthToken());
-                  
-                  // Save the stream URL (stored in collectionId field)
-                  await updateStreamConfig({ collectionId: customStreamUrl }, token);
-                  // Set database live status
-                  await setStreamLive(nextLive, token);
-                  
-                  setIsLive(nextLive);
-                  toast.success(nextLive ? 'Stream set to live' : 'Stream set to offline');
-                } catch (err) {
-                  toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
-                }
-              }}
-              className={`flex-1 py-2.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm transition-colors ${
+              onClick={handleGoLive}
+              disabled={saving || (!isLive && !customStreamUrl.trim())}
+              className={`w-full py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded transition-colors disabled:opacity-40 ${
                 isLive
-                  ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90'
+                  ? 'bg-red-600 text-white hover:bg-red-500'
                   : 'bg-green-600 text-white hover:bg-green-500'
               }`}
             >
-              {isLive ? 'End Stream' : 'Go Live'}
+              {saving ? 'Saving…' : isLive ? 'End Stream' : 'Go Live'}
             </button>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
 
@@ -203,11 +223,10 @@ const LivePage = () => {
   const isSuperAdmin = roles.includes('super_admin');
   const [liveGame, setLiveGame] = useState<Game | null>(null);
 
-  // Admin stream state — fetched from backend
+  // Admin stream state — fetched from backend (single source of truth)
   const [isStreamLive, setIsStreamLive] = useState(false);
   const [streamTitle, setStreamTitle] = useState('Live Game Broadcast');
   const [viewerCount, setViewerCount] = useState(0);
-  const [streamSource, setStreamSource] = useState<'custom' | 'cloudflare'>('custom');
   const [customStreamUrl, setCustomStreamUrl] = useState('');
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
 
@@ -474,28 +493,24 @@ const LivePage = () => {
       <div className="lg:container lg:py-4">
         <div className="lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
 
-          {/* LEFT: admin controls + broadcast area + actions + chat */}
+          {/* LEFT: broadcast area + actions + chat */}
           <div className="lg:col-span-2 flex flex-col">
 
-            {/* Admin stream controls — super_admin only */}
-            {isSuperAdmin && (
-              <div className="container lg:px-0 pt-4 lg:pt-0">
-                <AdminStreamControls
+            {/* Broadcast Area — admin overlay + access-gate player */}
+            <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
+              {/* Admin stream overlay — inside the video wrapper, super_admin only */}
+              {isSuperAdmin && (
+                <AdminStreamOverlay
                   isLive={isStreamLive}
                   setIsLive={setIsStreamLive}
                   streamTitle={streamTitle}
                   setStreamTitle={setStreamTitle}
                   viewerCount={viewerCount}
-                  streamSource={streamSource}
-                  setStreamSource={setStreamSource}
                   customStreamUrl={customStreamUrl}
                   setCustomStreamUrl={setCustomStreamUrl}
                 />
-              </div>
-            )}
+              )}
 
-            {/* Broadcast Area — access-gate logic lives inside LiveStreamPlayer */}
-            <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
               {liveGame ? (
                 <LiveStreamPlayer
                   game={liveGame}
