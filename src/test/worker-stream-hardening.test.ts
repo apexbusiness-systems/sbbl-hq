@@ -68,6 +68,25 @@ function createQuery(table: string, state: Record<string, Row[]>) {
         }),
       };
     },
+    upsert: (row: Row, _opts?: unknown) => {
+      const rows = state[table] ?? [];
+      // Simple upsert: find by matching unique key fields, update or insert
+      const existing = rows.find((r) =>
+        (row.user_id ? r.user_id === row.user_id && r.game_id === row.game_id && r.idempotency_key === row.idempotency_key : r.id === row.id)
+      );
+      if (existing) {
+        Object.assign(existing, row);
+      } else {
+        const normalized = { ...row, id: row.id ?? crypto.randomUUID() };
+        state[table] = [...rows, normalized];
+      }
+      const result = existing ?? state[table][state[table].length - 1];
+      return {
+        select: () => ({
+          single: async () => ({ data: result, error: null }),
+        }),
+      };
+    },
   };
   return api;
 }
@@ -121,6 +140,7 @@ describe('stream hardening worker handlers', () => {
     const state = {
       api_idempotency_keys: [],
       user_role_assignments: [],
+      games: [{ id: 'game-1', status: 'live' }],
       stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true }],
       stream_access_sessions: [],
     } as Record<string, Row[]>;

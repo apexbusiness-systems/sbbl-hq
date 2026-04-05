@@ -9,6 +9,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api/client';
 import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
+import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
 import { CASLNudge } from '@/components/CASLNudge';
 import { fetchPublicHome } from '@/lib/api/public';
 import { fetchStreamComments, postStreamComment } from '@/lib/api/stream';
@@ -265,11 +266,11 @@ const LivePage = () => {
           // Public poller
           const { fetchPublicStreamStatus } = await import('@/lib/api/stream');
           const res = await fetchPublicStreamStatus();
-          if (active && res) {
-            setIsStreamLive(res.isLive);
-            setStreamTitle(res.title);
-            setViewerCount(res.viewerCount);
-            if (res.gameId) setActiveGameId(res.gameId);
+          if (active && res?.ok) {
+            setIsStreamLive(Boolean(res.isLive));
+            setStreamTitle(typeof res.title === 'string' ? res.title : 'Live Game Broadcast');
+            setViewerCount(typeof res.viewerCount === 'number' && res.viewerCount >= 0 ? res.viewerCount : 0);
+            if (typeof res.gameId === 'string' && res.gameId) setActiveGameId(res.gameId);
           }
         }
       } catch {
@@ -522,37 +523,41 @@ const LivePage = () => {
               )}
 
               {liveGame ? (
-                <LiveStreamPlayer
-                  game={liveGame}
-                  userId={user?.id ?? null}
-                  roles={roles}
-                  hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-                  isStreamLive={isStreamLive}
-                />
+                <PlayerErrorBoundary>
+                  <LiveStreamPlayer
+                    game={liveGame}
+                    userId={user?.id ?? null}
+                    roles={roles}
+                    hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                    isStreamLive={isStreamLive}
+                  />
+                </PlayerErrorBoundary>
               ) : isStreamLive ? (
                 /* Stream is live but no game is scheduled — show stream anyway
                    by creating a synthetic game shell. This prevents the "no game"
                    state from blocking broadcast when admin goes live without a
                    scheduled game. */
-                <LiveStreamPlayer
-                  game={{
-                    id: activeGameId ?? 'broadcast',
-                    leagueId: 'sbbl',
-                    homeTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
-                    awayTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
-                    venue: 'SBBL HQ',
-                    court: 'Main Court',
-                    date: new Date().toISOString(),
-                    time: new Date().toISOString(),
-                    status: 'live',
-                    score: { home: 0, away: 0 },
-                    ppvPrice: 4.99,
-                  }}
-                  userId={user?.id ?? null}
-                  roles={roles}
-                  hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-                  isStreamLive={isStreamLive}
-                />
+                <PlayerErrorBoundary>
+                  <LiveStreamPlayer
+                    game={{
+                      id: activeGameId ?? 'broadcast',
+                      leagueId: 'sbbl',
+                      homeTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
+                      awayTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
+                      venue: 'SBBL HQ',
+                      court: 'Main Court',
+                      date: new Date().toISOString(),
+                      time: new Date().toISOString(),
+                      status: 'live',
+                      score: { home: 0, away: 0 },
+                      ppvPrice: 4.99,
+                    }}
+                    userId={user?.id ?? null}
+                    roles={roles}
+                    hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                    isStreamLive={isStreamLive}
+                  />
+                </PlayerErrorBoundary>
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
                   <div className="w-14 h-14 rounded-full bg-secondary/50 flex items-center justify-center mb-3">
