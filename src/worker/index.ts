@@ -485,8 +485,10 @@ export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
     },
   });
 
-  // Write to edge cache — fire-and-forget
-  cache.put(cacheKey, response.clone()).catch(() => {});
+  // Write to edge cache — best-effort with single retry
+  cache.put(cacheKey, response.clone()).catch(() => {
+    cache.put(cacheKey, response.clone()).catch(() => {});
+  });
 
   return response;
 }
@@ -525,6 +527,7 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   if (Object.keys(patch).length === 0)
     return json({ ok: false, error: "patch_required" }, 400);
 
+  patch.updated_at = new Date().toISOString();
   const { data, error } = await ctx.admin
     .from("stream_admin_config")
     .upsert(
@@ -535,8 +538,12 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
     .single();
   if (error) throw new Error(error.message);
 
-  // Bust edge cache so next poll picks up new collectionId / title / source
-  (caches as unknown as { default: Cache }).default.delete(new Request(streamCacheUrl(null))).catch(() => {});
+  // Bust edge cache so next poll picks up new collectionId / title / source.
+  // Retry once on failure — stale cache after Go Live is worse than a double-delete.
+  const cfCacheConfig = (caches as unknown as { default: Cache }).default;
+  cfCacheConfig.delete(new Request(streamCacheUrl(null))).catch(() => {
+    cfCacheConfig.delete(new Request(streamCacheUrl(null))).catch(() => {});
+  });
 
   return json({
     ok: true,
@@ -630,12 +637,15 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   }
 
   // Bust edge cache immediately so Go Live / End Broadcast is reflected
-  // for all viewers on their next 15 s poll (not delayed by TTL)
-  const cfCachesLive = caches as unknown as { default: Cache };
-  cfCachesLive.default.delete(new Request(streamCacheUrl(null))).catch(() => {});
+  // for all viewers on their next 15 s poll (not delayed by TTL).
+  // Retry once on failure — stale "offline" after Go Live is a P0 UX issue.
+  const cfCachesLive = (caches as unknown as { default: Cache }).default;
+  const bustKey = new Request(streamCacheUrl(null));
+  cfCachesLive.delete(bustKey).catch(() => { cfCachesLive.delete(bustKey).catch(() => {}); });
   // Also bust game-scoped key if a gameId was provided
   if (typeof body.gameId === "string") {
-    cfCachesLive.default.delete(new Request(streamCacheUrl(body.gameId))).catch(() => {});
+    const bustGameKey = new Request(streamCacheUrl(body.gameId));
+    cfCachesLive.delete(bustGameKey).catch(() => { cfCachesLive.delete(bustGameKey).catch(() => {}); });
   }
 
   return json({ ok: true, isLive: body.isLive, at: nowIso });
@@ -2604,44 +2614,28 @@ async function createOrRefreshPlaybackSession(
   userId: string,
   sessionKey: string,
 ) {
+  const nowIso = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 70_000).toISOString();
-  const existing = await ctx.admin
-    .from("stream_access_sessions")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("game_id", gameId)
-    .eq("idempotency_key", sessionKey)
-    .maybeSingle();
-  if (existing.data) {
-    const { data, error } = await ctx.admin
-      .from("stream_access_sessions")
-      .update({
-        status: "active",
-        last_seen_at: new Date().toISOString(),
-        expires_at: expiresAt,
-        updated_at: new Date().toISOString(),
-        updated_by: userId,
-      })
-      .eq("id", (existing.data as Record<string, unknown>).id)
-      .select("id,expires_at")
-      .single();
-    if (error) throw new Error(error.message);
-    return { id: String(data.id), expiresAt: String(data.expires_at) };
-  }
 
+  // Atomic upsert — eliminates the TOCTOU race where two rapid requests
+  // both miss the SELECT and create duplicate sessions. The unique constraint
+  // on (user_id, game_id, idempotency_key) guarantees exactly one row.
   const { data, error } = await ctx.admin
     .from("stream_access_sessions")
-    .insert({
-      entitlement_id: null,
-      game_id: gameId,
-      user_id: userId,
-      status: "active",
-      expires_at: expiresAt,
-      last_seen_at: new Date().toISOString(),
-      idempotency_key: sessionKey,
-      created_by: userId,
-      updated_by: userId,
-    })
+    .upsert(
+      {
+        entitlement_id: null,
+        game_id: gameId,
+        user_id: userId,
+        status: "active",
+        expires_at: expiresAt,
+        last_seen_at: nowIso,
+        idempotency_key: sessionKey,
+        created_by: userId,
+        updated_by: userId,
+      },
+      { onConflict: "user_id,game_id,idempotency_key" },
+    )
     .select("id,expires_at")
     .single();
   if (error) throw new Error(error.message);
@@ -2659,6 +2653,17 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   if (!body?.sessionKey || body.sessionKey.length < 8) {
     return json({ ok: false, error: "session_key_required" }, 400);
   }
+
+  // Validate game exists — reject phantom session creation for non-existent games
+  const gameCheck = await ctx.admin
+    .from("games")
+    .select("id")
+    .eq("id", gameId)
+    .maybeSingle();
+  if (!gameCheck.data) {
+    return json({ ok: false, error: "game_not_found" }, 404);
+  }
+
   const roles = await getUserRolesFromDB(userId, ctx.admin);
   const hasPrivilegedRole = roles.some(
     (role) => role === "player" || role === "paid_fan" || role === "super_admin",
