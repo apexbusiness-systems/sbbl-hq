@@ -63,6 +63,9 @@ export function LiveStreamPlayer({
 
   const [playbackUrl, setPlaybackUrl] = useState('');
   const [playbackLoading, setPlaybackLoading] = useState(false);
+  const [playerReady, setPlayerReady] = useState(false);
+  const [playerError, setPlayerError] = useState<string | null>(null);
+  const [heartbeatFailures, setHeartbeatFailures] = useState(0);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
 
   // ── Role classification ──────────────────────────────────────────────────
@@ -93,12 +96,20 @@ export function LiveStreamPlayer({
 
   // Start playback session — all API calls use null token so apiFetch
   // auto-refreshes the JWT, preventing stale-token 401 loops.
+  // Circuit breaker: after 3 consecutive heartbeat failures, notify the
+  // viewer and stop the heartbeat interval to prevent battery drain.
+  const MAX_HEARTBEAT_FAILURES = 3;
+
   useEffect(() => {
     if (!hasAccess || !userId) return;
     let active = true;
     let heartbeatId: number | null = null;
     let sessionIdForCleanup: string | null = null;
+    let consecutiveFailures = 0;
     setPlaybackLoading(true);
+    setPlayerReady(false);
+    setPlayerError(null);
+    setHeartbeatFailures(0);
     const sessionKey = `playback-${game.id}`;
     const start = async () => {
       try {
@@ -117,7 +128,20 @@ export function LiveStreamPlayer({
           void apiFetch(`/api/streams/${game.id}/session/heartbeat`, {
             method: 'POST',
             body: JSON.stringify({ sessionId: res.session.id }),
-          }, null).catch(() => {});
+          }, null)
+            .then(() => {
+              consecutiveFailures = 0;
+              if (active) setHeartbeatFailures(0);
+            })
+            .catch(() => {
+              consecutiveFailures++;
+              if (active) setHeartbeatFailures(consecutiveFailures);
+              if (consecutiveFailures >= MAX_HEARTBEAT_FAILURES && heartbeatId) {
+                clearInterval(heartbeatId);
+                heartbeatId = null;
+                if (active) toast.error('Connection lost. Refresh to reconnect.');
+              }
+            });
         }, hbMs);
       } catch {
         if (active) toast.error('Unable to start secure playback session.');
@@ -182,14 +206,39 @@ export function LiveStreamPlayer({
           <div className="absolute inset-0 flex items-center justify-center bg-black">
             <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
           </div>
+        ) : playerError ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6">
+            <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mb-3">
+              <Play className="w-6 h-6 text-red-400" />
+            </div>
+            <p className="text-sm text-white/80 font-medium mb-1">Stream Unavailable</p>
+            <p className="text-xs text-white/50 mb-4">{playerError}</p>
+            <button
+              onClick={() => { setPlayerError(null); setPlayerReady(false); }}
+              className="px-4 py-2 text-xs font-display font-bold uppercase tracking-wider bg-amber-500 text-black rounded hover:bg-amber-400 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
         ) : playbackUrl ? (
           <div className="absolute inset-0 pointer-events-auto">
+            {!playerReady && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black z-10">
+                <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
             <ReactPlayer
               url={playbackUrl}
               playing={true}
               controls={true}
               width="100%"
               height="100%"
+              onReady={() => setPlayerReady(true)}
+              onError={(e) => {
+                console.error('[ReactPlayer] Stream error:', e);
+                setPlayerError('The stream source could not be loaded. The URL may be invalid or the stream may have ended.');
+              }}
+              onBuffer={() => setPlayerReady(true)}
               config={{
                 twitch: {
                   options: {
@@ -206,6 +255,19 @@ export function LiveStreamPlayer({
         ) : (
           <div className="absolute inset-0 flex items-center justify-center bg-black">
             <p className="text-sm text-muted-foreground">Admin has not provided a stream URL.</p>
+          </div>
+        )}
+
+        {/* Connection lost banner — circuit breaker triggered */}
+        {heartbeatFailures >= MAX_HEARTBEAT_FAILURES && (
+          <div className="absolute top-0 left-0 right-0 z-20 bg-red-600/95 backdrop-blur-sm px-4 py-2 flex items-center justify-between">
+            <p className="text-xs text-white font-medium">Connection lost — session may have expired.</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="text-[10px] font-bold uppercase tracking-wider text-white bg-white/20 px-3 py-1 rounded hover:bg-white/30 transition-colors"
+            >
+              Reconnect
+            </button>
           </div>
         )}
 

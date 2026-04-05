@@ -70,13 +70,23 @@ function AdminStreamOverlay({
     try {
       const { setStreamLive, updateStreamConfig } = await import('@/lib/api/stream');
       const token = await import('@/lib/api/client').then(m => m.getAuthToken());
+      // Step 1: Save config (URL + title)
       await updateStreamConfig({ collectionId: customStreamUrl, title: streamTitle }, token);
-      await setStreamLive(nextLive, token);
+      // Step 2: Toggle live status — if this fails, config is saved but
+      // stream state is unchanged. Admin sees the error and can retry
+      // the toggle without re-entering the URL.
+      try {
+        await setStreamLive(nextLive, token);
+      } catch (liveErr) {
+        toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
+        setSaving(false);
+        return;
+      }
       setIsLive(nextLive);
       toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
       if (nextLive) setOpen(false);
     } catch (err) {
-      toast.error(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`Failed to save config: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setSaving(false);
     }
@@ -519,9 +529,37 @@ const LivePage = () => {
                   hasPremiumPlayerAccess={hasPremiumPlayerAccess}
                   isStreamLive={isStreamLive}
                 />
+              ) : isStreamLive ? (
+                /* Stream is live but no game is scheduled — show stream anyway
+                   by creating a synthetic game shell. This prevents the "no game"
+                   state from blocking broadcast when admin goes live without a
+                   scheduled game. */
+                <LiveStreamPlayer
+                  game={{
+                    id: activeGameId ?? 'broadcast',
+                    leagueId: 'sbbl',
+                    homeTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
+                    awayTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
+                    venue: 'SBBL HQ',
+                    court: 'Main Court',
+                    date: new Date().toISOString(),
+                    time: new Date().toISOString(),
+                    status: 'live',
+                    score: { home: 0, away: 0 },
+                    ppvPrice: 4.99,
+                  }}
+                  userId={user?.id ?? null}
+                  roles={roles}
+                  hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                  isStreamLive={isStreamLive}
+                />
               ) : (
-                <div className="absolute inset-0 flex items-center justify-center text-sm text-muted-foreground">
-                  Loading live game data…
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
+                  <div className="w-14 h-14 rounded-full bg-secondary/50 flex items-center justify-center mb-3">
+                    <Radio className="w-6 h-6 text-muted-foreground" />
+                  </div>
+                  <p className="text-sm text-white/70 font-medium">No Active Broadcast</p>
+                  <p className="text-xs text-white/40 mt-1">Check back when a game is scheduled or a stream goes live.</p>
                 </div>
               )}
             </div>
