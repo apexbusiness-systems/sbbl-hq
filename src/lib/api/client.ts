@@ -42,9 +42,10 @@ export async function getAuthToken(): Promise<string | null> {
  * and a single-retry guardrail for transient 401s.
  *
  * GUARDRAIL: If the server returns 401, we proactively refresh the session
- * and retry the request exactly once. This handles the edge-case where the
- * token expired between the getAuthToken() call above and the network
- * round-trip to the Worker (e.g. clock skew, very long request queuing).
+ * and retry the request exactly once. This applies whether the token was
+ * auto-fetched OR explicitly passed — callers often capture a token in a
+ * React closure that goes stale when the JWT expires, so we must always
+ * attempt a refresh on 401.
  */
 export async function apiFetch<T>(
   path: string,
@@ -70,15 +71,16 @@ export async function apiFetch<T>(
   let response = await attempt(authToken);
 
   // GUARDRAIL: single retry on 401 — refresh session and try once more.
-  // This handles token expiry that occurs between getAuthToken() and the
-  // actual HTTP request reaching the Worker.
-  if (response.status === 401 && !token) {
+  // This fires whether the token was auto-fetched or explicitly passed.
+  // Explicit tokens (e.g. from useAuth() closures) go stale when the JWT
+  // expires, producing endless 401 loops if we don't retry with a refresh.
+  if (response.status === 401) {
     console.warn('[apiFetch] 401 received, refreshing session and retrying:', path);
     const supabaseClient = getSupabaseClient();
     if (supabaseClient) {
       const { data: refreshData } = await supabaseClient.auth.refreshSession();
       const freshToken = refreshData.session?.access_token ?? null;
-      if (freshToken) {
+      if (freshToken && freshToken !== authToken) {
         response = await attempt(freshToken);
       }
     }

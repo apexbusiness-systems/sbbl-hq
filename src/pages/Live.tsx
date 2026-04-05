@@ -200,7 +200,6 @@ const LivePage = () => {
   }, [leaderboardsData]);
 
   const { user, session, roles } = useAuth();
-  const token = session?.access_token ?? null;
   const isSuperAdmin = roles.includes('super_admin');
   const [liveGame, setLiveGame] = useState<Game | null>(null);
 
@@ -223,9 +222,11 @@ const LivePage = () => {
         const selected = liveRows[0] ?? upcomingRows[0] ?? null;
         if (active && selected) setLiveGame(mapHomeGameToUi(selected));
         if (isSuperAdmin) {
-          // Admin needs full config
+          // Admin needs full config — pass null so apiFetch uses getAuthToken()
+          // which auto-refreshes expired JWTs. Never pass an explicit token from
+          // a React closure here; it goes stale and causes endless 401 loops.
           const { fetchAdminStreamConfig } = await import('@/lib/api/stream');
-          const res = await fetchAdminStreamConfig(token);
+          const res = await fetchAdminStreamConfig(null);
           if (active && res?.config) {
             setIsStreamLive(res.config.isLive);
             setStreamTitle(res.config.title);
@@ -242,16 +243,16 @@ const LivePage = () => {
             if (res.gameId) setActiveGameId(res.gameId);
           }
         }
-      } catch (err) {
-        // silently ignore poller errors
+      } catch {
+        // Poller errors are non-fatal; next tick retries with a fresh token.
       }
     };
-    
+
     void fetchStatus();
     // Poll every 15 seconds for viewers
     const id = setInterval(fetchStatus, 15000);
     return () => { active = false; clearInterval(id); };
-  }, [isSuperAdmin, token]);
+  }, [isSuperAdmin]);
 
   const [comments, setComments] = useState<Array<{ id: string; user: string; text: string }>>([]);
   const [chatInput, setChatInput] = useState('');
@@ -296,7 +297,7 @@ const LivePage = () => {
     // Optimistic update immediately
     setReactions(r => ({ ...r, [type]: r[type] + 1 }));
     // Persist to DB (auth required; silently skip if not signed in)
-    if (!user?.id || !activeGameId || !session?.access_token) return;
+    if (!user?.id || !activeGameId || !session) return;
     try {
       await apiFetch(`/api/streams/${activeGameId}/react`, {
         method: 'POST',
@@ -366,8 +367,8 @@ const LivePage = () => {
 
   const handleSendChat = () => {
     const text = chatInput.trim();
-    if (!text || !liveGame?.id || !token) return;
-    void postStreamComment(liveGame.id, text, token)
+    if (!text || !liveGame?.id || !session) return;
+    void postStreamComment(liveGame.id, text, null)
       .then((res) => {
         setComments(prev => [...prev, {
           id: res.comment.id,
@@ -500,7 +501,6 @@ const LivePage = () => {
                   game={liveGame}
                   userId={user?.id ?? null}
                   roles={roles}
-                  token={token}
                   hasPremiumPlayerAccess={hasPremiumPlayerAccess}
                   isStreamLive={isStreamLive}
                 />
@@ -562,7 +562,7 @@ const LivePage = () => {
                   />
                   <button
                     onClick={handleSendChat}
-                    disabled={!chatInput.trim() || !token || !liveGame?.id}
+                    disabled={!chatInput.trim() || !session || !liveGame?.id}
                     className="px-3 py-2 text-xs bg-primary text-primary-foreground rounded-sm font-medium disabled:opacity-40 transition-opacity"
                   >
                     Send
