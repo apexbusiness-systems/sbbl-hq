@@ -34,6 +34,14 @@ const ProfilesPage = () => {
     return [];
   }, [teamsQuery.data]);
 
+  const teamMap = useMemo(() => {
+    const map: Record<string, Team> = {};
+    teams.forEach((t) => {
+      map[t.id] = t;
+    });
+    return map;
+  }, [teams]);
+
   const detail = selectedPlayer ? players.find((p) => p.id === selectedPlayer) : null;
 
   // Both tabs are always shown. 'players' is always first and always visible.
@@ -96,7 +104,7 @@ const ProfilesPage = () => {
                         <div>
                           <p className="font-semibold text-sm">{p.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {p.position} &middot; {teams.find((t) => t.id === p.teamId)?.name}
+                            {p.position} &middot; {teamMap[p.teamId]?.name}
                             &nbsp;&nbsp;
                             <span className="text-foreground font-medium">{p.stats.pts}</span> PPG
                           </p>
@@ -117,7 +125,7 @@ const ProfilesPage = () => {
                         <div>
                           <h3 className="font-bold text-lg">{detail.name}</h3>
                           <p className="text-sm text-muted-foreground">
-                            {detail.position} &middot; {teams.find((t) => t.id === detail.teamId)?.name}
+                            {detail.position} &middot; {teamMap[detail.teamId]?.name}
                           </p>
                         </div>
                       </div>
