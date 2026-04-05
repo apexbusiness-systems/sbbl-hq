@@ -75,8 +75,7 @@ docs/
 |---|---|---|
 | [STATS PIPELINE](./features/STATS_PIPELINE_v1.2.0.md) | v1.2.0 | 4-stage stat submission + materialized standings + react-window virtualization |
 | [STREAM GATING](./features/STREAM_GATING_v1.2.0.md) | v1.2.0 | PPV entitlement, invites, Turnstile, Stripe webhook, live chat, standings |
-
----
+| [PIPELINE MAP](./features/PIPELINE_MAP_v1.0.0.md) | v1.0.0 | Super-Admin Ops Console data upload pipeline flowchart |
 
 ## Quality
 
@@ -119,8 +118,7 @@ docs/
 |---|---|---|
 | [APEX DEBUG FRAMEWORK](./internal/APEX_DEBUG_FRAMEWORK_v1.0.0.md) | v1.0.0 | Proprietary APEX omniscient debugging intelligence |
 | [APEX POWER FRAMEWORK](./internal/APEX_POWER_FRAMEWORK_v1.0.0.md) | v1.0.0 | Proprietary APEX universal execution meta-skill |
-
----
+| [SBBL AGENT](./internal/SBBL_AGENT_v1.0.0.md) | v1.0.0 | Session skill profile for SBBL HQ execution contexts |
 
 ## Documentation Governance
 

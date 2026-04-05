@@ -56,6 +56,8 @@ identity:
   - Supply Chain Security Specialist
 ---
 
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
+
 # APEX-OMNI-TEST - Annotated Summary
 
 **Type**: Domain Skill (20x Omnipotent Software Quality Intelligence)

@@ -46,6 +46,8 @@ iron_laws:
   6: "ALWAYS include exact remediation path on every REJECT"
 ---
 
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
+
 # APEX-QA - Annotated Summary
 
 **Type**: Guardian Skill (Zero-Trust QA Gatekeeper)

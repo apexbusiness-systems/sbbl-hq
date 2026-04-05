@@ -1,3 +1,4 @@
+<!-- Version: v1.0.0 | Date: 2026-03-28 | Status: Archived -->
 # SBBL HQ Operations Runbook
 
 **Version:** v1.0.1  

@@ -39,6 +39,8 @@ supersedes: omnidev v1, one-pass-debug, apex-power (for software engineering)
 compatibility: Claude, GPT-4/o1/o3, Gemini, Llama, Mistral, DeepSeek, Qwen, Grok, any reasoning model
 ---
 
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
+
 # OMNIDEV-V2 - Annotated Summary
 
 **Type**: Domain Skill (God-Mode Software Engineering)
