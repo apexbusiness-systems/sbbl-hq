@@ -46,6 +46,8 @@ references:
   - multi-agent-coordination.md
 ---
 
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
+
 # APEX-MEMORY - Annotated Summary
 
 **Type**: Domain Skill (Memory + Context Engineering)

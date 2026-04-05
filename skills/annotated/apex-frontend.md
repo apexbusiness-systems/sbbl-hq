@@ -41,6 +41,8 @@ invocation:
 extended_thinking: "ultrathink"
 ---
 
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
+
 # APEX-FRONTEND - Annotated Summary
 
 **Type**: Domain Skill (UI/UX + Frontend Engineering)

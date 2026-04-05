@@ -1,3 +1,4 @@
+<!-- Version: v1.0.0 | Date: 2026-03-28 | Status: Current -->
 # End-to-End Build Audit Report
 
 **Version:** v1.0.0  

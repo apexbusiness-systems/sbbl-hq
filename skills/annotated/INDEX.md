@@ -4,6 +4,8 @@ owner: APEX Business Systems Ltd.
 updated: 2026-03-29
 ---
 
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
+
 # APEX Skills Index - Annotated Reference
 
 Complete annotated catalog of APEX custom skills for SBBL HQ and universal use.
@@ -36,7 +38,8 @@ Complete annotated catalog of APEX custom skills for SBBL HQ and universal use.
 
 | Skill | Version | Scope | Description |
 |-------|---------|-------|-------------|
-| [sbbl-agent](sbbl-agent.md) | 1.0.0 | Project | SBBL HQ session context profile. Domain awareness, role routing, brand constraints. |
+| [sbbl-agent](../../docs/internal/SBBL_AGENT_v1.0.0.md) | 1.0.0 | Project | SBBL HQ session context profile. Domain awareness, role routing, brand constraints. |
+
 
 ## Skill Relationship Map
 
@@ -56,7 +59,7 @@ sbbl-agent (project context) → provides domain context to all above
 
 | Skill | Source Location | Format |
 |-------|----------------|--------|
-| sbbl-agent | `sbbl-agent.md` | Markdown |
+| sbbl-agent | `../../docs/internal/SBBL_AGENT_v1.0.0.md` | Markdown |
 | apex-power | `apex-power.md` | Markdown (339 lines) |
 | apex-master-debug | `apex-master-debug-universal.md` | Markdown (580 lines) |
 | apex-frontend | `apex-frontend-universal-skill.zip` | ZIP (SKILL.md + 8 playbooks + templates + examples) |

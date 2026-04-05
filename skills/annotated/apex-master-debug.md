@@ -39,6 +39,8 @@ supersedes: one-pass-debug (all versions)
 compatibility: Claude, GPT-4o, Gemini Ultra, Llama 3, Mistral, DeepSeek, any LLM
 ---
 
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
+
 # APEX-MASTER-DEBUG - Annotated Summary
 
 **Type**: Domain Skill (Omniscient Debugging)

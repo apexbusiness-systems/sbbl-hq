@@ -1,3 +1,4 @@
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
 # Super-Admin Ops Console Data Upload Pipeline Flowchart
 
 This document maps out the end-to-end data pipeline originating from the Super-Admin Ops Console.
