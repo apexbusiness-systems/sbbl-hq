@@ -167,12 +167,6 @@ const LivePage = () => {
   // --- Top Performers Carousel Logic ---
   /* eslint-disable @typescript-eslint/no-explicit-any */
 
-  const { data: allPlayers = [] } = useQuery({
-    queryKey: ['public-players', 'all'],
-    queryFn: () => apiFetch('/api/public/players?league=all').then((res: any) => res.data || []),
-    staleTime: 1000 * 60 * 5, // 5 min
-  });
-
   const [activeLeagueIdx, setActiveLeagueIdx] = useState(0);
   // leagueIds is moved outside to avoid dependency array issues
 
@@ -183,28 +177,27 @@ const LivePage = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const { data: leaderboardsData = [] } = useQuery({
+    queryKey: ['public-leaderboards', LEAGUE_IDS[activeLeagueIdx]],
+    queryFn: async () => {
+      const supabase = getSupabaseClient();
+      const { data } = await supabase.rpc('get_leaderboards', { p_filters: { league: LEAGUE_IDS[activeLeagueIdx] } });
+      return data?.leaders || [];
+    },
+    staleTime: 1000 * 60 * 5, // 5 min
+  });
+
   const topPerformers = useMemo(() => {
-    const activeLeagueId = LEAGUE_IDS[activeLeagueIdx];
-    // Filter players by league, ensure they have stats, sort by points descending
-    const leaguePlayers = allPlayers.filter((p: PlayerProfile | any) => String(p.league_id || '').toLowerCase() === activeLeagueId);
-
-    // Sort logic mimicking typical PTS calculation if available, or fallback to mock if no data to not break dev layout
-
-    const sorted = leaguePlayers.sort((a: Record<string, any>, b: Record<string, any>) => {
-      const aPts = a.stats?.pts || 0;
-      const bPts = b.stats?.pts || 0;
-      return bPts - aPts;
-    });
-
-    return sorted.slice(0, 3).map((p: PlayerProfile | any) => ({
+    // leaderboardsData is already sorted by points descending from the RPC.
+    return leaderboardsData.slice(0, 3).map((p: any) => ({
       id: p.id,
-      name: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
-      avatar: p.avatar_url,
+      name: p.name,
+      avatar: p.avatar, // the RPC does not currently return avatar_url, but we map what we have or let fallback handle it
       position: p.position || 'N/A',
-      pts: p.stats?.pts || 0,
+      pts: p.pts || 0,
       league_id: p.league_id,
     }));
-  }, [allPlayers, activeLeagueIdx]);
+  }, [leaderboardsData]);
 
   const { user, session, roles } = useAuth();
   const token = session?.access_token ?? null;
@@ -404,7 +397,7 @@ const LivePage = () => {
               key={carouselProduct.id}
               src={carouselProduct.image}
               alt={carouselProduct.name}
-              className="w-full h-full object-cover animate-fade-in"
+              className="w-full h-full object-contain animate-fade-in"
               loading="lazy"
             />
             <span className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 bg-primary text-primary-foreground text-[9px] font-bold uppercase tracking-wider rounded-sm">
@@ -447,7 +440,7 @@ const LivePage = () => {
               className="mt-3 w-full gold-bg py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded-sm inline-flex items-center justify-center gap-2"
             >
               <ShoppingBag className="w-3.5 h-3.5" />
-              {carouselProduct.price > 0 ? `Add to Bag — ₱${carouselProduct.price.toLocaleString()}` : 'Claim Reward'}
+              {carouselProduct.price > 0 ? `Add to Bag — $${carouselProduct.price.toLocaleString()}` : 'Claim Reward'}
             </button>
           </div>
         </div>

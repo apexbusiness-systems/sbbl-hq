@@ -73,7 +73,7 @@ export const BagDrawer = () => {
                 return (
                   <div key={i} className="flex items-center gap-3 p-3 bg-secondary rounded-sm">
                     {product?.image && (
-                      <img src={product.image} alt={product.name} className="w-12 h-12 object-cover rounded-sm flex-shrink-0" />
+                      <img src={product.image} alt={product.name} className="w-12 h-12 object-contain rounded-sm flex-shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{product?.name ?? id}</p>
