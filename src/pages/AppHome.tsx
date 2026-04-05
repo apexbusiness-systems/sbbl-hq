@@ -18,7 +18,7 @@ const AppHomePage = () => {
         {/* Photo background */}
         <picture className="absolute inset-0 w-full h-full">
           <source media="(min-width: 768px)" srcSet="/assets/hero-desktop.png" />
-          <img src="/assets/hero-mobile.png" alt="" className="w-full h-full object-cover object-center" draggable={false} />
+          <img src="/assets/hero-mobile.png" alt="" className="w-full h-full object-contain object-center" draggable={false} />
         </picture>
         <div className="absolute inset-0 bg-black/45" />
         <div className="absolute inset-0 [background:linear-gradient(to_right,rgba(10,10,10,0.85)_0%,rgba(10,10,10,0.3)_55%,transparent_100%)]" />
@@ -159,7 +159,7 @@ const AppHomePage = () => {
             {featuredProducts.map(p => (
               <div key={p.id} className="panel overflow-hidden group hover:border-primary/30 transition-colors">
                 <div className="relative aspect-square overflow-hidden bg-secondary">
-                  <img src={p.image} alt={p.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" loading="lazy" />
+                  <img src={p.image} alt={p.name} className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" loading="lazy" />
                   <span className="absolute top-2 left-2 px-2 py-0.5 bg-primary text-primary-foreground text-[9px] font-bold uppercase tracking-wider rounded-sm">Sale</span>
                 </div>
                 <div className="p-4">

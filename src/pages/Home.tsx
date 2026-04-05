@@ -235,7 +235,7 @@ const HomePage = () => {
                 <img
                   src="/assets/events/1v1-fred-vs-karl.jpg"
                   alt="1v1 Event — Fred vs Karl"
-                  className="w-full md:h-full object-cover object-top md:max-h-[320px]"
+                  className="w-full md:h-full object-contain object-top md:max-h-[320px]"
                   loading="lazy"
                   onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                 />
