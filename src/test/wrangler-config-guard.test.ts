@@ -2,15 +2,17 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
+const SUPABASE_JWT_REGEX = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
+const LEGACY_PLACEHOLDER_KEY_REGEX = /sb_publishable_/;
+
 /**
  * Guardrail tests for wrangler.jsonc — prevents regressions from careless
  * agents or contributors that rename the worker or remove critical config.
  *
- * CONTEXT: The worker name "sbbl-hq" has Cloudflare secrets bound to it
- * (SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, etc.). Renaming the worker
- * deploys a NEW Cloudflare Worker with ZERO secrets, causing "Invalid API key"
- * errors on every API route. This happened in commit d7064b4 when the name
- * was changed to "sbbl-hq-worker", breaking Scores, Teams, and all data tabs.
+ * CONTEXT:
+ * - The live site domains are bound to worker name "sbbl-hq-worker".
+ * - A non-Supabase placeholder key format (`sb_publishable_*`) previously
+ *   shipped and caused runtime 500s across tab data API calls.
  */
 describe("wrangler.jsonc guardrails", () => {
   const raw = readFileSync(
@@ -28,6 +30,14 @@ describe("wrangler.jsonc guardrails", () => {
 
   it("must define SUPABASE_PUBLISHABLE_KEY in vars", () => {
     expect(raw).toMatch(/"SUPABASE_PUBLISHABLE_KEY":\s*"[^"]+"/);
+  });
+
+  it("must not use legacy sb_publishable placeholder keys", () => {
+    expect(raw).not.toMatch(LEGACY_PLACEHOLDER_KEY_REGEX);
+  });
+
+  it("must use JWT-formatted SUPABASE_PUBLISHABLE_KEY values", () => {
+    expect(raw).toMatch(SUPABASE_JWT_REGEX);
   });
 
   it("must have custom_domain routes for sbbl-hq.icu", () => {
@@ -57,7 +67,40 @@ describe("deploy.yml guardrails", () => {
     expect(deployYml).toMatch(/VITE_SUPABASE_URL:.*\|\|/);
   });
 
+  it("must support legacy SUPABASE_URL secret fallback", () => {
+    expect(deployYml).toContain("secrets.SUPABASE_URL");
+  });
+
   it("must include fallback for VITE_SUPABASE_ANON_KEY", () => {
     expect(deployYml).toMatch(/VITE_SUPABASE_ANON_KEY:.*\|\|/);
+  });
+
+  it("must support legacy SUPABASE_ANON_KEY secret fallback", () => {
+    expect(deployYml).toContain("secrets.SUPABASE_ANON_KEY");
+  });
+
+  it("must prefer CLOUDFLARE_API_TOKEN_WORKERS with fallback to CLOUDFLARE_API_TOKEN", () => {
+    expect(deployYml).toContain(
+      "CLOUDFLARE_API_TOKEN_WORKERS || secrets.CLOUDFLARE_API_TOKEN",
+    );
+  });
+
+  it("must not use legacy sb_publishable placeholder in fallback keys", () => {
+    expect(deployYml).not.toMatch(LEGACY_PLACEHOLDER_KEY_REGEX);
+  });
+
+  it("must use JWT-formatted fallback key for VITE_SUPABASE_ANON_KEY", () => {
+    const fallbackMatch = deployYml.match(/VITE_SUPABASE_ANON_KEY:.*\|\|\s*'([^']+)'/);
+    expect(fallbackMatch?.[1]).toBeTruthy();
+    expect(fallbackMatch?.[1]).toMatch(SUPABASE_JWT_REGEX);
+  });
+
+  it("must parse /ops/health JSON with jq", () => {
+    expect(deployYml).toContain("jq -e '.ok == true'");
+  });
+
+  it("must include a retry loop for post-deploy health checks", () => {
+    expect(deployYml).toContain("for attempt in {1..12}; do");
+    expect(deployYml).toContain("sleep 10");
   });
 });
