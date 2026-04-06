@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, memo, useCallback } from 'react';
 import { products as mockProducts } from '@/data/mock';
 import { useBag } from '@/contexts/BagContext';
 import { useQuery } from '@tanstack/react-query';
@@ -7,6 +7,46 @@ import { Product } from '@/types';
 import { ShoppingBag, Filter } from 'lucide-react';
 
 type Category = 'all' | 'tees' | 'hoodies' | 'jerseys' | 'caps' | 'accessories' | 'rewards';
+
+// Memoized product card to prevent re-rendering all grid items when selection changes
+const StoreProductCard = memo(function StoreProductCard({
+  product,
+  isSelected,
+  onSelect,
+}: {
+  product: Product;
+  isSelected: boolean;
+  onSelect: (id: string, colors?: string[]) => void;
+}) {
+  return (
+    <div
+      onClick={() => onSelect(product.id, product.colors)}
+      className={`panel overflow-hidden cursor-pointer group transition-colors ${
+        isSelected ? 'border-primary/50' : 'hover:border-border'
+      }`}
+    >
+      <div className="relative aspect-square overflow-hidden">
+        <img
+          src={product.image}
+          alt={product.name}
+          className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500"
+          loading="lazy"
+        />
+        {product.badge && (
+          <span className="absolute top-2 left-2 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-sm bg-primary text-primary-foreground">
+            {product.badge}
+          </span>
+        )}
+      </div>
+      <div className="p-3">
+        <p className="text-xs font-medium truncate">{product.name}</p>
+        <p className="stat-numeral text-sm text-primary mt-0.5">
+          {product.price > 0 ? `$${product.price.toLocaleString()}` : 'Reward Item'}
+        </p>
+      </div>
+    </div>
+  );
+});
 
 const StorePage = () => {
   const { addToBag } = useBag();
@@ -31,6 +71,13 @@ const StorePage = () => {
   const filtered = category === 'all' ? products : products.filter(p => p.category === category);
   const detail = selectedProduct ? products.find(p => p.id === selectedProduct) : null;
 
+  const handleSelectProduct = useCallback((id: string, colors?: string[]) => {
+    setSelectedProduct(id);
+    if (colors?.length) {
+      setSelectedColor(colors[0]);
+    }
+  }, []);
+
   return (
     <div className="min-h-screen">
       <div className="container py-8 md:py-12">
@@ -53,18 +100,12 @@ const StorePage = () => {
           <div className="lg:col-span-2">
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
               {filtered.map(p => (
-                <div key={p.id} onClick={() => { setSelectedProduct(p.id); if (p.colors?.length) setSelectedColor(p.colors[0]); }} className={`panel overflow-hidden cursor-pointer group transition-colors ${selectedProduct === p.id ? 'border-primary/50' : 'hover:border-border'}`}>
-                  <div className="relative aspect-square overflow-hidden">
-                    <img src={p.image} alt={p.name} className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-500" loading="lazy" />
-                    {p.badge && (
-                      <span className="absolute top-2 left-2 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-sm bg-primary text-primary-foreground">{p.badge}</span>
-                    )}
-                  </div>
-                  <div className="p-3">
-                    <p className="text-xs font-medium truncate">{p.name}</p>
-                    <p className="stat-numeral text-sm text-primary mt-0.5">{p.price > 0 ? `$${p.price.toLocaleString()}` : 'Reward Item'}</p>
-                  </div>
-                </div>
+                <StoreProductCard
+                  key={p.id}
+                  product={p}
+                  isSelected={selectedProduct === p.id}
+                  onSelect={handleSelectProduct}
+                />
               ))}
             </div>
           </div>
