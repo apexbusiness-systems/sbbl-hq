@@ -80,4 +80,13 @@ describe("deploy.yml guardrails", () => {
     expect(fallbackMatch?.[1]).toBeTruthy();
     expect(fallbackMatch?.[1]).toMatch(SUPABASE_JWT_REGEX);
   });
+
+  it("must parse /ops/health JSON with jq", () => {
+    expect(deployYml).toContain("jq -e '.ok == true'");
+  });
+
+  it("must include a retry loop for post-deploy health checks", () => {
+    expect(deployYml).toContain("for attempt in {1..12}; do");
+    expect(deployYml).toContain("sleep 10");
+  });
 });
