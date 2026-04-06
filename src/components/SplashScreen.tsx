@@ -121,7 +121,7 @@ export function SplashScreen() {
         </svg>
 
         <img
-          src="/icons/icon-splash.png"
+          src="/icons/icon-splash.svg"
           alt="SBBL HQ"
           width={160}
           height={160}
