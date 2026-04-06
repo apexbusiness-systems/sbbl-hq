@@ -1,10 +1,11 @@
-import { Mail, MessageCircle, FileText, ChevronDown, ChevronUp } from 'lucide-react';
+import { Mail, MessageCircle, FileText, ChevronDown, ChevronUp, Shield, ScrollText } from 'lucide-react';
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 
 const faqs = [
   {
     q: 'How do I register as a player?',
-    a: 'Sign in, then go to Billing & Payments and click "Pay & Renew" to activate your player registration tier ($7/month). Once active, your profile, stats, and leaderboard entries will be visible.',
+    a: 'Sign in, then go to Billing & Payments and click "Pay & Renew" to activate your player registration tier ($6.99/month). Once active, your profile, stats, and leaderboard entries will be visible.',
   },
   {
     q: 'How does the livestream paywall work?',
@@ -118,6 +119,24 @@ const SupportPage = () => {
           {faqs.map((faq) => (
             <FaqItem key={faq.q} q={faq.q} a={faq.a} />
           ))}
+        </div>
+
+        {/* Legal links */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-10">
+          <Link to="/privacy" className="panel p-4 flex items-center gap-3 hover:border-primary/30 transition-colors">
+            <Shield className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium">Privacy Policy</p>
+              <p className="text-[11px] text-muted-foreground">How we handle your data</p>
+            </div>
+          </Link>
+          <Link to="/terms" className="panel p-4 flex items-center gap-3 hover:border-primary/30 transition-colors">
+            <ScrollText className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+            <div>
+              <p className="text-sm font-medium">Terms of Service</p>
+              <p className="text-[11px] text-muted-foreground">Rules and conditions of use</p>
+            </div>
+          </Link>
         </div>
 
         <p className="text-xs text-muted-foreground text-center mt-10">

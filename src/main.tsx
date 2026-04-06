@@ -7,6 +7,7 @@ import App from "./App.tsx";
 import "./index.css";
 import { registerSW } from "virtual:pwa-register";
 import { AppErrorBoundary } from "@/components/AppErrorBoundary";
+import { initNativePlugins } from "@/lib/capacitor";
 
 registerSW({
   onNeedRefresh() {
@@ -15,6 +16,9 @@ registerSW({
     }
   },
 });
+
+// Initialise Capacitor native plugins (no-ops on web)
+initNativePlugins();
 
 document.title = "SBBL HQ";
 

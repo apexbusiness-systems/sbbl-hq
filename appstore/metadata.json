@@ -1,0 +1,87 @@
+{
+  "app": {
+    "id": "com.sbblhq.app",
+    "name": "SBBL HQ",
+    "subtitle": "Three Leagues · One Platform",
+    "version": "1.0.0",
+    "buildNumber": "1"
+  },
+
+  "listing": {
+    "shortDescription": "Live basketball games, stats, scores & merch for SBBL, WBL, and TGIFBL leagues.",
+    "fullDescription": "SBBL HQ is the official app for the SBBL (Sunday's Best Basketball League), WBL (Weekend Basketball League), and TGIFBL (Thank God It's Friday Basketball League) — three community basketball leagues under the Apex Business Systems organization based in Alberta, Canada.\n\n⛹️ LIVE GAMES\n• Watch games live with real-time streaming\n• Pay-per-view access for fans, free for registered players\n• Multi-camera support with low-latency WebRTC delivery\n\n📊 STATS & LEADERBOARDS\n• Full box scores for every game\n• Season-long player statistics across all three leagues\n• Points, rebounds, assists, steals, blocks, and shooting percentages\n• Dynamic leaderboards with league and season filtering\n\n📅 SCHEDULES & SCORES\n• Complete game schedules for all leagues\n• Live scores updated in real-time\n• Team standings and win/loss records\n\n👤 PLAYER PROFILES\n• Personal player cards with headshot, bio, and stats\n• Track your performance across seasons\n• Compare stats with other players\n\n🎬 MEDIA\n• Game highlights and recaps\n• League news and announcements\n• Photo galleries from game nights\n\n🛒 MERCH STORE\n• Official league merchandise\n• Team jerseys and apparel\n• Secure checkout powered by Stripe\n\n🏀 THREE LEAGUES, ONE APP\nWhether you play in SBBL, WBL, or TGIFBL — everything lives in one place. Switch between leagues seamlessly.\n\nPlayer registration: $6.99 CAD/month — includes livestream access, full stat tracking, and leaderboard eligibility.",
+    "keywords": "basketball,league,SBBL,WBL,TGIFBL,live,streaming,stats,scores,schedules,leaderboards,Alberta,Canada,community,sports",
+    "category": "Sports",
+    "secondaryCategory": "Entertainment",
+    "contentRating": "Everyone",
+    "supportUrl": "https://sbbl-hq.icu/support",
+    "privacyPolicyUrl": "https://sbbl-hq.icu/privacy",
+    "termsOfServiceUrl": "https://sbbl-hq.icu/terms",
+    "websiteUrl": "https://sbbl-hq.icu",
+    "contactEmail": "info-outreach@sbbl-hq.icu"
+  },
+
+  "apple": {
+    "bundleId": "com.sbblhq.app",
+    "teamId": "",
+    "sku": "com-sbblhq-app",
+    "primaryLocale": "en-CA",
+    "availableTerritories": ["CA", "US"],
+    "ageRating": {
+      "kidsCategory": false,
+      "madeForKids": false,
+      "ageGateRequired": false
+    },
+    "appStoreReviewNotes": "This app provides live basketball game streaming, player stats, schedules, and merchandise for three community basketball leagues in Alberta, Canada. Test account credentials can be provided upon request. The app requires a subscription ($6.99 CAD/month) for player features and livestream access. Pay-per-view is available for individual games.",
+    "requiredCapabilities": ["arm64"],
+    "minimumOsVersion": "16.0"
+  },
+
+  "google": {
+    "packageName": "com.sbblhq.app",
+    "defaultLocale": "en-CA",
+    "availableCountries": ["CA", "US"],
+    "contentRating": {
+      "targetAge": "all",
+      "interactiveElements": ["Users Interact", "In-App Purchases"],
+      "violence": false,
+      "gambling": false
+    },
+    "storePresence": {
+      "appType": "APPLICATION",
+      "isFree": true,
+      "containsAds": false,
+      "inAppPurchases": true
+    },
+    "minimumSdkVersion": 24,
+    "targetSdkVersion": 35
+  },
+
+  "screenshots": {
+    "note": "Generate screenshots at these sizes for submission:",
+    "ios": {
+      "iphone_6_7": "1290x2796 (iPhone 15 Pro Max — required)",
+      "iphone_6_5": "1284x2778 (iPhone 14 Pro Max)",
+      "ipad_12_9": "2048x2732 (iPad Pro 12.9-inch — required if supporting iPad)",
+      "minimum": 3,
+      "maximum": 10
+    },
+    "android": {
+      "phone": "1080x1920 minimum (16:9 ratio recommended)",
+      "tablet_7": "1200x1920 (7-inch tablet)",
+      "tablet_10": "1600x2560 (10-inch tablet)",
+      "minimum": 2,
+      "maximum": 8
+    },
+    "suggestedScreens": [
+      "Home / App Hub (league selector)",
+      "Live game streaming view",
+      "Scores page with live results",
+      "Player stats / leaderboards",
+      "Schedules calendar view",
+      "Team profiles page",
+      "Merch store",
+      "Player profile card"
+    ]
+  }
+}
