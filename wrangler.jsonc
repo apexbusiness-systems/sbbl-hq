@@ -7,7 +7,7 @@
   // │ this name. Changing it deploys to a DIFFERENT worker, breaking the      │
   // │ live site. DO NOT rename without migrating domains AND secrets.         │
   // └─────────────────────────────────────────────────────────────────────────┘
-  "name": "sbbl-hq-worker",
+  "name": "sbbl-hq",
   "main": "src/worker/index.ts",
   "compatibility_date": "2026-03-27",
   "compatibility_flags": ["nodejs_compat"],
