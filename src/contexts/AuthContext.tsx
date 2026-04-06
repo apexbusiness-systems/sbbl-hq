@@ -41,18 +41,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     setLoading(true);
 
-    // GUARDRAIL: Always call getUser() first to force a live token refresh
-    // before reading the session. This prevents stale/expired access_tokens
-    // from being used in subsequent API calls (root cause of "unauthorized"
-    // errors on Save Config / Go Live).
-    //
-    // getSession() alone only reads from localStorage — it does NOT check
-    // expiry or refresh the token. getUser() performs a live Supabase Auth
-    // round-trip and auto-refreshes the access_token via the refresh_token
-    // if it has expired.
-    await client.auth.getUser().catch(() => null);
+    // GUARDRAIL: Read the cached session first (instant, localStorage only),
+    // then force a live token refresh via getUser() ONLY when the access_token
+    // is expired or about to expire (<60 s remaining).  This eliminates a
+    // ~150-300 ms network round-trip on every cold mount for fresh tokens
+    // while still preventing stale/expired access_tokens from causing
+    // "unauthorized" errors on Save Config / Go Live.
+    let { data } = await client.auth.getSession();
 
-    const { data } = await client.auth.getSession();
+    if (data.session) {
+      const expiresAt = (data.session.expires_at ?? 0) * 1000; // seconds → ms
+      const needsRefresh = expiresAt - Date.now() < 60_000;
+      if (needsRefresh) {
+        await client.auth.getUser().catch(() => null);
+        // Re-read session after the refresh has updated localStorage
+        ({ data } = await client.auth.getSession());
+      }
+    }
+
     setSession(data.session ?? null);
     setUser(data.session?.user ?? null);
 

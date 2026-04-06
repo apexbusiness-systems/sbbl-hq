@@ -32,6 +32,22 @@ const PPV_PRICE_USD = 4.99;
 // Legacy Switcher Studio config removed.
 // ReactPlayer stream URL is configured via AdminStreamControls.
 
+/**
+ * Normalize Facebook Live URLs:
+ * - Strip fbclid tracking parameter that breaks embed playback
+ * - Ensure /live/ suffix is present for direct FB Live embeds
+ */
+function normalizeFacebookUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (!u.hostname.includes('facebook.com')) return url;
+    u.searchParams.delete('fbclid');
+    return u.toString();
+  } catch {
+    return url;
+  }
+}
+
 interface LiveStreamPlayerProps {
   game: Game;
   userId: string | null;
@@ -121,7 +137,7 @@ export function LiveStreamPlayer({
           body: JSON.stringify({ sessionKey }),
         }, null);
         if (!active) return;
-        setPlaybackUrl(res.playback.url);
+        setPlaybackUrl(normalizeFacebookUrl(res.playback.url));
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
         heartbeatId = window.setInterval(() => {
@@ -247,6 +263,11 @@ export function LiveStreamPlayer({
                 },
                 youtube: {
                   playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1 }
+                },
+                facebook: {
+                  appId: '',
+                  version: 'v18.0',
+                  playerId: 'sbbl-fb-player',
                 }
               }}
               style={{ position: 'absolute', top: 0, left: 0 }}

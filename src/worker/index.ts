@@ -25,6 +25,50 @@ type Route = { method: string; regex: RegExp; handler: Handler };
 const transientIdempotency = new Map<string, number>();
 const transientRateLimits = new Map<string, number[]>();
 
+// Per-isolate cached admin Supabase client.  Cloudflare Workers reuse isolate
+// memory across requests, so we avoid creating a new client on every fetch.
+let _cachedAdmin: SupabaseClient | null = null;
+let _cachedAdminUrl: string | null = null;
+
+// ── Heartbeat batch queue ────────────────────────────────────────────────
+// Instead of writing every 25-second heartbeat to the DB individually (800
+// writes/s at 20K viewers), queue them in-memory and flush once every 30s
+// via a single batch_heartbeat_upsert() RPC call.
+type HeartbeatEntry = {
+  session_id: string;
+  user_id: string;
+  game_id: string;
+  expires_at: string;
+  now_ts: string;
+};
+const heartbeatQueue: HeartbeatEntry[] = [];
+let heartbeatFlushTimer: ReturnType<typeof setTimeout> | null = null;
+const HEARTBEAT_FLUSH_INTERVAL_MS = 30_000;
+
+async function flushHeartbeatQueue(env: Env): Promise<void> {
+  if (heartbeatQueue.length === 0) return;
+  const batch = heartbeatQueue.splice(0, heartbeatQueue.length);
+  const admin = getAdminClient(env);
+  const { error } = await admin.rpc("batch_heartbeat_upsert", {
+    p_heartbeats: JSON.stringify(batch),
+  });
+  if (error) {
+    // On failure, push entries back so the next flush retries them
+    heartbeatQueue.unshift(...batch);
+    console.error("[heartbeat-flush] batch_heartbeat_upsert failed:", error.message);
+  }
+}
+
+function getAdminClient(env: Env): SupabaseClient {
+  // Invalidate if the URL changed (e.g. secret rotation / preview deploy)
+  if (_cachedAdmin && _cachedAdminUrl === env.SUPABASE_URL) return _cachedAdmin;
+  _cachedAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  _cachedAdminUrl = env.SUPABASE_URL;
+  return _cachedAdmin;
+}
+
 function json(data: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
     status,
@@ -2713,23 +2757,28 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
     sessionId?: string;
   } | null;
   if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
+
+  const now = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 70_000).toISOString();
-  const update = await ctx.admin
-    .from("stream_access_sessions")
-    .update({
-      expires_at: expiresAt,
-      status: "active",
-      last_seen_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-      updated_by: userId,
-    })
-    .eq("id", body.sessionId)
-    .eq("user_id", userId)
-    .eq("game_id", gameId)
-    .select("id")
-    .maybeSingle();
-  if (update.error) throw new Error(update.error.message);
-  if (!update.data) return json({ ok: false, error: "session_not_found" }, 404);
+
+  // Queue heartbeat for batch flush instead of writing per-request.
+  // At 20K viewers × 25s interval this cuts ~800 writes/s → ~1 bulk call/30s.
+  heartbeatQueue.push({
+    session_id: body.sessionId,
+    user_id: userId,
+    game_id: gameId,
+    expires_at: expiresAt,
+    now_ts: now,
+  });
+
+  // Ensure the periodic flush timer is running
+  if (!heartbeatFlushTimer) {
+    heartbeatFlushTimer = setTimeout(async () => {
+      heartbeatFlushTimer = null;
+      await flushHeartbeatQueue(ctx.env);
+    }, HEARTBEAT_FLUSH_INTERVAL_MS);
+  }
+
   return json({ ok: true, sessionId: body.sessionId, expiresAt });
 }
 
@@ -3757,6 +3806,7 @@ function addSecurityHeaders(res: Response): Response {
     "font-src 'self' data:; " +
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +
     "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://www.youtube.com https://player.vimeo.com; " +
+    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
     "form-action 'self' https://checkout.stripe.com;"
@@ -3834,13 +3884,7 @@ export default Sentry.withSentry(
       }
     }
 
-    const admin = createClient(
-      env.SUPABASE_URL,
-      env.SUPABASE_SERVICE_ROLE_KEY,
-      {
-        auth: { persistSession: false, autoRefreshToken: false },
-      },
-    );
+    const admin = getAdminClient(env);
 
     // Internal verified headers are set here and ONLY here, after JWT verification.
     // These use a -verified suffix to distinguish them from any client-supplied headers
