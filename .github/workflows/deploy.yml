@@ -39,3 +39,35 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Post-deploy live health gate (must have server secrets)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Allow edge propagation before probing live endpoints.
+          sleep 15
+
+          HEALTH_URL="https://sbbl-hq.icu/ops/health"
+          TEAMS_URL="https://sbbl-hq.icu/api/teams?leagueId=wbl"
+          SCORES_URL="https://sbbl-hq.icu/api/scores?league=wbl"
+
+          health_json="$(curl -fsS "$HEALTH_URL")"
+          echo "$health_json"
+
+          # Hard-fail deploy if worker reports missing required env secrets.
+          if echo "$health_json" | grep -q '"ok":false'; then
+            echo "❌ /ops/health returned not-ok after deploy"
+            exit 1
+          fi
+
+          # Data tabs depend on these APIs; require HTTP 200 after deploy.
+          teams_code="$(curl -sS -o /tmp/teams.json -w '%{http_code}' "$TEAMS_URL")"
+          scores_code="$(curl -sS -o /tmp/scores.json -w '%{http_code}' "$SCORES_URL")"
+          echo "teams_status=$teams_code"
+          echo "scores_status=$scores_code"
+          head -c 200 /tmp/teams.json || true; echo
+          head -c 200 /tmp/scores.json || true; echo
+
+          test "$teams_code" = "200"
+          test "$scores_code" = "200"
