@@ -90,6 +90,28 @@ const MediaPage = () => {
     }
   };
 
+  if (mediaQuery.isLoading) {
+    return (
+      <div className="container py-8 md:py-12 flex items-center justify-center min-h-64">
+        <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (mediaQuery.isError) {
+    return (
+      <div className="container py-8 md:py-12 flex flex-col items-center justify-center min-h-64 gap-3 text-center">
+        <p className="text-sm text-muted-foreground">Could not load media. Please try again.</p>
+        <button
+          onClick={() => mediaQuery.refetch()}
+          className="text-xs font-semibold text-primary hover:underline"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen">
       <div className="container py-8 md:py-12">

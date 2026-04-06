@@ -31,34 +31,38 @@ function createQuery(table: string, state: Record<string, Row[]>) {
       return resolve({ data: rows, error: null });
     },
     select: () => api,
-    update: (patch: Row) => ({
-      eq(col: string, val: unknown) {
-        const rows = state[table] ?? [];
-        const target = rows.find((r) => r[col] === val);
-        if (target) Object.assign(target, patch);
-        return {
-          eq(col2: string, val2: unknown) {
-            const ok = target && target[col2] === val2;
-            return {
-              eq(col3: string, val3: unknown) {
-                const ok3 = ok && target && target[col3] === val3;
-                return {
-                  select: () => ({
-                    maybeSingle: async () => ({ data: ok3 ? target : null, error: null }),
-                    single: async () => ({ data: ok3 ? target : null, error: ok3 ? null : { message: 'not_found' } }),
-                  }),
-                };
-              },
-              select: () => ({
-                maybeSingle: async () => ({ data: ok ? target : null, error: null }),
-                single: async () => ({ data: ok ? target : null, error: ok ? null : { message: 'not_found' } }),
-              }),
-            };
-          },
-          select: () => ({ single: async () => ({ data: target ?? null, error: target ? null : { message: 'not_found' } }) }),
-        };
-      },
-    }),
+    update: (patch: Row) => {
+      // Chainable filter builder for update().eq()...neq()
+      // Supports the displacement query: .eq(status).eq(user_id).eq(game_id).neq(idempotency_key)
+      const colFilters: Array<(r: Row) => boolean> = [];
+      const applyPatch = () => {
+        (state[table] ?? []).forEach((r) => {
+          if (colFilters.every((fn) => fn(r))) Object.assign(r, patch);
+        });
+      };
+      const builder: any = {
+        eq(col: string, val: unknown) {
+          colFilters.push((r) => r[col] === val);
+          return builder;
+        },
+        neq(col: string, val: unknown) {
+          colFilters.push((r) => r[col] !== val);
+          // neq terminates the displacement chain — apply patch now
+          applyPatch();
+          return { error: null };
+        },
+        select: () => {
+          // select after update chain — find updated target for maybeSingle/single
+          const rows = state[table] ?? [];
+          const target = rows.find((r) => colFilters.every((fn) => fn(r)));
+          return {
+            maybeSingle: async () => ({ data: target ?? null, error: null }),
+            single: async () => ({ data: target ?? null, error: target ? null : { message: 'not_found' } }),
+          };
+        },
+      };
+      return builder;
+    },
     insert: (row: Row) => {
       const normalized = { ...row, id: row.id ?? crypto.randomUUID() };
       state[table] = [...(state[table] ?? []), normalized];

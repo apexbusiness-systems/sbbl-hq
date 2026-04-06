@@ -13,6 +13,7 @@ import { RequireAdmin, RequireAuth } from '@/components/auth/RouteGuards';
 import { StickyMusicPlayer } from '@/components/marketing/StickyMusicPlayer';
 import { AppDownloadPill } from '@/components/marketing/AppDownloadPill';
 import { OfflineBanner } from '@/components/OfflineBanner';
+import { SplashScreen } from '@/components/SplashScreen';
 
 const AppHome = lazy(() => import('./pages/AppHome'));
 const Home = lazy(() => import('./pages/Home'));
@@ -33,6 +34,8 @@ const Ops = lazy(() => import('./pages/Ops'));
 const Support = lazy(() => import('./pages/Support'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Offline = lazy(() => import('./pages/Offline'));
+const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
+const TermsOfService = lazy(() => import('./pages/TermsOfService'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -76,6 +79,8 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AuthProvider>
+        {/* SplashScreen reads useAuth().loading — must live inside AuthProvider */}
+        <SplashScreen />
         <BagProvider>
         <AppProvider>
           <Toaster />
@@ -108,6 +113,8 @@ const App = () => (
                     <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
                     <Route path="/ops" element={<RequireAdmin><Ops /></RequireAdmin>} />
                     <Route path="/support" element={<Support />} />
+                    <Route path="/privacy" element={<PrivacyPolicy />} />
+                    <Route path="/terms" element={<TermsOfService />} />
                     <Route path="/offline" element={<Offline />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>

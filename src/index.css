@@ -167,3 +167,39 @@
     display: none;
   }
 }
+
+/* ── Splash screen animations ─────────────────────────────────────────────── */
+@keyframes splash-rise {
+  0%   { opacity: 0; transform: scale(0.88) translateY(12px); }
+  100% { opacity: 1; transform: scale(1)    translateY(0); }
+}
+@keyframes splash-wordmark {
+  0%   { opacity: 0; transform: translateY(10px) skewX(-1deg); }
+  100% { opacity: 1; transform: translateY(0)    skewX(0); }
+}
+@keyframes splash-orbit-spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes splash-glow-pulse {
+  0%,100% { opacity: 0.35; transform: scale(1); }
+  50%      { opacity: 0.65; transform: scale(1.08); }
+}
+@keyframes splash-fade-out {
+  0%   { opacity: 1; }
+  100% { opacity: 0; pointer-events: none; }
+}
+@keyframes splash-tag {
+  0%   { opacity: 0; letter-spacing: 0.35em; }
+  100% { opacity: 1; letter-spacing: 0.45em; }
+}
+@keyframes dash-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+.splash-rise      { animation: splash-rise      0.55s cubic-bezier(0.16,1,0.3,1) both; }
+.splash-wordmark  { animation: splash-wordmark  0.55s cubic-bezier(0.16,1,0.3,1) 0.12s both; }
+.splash-tag       { animation: splash-tag       0.7s  cubic-bezier(0.16,1,0.3,1) 0.28s both; }
+.splash-glow      { animation: splash-glow-pulse 2.4s ease-in-out 0.4s infinite; }
+.splash-orbit     { animation: splash-orbit-spin 8s   linear infinite; }
+.splash-exit      { animation: splash-fade-out  0.4s  ease-in forwards; }

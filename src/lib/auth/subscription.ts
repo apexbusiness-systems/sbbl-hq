@@ -1,7 +1,18 @@
 import { AppRole } from '@/lib/auth/roles';
 
-/** Player membership: $6.99 CAD / month recurring subscription */
+/** Player membership: $6.99 CAD / month recurring subscription (before tax) */
 export const PLAYER_REGISTRATION_PRICE_CAD = 6.99;
+
+/**
+ * Alberta applies only federal GST (5%). No PST.
+ * All prices are quoted before tax; GST is collected by Stripe at checkout.
+ */
+export const ALBERTA_GST_RATE = 0.05;
+
+/** Returns the total price including Alberta GST, rounded to 2 decimal places. */
+export function priceWithTax(baseCAD: number): number {
+  return Math.round(baseCAD * (1 + ALBERTA_GST_RATE) * 100) / 100;
+}
 
 /** PPV single-stream access: $4.99 CAD, token valid for 6 hours from first use */
 export const PPV_PRICE_CAD = 4.99;
