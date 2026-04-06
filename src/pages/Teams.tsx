@@ -57,8 +57,14 @@ const TeamsPage = () => {
   const filteredTeams = useMemo(() => {
     const apiTeams = teamsQuery.data?.teams ?? [];
     if (leagueFilter === 'all') return apiTeams;
-    const code = getLeagueConfig(leagueFilter).code;
-    return apiTeams.filter((t) => t.league_code === code);
+    // FIX: Case-insensitive comparison for league_code.
+    // ROOT CAUSE: Worker normalises league_code to uppercase via .toUpperCase(), and
+    // getLeagueConfig().code is also uppercase (e.g. 'WBL'). However if the DB ever
+    // returns mixed-case codes (migration not yet applied, or legacy data), a strict
+    // === comparison silently returns 0 teams — no error thrown, just an empty view.
+    // CHANGE: normalise both sides to uppercase before comparing.
+    const code = getLeagueConfig(leagueFilter).code.toUpperCase();
+    return apiTeams.filter((t) => t.league_code.toUpperCase() === code);
   }, [teamsQuery.data?.teams, leagueFilter]);
 
   // Standings: sort by Win PCT descending, then wins descending, then diff descending

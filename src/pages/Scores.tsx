@@ -61,17 +61,37 @@ const ScoresPage = () => {
     updateFilters(category, val);
   };
 
+  // FIX: Static queryKey — fetch ALL games once, filter entirely client-side.
+  // ROOT CAUSE: Per-filter queryKey (['scores', category, leagueFilter, statusFilter])
+  // caused N separate network requests per filter combination. Any failed request
+  // left that filter combo in an error/empty state independent of other combos,
+  // producing inconsistent renders (e.g. 'All' shows data but 'WBL+Recent' is blank).
+  // statusFilter was local state (not in URL), so its cache entries were orphaned
+  // across navigations, preventing proper revalidation.
+  // CHANGE: Single static key ['scores'] fetches all data once. Client-side useMemo
+  // handles all filtering without extra round-trips.
   const scoresQuery = useQuery({
-    queryKey: ['scores', category, leagueFilter, statusFilter],
-    queryFn: () => fetchScores({
-      category: category === 'all' ? undefined : category,
-      league:   leagueFilter === 'all' ? undefined : leagueFilter,
-      status:   statusFilter === 'all' ? undefined : statusFilter,
-    }),
+    queryKey: ['scores'],
+    queryFn: () => fetchScores(),
     staleTime: 60_000,
   });
 
-  const gamesData = useMemo(() => scoresQuery.data?.games ?? [], [scoresQuery.data?.games]);
+  const gamesData = useMemo(() => {
+    const all = scoresQuery.data?.games ?? [];
+    return all.filter((g) => {
+      const catMatch =
+        category === 'all' || g.category === category;
+      const leagueMatch =
+        leagueFilter === 'all' ||
+        g.leagueId === leagueFilter ||
+        (g.leagueCode ?? '').toLowerCase() === leagueFilter.toLowerCase();
+      const statusMatch =
+        statusFilter === 'all' ||
+        (statusFilter === 'recent' && g.status === 'final') ||
+        (statusFilter === 'upcoming' && ['upcoming', 'scheduled'].includes(g.status));
+      return catMatch && leagueMatch && statusMatch;
+    });
+  }, [scoresQuery.data?.games, category, leagueFilter, statusFilter]);
 
   // Group by category when viewing "All"
   const grouped = useMemo(() => {
