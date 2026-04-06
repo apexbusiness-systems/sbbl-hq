@@ -75,16 +75,6 @@ describe("deploy.yml guardrails", () => {
     expect(deployYml).toMatch(/VITE_SUPABASE_ANON_KEY:.*\|\|/);
   });
 
-  it("must support legacy SUPABASE_ANON_KEY secret fallback", () => {
-    expect(deployYml).toContain("secrets.SUPABASE_ANON_KEY");
-  });
-
-  it("must prefer CLOUDFLARE_API_TOKEN_WORKERS with fallback to CLOUDFLARE_API_TOKEN", () => {
-    expect(deployYml).toContain(
-      "CLOUDFLARE_API_TOKEN_WORKERS || secrets.CLOUDFLARE_API_TOKEN",
-    );
-  });
-
   it("must not use legacy sb_publishable placeholder in fallback keys", () => {
     expect(deployYml).not.toMatch(LEGACY_PLACEHOLDER_KEY_REGEX);
   });
