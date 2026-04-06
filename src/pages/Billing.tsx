@@ -58,7 +58,7 @@ const BillingPage = () => {
     <div className="min-h-screen">
       <div className="container py-8 md:py-12 max-w-4xl">
         <div className="mb-8">
-          <h1 className="font-display text-3xl md:text-4xl">Billing & Payments</h1>
+          <h1 className="font-display text-3xl md:text-4xl font-bold">Billing & Payments</h1>
           <p className="text-sm text-muted-foreground mt-1">Account billing and player registration</p>
         </div>
 

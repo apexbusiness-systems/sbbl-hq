@@ -88,21 +88,25 @@ const TeamsPage = () => {
   };
 
   return (
-    <div className="container py-8 max-w-7xl\">
+    <div className="min-h-screen">
+      <div className="container py-8 md:py-12">
       {/* Page Header */}
-      <div className="mb-8\">
-        <h1 className="text-3xl font-bold mb-1\">Teams & Standings</h1>
-        <p className="text-muted-foreground\">Rosters, rankings, and team stats.</p>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="font-display text-3xl md:text-4xl font-bold">Teams & Standings</h1>
+          <p className="text-sm text-muted-foreground mt-1">Rosters, rankings, and team stats.</p>
+        </div>
+        <Trophy className="w-5 h-5 text-primary" />
       </div>
 
       {/* Filters and Tabs Row */}
-      <div className="flex flex-col md:flex-row gap-4 mb-6\">
+      <div className="flex flex-col md:flex-row gap-4 mb-8">
         {/* League filter */}
-        <div className="flex items-center gap-2 flex-wrap\">
+        <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
           <button
             onClick={() => handleLeagueFilterChange('all')}
             className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors min-h-[36px] ${
-              leagueFilter === 'all' ? 'bg-card text-foreground' : 'text-muted-foreground'
+              leagueFilter === 'all' ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             All
@@ -112,7 +116,7 @@ const TeamsPage = () => {
               key={l.id}
               onClick={() => handleLeagueFilterChange(l.id)}
               className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors min-h-[36px] ${
-                leagueFilter === l.id ? 'bg-card text-foreground' : 'text-muted-foreground'
+                leagueFilter === l.id ? 'bg-card text-foreground' : 'text-muted-foreground hover:text-foreground'
               }`}
             >
               {l.shortName}
@@ -121,7 +125,7 @@ const TeamsPage = () => {
         </div>
 
         {/* View Tabs */}
-        <div className="flex items-center gap-2 flex-wrap ml-auto\">
+        <div className="flex gap-2 ml-auto overflow-x-auto scrollbar-hidden">
           {[
             { id: 'standings', label: 'Standings', icon: Trophy },
             { id: 'rosters', label: 'Rosters', icon: Users },
@@ -132,13 +136,13 @@ const TeamsPage = () => {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id as TabView)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors min-h-[36px] ${
+                className={`flex items-center gap-1.5 px-4 py-2 text-xs font-semibold uppercase tracking-wider rounded-sm whitespace-nowrap transition-colors ${
                   activeTab === tab.id
-                    ? 'bg-card text-foreground border border-border/50'
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-secondary text-secondary-foreground hover:text-foreground'
                 }`}
               >
-                <Icon className="w-4 h-4\" />
+                <Icon className="w-4 h-4" />
                 {tab.label}
               </button>
             );
@@ -148,15 +152,15 @@ const TeamsPage = () => {
 
       {/* Loading state */}
       {teamsQuery.isLoading && (
-        <div className="flex items-center justify-center py-16\">
-          <div className="text-muted-foreground\">Loading teams data...</div>
+        <div className="flex items-center justify-center py-16">
+          <div className="text-muted-foreground">Loading teams data...</div>
         </div>
       )}
 
       {/* Empty state */}
       {!teamsQuery.isLoading && filteredTeams.length === 0 && (
-        <div className="flex items-center justify-center py-16\">
-          <div className="text-muted-foreground\">No teams found for the selected league.</div>
+        <div className="flex items-center justify-center py-16">
+          <div className="text-muted-foreground">No teams found for the selected league.</div>
         </div>
       )}
 
@@ -211,49 +215,49 @@ const TeamsPage = () => {
 
       {/* -- ROSTERS VIEW ------------------------------------------ */}
       {!teamsQuery.isLoading && activeTab === 'rosters' && filteredTeams.length > 0 && (
-        <div className="space-y-6\">
+        <div className="space-y-6">
           {filteredTeams.map((team) => (
-            <div key={team.id} className="rounded-lg border border-border/40 bg-card p-6\">
-              <div className="flex items-center justify-between mb-4\">
+            <div key={team.id} className="panel overflow-hidden">
+              <div className="px-5 py-4 border-b border-border flex items-center justify-between">
                 <div>
-                  <h3 className="text-lg font-semibold\">{team.name}</h3>
+                  <h3 className="font-display text-lg font-bold">{team.name}</h3>
                   {leagueFilter === 'all' && (
                     <LeagueBadge leagueId={team.league_code.toLowerCase() as LeagueId} size="sm" />
                   )}
                 </div>
-                <div className="flex items-center gap-4 text-xs text-muted-foreground\">
-                  <div className="flex items-center gap-1.5\">
-                    <Users className="w-4 h-4\" />
-                    {team.roster_count} Players
+                <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1.5">
+                    <Users className="w-4 h-4" />
+                    <span className="stat-numeral text-sm">{team.roster_count}</span> Players
                   </div>
-                  <div className="flex items-center gap-1.5\">
-                    <Briefcase className="w-4 h-4\" />
-                    {team.coaches?.length || 0} Staff
+                  <div className="flex items-center gap-1.5">
+                    <Briefcase className="w-4 h-4" />
+                    <span className="stat-numeral text-sm">{team.coaches?.length || 0}</span> Staff
                   </div>
                 </div>
               </div>
 
               {/* Coaches Section */}
               {(team.coaches?.length || 0) > 0 && (
-                <div className="mb-6\">
-                  <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3\">Coaching Staff</h4>
-                  <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3\">
+                <div className="px-5 py-4 border-b border-border">
+                  <h4 className="font-display text-sm font-bold uppercase tracking-wider text-primary mb-3">Coaching Staff</h4>
+                  <div className="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                     {team.coaches.map((coach) => (
-                      <div key={coach.id} className="flex items-center gap-3 p-2 rounded-sm border border-border/30\">
+                      <div key={coach.id} className="flex items-center gap-3 p-2 rounded-sm border border-border/30">
                         {coach.avatar_url ? (
                           <PlayerAvatar src={coach.avatar_url} alt="avatar" className="w-10 h-10" />
                         ) : (
-                          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center\">
-                            <Briefcase className="w-5 h-5 text-muted-foreground\" />
+                          <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+                            <Briefcase className="w-5 h-5 text-muted-foreground" />
                           </div>
                         )}
-                        <div className="flex-1 min-w-0\">
-                          <div className="text-sm font-medium truncate\">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">
                             {coach.first_name || coach.last_name
                               ? `${coach.first_name || ''} ${coach.last_name || ''}`.trim()
                               : 'Coach'}
                           </div>
-                          <div className="text-xs text-muted-foreground\">
+                          <div className="text-xs text-muted-foreground">
                             {coach.role === 'team_manager' ? 'Manager' : coach.role}
                           </div>
                         </div>
@@ -264,24 +268,24 @@ const TeamsPage = () => {
               )}
 
               {/* Players Section */}
-              <div>
-                <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3\">Active Roster</h4>
+              <div className="px-5 py-4">
+                <h4 className="font-display text-sm font-bold uppercase tracking-wider text-primary mb-3">Active Roster</h4>
                 {(!team.players || team.players.length === 0) ? (
-                  <div className="text-sm text-muted-foreground py-4 text-center\">No players registered.</div>
+                  <div className="text-sm text-muted-foreground py-4 text-center">No players registered.</div>
                 ) : (
-                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3\">
+                  <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
                     {team.players.map((player) => (
-                      <div key={player.id} className="flex items-center gap-3 p-2 rounded-sm border border-border/30\">
-                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center font-semibold text-sm">
-                          {player.jersey_number != null ? player.jersey_number : '-'}
+                      <div key={player.id} className="flex items-center gap-3 p-2 rounded-sm border border-border/30">
+                        <div className="flex-shrink-0 w-8 h-8 rounded-full bg-secondary flex items-center justify-center">
+                          <span className="stat-numeral text-sm">{player.jersey_number != null ? player.jersey_number : '-'}</span>
                         </div>
-                        <div className="flex-1 min-w-0\">
-                          <div className="text-sm font-medium truncate\">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-medium truncate">
                             {player.first_name || player.last_name
                               ? `${player.first_name || ''} ${player.last_name || ''}`.trim()
                               : 'Player'}
                           </div>
-                          <div className="text-xs text-muted-foreground\">{player.position || 'N/A'}</div>
+                          <div className="text-xs text-muted-foreground">{player.position || 'N/A'}</div>
                         </div>
                       </div>
                     ))}
@@ -295,26 +299,26 @@ const TeamsPage = () => {
 
       {/* -- STATS VIEW ------------------------------------------ */}
       {!teamsQuery.isLoading && activeTab === 'stats' && filteredTeams.length > 0 && (
-        <div className="grid gap-6 lg:grid-cols-2\">
+        <div className="grid gap-6 lg:grid-cols-2">
           <div>
-            <h3 className="text-lg font-semibold mb-4\">Highest Scoring Offense (PPG)</h3>
-            <div className="space-y-2\">
+            <h3 className="font-display text-lg font-bold mb-4">Highest Scoring Offense (PPG)</h3>
+            <div className="space-y-2">
               {statsLeaders.slice(0, 10).map((team, index) => {
                 const ppg =
                   team.stats.gamesPlayed > 0 ? (team.stats.ptsFor / team.stats.gamesPlayed).toFixed(1) : '0.0';
                 return (
                   <div
                     key={team.id}
-                    className="flex items-center gap-3 p-3 rounded-lg border border-border/30 hover:bg-muted/20 transition-colors\"
+                    className="panel p-3 flex items-center gap-3 hover:border-border/60 transition-colors"
                   >
-                    <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center font-semibold text-sm">
+                    <span className="stat-numeral text-sm text-muted-foreground w-6 text-center flex-shrink-0">
                       {index + 1}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-display font-bold text-sm truncate">{team.name}</div>
+                      <div className="text-[10px] text-muted-foreground">{team.stats.gamesPlayed} GP</div>
                     </div>
-                    <div className="flex-1 min-w-0\">
-                      <div className="font-semibold truncate\">{team.name}</div>
-                      <div className="text-xs text-muted-foreground\">{team.stats.gamesPlayed} GP</div>
-                    </div>
-                    <div className="text-lg font-bold\">{ppg}</div>
+                    <span className="stat-numeral text-xl text-primary">{ppg}</span>
                   </div>
                 );
               })}
@@ -322,8 +326,8 @@ const TeamsPage = () => {
           </div>
 
           <div>
-            <h3 className="text-lg font-semibold mb-4\">Best Defense (PAPG)</h3>
-            <div className="space-y-2\">
+            <h3 className="font-display text-lg font-bold mb-4">Best Defense (PAPG)</h3>
+            <div className="space-y-2">
               {[...filteredTeams]
                 .filter((t) => t.stats && t.stats.gamesPlayed > 0)
                 .sort((a, b) => {
@@ -338,16 +342,16 @@ const TeamsPage = () => {
                   return (
                     <div
                       key={team.id}
-                      className="flex items-center gap-3 p-3 rounded-lg border border-border/30 hover:bg-muted/20 transition-colors\"
+                      className="panel p-3 flex items-center gap-3 hover:border-border/60 transition-colors"
                     >
-                      <div className="flex-shrink-0 w-8 h-8 rounded-full bg-muted flex items-center justify-center font-semibold text-sm">
+                      <span className="stat-numeral text-sm text-muted-foreground w-6 text-center flex-shrink-0">
                         {index + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-display font-bold text-sm truncate">{team.name}</div>
+                        <div className="text-[10px] text-muted-foreground">{team.stats.gamesPlayed} GP</div>
                       </div>
-                      <div className="flex-1 min-w-0\">
-                        <div className="font-semibold truncate\">{team.name}</div>
-                        <div className="text-xs text-muted-foreground\">{team.stats.gamesPlayed} GP</div>
-                      </div>
-                      <div className="text-lg font-bold\">{papg}</div>
+                      <span className="stat-numeral text-xl text-primary">{papg}</span>
                     </div>
                   );
                 })}
@@ -355,6 +359,7 @@ const TeamsPage = () => {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 };
