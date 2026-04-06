@@ -68,7 +68,7 @@ const fetchScoresSpy = vi.fn(async () => ({
 }));
 
 vi.mock('@/lib/api/scores', () => ({
-  fetchScores: (...args: unknown[]) => fetchScoresSpy(...args),
+  fetchScores: () => fetchScoresSpy(),
 }));
 
 vi.mock('@/contexts/AppContext', () => ({
@@ -109,12 +109,10 @@ describe('Scores page — client-side filtering regression', () => {
     // Wait for data to load
     await screen.findByText('WBL Warriors');
 
-    // CRITICAL: fetchScores must be called with no arguments (or undefined)
-    // so the worker returns ALL games, not a filtered subset.
-    // If params were passed, different filter combos would each trigger new requests.
+    // CRITICAL: fetchScores must have been called exactly once with no arguments.
+    // If per-filter queryKeys were still used, each filter combo would trigger
+    // a separate call — this assertion proves the static queryKey fix is in place.
     expect(fetchScoresSpy).toHaveBeenCalledTimes(1);
-    const [calledWithParams] = fetchScoresSpy.mock.calls[0];
-    // fetchScores() called with no args or with undefined — never with filter params
-    expect(calledWithParams).toBeUndefined();
+    expect(fetchScoresSpy).toHaveBeenCalledWith();
   });
 });
