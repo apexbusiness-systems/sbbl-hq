@@ -14,7 +14,7 @@ const ROLE_OPTIONS: { value: RoleIntent; label: string; description: string }[] 
   },
   {
     value: 'player',
-    label: 'Player — $7.00 CAD/month',
+    label: 'Player — $6.99 CAD/month + GST',
     description: 'Register as a player. Includes stats, leaderboard, player profile, highlight downloads, and a 10% store discount. Billed monthly.',
   },
   {
@@ -222,7 +222,7 @@ const OnboardingPage = () => {
 
           {form.primaryRoleIntent === 'player' && (
             <p className="text-xs text-muted-foreground text-center -mt-2">
-              You'll be taken to checkout after saving your profile. $7.00 CAD/month. Cancel any time.
+              You'll be taken to checkout after saving your profile. $6.99 CAD/month + 5% GST. Cancel any time.
             </p>
           )}
         </form>

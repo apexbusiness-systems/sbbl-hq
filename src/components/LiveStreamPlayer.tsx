@@ -27,7 +27,10 @@ import gameAction from '@/assets/game-action.svg';
 import type { Game } from '@/types';
 import type { AppRole } from '@/lib/auth/roles';
 
-const PPV_PRICE_USD = 4.99;
+const PPV_PRICE_CAD = 4.99;
+const ALBERTA_GST = 0.05;
+/** Tax-inclusive price shown to Alberta viewers */
+const PPV_PRICE_TOTAL = Math.round(PPV_PRICE_CAD * (1 + ALBERTA_GST) * 100) / 100;
 
 // Legacy Switcher Studio config removed.
 // ReactPlayer stream URL is configured via AdminStreamControls.
@@ -161,7 +164,23 @@ export function LiveStreamPlayer({
               consecutiveFailures = 0;
               if (active) setHeartbeatFailures(0);
             })
-            .catch(() => {
+            .catch((err: unknown) => {
+              const msg = err instanceof Error ? err.message : '';
+
+              // Displaced session: another device started streaming — stop immediately
+              // and show a specific message instead of the generic circuit breaker.
+              if (msg === 'session_not_found' || msg === 'forbidden') {
+                if (heartbeatId) { clearInterval(heartbeatId); heartbeatId = null; }
+                if (active) {
+                  setHeartbeatFailures(MAX_HEARTBEAT_FAILURES); // trigger overlay
+                  toast.error(
+                    'Your stream was opened on another device. Only one device can stream at a time.',
+                    { duration: 10_000 }
+                  );
+                }
+                return;
+              }
+
               consecutiveFailures++;
               if (active) setHeartbeatFailures(consecutiveFailures);
               if (consecutiveFailures >= MAX_HEARTBEAT_FAILURES && heartbeatId) {
@@ -299,15 +318,23 @@ export function LiveStreamPlayer({
           </div>
         )}
 
-        {/* Connection lost banner — circuit breaker triggered */}
+        {/* Connection lost / displaced banner — circuit breaker triggered */}
         {heartbeatFailures >= MAX_HEARTBEAT_FAILURES && (
-          <div className="absolute top-0 left-0 right-0 z-20 bg-red-600/95 backdrop-blur-sm px-4 py-2 flex items-center justify-between">
-            <p className="text-xs text-white font-medium">Connection lost — session may have expired.</p>
+          <div className="absolute inset-0 z-20 bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center text-center px-6 gap-4">
+            <div className="w-14 h-14 rounded-full bg-red-500/15 flex items-center justify-center">
+              <Lock className="w-7 h-7 text-red-400" />
+            </div>
+            <div>
+              <h3 className="font-display text-lg font-bold text-white mb-1">Stream Ended on This Device</h3>
+              <p className="text-sm text-white/60 max-w-xs leading-relaxed">
+                Only one device can stream at a time per account. To watch here, sign in on this device and start a new session.
+              </p>
+            </div>
             <button
               onClick={() => window.location.reload()}
-              className="text-[10px] font-bold uppercase tracking-wider text-white bg-white/20 px-3 py-1 rounded hover:bg-white/30 transition-colors"
+              className="bg-amber-500 hover:bg-amber-400 text-black px-6 py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded-2xl transition-colors"
             >
-              Reconnect
+              Resume on This Device
             </button>
           </div>
         )}
@@ -466,7 +493,7 @@ export function LiveStreamPlayer({
           className="bg-amber-500 hover:bg-amber-400 text-black px-8 py-3.5 font-display font-bold text-sm uppercase tracking-wider rounded-2xl inline-flex items-center gap-2 transition-colors disabled:opacity-60 shadow-md"
         >
           <Play className="w-4 h-4" />
-          {purchasing ? 'Redirecting…' : `Purchase Access — $${PPV_PRICE_USD.toFixed(2)}`}
+          {purchasing ? 'Redirecting…' : `Purchase Access — $${PPV_PRICE_TOTAL.toFixed(2)} CAD (incl. GST)`}
         </button>
 
         {/* Divider */}

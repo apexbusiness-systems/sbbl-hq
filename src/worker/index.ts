@@ -3018,7 +3018,11 @@ export async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
       "line_items[0][price_data][currency]": "cad",
       "line_items[0][price_data][product_data][name]": "SBBL HQ PPV Access",
       "line_items[0][price_data][unit_amount]": String(unitAmount), // $4.99 CAD in cents
+      "line_items[0][price_data][tax_behavior]": "exclusive", // GST added on top at checkout
       "line_items[0][quantity]": "1",
+      // Automatic tax: Stripe calculates Alberta GST (5%) based on billing address.
+      // Requires Stripe Tax to be enabled in the dashboard.
+      "automatic_tax[enabled]": "true",
       mode: "payment",
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -3487,9 +3491,13 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
       "line_items[0][price_data][product_data][name]": "SBBL Player Membership",
       "line_items[0][price_data][product_data][description]":
         "Monthly player registration. Includes stats, leaderboard, player profile, highlight downloads, and 10% store discount.",
-      "line_items[0][price_data][unit_amount]": "700",
+      "line_items[0][price_data][unit_amount]": "699", // $6.99 CAD before tax
+      "line_items[0][price_data][tax_behavior]": "exclusive", // GST added on top at checkout
       "line_items[0][price_data][recurring][interval]": "month",
       "line_items[0][quantity]": "1",
+      // Automatic tax: Stripe calculates Alberta GST (5%) based on billing address.
+      // Requires Stripe Tax to be enabled in the dashboard.
+      "automatic_tax[enabled]": "true",
       mode: "subscription",
       success_url: successUrl,
       cancel_url: cancelUrl,
