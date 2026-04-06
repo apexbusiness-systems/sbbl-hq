@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
   const supabaseKey =
     env.VITE_SUPABASE_PUBLISHABLE_KEY ||
     env.VITE_SUPABASE_ANON_KEY ||
-    'sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz';
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo';
     const turnstileSiteKey =
     env.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAACz241-XHmFaqRrM';
 

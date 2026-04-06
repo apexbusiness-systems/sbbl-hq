@@ -36,7 +36,7 @@
   ],
   "vars": {
     "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
-    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz",
+    "SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo",
     // Sentry DSN for the Worker — fill in after creating sbbl-hq-worker project in Sentry.
     // Worker Sentry project: Sentry Dashboard → sbbl-hq-worker → Settings → Client Keys (DSN)
     "SENTRY_DSN": ""
@@ -46,7 +46,7 @@
       "name": "sbbl-hq-staging",
       "vars": {
         "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
-        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz",
+        "SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo",
         "SENTRY_DSN": ""
       }
     }
