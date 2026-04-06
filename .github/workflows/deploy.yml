@@ -72,7 +72,11 @@ jobs:
           # Retry health for up to 2 minutes to handle edge propagation delays.
           health_ok=false
           for attempt in {1..12}; do
-            health_json="$(curl -fsS "$HEALTH_URL")"
+            # FIX: removed -f flag — curl -f exits with code 22 on 500, killing
+            # the retry loop on attempt 1 before retries can run. -sS without -f
+            # lets a 500 return an empty body; jq then fails gracefully and the
+            # loop sleeps + retries up to 12x (2 min) for edge propagation.
+            health_json="$(curl -sS "$HEALTH_URL" || true)"
             echo "health_attempt_${attempt}: $health_json"
 
             if echo "$health_json" | jq -e '.ok == true' >/dev/null; then
