@@ -91,17 +91,21 @@ const ScoresPage = () => {
   };
 
   return (
-    <div className="container py-8 max-w-7xl">
+    <div className="min-h-screen">
+      <div className="container py-8 md:py-12">
       {/* Page header */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold mb-1">Scores</h1>
-        <p className="text-muted-foreground text-sm">League games, 1-on-1 matchups, and special events.</p>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="font-display text-3xl md:text-4xl font-bold">Scores</h1>
+          <p className="text-sm text-muted-foreground mt-1">League games, 1-on-1 matchups, and special events.</p>
+        </div>
+        <Trophy className="w-5 h-5 text-primary" />
       </div>
 
       {/* ── Filter bar ───────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-3 mb-6">
+      <div className="flex flex-wrap gap-3 mb-8">
         {/* Category */}
-        <div className="flex bg-secondary p-1 rounded-sm">
+        <div className="flex gap-1 p-1 bg-secondary rounded-sm">
           {CATEGORIES.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -118,7 +122,7 @@ const ScoresPage = () => {
 
         {/* League filter — shown when category includes league games */}
         {(category === 'all' || category === 'league') && (
-          <div className="flex bg-secondary p-1 rounded-sm">
+          <div className="flex gap-1 p-1 bg-secondary rounded-sm">
             <button
               onClick={() => handleLeagueChange('all')}
               className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${
@@ -142,7 +146,7 @@ const ScoresPage = () => {
         )}
 
         {/* Status filter */}
-        <div className="flex bg-secondary p-1 rounded-sm ml-auto">
+        <div className="flex gap-1 p-1 bg-secondary rounded-sm ml-auto">
           {STATUS_FILTERS.map((s) => (
             <button
               key={s.id}
@@ -221,6 +225,7 @@ const ScoresPage = () => {
           ))}
         </div>
       )}
+    </div>
     </div>
   );
 };
