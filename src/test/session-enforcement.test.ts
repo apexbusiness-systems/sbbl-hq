@@ -121,7 +121,7 @@ describe('one-device session displacement', () => {
   });
 
   it('generic network error still uses 3-failure circuit breaker (not immediate)', () => {
-    const errorMessage = 'network_error';
+    const errorMessage: string = 'network_error';
     const isDisplaced = errorMessage === 'session_not_found' || errorMessage === 'forbidden';
     expect(isDisplaced).toBe(false);
     // Should increment consecutiveFailures, not immediately fire
