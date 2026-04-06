@@ -964,7 +964,7 @@ Return valid JSON only, no markdown.
                         <div className="absolute top-2 right-2 text-[10px] text-muted-foreground font-semibold">Item {i+1}</div>
                         <input placeholder="Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={storeBatchItems[i].title} onChange={e => updateStoreBatchItem(i, 'title', e.target.value)} />
                         <div className="grid grid-cols-2 gap-2">
-                          <input type="number" placeholder="Price (USD)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={storeBatchItems[i].price} onChange={e => updateStoreBatchItem(i, 'price', e.target.value)} />
+                          <input type="number" placeholder="Price (CAD)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={storeBatchItems[i].price} onChange={e => updateStoreBatchItem(i, 'price', e.target.value)} />
                         </div>
                         <select className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={storeBatchItems[i].category} onChange={e => updateStoreBatchItem(i, 'category', e.target.value)}>
                           <option value="apparel">Apparel</option>
