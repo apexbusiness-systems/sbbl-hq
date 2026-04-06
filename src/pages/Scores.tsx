@@ -1,13 +1,13 @@
 import { useQuery } from '@tanstack/react-query';
 import { useApp } from '@/contexts/AppContext';
 import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
+import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId, ScoreCategory, ScoreEntry } from '@/types';
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Trophy, Users, Star } from 'lucide-react';
+import { Trophy, Users, Star, Calendar } from 'lucide-react';
 import { fetchScores } from '@/lib/api/scores';
-// ScoreCard is memoized — prevents grid re-renders on filter state changes
-import { ScoreCard } from '@/components/scores/ScoreCard';
+import { games as mockGames } from '@/data/mock';
 
 // ── Category config ────────────────────────────────────────────────────────
 const CATEGORIES: Array<{ id: ScoreCategory | 'all'; label: string; icon: typeof Trophy }> = [
@@ -22,6 +22,106 @@ const STATUS_FILTERS = [
   { id: 'recent',   label: 'Recent'   },
   { id: 'upcoming', label: 'Upcoming' },
 ] as const;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function statusLabel(status: string): string {
+  if (status === 'live')     return 'Live';
+  if (status === 'final')    return 'Final';
+  if (status === 'upcoming' || status === 'scheduled') return 'Upcoming';
+  if (status === 'postponed') return 'Postponed';
+  return status;
+}
+
+function statusColor(status: string): string {
+  if (status === 'live')      return 'text-red-400 bg-red-500/15';
+  if (status === 'final')     return 'text-green-400 bg-green-500/10';
+  if (status === 'postponed') return 'text-yellow-400 bg-yellow-500/10';
+  return 'text-muted-foreground bg-secondary';
+}
+
+function winnerSide(entry: ScoreEntry): 'home' | 'away' | null {
+  if (entry.status !== 'final') return null;
+  if (entry.homeScore == null || entry.awayScore == null) return null;
+  if (entry.homeScore > entry.awayScore) return 'home';
+  if (entry.awayScore > entry.homeScore) return 'away';
+  return null;
+}
+
+// ── Game card ──────────────────────────────────────────────────────────────
+function ScoreCard({ entry }: { readonly entry: ScoreEntry }) {
+  const winner = winnerSide(entry);
+  const hasScore = entry.homeScore != null && entry.awayScore != null;
+  const leagueId = entry.leagueId;
+
+  return (
+    <div className="panel p-0 overflow-hidden flex flex-col">
+      {/* Card header */}
+      <div className="px-4 pt-3 pb-2 border-b border-border/40 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {entry.category === 'league' && leagueId && (
+            <LeagueBadge leagueId={leagueId} size="sm" />
+          )}
+          {entry.category === '1v1' && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-purple-500/15 text-purple-400 text-[10px] font-bold uppercase tracking-wider">
+              <Users className="w-2.5 h-2.5" /> 1v1
+            </span>
+          )}
+          {entry.category === 'special_event' && (
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-sm bg-amber-500/15 text-amber-400 text-[10px] font-bold uppercase tracking-wider">
+              <Star className="w-2.5 h-2.5" /> Event
+            </span>
+          )}
+          {entry.eventName ? (
+            <span className="text-[10px] text-muted-foreground truncate">{entry.eventName}</span>
+          ) : entry.seasonName ? (
+            <span className="text-[10px] text-muted-foreground truncate">{entry.seasonName}</span>
+          ) : null}
+        </div>
+        <span className={`flex-shrink-0 text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${statusColor(entry.status)}`}>
+          {statusLabel(entry.status)}
+          {entry.status === 'live' && <span className="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse align-middle" />}
+        </span>
+      </div>
+
+      {/* Score body */}
+      <div className="px-4 py-3 flex-1 space-y-2">
+        {/* Away row */}
+        <div className="flex items-center justify-between gap-2">
+          <span className={`font-display font-bold text-sm truncate ${winner === 'away' ? 'text-foreground font-extrabold' : 'text-muted-foreground'}`}>
+            {entry.awayLabel}
+          </span>
+          <span className={`stat-numeral text-xl flex-shrink-0 w-8 text-right ${hasScore ? (winner === 'away' ? 'text-foreground font-bold' : 'text-muted-foreground') : 'text-muted-foreground/40'}`}>
+            {hasScore ? entry.awayScore : '—'}
+          </span>
+        </div>
+        {/* Home row */}
+        <div className="flex items-center justify-between gap-2">
+          <span className={`font-display font-bold text-sm truncate ${winner === 'home' ? 'text-foreground font-extrabold' : 'text-muted-foreground'}`}>
+            {entry.homeLabel}
+          </span>
+          <span className={`stat-numeral text-xl flex-shrink-0 w-8 text-right ${hasScore ? (winner === 'home' ? 'text-foreground font-bold' : 'text-muted-foreground') : 'text-muted-foreground/40'}`}>
+            {hasScore ? entry.homeScore : '—'}
+          </span>
+        </div>
+      </div>
+
+      {/* Card footer */}
+      {(entry.gameDate || entry.notes) && (
+        <div className="px-4 pb-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/30 pt-2">
+          {entry.gameDate && (
+            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <Calendar className="w-3 h-3" />
+              {new Date(entry.gameDate).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}
+            </span>
+          )}
+          {entry.notes && (
+            <span className="text-[10px] text-muted-foreground/70 italic truncate w-full">{entry.notes}</span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── Main page ──────────────────────────────────────────────────────────────
 const ScoresPage = () => {
@@ -61,48 +161,46 @@ const ScoresPage = () => {
     updateFilters(category, val);
   };
 
-  // FIX: Static queryKey — fetch ALL games once, filter entirely client-side.
-  // ROOT CAUSE: Per-filter queryKey (['scores', category, leagueFilter, statusFilter])
-  // caused N separate network requests per filter combination. Any failed request
-  // left that filter combo in an error/empty state independent of other combos,
-  // producing inconsistent renders (e.g. 'All' shows data but 'WBL+Recent' is blank).
-  // statusFilter was local state (not in URL), so its cache entries were orphaned
-  // across navigations, preventing proper revalidation.
-  // CHANGE: Single static key ['scores'] fetches all data once. Client-side useMemo
-  // handles all filtering without extra round-trips.
   const scoresQuery = useQuery({
-    queryKey: ['scores'],
-    queryFn: () => fetchScores(),
+    queryKey: ['scores', category, leagueFilter, statusFilter],
+    queryFn: () => fetchScores({
+      category: category === 'all' ? undefined : category,
+      league:   leagueFilter === 'all' ? undefined : leagueFilter,
+      status:   statusFilter === 'all' ? undefined : statusFilter,
+    }),
     staleTime: 60_000,
   });
 
-  const gamesData = useMemo(() => {
-    const all = scoresQuery.data?.games ?? [];
-    return all.filter((g) => {
-      const catMatch =
-        category === 'all' || g.category === category;
-      const leagueMatch =
-        leagueFilter === 'all' ||
-        g.leagueId === leagueFilter ||
-        (g.leagueCode ?? '').toLowerCase() === leagueFilter.toLowerCase();
-      const statusMatch =
-        statusFilter === 'all' ||
-        (statusFilter === 'recent' && g.status === 'final') ||
-        (statusFilter === 'upcoming' && ['upcoming', 'scheduled'].includes(g.status));
-      return catMatch && leagueMatch && statusMatch;
-    });
-  }, [scoresQuery.data?.games, category, leagueFilter, statusFilter]);
+  const games = useMemo(() => {
+    const apiGames = scoresQuery.data?.games;
+    if (Array.isArray(apiGames) && apiGames.length > 0) {
+      return apiGames;
+    }
+    // Fallback to mock data when API returns empty
+    return mockGames.map((g): ScoreEntry => ({
+      id: g.id,
+      category: 'league',
+      leagueId: g.leagueId,
+      homeLabel: g.homeTeam.name,
+      awayLabel: g.awayTeam.name,
+      homeScore: g.score?.home,
+      awayScore: g.score?.away,
+      status: g.status,
+      gameDate: g.date,
+      notes: `${g.venue} — ${g.court}`,
+    }));
+  }, [scoresQuery.data?.games]);
 
   // Group by category when viewing "All"
   const grouped = useMemo(() => {
-    if (category !== 'all') return { [category]: gamesData } as Record<string, ScoreEntry[]>;
-    return gamesData.reduce<Record<string, ScoreEntry[]>>((acc, g) => {
+    if (category !== 'all') return { [category]: games } as Record<string, ScoreEntry[]>;
+    return games.reduce<Record<string, ScoreEntry[]>>((acc, g) => {
       (acc[g.category] ??= []).push(g);
       return acc;
     }, {});
-  }, [gamesData, category]);
+  }, [games, category]);
 
-  const hasGames = gamesData.length > 0;
+  const hasGames = games.length > 0;
 
   const sectionLabel: Record<string, string> = {
     league:        'League Games',
@@ -111,21 +209,17 @@ const ScoresPage = () => {
   };
 
   return (
-    <div className="min-h-screen">
-      <div className="container py-8 md:py-12">
+    <div className="container py-8 max-w-7xl">
       {/* Page header */}
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="font-display text-3xl md:text-4xl font-bold">Scores</h1>
-          <p className="text-sm text-muted-foreground mt-1">League games, 1-on-1 matchups, and special events.</p>
-        </div>
-        <Trophy className="w-5 h-5 text-primary" />
+      <div className="mb-6">
+        <h1 className="text-3xl font-bold mb-1">Scores</h1>
+        <p className="text-muted-foreground text-sm">League games, 1-on-1 matchups, and special events.</p>
       </div>
 
       {/* ── Filter bar ───────────────────────────────────────────────── */}
-      <div className="flex flex-wrap gap-3 mb-8">
+      <div className="flex flex-wrap gap-3 mb-6">
         {/* Category */}
-        <div className="flex gap-1 p-1 bg-secondary rounded-sm">
+        <div className="flex bg-secondary p-1 rounded-sm">
           {CATEGORIES.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
@@ -142,7 +236,7 @@ const ScoresPage = () => {
 
         {/* League filter — shown when category includes league games */}
         {(category === 'all' || category === 'league') && (
-          <div className="flex gap-1 p-1 bg-secondary rounded-sm">
+          <div className="flex bg-secondary p-1 rounded-sm">
             <button
               onClick={() => handleLeagueChange('all')}
               className={`px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${
@@ -166,7 +260,7 @@ const ScoresPage = () => {
         )}
 
         {/* Status filter */}
-        <div className="flex gap-1 p-1 bg-secondary rounded-sm ml-auto">
+        <div className="flex bg-secondary p-1 rounded-sm ml-auto">
           {STATUS_FILTERS.map((s) => (
             <button
               key={s.id}
@@ -189,25 +283,8 @@ const ScoresPage = () => {
         </div>
       )}
 
-      {/* ── Error state ─────────────────────────────────────────────── */}
-      {!scoresQuery.isLoading && scoresQuery.isError && (
-        <div className="panel p-12 text-center">
-          <Trophy className="w-10 h-10 text-red-400 mx-auto mb-4" />
-          <p className="text-lg font-semibold mb-1">Failed to load scores</p>
-          <p className="text-sm text-muted-foreground mb-4">
-            {scoresQuery.error instanceof Error ? scoresQuery.error.message : 'An unexpected error occurred.'}
-          </p>
-          <button
-            onClick={() => scoresQuery.refetch()}
-            className="px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:bg-primary/90 transition-colors"
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
       {/* ── Empty state ──────────────────────────────────────────────── */}
-      {!scoresQuery.isLoading && !scoresQuery.isError && !hasGames && (
+      {!scoresQuery.isLoading && !hasGames && (
         <div className="panel p-12 text-center">
           <Trophy className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
           <p className="text-lg font-semibold mb-1">No scores found</p>
@@ -245,7 +322,6 @@ const ScoresPage = () => {
           ))}
         </div>
       )}
-    </div>
     </div>
   );
 };
