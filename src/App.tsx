@@ -13,6 +13,7 @@ import { RequireAdmin, RequireAuth } from '@/components/auth/RouteGuards';
 import { StickyMusicPlayer } from '@/components/marketing/StickyMusicPlayer';
 import { AppDownloadPill } from '@/components/marketing/AppDownloadPill';
 import { OfflineBanner } from '@/components/OfflineBanner';
+import { SplashScreen } from '@/components/SplashScreen';
 
 const AppHome = lazy(() => import('./pages/AppHome'));
 const Home = lazy(() => import('./pages/Home'));
@@ -76,6 +77,8 @@ const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AuthProvider>
+        {/* SplashScreen reads useAuth().loading — must live inside AuthProvider */}
+        <SplashScreen />
         <BagProvider>
         <AppProvider>
           <Toaster />
