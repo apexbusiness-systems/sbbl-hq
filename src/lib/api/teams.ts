@@ -57,10 +57,5 @@ export type TeamCard = {
  * the single cached response is shared across filter switches.
  */
 export async function fetchTeams(): Promise<{ ok: boolean; teams: TeamCard[] }> {
-  try {
-    return await apiFetch<{ ok: boolean; teams: TeamCard[] }>('/api/teams');
-  } catch (err) {
-    return { ok: false, teams: [] };
-  }
-
+  return apiFetch<{ ok: boolean; teams: TeamCard[] }>('/api/teams');
 }
