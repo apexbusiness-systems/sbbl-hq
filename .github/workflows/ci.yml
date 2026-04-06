@@ -41,6 +41,7 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
           VITE_APP_NAME: SBBL HQ
           VITE_DEFAULT_LEAGUE: SBBL
 
@@ -49,7 +50,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: quality
-    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +70,7 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY }}
           VITE_APP_NAME: SBBL HQ
           VITE_DEFAULT_LEAGUE: SBBL
 

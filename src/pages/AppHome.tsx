@@ -11,14 +11,14 @@ const AppHomePage = () => {
   const featuredProducts = products.filter(p => p.sale && p.price > 0).slice(0, 3);
 
   return (
-    <div className="min-h-screen">
+    <main className="min-h-screen">
 
       {/* ── BRAND HERO ─────────────────────────────────────────── */}
       <section className="relative overflow-hidden bg-[#0A0A0A]" style={{ minHeight: '560px' }}>
         {/* Photo background */}
         <picture className="absolute inset-0 w-full h-full">
           <source media="(min-width: 768px)" srcSet="/assets/hero-desktop.png" />
-          <img src="/assets/hero-mobile.png" alt="" className="w-full h-full object-cover object-center" draggable={false} />
+          <img src="/assets/hero-mobile.png" alt="SBBL HQ Hero - The Premier Basketball Platform" className="w-full h-full object-cover object-center" draggable={false} />
         </picture>
         <div className="absolute inset-0 bg-black/45" />
         <div className="absolute inset-0 [background:linear-gradient(to_right,rgba(10,10,10,0.85)_0%,rgba(10,10,10,0.3)_55%,transparent_100%)]" />
@@ -52,7 +52,7 @@ const AppHomePage = () => {
       </section>
 
       {/* ── THREE LEAGUES ──────────────────────────────────────── */}
-      <section className="container py-14 md:py-20">
+      <section className="container py-14 md:py-20" aria-label="League Selection">
         <div className="flex items-center justify-between mb-8">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary mb-1">Active Leagues</p>
@@ -196,7 +196,7 @@ const AppHomePage = () => {
         </div>
       </section>
 
-    </div>
+    </main>
   );
 };
 

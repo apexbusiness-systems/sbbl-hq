@@ -11,6 +11,7 @@ import {
 const staticNav = [
   { label: 'Home', path: '/' },
   { label: 'Live', path: '/live' },
+  { label: 'Scores', path: '/scores' },
   { label: 'Store', path: '/store' },
   { label: 'Profiles', path: '/profiles' },
 ];

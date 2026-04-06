@@ -1,3 +1,4 @@
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import { safeServerEnv } from "@/lib/env";
 import { readIdempotencyKey } from "@/lib/api/idempotency";
 import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
@@ -15,12 +16,30 @@ type Handler = (ctx: HandlerCtx) => Promise<Response>;
 
 type Route = { method: string; regex: RegExp; handler: Handler };
 const transientIdempotency = new Map<string, number>();
+const transientRateLimits = new Map<string, number[]>();
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+function enforceInMemoryRateLimit(
+  key: string,
+  limit: number,
+  windowMs: number,
+): boolean {
+  const now = Date.now();
+  const bucket = transientRateLimits.get(key) ?? [];
+  const recent = bucket.filter((ts) => now - ts <= windowMs);
+  if (recent.length >= limit) {
+    transientRateLimits.set(key, recent);
+    return false;
+  }
+  recent.push(now);
+  transientRateLimits.set(key, recent);
+  return true;
 }
 
 // SECURITY: roles are never read from client-supplied headers.
@@ -95,31 +114,62 @@ async function verifyStripeSignature(
   );
 }
 
+async function verifyTurnstileToken(
+  env: Env,
+  token: string | undefined,
+  remoteIp: string,
+): Promise<boolean> {
+  if (!env.OPTIONAL_TURNSTILE_SECRET_KEY) return true;
+  if (!token) return false;
+  const form = new URLSearchParams();
+  form.set("secret", env.OPTIONAL_TURNSTILE_SECRET_KEY);
+  form.set("response", token);
+  if (remoteIp && remoteIp !== "unknown") form.set("remoteip", remoteIp);
+  const res = await fetch(
+    "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+    {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: form.toString(),
+    },
+  );
+  if (!res.ok) return false;
+  const payload = (await res.json().catch(() => null)) as
+    | { success?: boolean }
+    | null;
+  return Boolean(payload?.success);
+}
+
 // SECURITY: session is established ONLY via a valid Supabase JWT Bearer token.
 // The x-sbbl-user-id fallback has been removed — any client-supplied identity
 // header is ignored. If JWT verification fails, session is null (unauthenticated).
+let jwksClient: ReturnType<typeof createRemoteJWKSet> | null = null;
+
 async function getSession(req: Request, env: Env) {
   const token = getBearerToken(req);
-  if (token && env.SUPABASE_PUBLISHABLE_KEY) {
-    const supabase = createClient(
-      env.SUPABASE_URL,
-      env.SUPABASE_PUBLISHABLE_KEY,
-      {
-        auth: { persistSession: false, autoRefreshToken: false },
-      },
-    );
-    const { data, error } = await supabase.auth.getUser(token);
-    if (!error && data.user) {
-      // Roles are fetched from DB on admin-gated routes via requireAdminSession().
-      // For non-admin routes, default to 'fan' unless the DB assignment is present.
+  if (!token || !env.SUPABASE_URL) return null;
+
+  try {
+    if (!jwksClient) {
+      const url = new URL("/auth/v1/jwks", env.SUPABASE_URL);
+      jwksClient = createRemoteJWKSet(url);
+    }
+
+    const { payload } = await jwtVerify(token, jwksClient, {
+      issuer: `${env.SUPABASE_URL}/auth/v1`,
+      audience: "authenticated",
+    });
+
+    if (payload && payload.sub) {
       return {
-        userId: data.user.id,
-        roles: ["fan"] as string[],
+        userId: payload.sub,
+        roles: (payload.user_role ? [payload.user_role] : ["fan"]) as string[],
       };
     }
+  } catch (error) {
+    console.error("JWT Verification failed:", error);
   }
 
-  // No fallback. No token = no session.
   return null;
 }
 
@@ -330,7 +380,48 @@ function streamCacheUrl(gameId: string | null): string {
     : `https://sbbl-hq.icu/__cache/stream-status`;
 }
 
-async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
+async function getActiveViewerCount(admin: SupabaseClient, gameId: string | null) {
+  if (!gameId) return 0;
+  const activeSessions = await admin
+    .from("stream_access_sessions")
+    .select("user_id")
+    .eq("game_id", gameId)
+    .eq("status", "active")
+    .gt("expires_at", new Date().toISOString());
+  if (activeSessions.error) return 0;
+  return new Set((activeSessions.data ?? []).map((row: Record<string, unknown>) => String(row.user_id))).size;
+}
+
+async function refreshLiveSessionMetrics(
+  admin: SupabaseClient,
+  gameId: string | null,
+  activeViewers: number,
+) {
+  if (!gameId) return;
+  const liveSession = await admin
+    .from("stream_sessions")
+    .select("id,peak_viewers")
+    .eq("game_id", gameId)
+    .eq("status", "live")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (liveSession.error || !liveSession.data) return;
+  const peak = Math.max(
+    Number((liveSession.data as Record<string, unknown>).peak_viewers ?? 0),
+    activeViewers,
+  );
+  await admin
+    .from("stream_sessions")
+    .update({
+      current_viewers: activeViewers,
+      peak_viewers: peak,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", String((liveSession.data as Record<string, unknown>).id));
+}
+
+export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const gameId = url.searchParams.get("gameId") ?? null;
   const cacheKey = new Request(streamCacheUrl(gameId));
@@ -346,14 +437,8 @@ async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   const cfg = await getOrCreateStreamConfig(admin);
   let viewerCount = 0;
   const activeGameId = gameId ?? (cfg.active_game_id as string | null) ?? null;
-  if (activeGameId) {
-    const viewers = await admin
-      .from("stream_entitlements")
-      .select("id", { count: "exact", head: true })
-      .eq("game_id", activeGameId)
-      .eq("status", "active");
-    if (!viewers.error) viewerCount = viewers.count ?? 0;
-  }
+  viewerCount = await getActiveViewerCount(admin, activeGameId);
+  await refreshLiveSessionMetrics(admin, activeGameId, viewerCount);
 
   const payload = {
     ok: true,
@@ -361,7 +446,6 @@ async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
     title: String(cfg.title ?? "SBBL Live Stream"),
     viewerCount,
     gameId: activeGameId,
-    collectionId: String(cfg.collection_id ?? ""),
   };
 
   const response = new Response(JSON.stringify(payload), {
@@ -467,12 +551,54 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   if (error) throw new Error(error.message);
 
   if (typeof body.gameId === "string") {
-    await ctx.admin.from("stream_sessions").insert({
-      game_id: body.gameId,
-      status: body.isLive ? "live" : "ended",
-      created_by: session.userId,
-      updated_by: session.userId,
-    });
+    if (body.isLive) {
+      await ctx.admin.from("stream_sessions").insert({
+        game_id: body.gameId,
+        status: "live",
+        started_at: nowIso,
+        current_viewers: 0,
+        peak_viewers: 0,
+        created_by: session.userId,
+        updated_by: session.userId,
+      });
+    } else {
+      const activeViewers = await getActiveViewerCount(ctx.admin, body.gameId);
+      const currentLive = await ctx.admin
+        .from("stream_sessions")
+        .select("id,peak_viewers")
+        .eq("game_id", body.gameId)
+        .eq("status", "live")
+        .order("updated_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (currentLive.data) {
+        const priorPeak = Number(
+          (currentLive.data as Record<string, unknown>).peak_viewers ?? 0,
+        );
+        await ctx.admin
+          .from("stream_sessions")
+          .update({
+            status: "ended",
+            ended_at: nowIso,
+            current_viewers: activeViewers,
+            peak_viewers: Math.max(priorPeak, activeViewers),
+            updated_at: nowIso,
+            updated_by: session.userId,
+          })
+          .eq("id", (currentLive.data as Record<string, unknown>).id as string);
+      } else {
+        await ctx.admin.from("stream_sessions").insert({
+          game_id: body.gameId,
+          status: "ended",
+          started_at: nowIso,
+          ended_at: nowIso,
+          current_viewers: activeViewers,
+          peak_viewers: activeViewers,
+          created_by: session.userId,
+          updated_by: session.userId,
+        });
+      }
+    }
   }
 
   // Bust edge cache immediately so Go Live / End Broadcast is reflected
@@ -491,7 +617,7 @@ async function handleStreamSessions({ req, admin }: HandlerCtx) {
   await requireAdminSession(req, admin);
   const { data, error } = await admin
     .from("stream_sessions")
-    .select("id,game_id,status,created_at,updated_at,games(league_id)")
+    .select("id,game_id,status,created_at,updated_at,started_at,ended_at,peak_viewers,current_viewers,games(league_id)")
     .order("updated_at", { ascending: false })
     .limit(50);
   if (error) throw new Error(error.message);
@@ -501,9 +627,9 @@ async function handleStreamSessions({ req, admin }: HandlerCtx) {
       id: s.id,
       gameId: s.game_id,
       leagueId: (s.games as Record<string, unknown> | null)?.league_id ?? null,
-      startedAt: s.created_at,
-      endedAt: s.status === "ended" ? s.updated_at : null,
-      peakViewers: 0,
+      startedAt: s.started_at ?? s.created_at,
+      endedAt: s.ended_at ?? (s.status === "ended" ? s.updated_at : null),
+      peakViewers: Number(s.peak_viewers ?? s.current_viewers ?? 0),
       totalPpvRevenue: 0,
       source: "main",
     })),
@@ -520,7 +646,7 @@ async function handleOpsRevenue({ req, admin }: HandlerCtx) {
     admin.from("ppv_invites").select("id"),
     admin
       .from("stream_sessions")
-      .select("id,game_id,status,created_at,updated_at")
+      .select("id,game_id,status,created_at,updated_at,started_at,ended_at,peak_viewers,current_viewers")
       .order("updated_at", { ascending: false })
       .limit(10),
   ]);
@@ -544,9 +670,9 @@ async function handleOpsRevenue({ req, admin }: HandlerCtx) {
       id: s.id,
       gameId: s.game_id,
       leagueId: null,
-      startedAt: s.created_at,
-      endedAt: s.status === "ended" ? s.updated_at : null,
-      peakViewers: 0,
+      startedAt: s.started_at ?? s.created_at,
+      endedAt: s.ended_at ?? (s.status === "ended" ? s.updated_at : null),
+      peakViewers: Number(s.peak_viewers ?? s.current_viewers ?? 0),
       totalPpvRevenue: 0,
       source: "main",
     })),
@@ -744,6 +870,98 @@ async function handleAccessOverride(ctx: HandlerCtx) {
     action: body.action,
     gameId: body.gameId,
   });
+}
+
+async function handleCoachApprovalRequest(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const body = (await ctx.req.json().catch(() => null)) as {
+    preferredLeague?: string;
+    note?: string;
+  } | null;
+  const { error } = await ctx.admin
+    .from('coach_approval_requests')
+    .insert({
+      user_id: userId,
+      status: 'pending',
+      preferred_league: body?.preferredLeague ?? null,
+      note: body?.note ?? null,
+    });
+  if (error && !error.message.includes('duplicate')) throw new Error(error.message);
+  // Also enqueue a review_queue item so it surfaces in the ops console
+  await ctx.admin
+    .from('review_queue')
+    .insert({
+      review_type: 'coach_approval',
+      ref_id: userId,
+      payload: {
+        title: 'Coach Approval Request',
+        description: `User ${userId} has requested coach access.`,
+        user_id: userId,
+        preferred_league: body?.preferredLeague ?? null,
+        note: body?.note ?? null,
+        severity: 'medium',
+      },
+      status: 'pending',
+      idempotency_key: readIdempotencyKey(ctx.req.headers),
+    });
+  return json({ ok: true, status: 'pending' });
+}
+
+async function handleListCoachRequests({ req, admin }: HandlerCtx) {
+  await requireSuperAdminSession(req, admin);
+  const { data, error } = await admin
+    .from('coach_approval_requests')
+    .select('id,user_id,status,preferred_league,note,created_at,reviewed_at,reviewed_by')
+    .order('created_at', { ascending: false })
+    .limit(100);
+  if (error) throw new Error(error.message);
+  return json({ ok: true, requests: data ?? [] });
+}
+
+async function handleResolveCoachRequest(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { id } = ctx.params;
+  const body = (await ctx.req.json().catch(() => null)) as {
+    action?: 'approve' | 'reject';
+  } | null;
+  if (!body?.action || !['approve', 'reject'].includes(body.action)) {
+    return json({ ok: false, error: 'action_required' }, 400);
+  }
+  const newStatus = body.action === 'approve' ? 'approved' : 'rejected';
+  const { data: reqRow, error: fetchErr } = await ctx.admin
+    .from('coach_approval_requests')
+    .update({ status: newStatus, reviewed_by: session.userId, reviewed_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('user_id')
+    .single();
+  if (fetchErr) throw new Error(fetchErr.message);
+
+  if (body.action === 'approve' && reqRow?.user_id) {
+    // Grant coach role
+    await ctx.admin
+      .from('user_role_assignments')
+      .upsert({ user_id: reqRow.user_id, role: 'coach', league_id: null }, { onConflict: 'user_id,role' });
+    // Resolve the review_queue item
+    await ctx.admin
+      .from('review_queue')
+      .update({ status: 'resolved' })
+      .eq('review_type', 'coach_approval')
+      .eq('status', 'pending')
+      .contains('payload', { user_id: reqRow.user_id });
+  }
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: session.userId,
+    action: `coach_approval_${body.action}`,
+    ref_type: 'coach_approval_requests',
+    ref_id: id,
+    payload: { action: body.action, target_user_id: reqRow?.user_id },
+    idempotency_key: readIdempotencyKey(ctx.req.headers),
+  });
+
+  return json({ ok: true, id, status: newStatus });
 }
 
 async function writeIngressFailure(
@@ -976,25 +1194,38 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
         ? metadata.purchase_type
         : null;
 
-    // Player registration: stamp subscription_ends_at (+30 days)
+    // Player registration (subscription): set subscription_ends_at + grant player role
     if (!purchaseType || purchaseType === "player_registration") {
       try {
-        const now = new Date();
-        now.setDate(now.getDate() + 30);
+        const subEndMs = typeof object.current_period_end === 'number'
+          ? object.current_period_end * 1000
+          : Date.now() + 31 * 24 * 60 * 60 * 1000;
+        const subEndsAt = new Date(subEndMs).toISOString();
+        const stripeCustomerId = typeof object.customer === 'string' ? object.customer : null;
+        const stripeSubId = typeof object.subscription === 'string' ? object.subscription : null;
         await ctx.admin
           .from("profiles")
-          .update({ subscription_ends_at: now.toISOString() })
+          .update({
+            subscription_ends_at: subEndsAt,
+            ...(stripeCustomerId ? { stripe_customer_id: stripeCustomerId } : {}),
+            ...(stripeSubId ? { stripe_subscription_id: stripeSubId } : {}),
+          })
           .eq("user_id", userId);
+        // Grant player role (upsert to avoid duplicates)
+        await ctx.admin
+          .from("user_role_assignments")
+          .upsert({ user_id: userId, role: 'player', league_id: null }, { onConflict: 'user_id,role' })
+          .select();
       } catch {
         /* non-critical */
       }
     }
 
-    // PPV purchase: create stream entitlement (24h access window)
+    // PPV purchase: create stream entitlement (6h access window)
     if (purchaseType === "ppv" && typeof metadata.game_id === "string") {
       try {
         const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + 24);
+        expiresAt.setHours(expiresAt.getHours() + 6);
         await ctx.admin.rpc("create_stream_entitlement", {
           p_game_id: metadata.game_id,
           p_user_id: userId,
@@ -1043,6 +1274,42 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
         /* non-critical */
       }
     }
+  }
+
+  // Player subscription renewed — extend subscription window
+  if (event.type === "customer.subscription.updated" && userId) {
+    const sub = event.data?.object ?? {};
+    const currentPeriodEnd = typeof (sub as Record<string, unknown>).current_period_end === 'number'
+      ? new Date((sub as Record<string, unknown>).current_period_end as number * 1000)
+      : null;
+    const status = typeof (sub as Record<string, unknown>).status === 'string'
+      ? (sub as Record<string, unknown>).status as string
+      : null;
+    if (currentPeriodEnd && status === 'active') {
+      try {
+        await ctx.admin
+          .from('profiles')
+          .update({ subscription_ends_at: currentPeriodEnd.toISOString() })
+          .eq('user_id', userId);
+      } catch { /* non-critical */ }
+    }
+  }
+
+  // Player subscription cancelled/expired — downgrade to fan (remove player role)
+  if ((event.type === "customer.subscription.deleted") && userId) {
+    try {
+      // Remove player role assignment — user reverts to fan
+      await ctx.admin
+        .from('user_role_assignments')
+        .delete()
+        .eq('user_id', userId)
+        .eq('role', 'player');
+      // Clear subscription end date
+      await ctx.admin
+        .from('profiles')
+        .update({ subscription_ends_at: null, stripe_subscription_id: null })
+        .eq('user_id', userId);
+    } catch { /* non-critical */ }
   }
 
   return json({
@@ -1195,10 +1462,17 @@ async function handleImportRoute(
         season_id: row.season_id,
         division_id: row.division_id || null,
         name: row.name,
-        status: "published",
+        status: row.status || "published",
+        record: row.wins != null ? {
+          wins: Number(row.wins),
+          losses: Number(row.losses ?? 0),
+          ptsFor: Number(row.pts_for ?? 0),
+          ptsAgainst: Number(row.pts_against ?? 0),
+        } : undefined,
       }));
-      // Using insert to avoid hallucinated unique constraint for upsert
-      const { error } = await ctx.admin.from("teams").insert(payload);
+      const { error } = await ctx.admin
+        .from("teams")
+        .upsert(payload, { onConflict: "season_id,name" });
       if (error) throw error;
     } else if (kind === "players") {
       const payload = rows.map((row) => ({
@@ -1475,9 +1749,10 @@ async function handlePublicPotg({ admin }: HandlerCtx) {
 
 // Ops List handlers
 function requireSuperAdmin(req: Request) {
-  const role = req.headers.get('x-user-role');
-  if (role !== 'super_admin') throw new Error('Forbidden: Super Admin only');
-  return requireAuth(req);
+  const userId = requireAuth(req);
+  const roles = req.headers.get('x-sbbl-roles-verified')?.split(',') ?? [];
+  if (!roles.includes('super_admin')) throw new Error('forbidden');
+  return userId;
 }
 
 async function handleOpsListTeams({ req, admin }: HandlerCtx) {
@@ -1726,7 +2001,7 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
   let query = admin
     .from("teams")
     .select(
-      "id,name,league_id,leagues(code,name),seasons(name),divisions(name)," +
+      "id,name,league_id,record,leagues(code,name),seasons(name),divisions(name)," +
         "players(id,jersey_number,position,user_id)," +
         "team_memberships(id,user_id,role)",
     )
@@ -1864,12 +2139,18 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
   }
 
   const teams = filteredTeamsData.map((row: Record<string, unknown>) => {
-    const stats = statsMap.get(row.id as string) || {
+    const dbRecord = row.record as { wins?: number; losses?: number; ptsFor?: number; ptsAgainst?: number } | null;
+    const stats = statsMap.get(row.id as string) || (dbRecord ? {
+      wins: dbRecord.wins ?? 0,
+      losses: dbRecord.losses ?? 0,
+      ptsFor: dbRecord.ptsFor ?? 0,
+      ptsAgainst: dbRecord.ptsAgainst ?? 0,
+    } : {
       wins: 0,
       losses: 0,
       ptsFor: 0,
       ptsAgainst: 0,
-    };
+    });
     const gp = stats.wins + stats.losses;
     let winPct = gp > 0 ? (stats.wins / gp).toFixed(3) : ".000";
     if (winPct.startsWith("1")) winPct = "1.000";
@@ -2199,15 +2480,22 @@ async function handleInviteGenerate(ctx: HandlerCtx) {
  * IP-mismatch on re-use → 403.  Different user on re-use → 403 (non-transferable).
  * Idempotent for same user + same IP (re-entry after page refresh).
  */
-async function handleInviteRedeem(ctx: HandlerCtx) {
+export async function handleInviteRedeem(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
   const ip = getClientIP(ctx.req);
+  if (!enforceInMemoryRateLimit(`invite-redeem:${userId}:${ip}`, 8, 60_000)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
 
   const body = (await ctx.req.json().catch(() => null)) as {
     code?: string;
     gameId?: string;
+    captchaToken?: string;
   } | null;
+  if (!(await verifyTurnstileToken(ctx.env, body?.captchaToken, ip))) {
+    return json({ ok: false, error: "captcha_failed" }, 403);
+  }
   const code = body?.code?.trim();
   const gameId = body?.gameId?.trim();
   if (!code || !gameId)
@@ -2309,6 +2597,79 @@ async function handleInviteRedeem(ctx: HandlerCtx) {
   return json({ ok: true, granted: true });
 }
 
+// ── STREAM REACTIONS ────────────────────────────────────────────────────────
+
+const REACTIONS_CACHE_TTL_S = 5;
+
+async function handleStreamReactions({ req, admin }: HandlerCtx) {
+  const url = new URL(req.url);
+  // Support /api/streams/:gameId/reactions and /api/streams/reactions?gameId=...
+  const pathGameId = req.url.match(/\/api\/streams\/([^/]+)\/reactions/)?.[1];
+  const gameId = (pathGameId && pathGameId !== 'reactions')
+    ? pathGameId
+    : url.searchParams.get('gameId') ?? null;
+
+  // Resolve 'current' to the active game from stream config
+  const resolvedGameId = gameId === 'current' || !gameId
+    ? await getOrCreateStreamConfig(admin).then(c => c.active_game_id as string | null).catch(() => null)
+    : gameId;
+
+  const cacheKey = new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${resolvedGameId ?? 'null'}`);
+  const cfCaches = caches as unknown as { default: Cache };
+  const cached = await cfCaches.default.match(cacheKey);
+  if (cached) return cached;
+
+  let fire = 0; let heart = 0; let clap = 0;
+  if (resolvedGameId) {
+    const { data } = await admin
+      .from('stream_reactions')
+      .select('reaction_type')
+      .eq('game_id', resolvedGameId);
+    for (const row of data ?? []) {
+      if (row.reaction_type === 'fire') fire++;
+      else if (row.reaction_type === 'heart') heart++;
+      else if (row.reaction_type === 'clap') clap++;
+    }
+  }
+
+  const payload = { ok: true, gameId: resolvedGameId, fire, heart, clap };
+  const res = new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'Cache-Control': `public, max-age=${REACTIONS_CACHE_TTL_S}`,
+    },
+  });
+  cfCaches.default.put(cacheKey, res.clone()).catch(() => {});
+  return res;
+}
+
+async function handleStreamReact(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const pathGameId = ctx.req.url.match(/\/api\/streams\/([^/]+)\/react/)?.[1];
+  if (!pathGameId) return json({ ok: false, error: 'game_id_required' }, 400);
+
+  const body = (await ctx.req.json().catch(() => null)) as { type?: string } | null;
+  const reactionType = body?.type;
+  if (!reactionType || !['fire', 'heart', 'clap'].includes(reactionType)) {
+    return json({ ok: false, error: 'invalid_reaction_type' }, 400);
+  }
+
+  const { error } = await ctx.admin.from('stream_reactions').insert({
+    game_id: pathGameId,
+    user_id: userId,
+    reaction_type: reactionType,
+  });
+  if (error) throw new Error(error.message);
+
+  // Bust the reactions cache so the next poll picks up fresh counts
+  const cfCaches = caches as unknown as { default: Cache };
+  cfCaches.default.delete(new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${pathGameId}`)).catch(() => {});
+
+  return json({ ok: true, gameId: pathGameId, type: reactionType });
+}
+
 // ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
 
 async function handleStreamAccess({ req, admin }: HandlerCtx) {
@@ -2321,6 +2682,257 @@ async function handleStreamAccess({ req, admin }: HandlerCtx) {
   if (error) throw new Error(error.message);
   const hasAccess = Boolean(data);
   return json({ ok: true, hasAccess, gameId, userId });
+}
+
+function parseCommentLimit(url: URL): number {
+  const raw = Number(url.searchParams.get("limit") ?? 40);
+  if (!Number.isFinite(raw)) return 40;
+  return Math.min(100, Math.max(1, Math.floor(raw)));
+}
+
+async function createOrRefreshPlaybackSession(
+  ctx: HandlerCtx,
+  gameId: string,
+  userId: string,
+  sessionKey: string,
+) {
+  const expiresAt = new Date(Date.now() + 70_000).toISOString();
+  const existing = await ctx.admin
+    .from("stream_access_sessions")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("game_id", gameId)
+    .eq("idempotency_key", sessionKey)
+    .maybeSingle();
+  if (existing.data) {
+    const { data, error } = await ctx.admin
+      .from("stream_access_sessions")
+      .update({
+        status: "active",
+        last_seen_at: new Date().toISOString(),
+        expires_at: expiresAt,
+        updated_at: new Date().toISOString(),
+        updated_by: userId,
+      })
+      .eq("id", (existing.data as Record<string, unknown>).id)
+      .select("id,expires_at")
+      .single();
+    if (error) throw new Error(error.message);
+    return { id: String(data.id), expiresAt: String(data.expires_at) };
+  }
+
+  const { data, error } = await ctx.admin
+    .from("stream_access_sessions")
+    .insert({
+      entitlement_id: null,
+      game_id: gameId,
+      user_id: userId,
+      status: "active",
+      expires_at: expiresAt,
+      last_seen_at: new Date().toISOString(),
+      idempotency_key: sessionKey,
+      created_by: userId,
+      updated_by: userId,
+    })
+    .select("id,expires_at")
+    .single();
+  if (error) throw new Error(error.message);
+  return { id: String(data.id), expiresAt: String(data.expires_at) };
+}
+
+export async function handlePlaybackSession(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const gameId = ctx.params.gameId;
+  const body = (await ctx.req.json().catch(() => null)) as {
+    sessionKey?: string;
+  } | null;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  if (!body?.sessionKey || body.sessionKey.length < 8) {
+    return json({ ok: false, error: "session_key_required" }, 400);
+  }
+  const roles = await getUserRolesFromDB(userId, ctx.admin);
+  const hasPrivilegedRole = roles.some(
+    (role) => role === "player" || role === "paid_fan" || role === "super_admin",
+  );
+  let hasAccess = hasPrivilegedRole;
+  if (!hasAccess) {
+    const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
+      p_game_id: gameId,
+      p_user_id: userId,
+    });
+    if (accessRpc.error) throw new Error(accessRpc.error.message);
+    hasAccess = Boolean(accessRpc.data);
+  }
+  if (!hasAccess) return json({ ok: false, error: "forbidden" }, 403);
+
+  const cfg = await getOrCreateStreamConfig(ctx.admin);
+  const playbackUrl = String(cfg.collection_id ?? "").trim();
+  if (!playbackUrl) {
+    return json({ ok: false, error: "stream_not_configured" }, 503);
+  }
+  const session = await createOrRefreshPlaybackSession(
+    ctx,
+    gameId,
+    userId,
+    body.sessionKey,
+  );
+  return json({
+    ok: true,
+    playback: {
+      type: "url",
+      url: playbackUrl,
+      expiresAt: session.expiresAt,
+      heartbeatIntervalSec: 25,
+    },
+    session: {
+      id: session.id,
+      gameId,
+    },
+  });
+}
+
+export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const gameId = ctx.params.gameId;
+  const body = (await ctx.req.json().catch(() => null)) as {
+    sessionId?: string;
+  } | null;
+  if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
+  const expiresAt = new Date(Date.now() + 70_000).toISOString();
+  const update = await ctx.admin
+    .from("stream_access_sessions")
+    .update({
+      expires_at: expiresAt,
+      status: "active",
+      last_seen_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
+    })
+    .eq("id", body.sessionId)
+    .eq("user_id", userId)
+    .eq("game_id", gameId)
+    .select("id")
+    .maybeSingle();
+  if (update.error) throw new Error(update.error.message);
+  if (!update.data) return json({ ok: false, error: "session_not_found" }, 404);
+  return json({ ok: true, sessionId: body.sessionId, expiresAt });
+}
+
+async function handleStreamSessionEnd(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const gameId = ctx.params.gameId;
+  const body = (await ctx.req.json().catch(() => null)) as {
+    sessionId?: string;
+  } | null;
+  if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
+  const endRes = await ctx.admin
+    .from("stream_access_sessions")
+    .update({
+      status: "ended",
+      expires_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      updated_by: userId,
+    })
+    .eq("id", body.sessionId)
+    .eq("user_id", userId)
+    .eq("game_id", gameId)
+    .select("id")
+    .maybeSingle();
+  if (endRes.error) throw new Error(endRes.error.message);
+  return json({ ok: true, ended: Boolean(endRes.data) });
+}
+
+async function handleListComments(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const url = new URL(ctx.req.url);
+  const limit = parseCommentLimit(url);
+  const before = url.searchParams.get("before");
+  let query = ctx.admin
+    .from("stream_chat_messages")
+    .select("id,message,status,created_at,user_id")
+    .eq("game_id", gameId)
+    .eq("status", "active")
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (before) query = query.lt("created_at", before);
+  const res = await query;
+  if (res.error) throw new Error(res.error.message);
+
+  const rows = (res.data ?? []) as Array<Record<string, unknown>>;
+  const userIds = Array.from(new Set(rows.map((row) => String(row.user_id))));
+  const profiles = userIds.length
+    ? await ctx.admin
+        .from("profiles")
+        .select("user_id,display_name")
+        .in("user_id", userIds)
+    : { data: [] as Array<Record<string, unknown>>, error: null };
+  if (profiles.error) throw new Error(profiles.error.message);
+  const nameByUser = new Map<string, string>(
+    (profiles.data ?? []).map(
+      (row: Record<string, unknown>) =>
+        [String(row.user_id), String(row.display_name ?? "Fan")] as [string, string],
+    ),
+  );
+
+  return json({
+    ok: true,
+    comments: rows
+      .map((row) => ({
+        id: String(row.id),
+        message: String(row.message),
+        createdAt: String(row.created_at),
+        userId: String(row.user_id),
+        userDisplayName: nameByUser.get(String(row.user_id)) ?? "Fan",
+      }))
+      .reverse(),
+  });
+}
+
+export async function handlePostComment(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const ip = getClientIP(ctx.req);
+  if (!enforceInMemoryRateLimit(`chat:${userId}:${gameId}`, 10, 30_000)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
+  if (!enforceInMemoryRateLimit(`chat-ip:${ip}:${gameId}`, 20, 30_000)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
+  const body = (await ctx.req.json().catch(() => null)) as {
+    message?: string;
+  } | null;
+  const message = String(body?.message ?? "").trim().replace(/\s+/g, " ");
+  if (message.length < 1 || message.length > 400) {
+    return json({ ok: false, error: "invalid_message_length" }, 400);
+  }
+  const insert = await ctx.admin
+    .from("stream_chat_messages")
+    .insert({
+      game_id: gameId,
+      user_id: userId,
+      message,
+      status: "active",
+      created_by: userId,
+      updated_by: userId,
+    })
+    .select("id,message,created_at,user_id")
+    .single();
+  if (insert.error) throw new Error(insert.error.message);
+  return json({
+    ok: true,
+    comment: {
+      id: String(insert.data.id),
+      message: String(insert.data.message),
+      createdAt: String(insert.data.created_at),
+      userId: String(insert.data.user_id),
+    },
+  });
 }
 
 function getSafeRedirectUrl(
@@ -2341,9 +2953,13 @@ function getSafeRedirectUrl(
   return fallback;
 }
 
-async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
+export async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
   await ensureMutation(req, { req, env, admin, params: {} });
   const userId = requireAuth(req);
+  const ip = getClientIP(req);
+  if (!enforceInMemoryRateLimit(`stream-purchase:${userId}:${ip}`, 6, 60_000)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
   const gameId = new URL(req.url).pathname.split("/")[3];
   if (!env.STRIPE_SECRET_KEY)
     return json({ ok: false, error: "payments_not_configured" }, 503);
@@ -2352,7 +2968,11 @@ async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
     successUrl?: string;
     cancelUrl?: string;
     ppvPrice?: number;
+    captchaToken?: string;
   } | null;
+  if (!(await verifyTurnstileToken(env, body?.captchaToken, ip))) {
+    return json({ ok: false, error: "captcha_failed" }, 403);
+  }
   const unitAmount = Math.round((body?.ppvPrice ?? 2.5) * 100);
   const reqUrlStr = req.url;
   const successUrl = getSafeRedirectUrl(
@@ -2374,9 +2994,9 @@ async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
     },
     body: new URLSearchParams({
       "payment_method_types[]": "card",
-      "line_items[0][price_data][currency]": "usd",
+      "line_items[0][price_data][currency]": "cad",
       "line_items[0][price_data][product_data][name]": "SBBL HQ PPV Access",
-      "line_items[0][price_data][unit_amount]": String(unitAmount),
+      "line_items[0][price_data][unit_amount]": String(unitAmount), // $4.99 CAD in cents
       "line_items[0][quantity]": "1",
       mode: "payment",
       success_url: successUrl,
@@ -2812,15 +3432,18 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
     },
     body: new URLSearchParams({
       "payment_method_types[]": "card",
-      "line_items[0][price_data][currency]": "usd",
-      "line_items[0][price_data][product_data][name]":
-        "SBBL HQ Player Registration",
-      "line_items[0][price_data][unit_amount]": "700",
+      "line_items[0][price_data][currency]": "cad",
+      "line_items[0][price_data][product_data][name]": "SBBL Player Membership",
+      "line_items[0][price_data][product_data][description]":
+        "Monthly player registration. Includes stats, leaderboard, player profile, highlight downloads, and 10% store discount.",
+      "line_items[0][price_data][unit_amount]": "699",
+      "line_items[0][price_data][recurring][interval]": "month",
       "line_items[0][quantity]": "1",
-      mode: "payment",
+      mode: "subscription",
       success_url: successUrl,
       cancel_url: cancelUrl,
       "metadata[user_id]": userId,
+      "metadata[purchase_type]": "player_registration",
     }),
   });
 
@@ -2917,11 +3540,27 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   {
     method: "POST",
     path: "/api/streams/:gameId/session",
-    handler: (ctx) =>
-      handleMutationAck({
-        ...ctx,
-        params: { route: "streams-session", ...ctx.params },
-      }),
+    handler: handlePlaybackSession,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/session/heartbeat",
+    handler: handleStreamSessionHeartbeat,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/session/end",
+    handler: handleStreamSessionEnd,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/comments",
+    handler: handleListComments,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/comments",
+    handler: handlePostComment,
   },
   { method: "GET", path: "/api/cart", handler: handleGetCart },
   { method: "POST", path: "/api/cart/items", handler: handleAddCartItem },
@@ -2998,6 +3637,21 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "GET",
+    path: "/api/streams/reactions",
+    handler: handleStreamReactions,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/reactions",
+    handler: handleStreamReactions,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/react",
+    handler: handleStreamReact,
+  },
+  {
+    method: "GET",
     path: "/ops/streams/config",
     handler: handleGetStreamConfig,
   },
@@ -3034,6 +3688,9 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/api/ingress", handler: handleIngress },
   { method: "POST", path: "/sync/drain", handler: handleSyncDrain },
   { method: "POST", path: "/webhooks/stripe", handler: handleStripeWebhook },
+  { method: "POST", path: "/api/coach/request", handler: handleCoachApprovalRequest },
+  { method: "GET", path: "/ops/coach/requests", handler: handleListCoachRequests },
+  { method: "POST", path: "/ops/coach/:id/resolve", handler: handleResolveCoachRequest },
 ];
 
 const compiled: Array<Route & { keys: string[] }> = routes.map((route) => {
@@ -3046,9 +3703,37 @@ const compiled: Array<Route & { keys: string[] }> = routes.map((route) => {
   };
 });
 
+const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5MB request body limit
+
+function addSecurityHeaders(res: Response): Response {
+  const headers = new Headers(res.headers);
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('X-Frame-Options', 'DENY');
+  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
+  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  headers.set('X-XSS-Protection', '1; mode=block');   // CSP: restricts resource loading to trusted origins only.   // Prevents XSS, data exfiltration, and clickjacking at the browser level.   headers.set('Content-Security-Policy',     "default-src 'self'; " +     "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +     "style-src 'self' 'unsafe-inline'; " +     "img-src 'self' data: blob: https:; " +     "font-src 'self' data:; " +     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +     "frame-src https://challenges.cloudflare.com https://js.stripe.com; " +     "frame-ancestors 'none'; " +     "base-uri 'self'; " +     "form-action 'self' https://checkout.stripe.com;"   );   // HSTS: force HTTPS for 2 years, include subdomains, allow preloading.   headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
+const ipRateMap = new Map<string, { count: number; windowStart: number }>();
+const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_MAX = 120; // 120 req/min per IP
+
+function checkRateLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = ipRateMap.get(ip);
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    ipRateMap.set(ip, { count: 1, windowStart: now });
+    return true;
+  }
+  entry.count += 1;
+  if (entry.count > RATE_LIMIT_MAX) return false;
+  return true;
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
-    const parsed = safeServerEnv(env as unknown as Record<string, unknown>);
+        const parsed = safeServerEnv(env as unknown as Record<string, unknown>);
 
     const url = new URL(req.url);
     if (
@@ -3260,6 +3945,276 @@ routes.push(
   { method: "GET",    path: "/ops/list/players",  handler: handleOpsListPlayers },
   { method: "GET",    path: "/ops/list/products", handler: handleOpsListProducts },
   { method: "GET",    path: "/ops/list/events",   handler: handleOpsListEvents },
+);
+
+// ── Scores handlers ────────────────────────────────────────────────────────
+
+/** GET /api/scores — public, optionally filtered by league/category/status */
+async function handleScoresList({ req, admin }: HandlerCtx) {
+  const url = new URL(req.url);
+  const leagueParam = url.searchParams.get("league");
+  const statusParam = url.searchParams.get("status");
+
+  // Query only base-schema columns guaranteed to exist in production.
+  // The extended columns (category, game_date, etc.) are now added by
+  // migration 20260404004000 — include them directly since migration is applied.
+  let query = admin
+    .from("games")
+    .select(
+      "id, status, created_at, home_score, away_score, " +
+      "home_team_id, away_team_id, " +
+      "home_team:teams!home_team_id(name), " +
+      "away_team:teams!away_team_id(name), " +
+      "leagues!league_id(code, name), " +
+      "seasons!season_id(name)"
+    )
+    .order("created_at", { ascending: false })
+    .limit(200);
+
+  if (statusParam === "recent") {
+    query = query.eq("status", "final");
+  } else if (statusParam === "upcoming") {
+    query = query.in("status", ["upcoming", "scheduled"]);
+  }
+
+  const { data, error } = await query;
+  if (error) return json({ ok: false, error: error.message }, 500);
+
+  // Attempt to also fetch extended columns from migration 20260404004000.
+  // On a DB that hasn't had the migration applied this will fail — we catch
+  // that and fall back to defaults so scores always render.
+  const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+  const ids = rows.map((r) => String(r.id));
+  const extMap = new Map<string, Record<string, unknown>>();
+  if (ids.length > 0) {
+    try {
+      const extRes = await admin
+        .from("games")
+        .select("id, category, game_date, event_name, participant1_label, participant2_label, notes")
+        .in("id", ids);
+      if (!extRes.error && extRes.data) {
+        for (const row of extRes.data as Array<Record<string, unknown>>) {
+          extMap.set(String(row.id), row);
+        }
+      }
+    } catch {
+      // Migration 20260404004000 not yet applied — fall back to defaults
+    }
+  }
+
+  const games = rows.map((r) => {
+    const ext = extMap.get(String(r.id)) ?? {};
+    const leagueRow = r.leagues as Record<string, unknown> | null;
+    const season = r.seasons as Record<string, unknown> | null;
+    const homeTeam = r.home_team as Record<string, unknown> | null;
+    const awayTeam = r.away_team as Record<string, unknown> | null;
+
+    const homeLabel = (ext.participant1_label as string | null)
+      ?? (homeTeam ? String(homeTeam.name) : null)
+      ?? "Home";
+    const awayLabel = (ext.participant2_label as string | null)
+      ?? (awayTeam ? String(awayTeam.name) : null)
+      ?? "Away";
+
+    const leagueCode = leagueRow ? String(leagueRow.code ?? "").toLowerCase() : undefined;
+    const leagueId = leagueCode === "wbl" ? "wbl"
+      : leagueCode === "tgifbl" ? "tgifbl"
+      : leagueCode === "sbbl" ? "sbbl"
+      : undefined;
+
+    // Derive game date: prefer explicit game_date column, fall back to created_at
+    const createdAt = r.created_at as string | null;
+    const gameDate = (ext.game_date as string | null)
+      ?? (createdAt ? createdAt.split("T")[0] : undefined);
+
+    return {
+      id: String(r.id),
+      category: String(ext.category ?? "league"),
+      leagueId,
+      leagueCode,
+      leagueName: leagueRow ? String(leagueRow.name ?? "") : undefined,
+      seasonName: season ? String(season.name ?? "") : undefined,
+      eventName: (ext.event_name as string | null) ?? undefined,
+      homeLabel,
+      awayLabel,
+      homeScore: r.home_score != null ? Number(r.home_score) : undefined,
+      awayScore: r.away_score != null ? Number(r.away_score) : undefined,
+      status: String(r.status ?? "upcoming"),
+      gameDate,
+      notes: (ext.notes as string | null) ?? undefined,
+    };
+  });
+
+  // Post-filter by league code if requested
+  const filtered = leagueParam && leagueParam !== "all"
+    ? games.filter((g) => g.leagueCode === leagueParam.toLowerCase())
+    : games;
+
+  return json({ ok: true, games: filtered });
+}
+
+/** POST /ops/scores/game — upsert a single game (super_admin only) */
+async function handleScoreGameUpsert(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    gameId?: string;
+    category?: string;
+    leagueId?: string;
+    seasonId?: string;
+    homeLabel?: string;
+    awayLabel?: string;
+    homeScore?: number;
+    awayScore?: number;
+    status?: string;
+    gameDate?: string;
+    eventName?: string;
+    venue?: string;
+    notes?: string;
+  } | null;
+
+  if (!body) return json({ ok: false, error: "body_required" }, 400);
+
+  // Resolve league_id UUID from league code if provided
+  let leagueUuid: string | null = null;
+  if (body.leagueId) {
+    const { data: leagueRow } = await ctx.admin
+      .from("leagues")
+      .select("id")
+      .ilike("code", body.leagueId)
+      .maybeSingle();
+    leagueUuid = leagueRow?.id ?? null;
+  }
+
+  const payload = {
+    ...(body.gameId ? {} : {}),
+    category: body.category ?? "league",
+    league_id: leagueUuid,
+    season_id: body.seasonId ?? null,
+    participant1_label: body.homeLabel ?? null,
+    participant2_label: body.awayLabel ?? null,
+    home_score: body.homeScore ?? null,
+    away_score: body.awayScore ?? null,
+    status: body.status ?? "upcoming",
+    game_date: body.gameDate ?? null,
+    event_name: body.eventName ?? null,
+    notes: body.notes ?? null,
+  };
+
+  let gameId: string;
+  if (body.gameId) {
+    const { data, error } = await ctx.admin
+      .from("games")
+      .update(payload)
+      .eq("id", body.gameId)
+      .select("id")
+      .single();
+    if (error) return json({ ok: false, error: error.message }, 500);
+    gameId = data.id;
+  } else {
+    const { data, error } = await ctx.admin
+      .from("games")
+      .insert(payload)
+      .select("id")
+      .single();
+    if (error) return json({ ok: false, error: error.message }, 500);
+    gameId = data.id;
+  }
+
+  return json({ ok: true, gameId });
+}
+
+/** POST /ops/scores/import — bulk CSV import (super_admin only) */
+async function handleScoresCsvImport(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => null)) as { rows?: Array<Record<string, string>> } | null;
+  const rows = body?.rows ?? [];
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return json({ ok: false, error: "rows_required" }, 400);
+  }
+
+  let inserted = 0;
+  let failed = 0;
+  const errors: string[] = [];
+
+  for (const row of rows) {
+    try {
+      // Resolve league uuid if league_id code provided
+      let leagueUuid: string | null = null;
+      if (row.league_id) {
+        const { data: lr } = await ctx.admin.from("leagues").select("id").ilike("code", row.league_id).maybeSingle();
+        leagueUuid = lr?.id ?? null;
+      }
+      const { error } = await ctx.admin.from("games").insert({
+        category: row.category || "league",
+        league_id: leagueUuid,
+        participant1_label: row.home_label || null,
+        participant2_label: row.away_label || null,
+        home_score: row.home_score !== "" && row.home_score != null ? Number(row.home_score) : null,
+        away_score: row.away_score !== "" && row.away_score != null ? Number(row.away_score) : null,
+        status: row.status || "final",
+        game_date: row.game_date || null,
+        event_name: row.event_name || null,
+        notes: row.notes || null,
+      });
+      if (error) { failed++; errors.push(`${row.home_label} vs ${row.away_label}: ${error.message}`); }
+      else inserted++;
+    } catch (e) {
+      failed++;
+      errors.push(e instanceof Error ? e.message : "unknown");
+    }
+  }
+
+  return json({ ok: true, inserted, failed, errors });
+}
+
+/** POST /ops/scores/parse-image — scoreboard OCR via Groq vision (super_admin only) */
+async function handleScoreboardImageParse(ctx: HandlerCtx) {
+  await requireAdminSession(ctx.req, ctx.admin);
+  const apiKey = ctx.env.GROQ_API_KEY;
+  if (!apiKey) return json({ ok: false, error: "groq_api_key_missing" }, 503);
+
+  const body = (await ctx.req.json().catch(() => null)) as { imageBase64: string; mimeType: string } | null;
+  if (!body?.imageBase64 || !body?.mimeType) return json({ ok: false, error: "image_required" }, 400);
+
+  const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "llama-3.2-11b-vision-preview",
+      max_tokens: 256,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "image_url", image_url: { url: `data:${body.mimeType};base64,${body.imageBase64}` } },
+          { type: "text", text: 'Extract scoreboard data. Return ONLY a JSON object with these keys: homeLabel (string), awayLabel (string), homeScore (number or null), awayScore (number or null), gameDate (YYYY-MM-DD or null), eventName (string or null), status ("final","live","upcoming"). No markdown, raw JSON only.' },
+        ],
+      }],
+    }),
+  });
+
+  if (!resp.ok) return json({ ok: false, error: "groq_error", status: resp.status }, 502);
+  const ai = (await resp.json()) as { choices: Array<{ message: { content: string } }> };
+  const raw = ai.choices[0]?.message?.content ?? "";
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return json({ ok: false, error: "parse_failed", raw }, 422);
+  try {
+    const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+    return json({ ok: true, data: parsed });
+  } catch {
+    return json({ ok: false, error: "invalid_json", raw }, 422);
+  }
+}
+
+// Register score routes
+routes.push(
+  { method: "GET",  path: "/api/scores",          handler: handleScoresList },
+  { method: "POST", path: "/ops/scores/game",      handler: handleScoreGameUpsert },
+  { method: "POST", path: "/ops/scores/import",    handler: handleScoresCsvImport },
+  { method: "POST", path: "/ops/scores/parse-image", handler: handleScoreboardImageParse },
 );
 
 // Cron or background job logic for inventory retention/archival

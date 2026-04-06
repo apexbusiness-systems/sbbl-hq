@@ -63,6 +63,8 @@ const LoginPage = () => {
         setMode('signin');
       } else if (raw.toLowerCase().includes('password') && raw.toLowerCase().includes('characters')) {
         setError('Password must be at least 6 characters.');
+      } else if (raw.toLowerCase().includes('rate limit')) {
+        setError('Too many sign-up attempts from your network. Please wait an hour or contact support.');
       } else {
         setError(raw);
       }

@@ -80,20 +80,20 @@ export const players: PlayerProfile[] = [
   { id: 'p3', name: 'Andre Santiago', number: 34, position: 'C', teamId: 't4', leagueId: 'wbl', avatar: player3, badges: ['Defensive Anchor', 'Rebound Machine'], stats: { pts: 14.2, reb: 12.6, ast: 2.1, stl: 0.8, blk: 3.4, fls: 3.2, min: 30.8 } },
   { id: 'p4', name: 'Carlos Mendez', number: 7, position: 'SG', teamId: 't6', leagueId: 'tgifbl', avatar: player1, badges: ['Clutch Performer'], stats: { pts: 22.1, reb: 4.5, ast: 4.2, stl: 1.5, blk: 0.5, fls: 2.4, min: 31.2 } },
   { id: 'p5', name: 'Darius Reyes', number: 5, position: 'PF', teamId: 't1', leagueId: 'sbbl', avatar: player2, badges: ['Rising Star'], stats: { pts: 16.8, reb: 8.9, ast: 2.8, stl: 1.1, blk: 1.7, fls: 2.9, min: 29.4 } },
-  { id: 'p6', name: 'Rico Bautista', number: 15, position: 'SF', teamId: 't5', leagueId: 'wbl', avatar: player3, badges: ['6th Man'], stats: { pts: 15.3, reb: 5.1, ast: 3.7, stl: 2.0, blk: 0.6, fls: 1.5, min: 26.7 } },
-  { id: 'p7', name: 'Tata Ramon', number: 8, position: 'SG', teamId: 't9', leagueId: 'wbl', avatar: potgTataRamon, badges: ['Player of the Game', 'Scorer'], stats: { pts: 22.0, reb: 5.0, ast: 6.0, stl: 1.5, blk: 0.5, fls: 2.0, min: 32.0 } },
-  { id: 'p8', name: 'Michael Ramos', number: 3, position: 'SF', teamId: 't10', leagueId: 'wbl', avatar: potgMichaelRamos, badges: ['Player of the Game', 'All-Star'], stats: { pts: 24.0, reb: 7.0, ast: 6.0, stl: 1.8, blk: 0.8, fls: 1.5, min: 34.0 } },
-  { id: 'p9', name: 'Harold Casio', number: 25, position: 'PF', teamId: 't11', leagueId: 'wbl', avatar: potgHaroldCasio, badges: ['Player of the Game', 'Rebounder'], stats: { pts: 20.0, reb: 7.0, ast: 5.0, stl: 1.2, blk: 1.0, fls: 2.5, min: 31.0 } },
-  { id: 'p10', name: 'JT Balangui', number: 10, position: 'PG', teamId: 't12', leagueId: 'wbl', avatar: potgJtBalangui, badges: ['Player of the Game', 'Floor General'], stats: { pts: 20.0, reb: 6.0, ast: 6.0, stl: 2.0, blk: 0.4, fls: 1.8, min: 30.0 } },
+  { id: 'p6', name: 'Rico Bautista', number: 15, position: 'SF', teamId: 't5', leagueId: 'wbl', avatar: player3, badges: ['6th Man'], stats: { pts: 15.3, reb: 5.1, ast: 3.7, stl: 2, blk: 0.6, fls: 1.5, min: 26.7 } },
+  { id: 'p7', name: 'Tata Ramon', number: 8, position: 'SG', teamId: 't9', leagueId: 'wbl', avatar: potgTataRamon, badges: ['Player of the Game', 'Scorer'], stats: { pts: 22, reb: 5, ast: 6, stl: 1.5, blk: 0.5, fls: 2, min: 32 } },
+  { id: 'p8', name: 'Michael Ramos', number: 3, position: 'SF', teamId: 't10', leagueId: 'wbl', avatar: potgMichaelRamos, badges: ['Player of the Game', 'All-Star'], stats: { pts: 24, reb: 7, ast: 6, stl: 1.8, blk: 0.8, fls: 1.5, min: 34 } },
+  { id: 'p9', name: 'Harold Casio', number: 25, position: 'PF', teamId: 't11', leagueId: 'wbl', avatar: potgHaroldCasio, badges: ['Player of the Game', 'Rebounder'], stats: { pts: 20, reb: 7, ast: 5, stl: 1.2, blk: 1, fls: 2.5, min: 31 } },
+  { id: 'p10', name: 'JT Balangui', number: 10, position: 'PG', teamId: 't12', leagueId: 'wbl', avatar: potgJtBalangui, badges: ['Player of the Game', 'Floor General'], stats: { pts: 20, reb: 6, ast: 6, stl: 2, blk: 0.4, fls: 1.8, min: 30 } },
 ];
 
 export const games: Game[] = [
-  { id: 'g1', leagueId: 'sbbl', homeTeam: teams[0], awayTeam: teams[1], venue: 'Panalay Arena', court: 'Court 1', date: '2026-03-29', time: '14:00', status: 'live', score: { home: 67, away: 62 }, ppvPrice: 2.50 },
-  { id: 'g2', leagueId: 'wbl', homeTeam: teams[3], awayTeam: teams[24], venue: 'La Liga Sports Complex', court: 'Main Court', date: '2026-03-28', time: '16:00', status: 'upcoming', ppvPrice: 2.50 },
-  { id: 'g3', leagueId: 'tgifbl', homeTeam: teams[27], awayTeam: teams[4], venue: 'Tat Stadium', court: 'Court A', date: '2026-03-27', time: '19:00', status: 'final', score: { home: 88, away: 79 }, ppvPrice: 2.50 },
-  { id: 'g4', leagueId: 'sbbl', homeTeam: teams[2], awayTeam: teams[5], venue: 'Panalay Arena', court: 'Court 2', date: '2026-03-30', time: '10:00', status: 'upcoming', ppvPrice: 2.50 },
-  { id: 'g5', leagueId: 'wbl', homeTeam: teams[24], awayTeam: teams[3], venue: 'La Liga Sports Complex', court: 'Court 2', date: '2026-04-04', time: '15:00', status: 'upcoming', ppvPrice: 2.50 },
-  { id: 'g6', leagueId: 'sbbl', homeTeam: teams[1], awayTeam: teams[2], venue: 'Panalay Arena', court: 'Court 1', date: '2026-03-22', time: '14:00', status: 'final', score: { home: 75, away: 71 }, ppvPrice: 2.50 },
+  { id: 'g1', leagueId: 'sbbl', homeTeam: teams[0], awayTeam: teams[1], venue: 'Panalay Arena', court: 'Court 1', date: '2026-03-29', time: '14:00', status: 'live', score: { home: 67, away: 62 }, ppvPrice: 2.5 },
+  { id: 'g2', leagueId: 'wbl', homeTeam: teams[3], awayTeam: teams[24], venue: 'La Liga Sports Complex', court: 'Main Court', date: '2026-03-28', time: '16:00', status: 'upcoming', ppvPrice: 2.5 },
+  { id: 'g3', leagueId: 'tgifbl', homeTeam: teams[27], awayTeam: teams[4], venue: 'Tat Stadium', court: 'Court A', date: '2026-03-27', time: '19:00', status: 'final', score: { home: 88, away: 79 }, ppvPrice: 2.5 },
+  { id: 'g4', leagueId: 'sbbl', homeTeam: teams[2], awayTeam: teams[5], venue: 'Panalay Arena', court: 'Court 2', date: '2026-03-30', time: '10:00', status: 'upcoming', ppvPrice: 2.5 },
+  { id: 'g5', leagueId: 'wbl', homeTeam: teams[24], awayTeam: teams[3], venue: 'La Liga Sports Complex', court: 'Court 2', date: '2026-04-04', time: '15:00', status: 'upcoming', ppvPrice: 2.5 },
+  { id: 'g6', leagueId: 'sbbl', homeTeam: teams[1], awayTeam: teams[2], venue: 'Panalay Arena', court: 'Court 1', date: '2026-03-22', time: '14:00', status: 'final', score: { home: 75, away: 71 }, ppvPrice: 2.5 },
 ];
 
 export const products: Product[] = [
@@ -136,12 +136,12 @@ export const reviewItems: ReviewItem[] = [
 export const invoices: Invoice[] = [
   { id: 'inv1', description: 'SBBL Season Registration — Panalay Kings', amount: 45, date: '2026-01-15', status: 'paid', leagueId: 'sbbl' },
   { id: 'inv2', description: 'WBL Season Registration — Weekend Warriors', amount: 49, date: '2026-01-20', status: 'paid', leagueId: 'wbl' },
-  { id: 'inv3', description: 'PPV Access — SBBL Game G1', amount: 2.50, date: '2026-03-29', status: 'paid', leagueId: 'sbbl' },
+  { id: 'inv3', description: 'PPV Access — SBBL Game G1', amount: 2.5, date: '2026-03-29', status: 'paid', leagueId: 'sbbl' },
   { id: 'inv4', description: 'Store Order #1042 — APEX Hoodie', amount: 55, date: '2026-03-25', status: 'pending' },
   { id: 'inv5', description: 'TGIFBL Season Registration — Friday Flames', amount: 49, date: '2026-01-22', status: 'paid', leagueId: 'tgifbl' },
 ];
 
-export const gameActionImage = gameAction;
+export { default as gameActionImage } from '@/assets/game-action.svg';
 
 export const playersOfTheGame: PlayerOfTheGame[] = [
   { id: 'potg-wbl-1', leagueId: 'wbl', playerName: 'Michael Ramos', playerId: 'p8', team: 'Ball is Life', pts: 24, rebs: 7, assts: 6, gameResult: 'NSD 82 vs Ball is Life 84', date: '2026-03-29', image: potgMichaelRamos },

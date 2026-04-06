@@ -36,7 +36,7 @@ export default defineConfig(({ mode }) => {
       react(),
       VitePWA({
         registerType: "autoUpdate",
-        includeAssets: ["favicon.svg", "robots.txt", "icons/apple-touch-icon.svg"],
+        includeAssets: ["favicon.svg", "robots.txt", "icons/apple-touch-icon.svg", "icons/ios-app-icon-180.png"],
         manifest: {
           name: "SBBL HQ",
           short_name: "SBBL HQ",
@@ -47,35 +47,74 @@ export default defineConfig(({ mode }) => {
           orientation: "portrait-primary",
           start_url: "/",
           icons: [
-            { src: "/icons/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
-            { src: "/icons/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "maskable any" }
+            { src: "/icons/app-icon.png", sizes: "512x512", type: "image/png", purpose: "any" },
+            { src: "/icons/app-icon.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+            { src: "/icons/google-play-icon-36.png", sizes: "36x36", type: "image/png" },
+            { src: "/icons/google-play-icon-48.png", sizes: "48x48", type: "image/png" },
+            { src: "/icons/google-play-icon-72.png", sizes: "72x72", type: "image/png" },
+            { src: "/icons/google-play-icon-96.png", sizes: "96x96", type: "image/png" },
+            { src: "/icons/google-play-icon-144.png", sizes: "144x144", type: "image/png" },
+            { src: "/icons/google-play-icon-192.png", sizes: "192x192", type: "image/png" },
+            { src: "/icons/google-play-icon-512.png", sizes: "512x512", type: "image/png" }
           ]
         },
         workbox: {
-          // globPatterns deliberately omitted — vite-plugin-pwa defaults to
-          // ["**/*.{js,css,html,ico,png,svg,jpg,jpeg}"] in production, and
-          // omitting it prevents a spurious dev-dist warning when the Vite
-          // dev server starts before the dist directory is populated.
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
           runtimeCaching: [
+            // App shell navigations: Stale-While-Revalidate
             {
-              urlPattern: /^https:\/\/sbbl-hq\.icu\/.*/i,
-              handler: "NetworkFirst",
+              urlPattern: ({ request }) => request.mode === 'navigate',
+              handler: 'StaleWhileRevalidate',
               options: {
-                cacheName: "sbbl-hq-cache",
-                expiration: { maxEntries: 200 },
+                cacheName: 'app-shell-navigations',
+                expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 * 7 }, // 1 week
               },
             },
+            // Hashed JS/CSS/Fonts: Cache-First
             {
-              urlPattern: ({ request }: { request: Request }) => request.destination === "image",
-              handler: "CacheFirst",
+              urlPattern: ({ request }) =>
+                request.destination === 'script' ||
+                request.destination === 'style' ||
+                request.destination === 'font',
+              handler: 'CacheFirst',
               options: {
-                cacheName: "sbblhq-images",
-                expiration: { maxEntries: 120, maxAgeSeconds: 60 * 60 * 24 * 14 },
+                cacheName: 'static-assets',
+                expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 }, // 30 days
+                cacheableResponse: { statuses: [0, 200] },
               },
             },
+            // Images: Cache-First with caps
+            {
+              urlPattern: ({ request }) => request.destination === 'image',
+              handler: 'CacheFirst',
+              options: {
+                cacheName: 'image-cache',
+                expiration: { maxEntries: 120, maxAgeSeconds: 60 * 60 * 24 * 14 }, // 14 days
+                cacheableResponse: { statuses: [0, 200] },
+              },
+            },
+            // Briefly stale-safe public API reads: Stale-While-Revalidate
+            {
+              urlPattern: ({ url, request }) =>
+                request.method === 'GET' &&
+                url.pathname.startsWith('/rest/v1/') &&
+                !url.pathname.includes('/auth/'),
+              handler: 'StaleWhileRevalidate',
+              options: {
+                cacheName: 'public-api-reads',
+                expiration: { maxEntries: 100, maxAgeSeconds: 60 * 5 }, // 5 minutes
+                cacheableResponse: { statuses: [0, 200] },
+              },
+            },
+            // Mutations / Auth / Protected: Network-Only
+            {
+              urlPattern: ({ request, url }) =>
+                request.method !== 'GET' ||
+                url.pathname.includes('/auth/'),
+              handler: 'NetworkOnly',
+            }
           ],
         },
         devOptions: { enabled: true },

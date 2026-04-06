@@ -104,6 +104,25 @@ export interface PlayerOfTheGame {
   image?: string;
 }
 
+export type ScoreCategory = 'league' | '1v1' | 'special_event';
+
+export interface ScoreEntry {
+  id: string;
+  category: ScoreCategory;
+  leagueId?: LeagueId;
+  leagueCode?: string;
+  leagueName?: string;
+  seasonName?: string;
+  eventName?: string;
+  homeLabel: string;
+  awayLabel: string;
+  homeScore?: number;
+  awayScore?: number;
+  status: GameStatus;
+  gameDate?: string;
+  notes?: string;
+}
+
 export interface Invoice {
   id: string;
   description: string;

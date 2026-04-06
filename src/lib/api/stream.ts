@@ -30,6 +30,28 @@ export interface StreamConfig {
   updatedAt?: string;
 }
 
+export interface StreamPlaybackSession {
+  ok: boolean;
+  playback: {
+    type: 'url';
+    url: string;
+    expiresAt: string;
+    heartbeatIntervalSec: number;
+  };
+  session: {
+    id: string;
+    gameId: string;
+  };
+}
+
+export interface StreamComment {
+  id: string;
+  message: string;
+  createdAt: string;
+  userId: string;
+  userDisplayName?: string;
+}
+
 export interface StreamSession {
   id: string;
   gameId: string;
@@ -82,8 +104,70 @@ export interface UserAccessLookup {
 /** Poll current stream status — no auth required */
 export async function fetchPublicStreamStatus(gameId?: string) {
   const qs = gameId ? `?gameId=${encodeURIComponent(gameId)}` : '';
-  return apiFetch<{ ok: boolean; isLive: boolean; title: string; viewerCount: number; collectionId: string }>(
+  return apiFetch<{ ok: boolean; isLive: boolean; title: string; viewerCount: number; collectionId: string; gameId?: string }>(
     `/api/streams/status${qs}`,
+  );
+}
+
+export async function createPlaybackSession(
+  gameId: string,
+  sessionKey: string,
+  token: string | null,
+) {
+  return apiFetch<StreamPlaybackSession>(
+    `/api/streams/${encodeURIComponent(gameId)}/session`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ sessionKey }),
+    },
+    token,
+  );
+}
+
+export async function heartbeatPlaybackSession(
+  gameId: string,
+  sessionId: string,
+  token: string | null,
+) {
+  return apiFetch<{ ok: boolean; sessionId: string; expiresAt: string }>(
+    `/api/streams/${encodeURIComponent(gameId)}/session/heartbeat`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    },
+    token,
+  );
+}
+
+export async function endPlaybackSession(
+  gameId: string,
+  sessionId: string,
+  token: string | null,
+) {
+  return apiFetch<{ ok: boolean; ended: boolean }>(
+    `/api/streams/${encodeURIComponent(gameId)}/session/end`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ sessionId }),
+    },
+    token,
+  );
+}
+
+export async function fetchStreamComments(gameId: string, limit = 40) {
+  return apiFetch<{ ok: boolean; comments: StreamComment[] }>(
+    `/api/streams/${encodeURIComponent(gameId)}/comments?limit=${Math.min(100, Math.max(1, limit))}`,
+  );
+}
+
+export async function postStreamComment(gameId: string, message: string, token: string | null) {
+  return apiFetch<{ ok: boolean; comment: StreamComment }>(
+    `/api/streams/${encodeURIComponent(gameId)}/comments`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    },
+    token,
   );
 }
 

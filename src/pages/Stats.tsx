@@ -1,12 +1,11 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { players as mockPlayers, teams } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
-import { ArrowUpDown, BarChart3, Lock } from 'lucide-react';
+import { BarChart3 } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
-import { useAuth } from '@/hooks/use-auth';
+import { players as mockPlayers } from '@/data/mock';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 
@@ -15,10 +14,9 @@ const statKeys: StatKey[] = ['pts', 'reb', 'ast', 'stl', 'blk', 'fls', 'min'];
 const statLabels: Record<StatKey, string> = { pts: 'PTS', reb: 'REB', ast: 'AST', stl: 'STL', blk: 'BLK', fls: 'FLS', min: 'MIN' };
 
 const StatsPage = () => {
-  const { hasPremiumPlayerAccess, activeLeague, setActiveLeague } = useApp();
-  const { isSignedIn } = useAuth();
+  const { activeLeague, setActiveLeague } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [sortBy, setSortBy] = useState<StatKey>('pts');
+
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
 
   // Initialise from URL param; fall back to current active league
@@ -47,18 +45,17 @@ const StatsPage = () => {
     }
   }, [activeLeague, paramLeague, isValidParam]);
 
-  // Fetch live stats from the worker; fall back to mock if API unavailable or returns empty
+  // Fetch live stats from the worker
   const statsQuery = useQuery({
     queryKey: ['stats', leagueFilter],
     queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/stats'),
-    enabled: isSignedIn,
     retry: 1,
     staleTime: 30_000,
   });
 
   const players = useMemo<PlayerProfile[]>(() => {
     const apiData = statsQuery.data?.data;
-    if (Array.isArray(apiData) && apiData.length > 0 && 'stats' in (apiData[0] ?? {})) {
+    if (Array.isArray(apiData) && apiData.length > 0) {
       return apiData;
     }
     return mockPlayers;
@@ -66,15 +63,15 @@ const StatsPage = () => {
 
   const filtered = useMemo(() => {
     const list = leagueFilter === 'all' ? players : players.filter(p => p.leagueId === leagueFilter);
-    return [...list].sort((a, b) => b.stats[sortBy] - a.stats[sortBy]);
-  }, [leagueFilter, sortBy, players]);
-  const visibleRows = hasPremiumPlayerAccess ? filtered : filtered.slice(0, 3);
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [leagueFilter, players]);
+  const visibleRows = filtered;
 
   const detail = selectedPlayer ? players.find(p => p.id === selectedPlayer) : null;
 
   const maxStat = (key: StatKey) => Math.max(...filtered.map(p => p.stats[key]));
 
-  const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
+  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
 
   return (
     <div className="min-h-screen">
@@ -127,10 +124,9 @@ const StatsPage = () => {
                     <tr className="border-b border-border">
                       <th className="text-left p-3 text-xs text-muted-foreground font-medium">Player</th>
                       {statKeys.map(k => (
-                        <th key={k} className="p-3 text-center cursor-pointer group" onClick={() => setSortBy(k)}>
-                          <span className={`text-xs font-semibold uppercase tracking-wider inline-flex items-center gap-1 ${sortBy === k ? 'text-primary' : 'text-muted-foreground'}`}>
+                        <th key={k} className="p-3 text-center">
+                          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                             {statLabels[k]}
-                            {sortBy === k && <ArrowUpDown className="w-3 h-3" />}
                           </span>
                         </th>
                       ))}
@@ -153,7 +149,7 @@ const StatsPage = () => {
                         </td>
                         {statKeys.map(k => (
                           <td key={k} className="p-3 text-center">
-                            <span className={`stat-numeral text-sm ${sortBy === k ? 'text-primary' : ''}`}>{p.stats[k]}</span>
+                            <span className="stat-numeral text-sm">{p.stats[k]}</span>
                           </td>
                         ))}
                       </tr>
@@ -161,20 +157,13 @@ const StatsPage = () => {
                   </tbody>
                 </table>
               </div>
-              {!hasPremiumPlayerAccess && (
-                <div className="p-4 border-t border-border bg-secondary/40 flex items-center justify-between gap-3">
-                  <div className="text-xs text-muted-foreground">
-                    Showing minimal stats preview. Players with an active $7 registration tier get full sortable stats and player detail access.
-                  </div>
-                  <span className="inline-flex items-center gap-1 text-xs text-primary font-semibold"><Lock className="w-3 h-3" /> Premium Player Stats</span>
-                </div>
-              )}
+
             </div>
           </div>
 
           {/* Player Detail Panel */}
           <div>
-            {detail && hasPremiumPlayerAccess ? (
+            {detail ? (
               <div className="panel p-4 sticky top-24 space-y-4">
                 <div className="flex items-center gap-3">
                   <img src={detail.avatar} alt={detail.name} className="w-16 h-16 rounded-full object-cover" loading="lazy" />
@@ -210,7 +199,7 @@ const StatsPage = () => {
               <div className="panel p-8 text-center">
                 <BarChart3 className="w-8 h-8 text-muted-foreground mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">
-                  {hasPremiumPlayerAccess ? 'Select a player to view stat breakdown' : 'Upgrade to active player tier to unlock full stat breakdowns and all player profiles.'}
+                  Select a player to view stat breakdown
                 </p>
               </div>
             )}

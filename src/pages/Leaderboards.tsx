@@ -1,12 +1,11 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { players as mockPlayers, teams } from '@/data/mock';
+import { teams, players as mockPlayers } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
 import { Trophy, Crown, Medal, Lock } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
-import { useAuth } from '@/hooks/use-auth';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 
@@ -23,7 +22,6 @@ const categories: { key: StatKey; label: string }[] = [
 
 const LeaderboardsPage = () => {
   const { hasPremiumPlayerAccess, activeLeague, setActiveLeague } = useApp();
-  const { isSignedIn } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeCategory, setActiveCategory] = useState<StatKey>('pts');
 
@@ -57,14 +55,13 @@ const LeaderboardsPage = () => {
   const leaderboardsQuery = useQuery({
     queryKey: ['leaderboards', leagueFilter],
     queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/leaderboards'),
-    enabled: isSignedIn,
     retry: 1,
     staleTime: 30_000,
   });
 
   const players = useMemo<PlayerProfile[]>(() => {
     const apiData = leaderboardsQuery.data?.data;
-    if (Array.isArray(apiData) && apiData.length > 0 && 'stats' in (apiData[0] ?? {})) {
+    if (Array.isArray(apiData) && apiData.length > 0) {
       return apiData;
     }
     return mockPlayers;
@@ -83,7 +80,7 @@ const LeaderboardsPage = () => {
     return <span className="stat-numeral text-sm text-muted-foreground w-4 text-center">{i + 1}</span>;
   };
 
-  const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
+  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
 
   return (
     <div className="min-h-screen">
@@ -183,43 +180,6 @@ const LeaderboardsPage = () => {
             </div>
           )}
 
-          {/* Team Standings */}
-          <div className="mt-12">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-display text-xl font-bold">Team Standings</h2>
-              {leagueFilter !== 'all' && activeLeagueObj && (
-                <div className="flex items-center gap-1.5 text-xs font-semibold">
-                  <img src={activeLeagueObj.logo} alt="" width={16} height={16} className="opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  <span className={activeLeagueObj.accentClass}>{activeLeagueObj.shortName}</span>
-                </div>
-              )}
-              {leagueFilter === 'all' && (
-                <span className="text-xs text-muted-foreground">All leagues combined</span>
-              )}
-            </div>
-            <div className="space-y-2">
-              {teams
-                .filter(t => leagueFilter === 'all' || t.leagueId === leagueFilter)
-                .sort((a, b) => (b.record.wins / (b.record.wins + b.record.losses)) - (a.record.wins / (a.record.wins + a.record.losses)))
-                .map((t, i) => (
-                  <div key={t.id} className="panel p-3 flex items-center gap-4">
-                    <span className="stat-numeral text-sm text-muted-foreground w-6 text-center">{i + 1}</span>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium">{t.name}</p>
-                      <div className="flex items-center gap-2">
-                        <LeagueBadge leagueId={t.leagueId} />
-                        <span className="text-[10px] text-muted-foreground">{t.division}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <span className="stat-numeral text-sm text-success">{t.record.wins}W</span>
-                      <span className="stat-numeral text-sm text-destructive">{t.record.losses}L</span>
-                      <span className="stat-numeral text-sm">{((t.record.wins / (t.record.wins + t.record.losses)) * 100).toFixed(0)}%</span>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          </div>
         </div>
       </div>
     </div>

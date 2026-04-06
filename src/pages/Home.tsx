@@ -59,7 +59,7 @@ const HomePage = () => {
     <div className="min-h-screen">
 
       {/* ── LEAGUE LOGO HERO ──────────────────────────────────── */}
-      <section className="relative overflow-hidden bg-[#0A0A0A]">
+      <section className="relative overflow-hidden bg-[#0A0A0A]" aria-label="League Hero">
 
         {/* League radial glow centred on logo */}
         <div className="absolute inset-0" style={{ background: `radial-gradient(ellipse at 50% 60%, hsl(var(--${league.id}) / 0.18) 0%, transparent 60%)` }} />
@@ -126,8 +126,9 @@ const HomePage = () => {
               transition={{ duration: 0.4, delay: 0.15 }}
               className="panel p-5 bg-card/90 backdrop-blur-sm border-primary/20 w-full lg:w-[320px] flex-shrink-0"
               style={{ boxShadow: '0 0 20px rgba(201,168,76,0.08)' }}
+              aria-label="League Snapshot Statistics"
             >
-              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-primary mb-3">League Snapshot</p>
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary mb-3">League Snapshot</p>
 
               {state === 'loading' && (
                 <div className="space-y-3">

@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { mediaAssets as mockMediaAssets } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { useApp } from '@/contexts/AppContext';
@@ -9,6 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 import { Play, Share2, Upload, Eye, Clock, Check } from 'lucide-react';
 import { toast } from 'sonner';
+import { mediaAssets as mockMedia } from '@/data/mock';
 
 const statusColors = { draft: 'text-muted-foreground', ready: 'text-warning', published: 'text-success' };
 
@@ -53,7 +53,7 @@ const MediaPage = () => {
   const allMedia = useMemo<MediaAsset[]>(() => {
     const apiData = mediaQuery.data?.data;
     if (Array.isArray(apiData) && apiData.length > 0) return apiData;
-    return mockMediaAssets;
+    return mockMedia;
   }, [mediaQuery.data]);
 
   const filtered = allMedia.filter(m => {
@@ -66,7 +66,7 @@ const MediaPage = () => {
   const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
 
   const handleCopyLink = async () => {
-    const url = `${window.location.origin}/media#${shareModal}`;
+    const url = `${globalThis.location.origin}/media#${shareModal}`;
     try {
       await navigator.clipboard.writeText(url);
       setCopied(true);
@@ -77,16 +77,17 @@ const MediaPage = () => {
   };
 
   const handleNativeShare = async () => {
-    if (!shareAsset) return;
-    const shareData = {
-      title: shareAsset.title,
-      text: `${shareAsset.title} — SBBL HQ`,
-      url: `${window.location.origin}/media#${shareModal}`,
-    };
-    if (navigator.share) {
-      try { await navigator.share(shareData); setShareModal(null); } catch { /* cancelled */ }
-    } else {
-      await handleCopyLink();
+    if (shareAsset) {
+      const shareData = {
+        title: shareAsset.title,
+        text: `${shareAsset.title} — SBBL HQ`,
+        url: `${globalThis.location.origin}/media#${shareModal}`,
+      };
+      if (navigator.share) {
+        try { await navigator.share(shareData); setShareModal(null); } catch { /* cancelled */ }
+      } else {
+        await handleCopyLink();
+      }
     }
   };
 
@@ -157,6 +158,7 @@ const MediaPage = () => {
                     {/* Ambient blur fill — fills dead space for non-portrait content, adds depth for all */}
                     <img
                       src={m.thumbnail}
+                      alt=""
                       aria-hidden
                       className="absolute inset-0 w-full h-full object-cover scale-125 blur-3xl opacity-30 pointer-events-none select-none"
                     />
@@ -174,7 +176,9 @@ const MediaPage = () => {
                     {/* Top-right status badge */}
                     <div className="absolute top-2.5 right-2.5">
                       <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-sm bg-black/50 backdrop-blur-sm ${statusColors[m.status]}`}>
-                        {m.status === 'published' ? <Eye className="w-2.5 h-2.5" /> : m.status === 'ready' ? <Clock className="w-2.5 h-2.5" /> : <Upload className="w-2.5 h-2.5" />}
+                        {m.status === 'published' && <Eye className="w-2.5 h-2.5" />}
+                        {m.status === 'ready' && <Clock className="w-2.5 h-2.5" />}
+                        {m.status === 'draft' && <Upload className="w-2.5 h-2.5" />}
                         {m.status}
                       </span>
                     </div>
@@ -213,7 +217,11 @@ const MediaPage = () => {
         {/* Share Modal */}
         {shareModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-background/70 backdrop-blur-sm" onClick={() => setShareModal(null)} />
+            <button 
+              className="absolute inset-0 bg-background/70 backdrop-blur-sm w-full h-full" 
+              onClick={() => setShareModal(null)}
+              aria-label="Close modal"
+            />
             <div className="relative panel p-6 w-full max-w-sm animate-fade-in">
               <h3 className="font-display font-bold text-lg mb-1">Share Content</h3>
               {shareAsset && <p className="text-xs text-muted-foreground mb-4 truncate">{shareAsset.title}</p>}
