@@ -18,11 +18,8 @@ describe("wrangler.jsonc guardrails", () => {
     "utf-8",
   );
 
-  it('worker name MUST be "sbbl-hq" (secrets are bound to this name)', () => {
-    // Match "name": "sbbl-hq" (exactly, not sbbl-hq-worker or any variant)
-    expect(raw).toMatch(/"name":\s*"sbbl-hq"/);
-    // Ensure it's NOT sbbl-hq-worker or any suffixed variant
-    expect(raw).not.toMatch(/"name":\s*"sbbl-hq-worker"/);
+  it('worker name MUST be "sbbl-hq-worker" (custom domains + secrets are bound to this name)', () => {
+    expect(raw).toMatch(/"name":\s*"sbbl-hq-worker"/);
   });
 
   it("must define SUPABASE_URL in vars", () => {

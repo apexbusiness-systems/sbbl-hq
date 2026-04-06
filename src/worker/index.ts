@@ -3437,12 +3437,44 @@ function computeP95(): number {
   return sorted[Math.floor(sorted.length * 0.95)] ?? 0;
 }
 
-async function handleOpsHealth({ env }: HandlerCtx) {
+async function handleOpsHealth({ env, admin }: HandlerCtx) {
+  // Actually test the Supabase connection — this is the single most critical check.
+  // If this fails, EVERY route that queries the database will also fail.
+  let dbStatus: "connected" | "error" | "timeout" = "error";
+  let dbError: string | null = null;
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    const { error } = await admin.from("leagues").select("id").limit(1).abortSignal(controller.signal);
+    clearTimeout(timeoutId);
+    if (error) {
+      dbError = error.message;
+    } else {
+      dbStatus = "connected";
+    }
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      dbStatus = "timeout";
+      dbError = "Supabase query timed out (3s)";
+    } else {
+      dbError = e instanceof Error ? e.message : "unknown_connection_error";
+    }
+  }
+
+  const serviceKeySet = Boolean(env.SUPABASE_SERVICE_ROLE_KEY);
+  const serviceKeyPrefix = serviceKeySet
+    ? env.SUPABASE_SERVICE_ROLE_KEY.substring(0, 10) + "..."
+    : "NOT_SET";
+
   return json({
     ok: true,
+    db_ok: dbStatus === "connected",
     version: "2026.04-hardened",
     commit: (env as unknown as Record<string, unknown>).CF_PAGES_COMMIT_SHA ?? "unknown",
     supabase_url: env.SUPABASE_URL ? env.SUPABASE_URL.replace(/https?:\/\//, "").split(".")[0] + "...[redacted]" : "not_set",
+    supabase_service_key: serviceKeyPrefix,
+    db_status: dbStatus,
+    db_error: dbError,
     time: new Date().toISOString(),
     uptime_s: Math.floor((Date.now() - metricsCounters.startedAt) / 1000),
   });
@@ -3787,6 +3819,21 @@ export default Sentry.withSentry(
     const cleanReq = new Request(req, { headers: cleanHeaders });
 
     const session = await getSession(cleanReq, env);
+
+    // ── Supabase admin client ─────────────────────────────────────────
+    // CRITICAL: If the service role key is wrong or unset, EVERY database
+    // query in EVERY route handler will fail with "Invalid API key".
+    // We validate the key format before creating the client.
+    if (!env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY.length < 20) {
+      if (url.pathname.startsWith("/api") || url.pathname.startsWith("/ops") || url.pathname.startsWith("/auth")) {
+        return addSecurityHeaders(json({
+          ok: false,
+          error: "supabase_service_key_missing",
+          detail: "SUPABASE_SERVICE_ROLE_KEY is not set or is too short. Set it via: wrangler secret put SUPABASE_SERVICE_ROLE_KEY",
+        }, 500));
+      }
+    }
+
     const admin = createClient(
       env.SUPABASE_URL,
       env.SUPABASE_SERVICE_ROLE_KEY,

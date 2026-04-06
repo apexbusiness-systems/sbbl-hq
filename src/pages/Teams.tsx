@@ -152,15 +152,35 @@ const TeamsPage = () => {
 
       {/* Loading state */}
       {teamsQuery.isLoading && (
-        <div className="flex items-center justify-center py-16">
-          <div className="text-muted-foreground">Loading teams data...</div>
+        <div className="py-20 text-center">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-sm text-muted-foreground">Loading teams data...</p>
+        </div>
+      )}
+
+      {/* Error state */}
+      {!teamsQuery.isLoading && teamsQuery.isError && (
+        <div className="panel p-12 text-center">
+          <Trophy className="w-10 h-10 text-red-400 mx-auto mb-4" />
+          <p className="text-lg font-semibold mb-1">Failed to load teams</p>
+          <p className="text-sm text-muted-foreground mb-4">
+            {teamsQuery.error instanceof Error ? teamsQuery.error.message : 'An unexpected error occurred.'}
+          </p>
+          <button
+            onClick={() => teamsQuery.refetch()}
+            className="px-4 py-2 text-xs font-semibold uppercase tracking-wider bg-primary text-primary-foreground rounded-sm hover:bg-primary/90 transition-colors"
+          >
+            Retry
+          </button>
         </div>
       )}
 
       {/* Empty state */}
-      {!teamsQuery.isLoading && filteredTeams.length === 0 && (
-        <div className="flex items-center justify-center py-16">
-          <div className="text-muted-foreground">No teams found for the selected league.</div>
+      {!teamsQuery.isLoading && !teamsQuery.isError && filteredTeams.length === 0 && (
+        <div className="panel p-12 text-center">
+          <Users className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+          <p className="text-lg font-semibold mb-1">No teams found</p>
+          <p className="text-sm text-muted-foreground">No teams found for the selected league.</p>
         </div>
       )}
 
