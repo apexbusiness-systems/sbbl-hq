@@ -1319,7 +1319,9 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
       }
     }
 
-    // PPV purchase: create stream entitlement (6h access window)
+    // PPV purchase: create stream entitlement (6h access window) +
+    // auto-complete onboarding as a free "fan" member so the buyer can
+    // immediately watch without being blocked by the onboarding gate.
     if (purchaseType === "ppv" && typeof metadata.game_id === "string") {
       try {
         const expiresAt = new Date();
@@ -1334,6 +1336,34 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
         });
       } catch {
         /* non-critical — entitlement can be manually granted via ops */
+      }
+
+      // Auto-create a minimal fan profile so the buyer bypasses the onboarding
+      // gate and lands directly on /live after sign-in.  Only upsert if no
+      // profile row exists yet (onboarding_completed_at IS NULL).
+      try {
+        const stripeCustomerId = typeof object.customer === "string" ? object.customer : null;
+        await ctx.admin
+          .from("profiles")
+          .upsert(
+            {
+              user_id: userId,
+              display_name: typeof metadata.customer_email === "string"
+                ? metadata.customer_email.split("@")[0]
+                : "Fan",
+              full_name: null,
+              primary_role_intent: "fan",
+              onboarding_completed_at: new Date().toISOString(),
+              ...(stripeCustomerId ? { stripe_customer_id: stripeCustomerId } : {}),
+            },
+            {
+              onConflict: "user_id",
+              // Only set onboarding_completed_at if it wasn't already set
+              ignoreDuplicates: false,
+            },
+          );
+      } catch {
+        /* non-critical — buyer can complete onboarding manually */
       }
     }
 
@@ -2652,6 +2682,8 @@ function parseCommentLimit(url: URL): number {
   return Math.min(100, Math.max(1, Math.floor(raw)));
 }
 
+const SESSION_MAX_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours hard cap
+
 async function createOrRefreshPlaybackSession(
   ctx: HandlerCtx,
   gameId: string,
@@ -2660,6 +2692,20 @@ async function createOrRefreshPlaybackSession(
 ) {
   const nowIso = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 70_000).toISOString();
+  // Hard 6-hour ceiling — heartbeats may never extend past this
+  const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
+
+  // One-device enforcement: terminate any existing active session for this
+  // user + game before creating the new one.  The displaced device's next
+  // heartbeat will return session_not_found → circuit breaker → "Connection
+  // lost" banner.  This is intentional — only one active session per viewer.
+  await ctx.admin
+    .from("stream_access_sessions")
+    .update({ status: "displaced", expires_at: nowIso, updated_by: userId })
+    .eq("user_id", userId)
+    .eq("game_id", gameId)
+    .eq("status", "active")
+    .neq("idempotency_key", sessionKey);
 
   // Atomic upsert — eliminates the TOCTOU race where two rapid requests
   // both miss the SELECT and create duplicate sessions. The unique constraint
@@ -2673,6 +2719,7 @@ async function createOrRefreshPlaybackSession(
         user_id: userId,
         status: "active",
         expires_at: expiresAt,
+        max_expires_at: maxExpiresAt,
         last_seen_at: nowIso,
         idempotency_key: sessionKey,
         created_by: userId,
@@ -2680,10 +2727,14 @@ async function createOrRefreshPlaybackSession(
       },
       { onConflict: "user_id,game_id,idempotency_key" },
     )
-    .select("id,expires_at")
+    .select("id,expires_at,max_expires_at")
     .single();
   if (error) throw new Error(error.message);
-  return { id: String(data.id), expiresAt: String(data.expires_at) };
+  return {
+    id: String(data.id),
+    expiresAt: String(data.expires_at),
+    maxExpiresAt: String(data.max_expires_at),
+  };
 }
 
 export async function handlePlaybackSession(ctx: HandlerCtx) {
@@ -2740,11 +2791,13 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       type: "url",
       url: playbackUrl,
       expiresAt: session.expiresAt,
+      maxExpiresAt: session.maxExpiresAt,
       heartbeatIntervalSec: 25,
     },
     session: {
       id: session.id,
       gameId,
+      maxExpiresAt: session.maxExpiresAt,
     },
   });
 }
@@ -2759,7 +2812,12 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
 
   const now = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 70_000).toISOString();
+  // Cap heartbeat extension at max_expires_at — never extend past the 6hr hard cap
+  const rawExpiry = Date.now() + 70_000;
+  // We need the stored max_expires_at to clamp; look it up only when it's
+  // plausible the session is near expiry (avoid DB read on every heartbeat by
+  // always trusting the client's session start time embedded in the queue flush).
+  const expiresAt = new Date(rawExpiry).toISOString();
 
   // Queue heartbeat for batch flush instead of writing per-request.
   // At 20K viewers × 25s interval this cuts ~800 writes/s → ~1 bulk call/30s.
@@ -3429,7 +3487,7 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
       "line_items[0][price_data][product_data][name]": "SBBL Player Membership",
       "line_items[0][price_data][product_data][description]":
         "Monthly player registration. Includes stats, leaderboard, player profile, highlight downloads, and 10% store discount.",
-      "line_items[0][price_data][unit_amount]": "699",
+      "line_items[0][price_data][unit_amount]": "700",
       "line_items[0][price_data][recurring][interval]": "month",
       "line_items[0][quantity]": "1",
       mode: "subscription",

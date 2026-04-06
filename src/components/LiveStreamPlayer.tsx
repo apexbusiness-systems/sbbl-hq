@@ -130,8 +130,8 @@ export function LiveStreamPlayer({
     const start = async () => {
       try {
         const res = await apiFetch<{
-          playback: { url: string; heartbeatIntervalSec: number };
-          session: { id: string };
+          playback: { url: string; heartbeatIntervalSec: number; maxExpiresAt?: string };
+          session: { id: string; maxExpiresAt?: string };
         }>(`/api/streams/${game.id}/session`, {
           method: 'POST',
           body: JSON.stringify({ sessionKey }),
@@ -140,6 +140,18 @@ export function LiveStreamPlayer({
         setPlaybackUrl(normalizeFacebookUrl(res.playback.url));
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
+
+        // 6-hour hard cap: schedule auto-termination at maxExpiresAt
+        if (res.session.maxExpiresAt) {
+          const msUntilCap = new Date(res.session.maxExpiresAt).getTime() - Date.now();
+          if (msUntilCap > 0) {
+            setTimeout(() => {
+              if (!active) return;
+              if (heartbeatId) { clearInterval(heartbeatId); heartbeatId = null; }
+              toast.error('Your 6-hour viewing session has ended. Purchase a new pass to continue.');
+            }, msUntilCap);
+          }
+        }
         heartbeatId = window.setInterval(() => {
           void apiFetch(`/api/streams/${game.id}/session/heartbeat`, {
             method: 'POST',

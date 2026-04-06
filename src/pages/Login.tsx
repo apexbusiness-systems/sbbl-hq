@@ -32,7 +32,17 @@ const LoginPage = () => {
   // between /onboarding and the target page (avoids wrong redirect flash).
   const redirectTo = urlParams.get('redirect');
   useEffect(() => {
-    if (isSignedIn && !loading) navigate(needsOnboarding ? '/onboarding' : (redirectTo || '/'));
+    if (!isSignedIn || loading) return;
+    if (needsOnboarding) {
+      // Pass the original redirect target through onboarding so fans land on
+      // /live (or their intended page) immediately after setup completes.
+      const onboardingUrl = redirectTo
+        ? `/onboarding?redirect=${encodeURIComponent(redirectTo)}`
+        : '/onboarding';
+      navigate(onboardingUrl);
+    } else {
+      navigate(redirectTo || '/live');
+    }
   }, [isSignedIn, loading, needsOnboarding, navigate, redirectTo]);
 
   const switchMode = (next: Mode) => {

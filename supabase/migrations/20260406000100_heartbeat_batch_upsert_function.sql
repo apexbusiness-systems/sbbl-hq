@@ -12,8 +12,15 @@ as $$
 begin
   update stream_access_sessions sas
   set
-    expires_at   = h.expires_at,
-    status       = 'active',
+    -- Clamp expires_at to the hard 6-hour ceiling; heartbeats may never extend
+    -- a session past max_expires_at.  If max_expires_at is NULL (old rows),
+    -- fall back to the requested expires_at unclamped.
+    expires_at   = least(h.expires_at, coalesce(sas.max_expires_at, h.expires_at)),
+    status       = case
+                     when sas.max_expires_at is not null and h.now_ts >= sas.max_expires_at
+                     then 'ended'   -- 6-hour window exhausted
+                     else 'active'
+                   end,
     last_seen_at = h.now_ts,
     updated_at   = h.now_ts,
     updated_by   = h.user_id
@@ -28,7 +35,8 @@ begin
   ) h
   where sas.id      = h.session_id
     and sas.user_id  = h.user_id
-    and sas.game_id  = h.game_id;
+    and sas.game_id  = h.game_id
+    and sas.status  != 'displaced';  -- do not revive displaced sessions
 end;
 $$;
 

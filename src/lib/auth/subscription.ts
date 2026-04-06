@@ -1,7 +1,7 @@
 import { AppRole } from '@/lib/auth/roles';
 
-/** Player membership: $6.99 CAD / month recurring subscription */
-export const PLAYER_REGISTRATION_PRICE_CAD = 6.99;
+/** Player membership: $7.00 CAD / month recurring subscription */
+export const PLAYER_REGISTRATION_PRICE_CAD = 7.00;
 
 /** PPV single-stream access: $4.99 CAD, token valid for 6 hours from first use */
 export const PPV_PRICE_CAD = 4.99;
