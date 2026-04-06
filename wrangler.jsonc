@@ -1,11 +1,11 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   // ┌─────────────────────────────────────────────────────────────────────────┐
-  // │ CRITICAL: Worker name MUST be "sbbl-hq-worker" — the custom domains   │
-  // │ (sbbl-hq.icu, www.sbbl-hq.icu) and ALL Cloudflare secrets             │
-  // │ (SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, etc.) are bound to     │
-  // │ this name. Changing it deploys to a DIFFERENT worker, breaking the     │
-  // │ live site. DO NOT rename without migrating domains AND secrets.        │
+  // │ CRITICAL: Worker name MUST be "sbbl-hq-worker" — the custom domains     │
+  // │ (sbbl-hq.icu, www.sbbl-hq.icu) and ALL Cloudflare secrets               │
+  // │ (SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, etc.) are bound to       │
+  // │ this name. Changing it deploys to a DIFFERENT worker, breaking the      │
+  // │ live site. DO NOT rename without migrating domains AND secrets.         │
   // └─────────────────────────────────────────────────────────────────────────┘
   "name": "sbbl-hq-worker",
   "main": "src/worker/index.ts",
