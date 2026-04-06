@@ -67,6 +67,10 @@ describe("deploy.yml guardrails", () => {
     expect(deployYml).toMatch(/VITE_SUPABASE_URL:.*\|\|/);
   });
 
+  it("must support legacy SUPABASE_URL secret fallback", () => {
+    expect(deployYml).toContain("secrets.SUPABASE_URL");
+  });
+
   it("must include fallback for VITE_SUPABASE_ANON_KEY", () => {
     expect(deployYml).toMatch(/VITE_SUPABASE_ANON_KEY:.*\|\|/);
   });
