@@ -7,7 +7,7 @@ import { PotgCard } from '@/components/ui/PotgCard';
 import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord, manualOpsAction } from '@/lib/api/ops';
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
-import { resizeImageToFit } from '@/lib/imageResize';
+import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
 import { fetchScores, submitScoreManual, submitScoresCsvImport, parseScoreboardImage } from '@/lib/api/scores';
 import type { ScoreCategory } from '@/types';
 
@@ -147,11 +147,13 @@ const OpsPage = () => {
 
   const potgMutation = useMutation({
     mutationFn: async () => {
-      // Upload the POTG graphic to Supabase storage (resized to 560×747 — 2× the 280×373 card)
+      // Upload the POTG graphic to Supabase storage.
+      // Auto-detect portrait (560×747) vs landscape (747×560) and fill with cover crop.
       let imageUrl: string | undefined;
       if (potgImageFile && hasSupabaseClientConfig) {
         const supabase = requireSupabaseClient();
-        const resized = await resizeImageToFit(potgImageFile, 560, 747);
+        const dims = await inferTargetDimensions(potgImageFile);
+        const resized = await resizeImageToFit(potgImageFile, dims.width, dims.height, dims.mode);
         const objectPath = `potg/${potgForm.leagueId}/${crypto.randomUUID()}.jpg`;
         const upload = await supabase.storage.from('media').upload(objectPath, resized, { upsert: true });
         if (upload.error) throw upload.error;
@@ -367,13 +369,17 @@ const OpsPage = () => {
     setEventParseState('parsing');
     setEventParseError('');
     try {
+      // Resize to correct AR before parsing and storage (landscape 747×560, portrait 560×747)
+      const dims = await inferTargetDimensions(file);
+      const resizedFile = await resizeImageToFit(file, dims.width, dims.height, dims.mode);
+
       const reader = new FileReader();
       const b64 = await new Promise<string>((resolve, reject) => {
         reader.onload = () => resolve(reader.result as string);
         reader.onerror = reject;
-        reader.readAsDataURL(file);
+        reader.readAsDataURL(resizedFile);
       });
-      const dataUrl = b64.startsWith('data:') ? b64 : `data:${file.type};base64,${b64}`;
+      const dataUrl = b64.startsWith('data:') ? b64 : `data:${resizedFile.type};base64,${b64}`;
 
       const promptText = `Extract event details from this image.
 Return valid JSON only, no markdown.
