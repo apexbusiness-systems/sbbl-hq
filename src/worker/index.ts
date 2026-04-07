@@ -2989,64 +2989,17 @@ export async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
   // SECURITY: PPV price is hardcoded to $4.99 CAD (499 cents).
   // Do NOT trust pricing from the client payload.
   const unitAmount = 499;
-const reqUrlStr = req.url;
-
-  // Extract all product IDs from the client request
-  const productIds = body.items.map(i => i.id).filter(Boolean);
-  if (!productIds.length) {
-    return json({ ok: false, error: "invalid_items" }, 400);
-  }
-
-  // Fetch the canonical products from the database
-  const { data: dbProducts, error: dbError } = await admin
-    .from("products")
-    .select("id, name, price")
-    .in("id", productIds);
-
-  if (dbError || !dbProducts || dbProducts.length === 0) {
-    return json({ ok: false, error: "products_not_found" }, 404);
-  }
-
-  const dbProductMap = new Map(dbProducts.map(p => [p.id, p]));
-
-  const params = new URLSearchParams({
-    "payment_method_types[]": "card",
-    mode: "payment",
-    success_url: getSafeRedirectUrl(
-      body.successUrl,
-      `${new URL(reqUrlStr).origin}/store?success=1`,
-      reqUrlStr,
-    ),
-    cancel_url: getSafeRedirectUrl(
-      body.cancelUrl,
-      `${new URL(reqUrlStr).origin}/store`,
-      reqUrlStr,
-    ),
-    "metadata[user_id]": userId,
-    "metadata[purchase_type]": "store_order",
-  });
-
-  // price is in PHP whole units — Stripe expects centavos (×100)
-  // Use the price from the database instead of the client payload
-  let validItemsCount = 0;
-  body.items.forEach((item) => {
-    if (!item.id) return;
-    const dbProduct = dbProductMap.get(item.id);
-    if (!dbProduct) return; // Skip if product doesn't exist in DB
-
-    const i = validItemsCount++;
-    params.set(`line_items[${i}][price_data][currency]`, "php");
-    params.set(`line_items[${i}][price_data][product_data][name]`, dbProduct.name);
-    params.set(
-      `line_items[${i}][price_data][unit_amount]`,
-      String(Math.round(dbProduct.price * 100)),
-    );
-    params.set(`line_items[${i}][quantity]`, String(item.qty ?? 1));
-  });
-
-  if (validItemsCount === 0) {
-    return json({ ok: false, error: "no_valid_items_for_checkout" }, 400);
-  }
+  const reqUrlStr = req.url;
+  const successUrl = getSafeRedirectUrl(
+    body?.successUrl,
+    "https://sbbl-hq.icu/live?access=1",
+    reqUrlStr,
+  );
+  const cancelUrl = getSafeRedirectUrl(
+    body?.cancelUrl,
+    "https://sbbl-hq.icu/live",
+    reqUrlStr,
+  );
 
   const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
     method: "POST",
@@ -3398,6 +3351,25 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
     return json({ ok: false, error: "items_required" }, 400);
 
   const reqUrlStr = req.url;
+
+  // Extract all product IDs from the client request
+  const productIds = body.items.map(i => i.id).filter(Boolean);
+  if (!productIds.length) {
+    return json({ ok: false, error: "invalid_items" }, 400);
+  }
+
+  // Fetch the canonical products from the database
+  const { data: dbProducts, error: dbError } = await admin
+    .from("products")
+    .select("id, name, price")
+    .in("id", productIds);
+
+  if (dbError || !dbProducts || dbProducts.length === 0) {
+    return json({ ok: false, error: "products_not_found" }, 404);
+  }
+
+  const dbProductMap = new Map(dbProducts.map(p => [p.id, p]));
+
   const params = new URLSearchParams({
     "payment_method_types[]": "card",
     mode: "payment",
@@ -3414,16 +3386,28 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
     "metadata[user_id]": userId,
     "metadata[purchase_type]": "store_order",
   });
+
   // price is in PHP whole units — Stripe expects centavos (×100)
-  body.items.forEach((item, i) => {
-    params.set(`line_items[${i}][price_data][currency]`, "php");
-    params.set(`line_items[${i}][price_data][product_data][name]`, item.name);
+  // Use the price from the database instead of the client payload
+  let validItemsCount = 0;
+  body.items.forEach((item) => {
+    if (!item.id) return;
+    const dbProduct = dbProductMap.get(item.id);
+    if (!dbProduct) return; // Skip if product doesn't exist in DB
+
+    const idx = validItemsCount++;
+    params.set(`line_items[${idx}][price_data][currency]`, "php");
+    params.set(`line_items[${idx}][price_data][product_data][name]`, dbProduct.name);
     params.set(
-      `line_items[${i}][price_data][unit_amount]`,
-      String(Math.round(item.price * 100)),
+      `line_items[${idx}][price_data][unit_amount]`,
+      String(Math.round(dbProduct.price * 100)),
     );
-    params.set(`line_items[${i}][quantity]`, String(item.qty ?? 1));
+    params.set(`line_items[${idx}][quantity]`, String(item.qty ?? 1));
   });
+
+  if (validItemsCount === 0) {
+    return json({ ok: false, error: "no_valid_items_for_checkout" }, 400);
+  }
 
   const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
     method: "POST",
