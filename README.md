@@ -36,7 +36,7 @@ VITE_SUPABASE_ANON_KEY=eyJ...   ← anon JWT from Supabase dashboard → Project
 > The code prefers `VITE_SUPABASE_PUBLISHABLE_KEY` and falls back to `VITE_SUPABASE_ANON_KEY`.
 > Either works — they resolve to the same Supabase anon/publishable key.
 
-### Worker runtime (Cloudflare — never browser)
+### Worker runtime (Cloudflare - never browser)
 Set in `.dev.vars` locally. Set via `wrangler secret put` in production.
 
 ```
