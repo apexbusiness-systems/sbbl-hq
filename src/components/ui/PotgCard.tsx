@@ -7,24 +7,34 @@ interface PotgCardProps {
   featured?: boolean; // kept for API compat; no longer affects dimensions
 }
 
-// All cards share the same 280×(3:4) container so the scroll strip is uniform.
+// All portrait cards share the same 280px width; landscape cards use 4:3 AR.
 const CARD_WIDTH = 'min-w-[280px] max-w-[280px]';
+const PORTRAIT_AR = '3/4';   // 560 × 747 uploads
+const LANDSCAPE_AR = '4/3';  // 747 × 560 uploads (2v2, event graphics)
+
 
 export const PotgCard = ({ potg }: PotgCardProps) => {
   const [imgFailed, setImgFailed] = useState(false);
+  const [ar, setAr] = useState<string>(PORTRAIT_AR);
 
   // Poster-style card — shown when a real graphic image is available and loads ok
   if (potg.image && !imgFailed) {
     return (
       <div
         className={`relative overflow-hidden flex-shrink-0 rounded-sm border border-border group cursor-default transition-all duration-300 hover:border-primary/40 hover:shadow-[0_0_32px_-4px_hsl(43_52%_54%/0.25)] ${CARD_WIDTH}`}
-        style={{ aspectRatio: '3/4' }}
+        style={{ aspectRatio: ar }}
       >
         <img
           src={potg.image}
           alt={`${potg.playerName} — Player of the Game`}
-          className="w-full h-full object-contain bg-black/50 group-hover:scale-[1.03] transition-transform duration-500"
+          className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-500"
           loading="lazy"
+          onLoad={(e) => {
+            const img = e.currentTarget;
+            // If image is wider than tall → landscape 4:3 card; otherwise portrait 3:4
+            const isLandscape = img.naturalWidth > img.naturalHeight;
+            setAr(isLandscape ? LANDSCAPE_AR : PORTRAIT_AR);
+          }}
           onError={() => setImgFailed(true)}
         />
         {/* Bottom stat overlay */}
@@ -44,7 +54,7 @@ export const PotgCard = ({ potg }: PotgCardProps) => {
   return (
     <div
       className={`relative bg-card border border-border rounded-sm overflow-hidden flex-shrink-0 flex flex-col transition-all duration-300 hover:border-primary/40 hover:shadow-[0_0_24px_-4px_hsl(43_52%_54%/0.15)] ${CARD_WIDTH}`}
-      style={{ aspectRatio: '3/4' }}
+      style={{ aspectRatio: PORTRAIT_AR }}
     >
       {/* Gold accent top bar */}
       <div className="h-[3px] bg-gradient-to-r from-primary via-primary/60 to-transparent" />

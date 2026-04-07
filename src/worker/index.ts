@@ -1655,33 +1655,27 @@ async function handleImportRoute(
   }
 
   if (bulkSuccess) {
-    // If the database insert succeeded, we map over rows for the RPC calls
-    await Promise.all(
-      rows.map(async (row) => {
-        try {
-          const { error } = await ctx.admin.rpc("enqueue_local_domain_event", {
-            p_event_type: `${kind}_imported`,
-            p_entity_type: kind,
-            p_entity_id: null,
-            p_league_id: row.league_id || null,
-            p_payload: row,
-            p_trace_id: crypto.randomUUID(),
-            p_available_at: new Date().toISOString(),
-          });
-          if (error) throw error;
-          insertedRows += 1;
-        } catch (error) {
-          failedRows += 1;
-          errors.push(error instanceof Error ? error.message : "import_failed");
-          await writeIngressFailure(
-            ctx.admin,
-            `${kind}_import_failed`,
-            row,
-            "admin_mutation",
-            session.userId,
-          );
-        }
-      }),
+    // DB insert committed all rows atomically. Count them all as inserted.
+    insertedRows = rows.length;
+
+    // Enqueue domain events best-effort: a failure here must NOT mark rows as failed
+    // because the data is already persisted in the database.
+    await Promise.allSettled(
+      rows.map((row) =>
+        ctx.admin.rpc("enqueue_local_domain_event", {
+          p_event_type: `${kind}_imported`,
+          p_entity_type: kind,
+          p_entity_id: null,
+          p_league_id: row.league_id || null,
+          p_payload: row,
+          p_trace_id: crypto.randomUUID(),
+          p_available_at: new Date().toISOString(),
+        }).then(({ error }) => {
+          if (error) {
+            console.warn(`[import] enqueue_local_domain_event warning (${kind}):`, error.message);
+          }
+        }),
+      ),
     );
   } else {
     // Iterative fallback if bulk db operation fails
