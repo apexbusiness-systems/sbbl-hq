@@ -719,7 +719,7 @@ async function handleStreamSessions({ req, admin }: HandlerCtx) {
 }
 
 async function handleOpsRevenue({ req, admin }: HandlerCtx) {
-  await requireAdminSession(req, admin);
+  await requireSuperAdminSession(req, admin);
   const [orders, invites, sessions] = await Promise.all([
     admin
       .from("orders")
