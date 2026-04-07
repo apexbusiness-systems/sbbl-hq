@@ -1,9 +1,8 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react-swc";
-import path from "path";
-import { componentTagger } from "lovable-tagger";
+import path from "node:path";
+import { createRequire } from "node:module";
 import { VitePWA } from "vite-plugin-pwa";
-import { sentryVitePlugin } from "@sentry/vite-plugin";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -25,6 +24,29 @@ export default defineConfig(({ mode }) => {
   // Sentry release: use git SHA injected by CI (VITE_APP_VERSION) or fall back
   // to a timestamp so every build produces a unique release string.
   const appVersion = env.VITE_APP_VERSION || `sbbl-hq@${Date.now()}`;
+
+  // Sentry: conditionally load only when the auth token is present at build time.
+  // createRequire is used because vite.config.ts runs as ESM ("type":"module")
+  // but @sentry/vite-plugin requires a synchronous load before the config object
+  // is returned. Falls back to empty array if package is not installed.
+  let sentryPlugins: import('vite').PluginOption[] = [];
+  if (env.SENTRY_AUTH_TOKEN) {
+    try {
+      const _require = createRequire(import.meta.url);
+     
+      const { sentryVitePlugin } = _require('@sentry/vite-plugin');
+      sentryPlugins = [sentryVitePlugin({
+        org: env.SENTRY_ORG || 'apex-business-systems',
+        project: env.SENTRY_PROJECT || 'sbbl-hq-frontend',
+        authToken: env.SENTRY_AUTH_TOKEN,
+        release: { name: appVersion },
+        sourcemaps: { filesToDeleteAfterUpload: ['dist/assets/*.js.map'] },
+        telemetry: false,
+      })];
+    } catch {
+      // @sentry/vite-plugin not installed — skip silently
+    }
+  }
 
   return {
     define: {
@@ -139,18 +161,7 @@ export default defineConfig(({ mode }) => {
         },
         devOptions: { enabled: true },
       }),
-      ...(mode === "development" ? [componentTagger()] : []),
-      // Sentry source map upload — only runs when SENTRY_AUTH_TOKEN is set.
-      // Hidden source maps: uploaded to Sentry but NOT served publicly.
-      // Skip in dev (no auth token) and when explicitly disabled.
-      ...(env.SENTRY_AUTH_TOKEN ? [sentryVitePlugin({
-        org: env.SENTRY_ORG || "apex-business-systems",
-        project: env.SENTRY_PROJECT || "sbbl-hq-frontend",
-        authToken: env.SENTRY_AUTH_TOKEN,
-        release: { name: appVersion },
-        sourcemaps: { filesToDeleteAfterUpload: ["dist/assets/*.js.map"] },
-        telemetry: false,
-      })] : []),
+      ...sentryPlugins,
     ],
 
     resolve: {
