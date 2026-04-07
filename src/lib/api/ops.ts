@@ -64,7 +64,7 @@ export async function uploadStoreMedia(payload: {
   imageUrl: string;
   leagueId?: string | null;
 }) {
-  return apiFetch<{ ok: boolean; productId: string; mediaAssetId: string }>('/ops/store/media', {
+  return apiFetch<{ ok: boolean; jobId: string; productId: string | null; mediaAssetId: string; publicationId: string | null }>('/ops/store/media', {
     method: 'POST',
     headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-store-media') },
     body: JSON.stringify(payload),
@@ -107,5 +107,45 @@ export async function manualOpsAction(
     method: 'POST',
     headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-manual-${kind}-${action}`) },
     body: JSON.stringify(payload),
+  });
+}
+
+// ── Ingest Lifecycle ─────────────────────────────────────────────────────────
+
+export type IngestJob = {
+  id: string;
+  source: string;
+  state: string;
+  media_asset_id: string | null;
+  publication_id: string | null;
+  payload: Record<string, unknown>;
+  error_detail: string | null;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function getIngestJobStatus(jobId: string) {
+  return apiFetch<{ ok: boolean; job: IngestJob }>(`/ops/ingest/${jobId}`);
+}
+
+export async function approveIngestJob(jobId: string) {
+  return apiFetch<{ ok: boolean; state: string }>(`/ops/ingest/${jobId}/approve`, {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-approve-${jobId}`) },
+  });
+}
+
+export async function rejectIngestJob(jobId: string) {
+  return apiFetch<{ ok: boolean; state: string }>(`/ops/ingest/${jobId}/reject`, {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-reject-${jobId}`) },
+  });
+}
+
+export async function replayIngestJob(jobId: string) {
+  return apiFetch<{ ok: boolean; newJobId: string; state: string }>(`/ops/ingest/${jobId}/replay`, {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-replay-${jobId}`) },
   });
 }

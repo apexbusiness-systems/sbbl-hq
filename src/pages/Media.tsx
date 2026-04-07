@@ -6,9 +6,8 @@ import { useApp } from '@/contexts/AppContext';
 import { LeagueId, MediaAsset } from '@/types';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
-import { Play, Share2, Upload, Eye, Clock, Check } from 'lucide-react';
+import { Play, Share2, Upload, Eye, Clock, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { mediaAssets as mockMedia } from '@/data/mock';
 
 const statusColors = { draft: 'text-muted-foreground', ready: 'text-warning', published: 'text-success' };
 
@@ -53,7 +52,7 @@ const MediaPage = () => {
   const allMedia = useMemo<MediaAsset[]>(() => {
     const apiData = mediaQuery.data?.data;
     if (Array.isArray(apiData) && apiData.length > 0) return apiData;
-    return mockMedia;
+    return []; // No mock fallback — empty state renders truthfully
   }, [mediaQuery.data]);
 
   const filtered = allMedia.filter(m => {
@@ -138,7 +137,12 @@ const MediaPage = () => {
           ))}
         </div>
 
-        {filtered.length === 0 ? (
+        {mediaQuery.isLoading ? (
+          <div className="panel p-12 text-center">
+            <Loader2 className="w-6 h-6 animate-spin text-muted-foreground mx-auto mb-2" />
+            <p className="text-sm text-muted-foreground">Loading media…</p>
+          </div>
+        ) : filtered.length === 0 ? (
           <div className="panel p-12 text-center">
             <p className="text-sm text-muted-foreground">No media found for this filter.</p>
           </div>

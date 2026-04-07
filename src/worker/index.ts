@@ -122,6 +122,13 @@ function getRolesFromVerifiedSession(req: Request): string[] {
     .filter(Boolean);
 }
 
+function requireSuperAdmin(req: Request): void {
+  const roles = getRolesFromVerifiedSession(req);
+  if (!roles.includes("super_admin")) {
+    throw Object.assign(new Error("forbidden: super_admin required"), { status: 403 });
+  }
+}
+
 function getBearerToken(req: Request) {
   const value = req.headers.get("authorization");
   if (!value?.startsWith("Bearer ")) return null;
@@ -1795,6 +1802,150 @@ async function handleImportHistory({ req, admin }: HandlerCtx) {
   return json({ ok: true, jobs: data ?? [] });
 }
 
+// ── Canonical Ingest Pipeline ──────────────────────────────────────────────────
+// All media ingest flows converge through createIngestJob.
+// State machine: uploaded → validated → written → projected → published | failed | needs_review
+
+type IngestSource = 'store_media' | 'potg_submit' | 'event_graphic' | 'manual_upload';
+type IngestState = 'uploaded' | 'validated' | 'written' | 'projected' | 'published' | 'failed' | 'needs_review';
+
+interface IngestResult {
+  jobId: string;
+  state: IngestState;
+  mediaAssetId: string | null;
+  publicationId: string | null;
+  productId?: string;
+  error?: string;
+}
+
+async function createIngestJob(
+  admin: SupabaseClient,
+  source: IngestSource,
+  payload: Record<string, unknown>,
+  opts: { createdBy?: string; idempotencyKey?: string; autoPublish?: boolean; extraProductInsert?: boolean } = {},
+): Promise<IngestResult> {
+  const autoPublish = opts.autoPublish ?? true;
+  const idemKey = opts.idempotencyKey ?? null;
+
+  // Step 1: Idempotency check — return existing job if duplicate
+  if (idemKey) {
+    const { data: existing } = await admin
+      .from("ingest_jobs")
+      .select("id,state,media_asset_id,publication_id")
+      .eq("idempotency_key", idemKey)
+      .maybeSingle();
+    if (existing) {
+      return {
+        jobId: existing.id,
+        state: existing.state as IngestState,
+        mediaAssetId: existing.media_asset_id,
+        publicationId: existing.publication_id,
+      };
+    }
+  }
+
+  // Step 2: Create ingest job (state=uploaded)
+  const { data: job, error: jobErr } = await admin
+    .from("ingest_jobs")
+    .insert({
+      source,
+      state: "uploaded",
+      payload,
+      idempotency_key: idemKey,
+      created_by: opts.createdBy ?? null,
+    })
+    .select("id")
+    .single();
+  if (jobErr || !job) {
+    return { jobId: "", state: "failed", mediaAssetId: null, publicationId: null, error: jobErr?.message ?? "job_insert_failed" };
+  }
+
+  let productId: string | undefined;
+  let mediaAssetId: string | null = null;
+  let publicationId: string | null = null;
+
+  try {
+    // Step 3: Validate payload
+    const title = String(payload.title ?? "");
+    const imageUrl = String(payload.imageUrl ?? payload.image_url ?? payload.thumbnail ?? "");
+    if (!title || !imageUrl) {
+      await admin.from("ingest_jobs").update({ state: "failed", error_detail: "missing_title_or_image" }).eq("id", job.id);
+      return { jobId: job.id, state: "failed", mediaAssetId: null, publicationId: null, error: "missing_title_or_image" };
+    }
+
+    await admin.from("ingest_jobs").update({ state: "validated" }).eq("id", job.id);
+
+    // Step 4: Optional product insert (store_media flow)
+    if (opts.extraProductInsert && source === "store_media") {
+      const { data: prod, error: prodErr } = await admin
+        .from("products")
+        .insert({
+          league_id: typeof payload.leagueId === "string" ? payload.leagueId : null,
+          name: title,
+          price: typeof payload.price === "number" ? payload.price : 0,
+          status: payload.publishStatus === "published" ? "published" : "draft",
+        })
+        .select("id")
+        .single();
+      if (prodErr) throw new Error(prodErr.message);
+      productId = prod.id;
+    }
+
+    // Step 5: Write media_assets row
+    const leagueId = typeof payload.leagueId === "string" ? payload.leagueId : null;
+    const assetStatus = autoPublish ? "published" : "draft";
+    const mediaType = String(payload.type ?? "poster");
+    const { data: asset, error: assetErr } = await admin
+      .from("media_assets")
+      .insert({
+        league_id: leagueId,
+        title,
+        status: assetStatus,
+        metadata: {
+          image_url: imageUrl,
+          type: mediaType,
+          category: payload.category ?? "general",
+          product_id: productId ?? null,
+          sale: payload.sale === true,
+          source,
+        },
+      })
+      .select("id")
+      .single();
+    if (assetErr || !asset) throw new Error(assetErr?.message ?? "asset_insert_failed");
+    mediaAssetId = asset.id;
+
+    await admin.from("ingest_jobs").update({ state: "written", media_asset_id: mediaAssetId }).eq("id", job.id);
+
+    // Step 6: Project → media_publications
+    const { data: pub, error: pubErr } = await admin
+      .from("media_publications")
+      .insert({
+        media_asset_id: mediaAssetId,
+        league_id: leagueId,
+        title,
+        type: mediaType,
+        thumbnail_url: imageUrl,
+        status: autoPublish ? "published" : "draft",
+        published_by: opts.createdBy ?? null,
+        metadata: { category: payload.category ?? "general", sale: payload.sale === true, product_id: productId ?? null },
+      })
+      .select("id")
+      .single();
+    if (pubErr || !pub) throw new Error(pubErr?.message ?? "publication_insert_failed");
+    publicationId = pub.id;
+
+    const finalState: IngestState = autoPublish ? "published" : "needs_review";
+    await admin.from("ingest_jobs").update({ state: finalState, publication_id: publicationId }).eq("id", job.id);
+
+    return { jobId: job.id, state: finalState, mediaAssetId, publicationId, productId };
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : "unknown_ingest_error";
+    await admin.from("ingest_jobs").update({ state: "failed", error_detail: errMsg, media_asset_id: mediaAssetId }).eq("id", job.id);
+    return { jobId: job.id, state: "failed", mediaAssetId, publicationId: null, error: errMsg };
+  }
+}
+
 async function handleStoreMedia(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireAdminSession(ctx.req, ctx.admin);
@@ -1808,52 +1959,35 @@ async function handleStoreMedia(ctx: HandlerCtx) {
     typeof payload.price !== "number" ||
     typeof payload.imageUrl !== "string"
   ) {
-    // sale flag is optional boolean
     return json({ ok: false, error: "invalid_store_payload" }, 400);
   }
 
-  const product = await ctx.admin
-    .from("products")
-    .insert({
-      league_id: typeof payload.leagueId === "string" ? payload.leagueId : null,
-      name: payload.title,
-      price: payload.price,
-      status: payload.publishStatus === "published" ? "published" : "draft",
-    })
-    .select("id")
-    .single();
-  if (product.error) throw new Error(product.error.message);
+  const result = await createIngestJob(ctx.admin, "store_media", payload, {
+    createdBy: session.userId,
+    idempotencyKey: readIdempotencyKey(ctx.req.headers) ?? undefined,
+    autoPublish: payload.publishStatus === "published",
+    extraProductInsert: true,
+  });
 
-  const media = await ctx.admin
-    .from("media_assets")
-    .insert({
-      league_id: typeof payload.leagueId === "string" ? payload.leagueId : null,
-      title: String(payload.title),
-      status: payload.publishStatus === "published" ? "published" : "draft",
-      metadata: {
-        image_url: payload.imageUrl,
-        category: payload.category,
-        product_id: product.data.id,
-        sale: payload.sale === true,
-      },
-    })
-    .select("id")
-    .single();
-  if (media.error) throw new Error(media.error.message);
+  if (result.state === "failed") {
+    return json({ ok: false, error: result.error ?? "ingest_failed", jobId: result.jobId }, 500);
+  }
 
   await ctx.admin.from("audit_logs").insert({
     actor_id: session.userId,
     action: "ops_store_media_upsert",
     ref_type: "product",
-    ref_id: product.data.id,
-    payload: { media_asset_id: media.data.id },
+    ref_id: result.productId ?? result.mediaAssetId,
+    payload: { job_id: result.jobId, media_asset_id: result.mediaAssetId, publication_id: result.publicationId },
     idempotency_key: readIdempotencyKey(ctx.req.headers),
   });
 
   return json({
     ok: true,
-    productId: product.data.id,
-    mediaAssetId: media.data.id,
+    jobId: result.jobId,
+    productId: result.productId ?? null,
+    mediaAssetId: result.mediaAssetId,
+    publicationId: result.publicationId,
   });
 }
 
@@ -3414,11 +3548,12 @@ async function handlePublicProducts({ req, admin }: HandlerCtx) {
 async function handlePublicMedia({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get("leagueId");
+  // CANONICAL: public media resolves through media_publications, never raw media_assets
   let query = admin
-    .from("media_assets")
-    .select("id,title,status,league_id,metadata,created_at,leagues:leagues!league_id(code)")
+    .from("media_publications")
+    .select("id,media_asset_id,title,type,thumbnail_url,status,league_id,metadata,published_at,leagues:leagues!league_id(code)")
     .eq("status", "published")
-    .order("created_at", { ascending: false })
+    .order("published_at", { ascending: false })
     .limit(50);
   if (leagueId) query = query.eq("league_id", leagueId);
   const { data, error } = await query;
@@ -3437,11 +3572,11 @@ async function handlePublicMedia({ req, admin }: HandlerCtx) {
     return {
       id: String(r.id),
       title: String(r.title ?? ""),
-      type: String(meta.type ?? "poster"),
-      thumbnail: String(meta.thumbnail ?? meta.image_url ?? ""),
+      type: String(r.type ?? "poster"),
+      thumbnail: String(r.thumbnail_url ?? ""),
       leagueId: leagueCode,
       status: String(r.status ?? "draft"),
-      date: String(meta.date ?? (r.created_at as string | null)?.split("T")[0] ?? ""),
+      date: String((r.published_at as string | null)?.split("T")[0] ?? ""),
     };
   });
 
@@ -4038,8 +4173,12 @@ async function handleManualOpsAction(ctx: HandlerCtx) {
   const action = ctx.params.action;
   const body = await req.json().catch(() => ({}));
 
-  // Basic implementation to prevent 404. Real logic will depend on DB schema
-  // For now, this satisfies the "real path" requirement for the frontend.
+  // HARDENED: explicit routing with 400 for unrecognized kind/action
+  const validKinds = ["team", "player", "schedule", "event", "store"];
+  if (!validKinds.includes(kind)) {
+    return json({ ok: false, error: `unknown_kind: ${kind}` }, 400);
+  }
+
   if (kind === "team") {
     if (action === "create") {
       const { error } = await admin.from("teams").insert({
@@ -4051,6 +4190,8 @@ async function handleManualOpsAction(ctx: HandlerCtx) {
     } else if (action === "delete") {
       const { error } = await admin.from("teams").delete().eq("id", body.id);
       if (error) return json({ ok: false, error: error.message }, 500);
+    } else {
+      return json({ ok: false, error: `unknown_action: team.${action}` }, 400);
     }
   } else if (kind === "player") {
     if (action === "create") {
@@ -4069,10 +4210,10 @@ async function handleManualOpsAction(ctx: HandlerCtx) {
         .update({ is_suspended: true })
         .eq("id", body.id);
       if (error) return json({ ok: false, error: error.message }, 500);
+    } else {
+      return json({ ok: false, error: `unknown_action: player.${action}` }, 400);
     }
-  }
-
-  if (kind === "schedule") {
+  } else if (kind === "schedule") {
     if (action === "create") {
       const { error } = await admin.from("schedules").insert({
         home_team_id: body.homeTeamId,
@@ -4087,6 +4228,8 @@ async function handleManualOpsAction(ctx: HandlerCtx) {
         .delete()
         .eq("id", body.id);
       if (error) return json({ ok: false, error: error.message }, 500);
+    } else {
+      return json({ ok: false, error: `unknown_action: schedule.${action}` }, 400);
     }
   } else if (kind === "event") {
     if (action === "create") {
@@ -4099,23 +4242,28 @@ async function handleManualOpsAction(ctx: HandlerCtx) {
     } else if (action === "delete") {
       const { error } = await admin.from("events").delete().eq("id", body.id);
       if (error) return json({ ok: false, error: error.message }, 500);
+    } else {
+      return json({ ok: false, error: `unknown_action: event.${action}` }, 400);
     }
-  }
-
-  if (kind === "store") {
+  } else if (kind === "store") {
     if (action === "batch_create") {
-      const items = body.items; // array of up to 4 items
+      // Route store batch_create through canonical ingest pipeline
+      const items = Array.isArray(body.items) ? body.items : [];
+      if (items.length === 0) return json({ ok: false, error: "items_required" }, 400);
+      const results = [];
       for (const item of items) {
-        const { error } = await admin.from("products").insert({
+        const result = await createIngestJob(admin, "store_media", {
           title: item.title,
+          imageUrl: item.imageUrl ?? "",
           price: item.price,
-          inventory_qty: item.qty,
           category: item.category,
-          is_sold_out: item.qty <= 0,
-          sold_out_date: item.qty <= 0 ? new Date().toISOString() : null,
-        });
-        if (error) return json({ ok: false, error: error.message }, 500);
+          leagueId: body.leagueId ?? null,
+          publishStatus: "published",
+        }, { autoPublish: true, extraProductInsert: true });
+        results.push(result);
       }
+      const failed = results.filter(r => r.state === "failed");
+      if (failed.length > 0) return json({ ok: false, error: failed[0].error, results }, 500);
     } else if (action === "suspend") {
       const { error } = await admin
         .from("products")
@@ -4125,17 +4273,119 @@ async function handleManualOpsAction(ctx: HandlerCtx) {
     } else if (action === "delete") {
       const { error } = await admin.from("products").delete().eq("id", body.id);
       if (error) return json({ ok: false, error: error.message }, 500);
+    } else {
+      return json({ ok: false, error: `unknown_action: store.${action}` }, 400);
     }
   }
   return json({ ok: true });
 }
 
+// ── Ingest Lifecycle Routes (Super-Admin Only) ────────────────────────────────
+
+async function handleIngestStatus({ req, admin, params }: HandlerCtx) {
+  requireSuperAdmin(req);
+  const { data, error } = await admin
+    .from("ingest_jobs")
+    .select("*")
+    .eq("id", params.jobId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!data) return json({ ok: false, error: "job_not_found" }, 404);
+  return json({ ok: true, job: data });
+}
+
+async function handleIngestApprove({ req, admin, params }: HandlerCtx) {
+  await ensureMutation(req, { req, admin, params } as unknown as HandlerCtx);
+  requireSuperAdmin(req);
+  const { data: job } = await admin.from("ingest_jobs").select("id,state,publication_id").eq("id", params.jobId).maybeSingle();
+  if (!job) return json({ ok: false, error: "job_not_found" }, 404);
+  if (job.state !== "needs_review") return json({ ok: false, error: `cannot_approve_state_${job.state}` }, 400);
+  // Publish the publication + advance the job
+  if (job.publication_id) {
+    await admin.from("media_publications").update({ status: "published" }).eq("id", job.publication_id);
+  }
+  await admin.from("ingest_jobs").update({ state: "published" }).eq("id", job.id);
+  return json({ ok: true, state: "published" });
+}
+
+async function handleIngestReject({ req, admin, params }: HandlerCtx) {
+  await ensureMutation(req, { req, admin, params } as unknown as HandlerCtx);
+  requireSuperAdmin(req);
+  const { data: job } = await admin.from("ingest_jobs").select("id,state").eq("id", params.jobId).maybeSingle();
+  if (!job) return json({ ok: false, error: "job_not_found" }, 404);
+  if (job.state !== "needs_review") return json({ ok: false, error: `cannot_reject_state_${job.state}` }, 400);
+  await admin.from("ingest_jobs").update({ state: "failed", error_detail: "rejected_by_admin" }).eq("id", job.id);
+  return json({ ok: true, state: "failed" });
+}
+
+async function handleIngestReplay({ req, admin, params }: HandlerCtx) {
+  await ensureMutation(req, { req, admin, params } as unknown as HandlerCtx);
+  requireSuperAdmin(req);
+  const { data: job } = await admin.from("ingest_jobs").select("*").eq("id", params.jobId).maybeSingle();
+  if (!job) return json({ ok: false, error: "job_not_found" }, 404);
+  if (job.state !== "failed") return json({ ok: false, error: `cannot_replay_state_${job.state}` }, 400);
+  // Reset and replay through the pipeline
+  await admin.from("ingest_jobs").update({ state: "uploaded", error_detail: null, retry_count: (job.retry_count ?? 0) + 1 }).eq("id", job.id);
+  const result = await createIngestJob(admin, job.source, job.payload, {
+    createdBy: job.created_by,
+    autoPublish: true,
+  });
+  return json({ ok: true, newJobId: result.jobId, state: result.state });
+}
+
+async function handleIngestReconcile({ req, admin }: HandlerCtx) {
+  requireSuperAdmin(req);
+  // 1. Orphan detection: published media_assets with no media_publication
+  const { data: orphanedAssets } = await admin.rpc("exec_sql", {}).catch(() => ({ data: null }));
+  // Simplified: count orphans via two queries
+  const { count: orphanCount } = await admin
+    .from("media_assets")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "published")
+    .not("id", "in", `(select media_asset_id from media_publications)`);
+
+  // 2. Stuck jobs: non-terminal states older than 24h
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { count: stuckCount } = await admin
+    .from("ingest_jobs")
+    .select("id", { count: "exact", head: true })
+    .in("state", ["uploaded", "validated", "written", "projected"])
+    .lt("updated_at", twentyFourHoursAgo);
+
+  // 3. Auto-fix stuck jobs → needs_review
+  if ((stuckCount ?? 0) > 0) {
+    await admin
+      .from("ingest_jobs")
+      .update({ state: "needs_review", error_detail: "stuck_>24h_auto_flagged" })
+      .in("state", ["uploaded", "validated", "written", "projected"])
+      .lt("updated_at", twentyFourHoursAgo);
+  }
+
+  return json({
+    ok: true,
+    reconciliation: {
+      orphaned_assets: orphanCount ?? 0,
+      stuck_jobs_flagged: stuckCount ?? 0,
+      run_at: new Date().toISOString(),
+    },
+  });
+}
+
 // Ensure the route handles this new path
 routes.push({
   method: "POST",
-  path: "/ops/manual/:kind/:action",
+  regex: /^\/ops\/manual\/(?<kind>[^\/]+)\/(?<action>[^\/]+)\/?$/,
   handler: handleManualOpsAction,
 });
+
+// Ingest lifecycle routes (super_admin only)
+routes.push(
+  { method: "GET",  regex: /^\/ops\/ingest\/(?<jobId>[^\/]+)\/?$/,          handler: handleIngestStatus },
+  { method: "POST", regex: /^\/ops\/ingest\/(?<jobId>[^\/]+)\/approve\/?$/,   handler: handleIngestApprove },
+  { method: "POST", regex: /^\/ops\/ingest\/(?<jobId>[^\/]+)\/reject\/?$/,    handler: handleIngestReject },
+  { method: "POST", regex: /^\/ops\/ingest\/(?<jobId>[^\/]+)\/replay\/?$/,    handler: handleIngestReplay },
+  { method: "GET",  regex: /^\/ops\/ingest\/reconcile\/?$/,        handler: handleIngestReconcile },
+);
 
 // B2 — register PATCH / DELETE / LIST routes that were defined but never wired
 routes.push(

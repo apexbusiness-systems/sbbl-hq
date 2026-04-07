@@ -33,7 +33,6 @@ export default defineConfig(({ mode }) => {
   if (env.SENTRY_AUTH_TOKEN) {
     try {
       const _require = createRequire(import.meta.url);
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
       const { sentryVitePlugin } = _require('@sentry/vite-plugin');
       sentryPlugins = [sentryVitePlugin({
         org: env.SENTRY_ORG || 'apex-business-systems',

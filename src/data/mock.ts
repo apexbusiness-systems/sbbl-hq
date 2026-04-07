@@ -28,6 +28,12 @@ const potgJayceeMasilungan = '/assets/potg/wbl-jaycee-masilungan.jpg';
 const potgRrFabiana = '/assets/potg/wbl-rr-fabiana.jpg';
 const potgTeejayReymundo = '/assets/potg/wbl-teejay-reymundo.jpg';
 const potgRobertOcampo = '/assets/potg/wbl-robert-ocampo.jpg';
+// Apr 7 TGIFBL POTG batch — 5 new player of the game cards
+const potgTgifRexManalo = '/assets/potg/tgifbl-rex-manalo.jpg';
+const potgTgifDarkoDevers = '/assets/potg/tgifbl-darko-devers.jpg';
+const potgTgifJhonlyVelasco = '/assets/potg/tgifbl-jhonly-velasco.jpg';
+const potgTgifTataRamon = '/assets/potg/tgifbl-tata-ramon.jpg';
+const potgTgifSheldonGahi = '/assets/potg/tgifbl-sheldon-gahi.jpg';
 
 export const leagues: League[] = [
   { id: 'sbbl', name: "Sunday's Best Basketball League", shortName: 'SBBL', fee: 45, accentVar: '--sbbl', description: 'The flagship Sunday league with multiple Panalay divisions, strict review rules, and all-star media day events.' },
@@ -134,6 +140,12 @@ export const mediaAssets: MediaAsset[] = [
   { id: 'm-wbl-potg-rr', title: 'POTG — RR Fabiana (Rebelde)', type: 'poster', thumbnail: potgRrFabiana, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
   { id: 'm-wbl-potg-teejay', title: 'POTG — Tee Jay Reymundo (Crosslinx Warriors)', type: 'poster', thumbnail: potgTeejayReymundo, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
   { id: 'm-wbl-potg-robert', title: 'POTG — Robert Ocampo (4Lifers)', type: 'poster', thumbnail: potgRobertOcampo, leagueId: 'wbl', status: 'published', date: '2026-04-04' },
+  // Apr 7 TGIFBL POTG batch
+  { id: 'm-tgifbl-potg-rex', title: 'POTG — Rex Manalo (JC Trans Jrs)', type: 'poster', thumbnail: potgTgifRexManalo, leagueId: 'tgifbl', status: 'published', date: '2026-04-07' },
+  { id: 'm-tgifbl-potg-darko-devers', title: 'POTG — Washington Darko & Jhing De Vers (Full Time Ballers)', type: 'poster', thumbnail: potgTgifDarkoDevers, leagueId: 'tgifbl', status: 'published', date: '2026-04-07' },
+  { id: 'm-tgifbl-potg-jhonly', title: 'POTG — Jhonly Velasco (Mantiku)', type: 'poster', thumbnail: potgTgifJhonlyVelasco, leagueId: 'tgifbl', status: 'published', date: '2026-04-07' },
+  { id: 'm-tgifbl-potg-tata', title: 'POTG — Tata Ramon (OSY x LCL)', type: 'poster', thumbnail: potgTgifTataRamon, leagueId: 'tgifbl', status: 'published', date: '2026-04-07' },
+  { id: 'm-tgifbl-potg-sheldon', title: 'POTG — Sheldon Gahi (Batang Riles x Tri J)', type: 'poster', thumbnail: potgTgifSheldonGahi, leagueId: 'tgifbl', status: 'published', date: '2026-04-07' },
 ];
 
 export const reviewItems: ReviewItem[] = [
@@ -168,4 +180,10 @@ export const playersOfTheGame: PlayerOfTheGame[] = [
   { id: 'potg-wbl-12', leagueId: 'wbl', playerName: 'RR Fabiana', team: 'Rebelde', pts: 18, rebs: 3, assts: 4, gameResult: 'DOWNTOWN 62 VS REBELDE 67', date: '2026-04-04', image: potgRrFabiana },
   { id: 'potg-wbl-13', leagueId: 'wbl', playerName: 'Tee Jay Reymundo', team: 'Crosslinx Warriors', pts: 30, rebs: 4, assts: 4, gameResult: 'SOLID NORTH 56 VS CROSSLINX 63', date: '2026-04-04', image: potgTeejayReymundo },
   { id: 'potg-wbl-14', leagueId: 'wbl', playerName: 'Robert Ocampo', team: '4Lifers', pts: 22, rebs: 8, assts: 7, gameResult: 'NSD 65 VS 4LIFERS 71', date: '2026-04-04', image: potgRobertOcampo },
+  // Apr 7 TGIFBL POTG batch
+  { id: 'potg-tgifbl-1', leagueId: 'tgifbl', playerName: 'Rex Manalo', team: 'JC Trans Jrs', pts: 17, rebs: 4, assts: 6, gameResult: 'JC TRANS JRS 75 VS BANAYAD HOOPERS 65', date: '2026-04-07', image: potgTgifRexManalo },
+  { id: 'potg-tgifbl-2', leagueId: 'tgifbl', playerName: 'Washington Darko', team: 'Full Time Ballers', pts: 15, rebs: 3, assts: 3, gameResult: 'FULL TIME BALLERS 65 VS DBRKDZ 60', date: '2026-04-07', image: potgTgifDarkoDevers },
+  { id: 'potg-tgifbl-3', leagueId: 'tgifbl', playerName: 'Jhonly Velasco', team: 'Mantiku', pts: 16, rebs: 7, assts: 5, gameResult: 'MANTIKU 59 VS BLBG 57', date: '2026-04-07', image: potgTgifJhonlyVelasco },
+  { id: 'potg-tgifbl-4', leagueId: 'tgifbl', playerName: 'Tata Ramon', team: 'OSY x LCL', pts: 24, rebs: 4, assts: 6, gameResult: 'SOLID NORTH 78 VS OSY X LCL 82', date: '2026-04-07', image: potgTgifTataRamon },
+  { id: 'potg-tgifbl-5', leagueId: 'tgifbl', playerName: 'Sheldon Gahi', team: 'Batang Riles x Tri J', pts: 35, rebs: 5, assts: 7, gameResult: 'J ELITE 70 VS BATANG RILES X TRI J 75', date: '2026-04-07', image: potgTgifSheldonGahi },
 ];
