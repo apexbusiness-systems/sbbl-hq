@@ -59,6 +59,36 @@ describe('env variables validation', () => {
       expect(result.SUPABASE_SERVICE_ROLE_KEY).toBe('super-secret-service-role-key');
     });
 
+    it('parses all optional environment variables correctly', () => {
+      const result = readServerEnv({
+        SUPABASE_URL: 'https://example.supabase.co',
+        SUPABASE_SERVICE_ROLE_KEY: 'super-secret-service-role-key',
+        SUPABASE_PUBLISHABLE_KEY: 'some-publishable-key-here',
+        SUPABASE_ANON_KEY: 'some-anon-key-here',
+        STRIPE_SECRET_KEY: 'sk_test_1234567890123456',
+        STRIPE_WEBHOOK_SECRET: 'whsec_1234567890123456',
+        RESEND_API_KEY: 're_1234567890123456',
+        OMNIHUB_SYNC_URL: 'https://omnihub.example.com',
+        OMNIHUB_SIGNING_SECRET: 'omni_sign_123456789012',
+        OMNIHUB_VERIFY_KEY: 'omni_verify_1234567890',
+        OPTIONAL_SOCIAL_API_KEYS: 'social_key_123',
+        OPTIONAL_TURNSTILE_SECRET_KEY: 'turnstile_secret',
+      });
+
+      expect(result.SUPABASE_URL).toBe('https://example.supabase.co');
+      expect(result.SUPABASE_SERVICE_ROLE_KEY).toBe('super-secret-service-role-key');
+      expect(result.SUPABASE_PUBLISHABLE_KEY).toBe('some-publishable-key-here');
+      expect(result.SUPABASE_ANON_KEY).toBe('some-anon-key-here');
+      expect(result.STRIPE_SECRET_KEY).toBe('sk_test_1234567890123456');
+      expect(result.STRIPE_WEBHOOK_SECRET).toBe('whsec_1234567890123456');
+      expect(result.RESEND_API_KEY).toBe('re_1234567890123456');
+      expect(result.OMNIHUB_SYNC_URL).toBe('https://omnihub.example.com');
+      expect(result.OMNIHUB_SIGNING_SECRET).toBe('omni_sign_123456789012');
+      expect(result.OMNIHUB_VERIFY_KEY).toBe('omni_verify_1234567890');
+      expect(result.OPTIONAL_SOCIAL_API_KEYS).toBe('social_key_123');
+      expect(result.OPTIONAL_TURNSTILE_SECRET_KEY).toBe('turnstile_secret');
+    });
+
     it('throws when required values are missing', () => {
       expect(() => {
         readServerEnv({
