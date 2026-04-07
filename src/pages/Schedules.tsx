@@ -6,7 +6,7 @@ import type { LeagueId } from '@/types';
 import { Calendar, MapPin, Clock } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchPublicSchedule } from '@/lib/api/public';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 
 const SchedulesPage = () => {
@@ -45,45 +45,52 @@ const SchedulesPage = () => {
     }
   }, [activeLeague, paramLeague, isValidParam]);
 
-  const filtered = leagueFilter === 'all'
+  // ⚡ Bolt Performance Optimization: Memoize the filtered and mapped schedules to avoid O(n) filtering
+  // and O(m) reduce/map operations on every render, especially when the searchParams or other
+  // state triggers a re-render.
+  const filtered = useMemo(() => leagueFilter === 'all'
     ? SCHEDULE_DATA
-    : SCHEDULE_DATA.filter((s) => s.leagueId === leagueFilter);
+    : SCHEDULE_DATA.filter((s) => s.leagueId === leagueFilter), [leagueFilter]);
 
   // Safely map live schedules into ScheduleDay shape if we have them
   // Group by league and date, then court
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const groupedLive = liveSchedules.reduce((acc: Record<string, any>, curr: any) => {
-    const key = `${curr.league_id}-${curr.start_time.split('T')[0]}`;
-    if (!acc[key]) {
-      acc[key] = {
-        leagueId: curr.league_id,
-        season: 'Current Season',
-        week: '1',
-        date: curr.start_time.split('T')[0],
-        venue: curr.venue || 'TBA',
-        address: curr.address || 'TBA',
-        courts: {}
-      };
-    }
-    const courtName = curr.court || 'Main Court';
-    if (!acc[key].courts[courtName]) {
-      acc[key].courts[courtName] = [];
-    }
-    const time = new Date(curr.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    acc[key].courts[courtName].push({
-      time,
-      home: curr.home_team_id || 'TBA',
-      away: curr.away_team_id || 'TBA'
-    });
-    return acc;
-  }, {});
+  const mappedLiveSchedules: ScheduleDay[] = useMemo(() => {
+    if (!liveSchedules || liveSchedules.length === 0) return [];
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const mappedLiveSchedules: ScheduleDay[] = Object.values(groupedLive).map((g: any) => ({
-    ...g,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    courts: Object.entries(g.courts).map(([name, games]) => ({ name, games: games as any[] }))
-  }));
+    const groupedLive = liveSchedules.reduce((acc: Record<string, any>, curr: any) => {
+      const key = `${curr.league_id}-${curr.start_time.split('T')[0]}`;
+      if (!acc[key]) {
+        acc[key] = {
+          leagueId: curr.league_id,
+          season: 'Current Season',
+          week: '1',
+          date: curr.start_time.split('T')[0],
+          venue: curr.venue || 'TBA',
+          address: curr.address || 'TBA',
+          courts: {}
+        };
+      }
+      const courtName = curr.court || 'Main Court';
+      if (!acc[key].courts[courtName]) {
+        acc[key].courts[courtName] = [];
+      }
+      const time = new Date(curr.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      acc[key].courts[courtName].push({
+        time,
+        home: curr.home_team_id || 'TBA',
+        away: curr.away_team_id || 'TBA'
+      });
+      return acc;
+    }, {});
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return Object.values(groupedLive).map((g: any) => ({
+      ...g,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      courts: Object.entries(g.courts).map(([name, games]) => ({ name, games: games as any[] }))
+    }));
+  }, [liveSchedules]);
 
   const displayData = mappedLiveSchedules.length > 0 ? mappedLiveSchedules : filtered;
 
