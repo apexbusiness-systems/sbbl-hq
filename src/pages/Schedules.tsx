@@ -28,7 +28,7 @@ const SchedulesPage = () => {
     queryFn: () => fetchPublicSchedule(leagueFilter),
     staleTime: 1000 * 60 * 5,
   });
-  const liveSchedules = liveDataRes?.data || [];
+  const liveSchedules = useMemo(() => liveDataRes?.data || [], [liveDataRes?.data]);
 
   // Keep URL and local state in sync when user clicks page filters
   const handleLeagueFilterChange = (val: LeagueId | 'all') => {
