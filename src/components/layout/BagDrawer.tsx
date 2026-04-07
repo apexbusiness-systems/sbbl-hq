@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { apiFetch } from '@/lib/api/client';
@@ -11,17 +11,24 @@ export const BagDrawer = () => {
   const { session } = useAuth();
   const [checkingOut, setCheckingOut] = useState(false);
 
+  const productMap = useMemo(() => {
+    return products.reduce((acc, p) => {
+      acc[p.id] = p;
+      return acc;
+    }, {} as Record<string, typeof products[0]>);
+  }, []);
+
   if (!bagOpen) return null;
 
   const subtotal = bagItems.reduce((sum, id) => {
-    const product = products.find(p => p.id === id);
+    const product = productMap[id];
     return sum + (product?.price ?? 0);
   }, 0);
 
   const handleCheckout = async () => {
     if (!session) { toast.error('Sign in to complete your purchase.'); return; }
     const lineItems = bagItems.reduce<Array<{ name: string; price: number; qty: number }>>((acc, id) => {
-      const product = products.find(p => p.id === id);
+      const product = productMap[id];
       if (!product || product.price === 0) return acc; // skip reward/free items
       const existing = acc.find(i => i.name === product.name);
       if (existing) { existing.qty += 1; } else { acc.push({ name: product.name, price: product.price, qty: 1 }); }
@@ -69,7 +76,7 @@ export const BagDrawer = () => {
           ) : (
             <div className="space-y-3">
               {bagItems.map((id, i) => {
-                const product = products.find(p => p.id === id);
+                const product = productMap[id];
                 return (
                   <div key={i} className="flex items-center gap-3 p-3 bg-secondary rounded-sm">
                     {product?.image && (
