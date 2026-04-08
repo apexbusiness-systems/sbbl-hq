@@ -29,7 +29,7 @@ export async function fetchImportHistory() {
 export async function submitCsvImport(kind: 'teams' | 'players' | 'schedules' | 'events', rows: Record<string, string>[]) {
   return apiFetch<{ ok: boolean; summary: ImportJob }>(`/ops/imports/${kind}`, {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-${kind}`) },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-${kind}`, { rows }) },
     body: JSON.stringify({ rows }),
   });
 }
@@ -47,10 +47,11 @@ export async function parsePotgImage(imageBase64: string, mimeType: string) {
 export async function submitPotgRecord(payload: {
   playerName: string; team: string; pts: number; rebs: number; assts: number;
   gameResult: string; leagueId: string; date: string; imageUrl?: string;
+  imageUpload?: { base64: string; mimeType: string; fileName?: string };
 }) {
   return apiFetch<{ ok: boolean; jobId: string; matched: boolean }>('/ops/potg/submit', {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-potg') },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-potg', payload) },
     body: JSON.stringify(payload),
   });
 }
@@ -61,12 +62,13 @@ export async function uploadStoreMedia(payload: {
   category: string;
   publishStatus: 'draft' | 'published';
   sale?: boolean;
-  imageUrl: string;
+  imageUrl?: string;
+  imageUpload?: { base64: string; mimeType: string; fileName?: string };
   leagueId?: string | null;
 }) {
-  return apiFetch<{ ok: boolean; productId: string; mediaAssetId: string }>('/ops/store/media', {
+  return apiFetch<{ ok: boolean; jobId: string; productId: string | null; mediaAssetId: string; publicationId: string | null }>('/ops/store/media', {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-store-media') },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-store-media', payload) },
     body: JSON.stringify(payload),
   });
 }
@@ -78,7 +80,7 @@ export async function fetchOpsList(entity: 'teams' | 'players' | 'products' | 'e
 export async function patchOpsEntity(entity: 'teams' | 'players' | 'products' | 'events' | 'schedules', id: string, payload: Record<string, unknown>) {
   return apiFetch<{ ok: boolean; data: unknown }>(`/ops/${entity}/${id}`, {
     method: 'PATCH',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-patch-${entity}-${id}`) },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-patch-${entity}-${id}`, payload) },
     body: JSON.stringify(payload),
   });
 }
@@ -93,217 +95,59 @@ export async function deleteOpsEntity(entity: 'teams' | 'players' | 'products' |
 export async function submitScoresImport(rows: Record<string, string>[]) {
   return apiFetch<{ ok: boolean; inserted: number; failed: number; errors: string[] }>('/ops/scores/import', {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-scores-csv') },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-scores-csv', { rows }) },
     body: JSON.stringify({ rows }),
   });
 }
 
-// ── manualOpsAction — routes to real schema-correct endpoints ─────────────
-// The scaffold /ops/manual/:kind/:action route has been deleted from the worker
-// (it had schema drift: products.publish_status, products.inventory_qty, etc.).
-// This function keeps the same call signature for Ops.tsx but routes each
-// action to the correct real backend path.
 export async function manualOpsAction(
   kind: 'team' | 'player' | 'schedule' | 'event' | 'store',
   action: 'create' | 'delete' | 'suspend' | 'batch_create',
   payload: Record<string, unknown>,
-): Promise<{ ok: boolean; error?: string }> {
-  const idem = (tag: string) => ({ [IDEMPOTENCY_HEADER]: createIdempotencyKey(tag) });
-
-  // ── Teams ──────────────────────────────────────────────────────────────
-  if (kind === 'team') {
-    if (action === 'create') {
-      return apiFetch('/ops/imports/teams', {
-        method: 'POST', ...idem('manual-team-create'),
-        body: JSON.stringify({ rows: [{ name: payload.name, leagueId: payload.leagueId, seasonId: payload.seasonId, division: payload.division }] }),
-      });
-    }
-    if (action === 'delete') {
-      return apiFetch(`/ops/teams/${payload.id}`, { method: 'DELETE', ...idem(`manual-team-delete-${payload.id}`) });
-    }
-  }
-
-  // ── Players ────────────────────────────────────────────────────────────
-  if (kind === 'player') {
-    if (action === 'create') {
-      return apiFetch('/ops/imports/players', {
-        method: 'POST', ...idem('manual-player-create'),
-        body: JSON.stringify({ rows: [{ userId: payload.userId, teamId: payload.teamId, leagueId: payload.leagueId, jerseyNumber: payload.jerseyNumber, position: payload.position }] }),
-      });
-    }
-    if (action === 'suspend') {
-      return apiFetch(`/ops/players/${payload.id}`, {
-        method: 'PATCH', ...idem(`manual-player-suspend-${payload.id}`),
-        body: JSON.stringify({ is_suspended: true }),
-      });
-    }
-    if (action === 'delete') {
-      return apiFetch(`/ops/players/${payload.id}`, { method: 'DELETE', ...idem(`manual-player-delete-${payload.id}`) });
-    }
-  }
-
-  // ── Schedules ──────────────────────────────────────────────────────────
-  if (kind === 'schedule') {
-    if (action === 'create') {
-      return apiFetch('/ops/imports/schedules', {
-        method: 'POST', ...idem('manual-schedule-create'),
-        body: JSON.stringify({ rows: [{ leagueId: payload.leagueId, seasonId: payload.seasonId, startsAt: payload.startsAt, endsAt: payload.endsAt }] }),
-      });
-    }
-    if (action === 'delete') {
-      return apiFetch(`/ops/schedules/${payload.id}`, { method: 'DELETE', ...idem(`manual-schedule-delete-${payload.id}`) });
-    }
-  }
-
-  // ── Events ─────────────────────────────────────────────────────────────
-  if (kind === 'event') {
-    if (action === 'create') {
-      return apiFetch('/ops/imports/events', {
-        method: 'POST', ...idem('manual-event-create'),
-        body: JSON.stringify({ rows: [{ title: payload.title, location: payload.location, date: payload.date, leagueId: payload.leagueId }] }),
-      });
-    }
-    if (action === 'delete') {
-      return apiFetch(`/ops/events/${payload.id}`, { method: 'DELETE', ...idem(`manual-event-delete-${payload.id}`) });
-    }
-  }
-
-  // ── Store ──────────────────────────────────────────────────────────────
-  if (kind === 'store') {
-    if (action === 'batch_create') {
-      return apiFetch('/ops/products/batch', {
-        method: 'POST', ...idem('manual-store-batch'),
-        body: JSON.stringify({ items: payload.items }),
-      });
-    }
-    if (action === 'suspend') {
-      return apiFetch(`/ops/products/${payload.id}`, {
-        method: 'PATCH', ...idem(`manual-store-suspend-${payload.id}`),
-        body: JSON.stringify({ status: 'archived' }),
-      });
-    }
-    if (action === 'delete') {
-      return apiFetch(`/ops/products/${payload.id}`, { method: 'DELETE', ...idem(`manual-store-delete-${payload.id}`) });
-    }
-  }
-
-  return { ok: false, error: `no_route_for_${kind}_${action}` };
-}
-
-// ── Generic media publish ─────────────────────────────────────────────────
-// Writes media_assets + media_publications for any surface without creating a
-// store product. Used by the Events tab (surface='event') and ad-hoc uploads.
-export async function publishMedia(payload: {
-  title: string;
-  surface: 'potg' | 'event' | 'store' | 'media_feed';
-  leagueId?: string | null;
-  date?: string;
-  imageUrl: string;
-  publishStatus?: 'draft' | 'published';
-}) {
-  return apiFetch<{ ok: boolean; mediaAssetId: string; publicationId: string }>(
-    '/ops/media/publish',
-    {
-      method: 'POST',
-      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-media-publish-${payload.surface}-${payload.title}`) },
-      body: JSON.stringify(payload),
-    }
-  );
-}
-
-// ── Canonical ingest API ──────────────────────────────────────────────────
-
-export type IngestKind = 'potg' | 'store' | 'event' | 'generic';
-
-export type IngestJob = {
-  id: string;
-  kind: IngestKind;
-  state: string;
-  confidence: number | null;
-  asset_path: string;
-  payload: Record<string, unknown>;
-  parse_result: Record<string, unknown> | null;
-  media_asset_id: string | null;
-  publication_id: string | null;
-  error_message: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-/** Step 1 — get a signed upload URL for the private media-ingest bucket. */
-export async function ingestPresign(kind: IngestKind, filename: string) {
-  return apiFetch<{ ok: boolean; signedUrl: string; token: string; objectPath: string }>(
-    '/ops/ingest/presign',
-    {
-      method: 'POST',
-      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ingest-presign-${kind}`) },
-      body: JSON.stringify({ kind, filename }),
-    }
-  );
-}
-
-/** Step 2 — submit metadata after binary upload completes. */
-export async function ingestSubmit(payload: {
-  kind: IngestKind;
-  objectPath: string;
-  publicUrl: string;
-  title: string;
-  leagueId?: string | null;
-  publishStatus?: 'draft' | 'published';
-  idempotencyKey?: string;
-  meta?: Record<string, unknown>;
-}) {
-  return apiFetch<{
-    ok: boolean;
-    jobId: string;
-    state: string;
-    mediaAssetId: string;
-    publicationId: string;
-    deduplicated?: boolean;
-  }>('/ops/ingest/submit', {
+) {
+  return apiFetch<{ ok: boolean; error?: string }>(`/ops/manual/${kind}/${action}`, {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: payload.idempotencyKey ?? createIdempotencyKey(`ingest-submit-${payload.kind}`) },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-manual-${kind}-${action}`, payload) },
     body: JSON.stringify(payload),
   });
 }
 
-/** Poll job status. */
-export async function ingestStatus(jobId: string) {
+// ── Ingest Lifecycle ─────────────────────────────────────────────────────────
+
+export type IngestJob = {
+  id: string;
+  source: string;
+  state: string;
+  media_asset_id: string | null;
+  publication_id: string | null;
+  payload: Record<string, unknown>;
+  error_detail: string | null;
+  retry_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export async function getIngestJobStatus(jobId: string) {
   return apiFetch<{ ok: boolean; job: IngestJob }>(`/ops/ingest/${jobId}`);
 }
 
-/** Approve a projected/needs_review job → publishes to media_publications. */
-export async function ingestApprove(jobId: string) {
-  return apiFetch<{ ok: boolean; jobId: string; publicationId: string; publishedAt: string }>(
-    `/ops/ingest/${jobId}/approve`,
-    {
-      method: 'POST',
-      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ingest-approve-${jobId}`) },
-      body: JSON.stringify({}),
-    }
-  );
+export async function approveIngestJob(jobId: string) {
+  return apiFetch<{ ok: boolean; state: string }>(`/ops/ingest/${jobId}/approve`, {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-approve-${jobId}`, { action: 'approve' }) },
+  });
 }
 
-/** Reject a job → archives publication, marks job failed. Replayable. */
-export async function ingestReject(jobId: string, reason?: string) {
-  return apiFetch<{ ok: boolean; jobId: string; state: string }>(
-    `/ops/ingest/${jobId}/reject`,
-    {
-      method: 'POST',
-      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ingest-reject-${jobId}`) },
-      body: JSON.stringify({ reason }),
-    }
-  );
+export async function rejectIngestJob(jobId: string) {
+  return apiFetch<{ ok: boolean; state: string }>(`/ops/ingest/${jobId}/reject`, {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-reject-${jobId}`, { action: 'reject' }) },
+  });
 }
 
-/** Replay a failed or needs_review job from scratch. */
-export async function ingestReplay(jobId: string) {
-  return apiFetch<{ ok: boolean; jobId: string; state: string }>(
-    `/ops/ingest/${jobId}/replay`,
-    {
-      method: 'POST',
-      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ingest-replay-${jobId}`) },
-      body: JSON.stringify({}),
-    }
-  );
+export async function replayIngestJob(jobId: string) {
+  return apiFetch<{ ok: boolean; newJobId: string; state: string }>(`/ops/ingest/${jobId}/replay`, {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-replay-${jobId}`, { action: 'replay' }) },
+  });
 }
