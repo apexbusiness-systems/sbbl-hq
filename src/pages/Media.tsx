@@ -6,9 +6,8 @@ import { useApp } from '@/contexts/AppContext';
 import { LeagueId, MediaAsset } from '@/types';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
-import { Play, Share2, Upload, Eye, Clock, Check } from 'lucide-react';
+import { Play, Share2, Upload, Eye, Clock, Check, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { mediaAssets as mockMedia } from '@/data/mock';
 
 const statusColors = { draft: 'text-muted-foreground', ready: 'text-warning', published: 'text-success' };
 
@@ -50,10 +49,10 @@ const MediaPage = () => {
     staleTime: 60_000,
   });
 
+  // No fallback data — surface the real state. Fail loud, never fake.
   const allMedia = useMemo<MediaAsset[]>(() => {
     const apiData = mediaQuery.data?.data;
-    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
-    return mockMedia;
+    return Array.isArray(apiData) ? apiData : [];
   }, [mediaQuery.data]);
 
   const filtered = allMedia.filter(m => {
@@ -138,9 +137,20 @@ const MediaPage = () => {
           ))}
         </div>
 
-        {filtered.length === 0 ? (
+        {mediaQuery.isError && (
+          <div className="panel p-6 mb-4 flex items-center gap-3 border-destructive/40 bg-destructive/5">
+            <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0" />
+            <p className="text-sm text-destructive">
+              Media feed unavailable — {(mediaQuery.error as Error)?.message ?? 'unknown error'}
+            </p>
+          </div>
+        )}
+
+        {!mediaQuery.isError && mediaQuery.isSuccess && filtered.length === 0 ? (
           <div className="panel p-12 text-center">
-            <p className="text-sm text-muted-foreground">No media found for this filter.</p>
+            <p className="text-sm text-muted-foreground">
+              {allMedia.length === 0 ? 'No published media yet.' : 'No media found for this filter.'}
+            </p>
           </div>
         ) : (
           // Grid: columns sized for landscape (wide) content; rows sized for portrait
