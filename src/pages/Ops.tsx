@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
-import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord, manualOpsAction } from '@/lib/api/ops';
+import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord, manualOpsAction, publishMedia } from '@/lib/api/ops';
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
@@ -70,6 +70,7 @@ const OpsPage = () => {
   const eventFileRef = useRef<HTMLInputElement>(null);
   const [eventParseState, setEventParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
   const [eventParseError, setEventParseError] = useState('');
+  const [eventResizedBlob, setEventResizedBlob] = useState<Blob | null>(null);
   const [eventGraphicForm, setEventGraphicForm] = useState({
     title: '',
     location: '',
@@ -193,6 +194,28 @@ const OpsPage = () => {
         publishStatus: storeForm.publishStatus,
         sale: storeForm.sale,
         imageUrl,
+      });
+    },
+    onSuccess: () => setStoreForm({ title: '', price: '0', category: 'apparel', publishStatus: 'draft', imageFile: null, sale: false }),
+  });
+
+  // Uploads the resized event graphic to Supabase Storage and writes
+  // media_assets + media_publications (surface='event') so it appears on /media.
+  const eventMediaMutation = useMutation({
+    mutationFn: async () => {
+      if (!eventResizedBlob || !eventGraphicForm.title) return null;
+      const supabase = requireSupabaseClient();
+      const objectPath = `events/${crypto.randomUUID()}.jpg`;
+      const upload = await supabase.storage.from('media').upload(objectPath, eventResizedBlob, { upsert: true });
+      if (upload.error) throw upload.error;
+      const imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
+      return publishMedia({
+        title: eventGraphicForm.title,
+        surface: 'event',
+        leagueId: eventGraphicForm.leagueId || null,
+        date: eventGraphicForm.date || undefined,
+        imageUrl,
+        publishStatus: 'published',
       });
     },
   });
@@ -372,6 +395,7 @@ const OpsPage = () => {
       // Resize to correct AR before parsing and storage (landscape 747×560, portrait 560×747)
       const dims = await inferTargetDimensions(file);
       const resizedFile = await resizeImageToFit(file, dims.width, dims.height, dims.mode);
+      setEventResizedBlob(resizedFile);
 
       const reader = new FileReader();
       const b64 = await new Promise<string>((resolve, reject) => {
@@ -921,20 +945,29 @@ Return valid JSON only, no markdown.
                   <input placeholder="League ID (e.g. wbl, sbbl)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventGraphicForm.leagueId} onChange={(e) => setEventGraphicForm(f => ({ ...f, leagueId: e.target.value }))} />
                   <input placeholder="Date / Time" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventGraphicForm.date} onChange={(e) => setEventGraphicForm(f => ({ ...f, date: e.target.value }))} />
                   <button
-                    disabled={!eventGraphicForm.title || createEventMutation.isPending}
+                    disabled={!eventGraphicForm.title || createEventMutation.isPending || eventMediaMutation.isPending}
                     className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60 flex justify-center items-center gap-2"
                     onClick={() => {
                       setEventForm({
-                         title: eventGraphicForm.title,
-                         location: eventGraphicForm.location,
-                         date: eventGraphicForm.date,
-                         leagueId: eventGraphicForm.leagueId
+                        title: eventGraphicForm.title,
+                        location: eventGraphicForm.location,
+                        date: eventGraphicForm.date,
+                        leagueId: eventGraphicForm.leagueId,
                       });
-                      setTimeout(() => createEventMutation.mutate(), 0);
+                      setTimeout(() => {
+                        createEventMutation.mutate();
+                        if (eventResizedBlob) eventMediaMutation.mutate();
+                      }, 0);
                     }}
                   >
-                    {createEventMutation.isPending ? 'Creating…' : 'Create Event from Extraction'}
+                    {(createEventMutation.isPending || eventMediaMutation.isPending) ? 'Publishing…' : 'Create Event & Publish to Media'}
                   </button>
+                  {eventMediaMutation.isSuccess && eventMediaMutation.data && (
+                    <p className="text-xs text-success">✓ Event graphic published to Media page</p>
+                  )}
+                  {eventMediaMutation.error && (
+                    <p className="text-xs text-destructive">{(eventMediaMutation.error as Error).message}</p>
+                  )}
                 </div>
               </div>
               <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
@@ -982,6 +1015,82 @@ Return valid JSON only, no markdown.
                     <button disabled={storeBatchItems.every(it => !it.title.trim()) || storeBatchMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => storeBatchMutation.mutate()}>{storeBatchMutation.isPending ? 'Submitting…' : 'Submit Batch'}</button>
                     {storeBatchMutation.error && <p className="text-xs text-destructive">{(storeBatchMutation.error as Error).message}</p>}
                     {storeBatchMutation.isSuccess && <p className="text-xs text-success">Products created.</p>}
+                  </div>
+                </div>
+
+                {/* Upload Store Product with Image */}
+                <div className="border border-primary/30 p-3 rounded-sm bg-primary/5">
+                  <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                    <Upload className="w-4 h-4 text-primary" /> Upload Store Product with Image
+                  </h3>
+                  <p className="text-xs text-muted-foreground mb-3">Creates the product AND publishes the image to the Store Media surface.</p>
+                  <div className="space-y-2">
+                    <input
+                      placeholder="Product Title *"
+                      className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm"
+                      value={storeForm.title}
+                      onChange={e => setStoreForm(f => ({ ...f, title: e.target.value }))}
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input
+                        type="number"
+                        placeholder="Price (CAD) *"
+                        className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm"
+                        value={storeForm.price}
+                        onChange={e => setStoreForm(f => ({ ...f, price: e.target.value }))}
+                      />
+                      <select
+                        className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm"
+                        value={storeForm.category}
+                        onChange={e => setStoreForm(f => ({ ...f, category: e.target.value }))}
+                      >
+                        <option value="apparel">Apparel</option>
+                        <option value="accessories">Accessories</option>
+                        <option value="rewards">Rewards</option>
+                      </select>
+                    </div>
+                    <div className="flex gap-4 items-center">
+                      <label className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input type="checkbox" checked={storeForm.sale} onChange={e => setStoreForm(f => ({ ...f, sale: e.target.checked }))} />
+                        On Sale
+                      </label>
+                      <select
+                        className="bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs"
+                        value={storeForm.publishStatus}
+                        onChange={e => setStoreForm(f => ({ ...f, publishStatus: e.target.value as 'draft' | 'published' }))}
+                      >
+                        <option value="draft">Draft</option>
+                        <option value="published">Published</option>
+                      </select>
+                    </div>
+                    <div
+                      className="border-2 border-dashed border-border rounded-sm p-4 text-center cursor-pointer hover:border-primary/40 transition-colors"
+                      onClick={() => document.getElementById('store-image-input')?.click()}
+                      onDragOver={e => e.preventDefault()}
+                      onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setStoreForm(prev => ({ ...prev, imageFile: f })); }}
+                    >
+                      <input
+                        id="store-image-input"
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) setStoreForm(prev => ({ ...prev, imageFile: f })); }}
+                      />
+                      {storeForm.imageFile ? (
+                        <p className="text-xs text-success font-medium">✓ {storeForm.imageFile.name}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Drop product image or click to select (PNG/JPG)</p>
+                      )}
+                    </div>
+                    <button
+                      disabled={!storeForm.title || !storeForm.imageFile || storeMutation.isPending}
+                      className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60"
+                      onClick={() => storeMutation.mutate()}
+                    >
+                      {storeMutation.isPending ? 'Uploading & Creating…' : 'Upload & Create Product'}
+                    </button>
+                    {storeMutation.error && <p className="text-xs text-destructive">{(storeMutation.error as Error).message}</p>}
+                    {storeMutation.isSuccess && <p className="text-xs text-success">✓ Product created and image published to store.</p>}
                   </div>
                 </div>
 
