@@ -47,15 +47,43 @@ jobs:
         # wrangler deploy only ships code — secrets are NOT auto-synced from
         # GitHub Actions env vars. Each secret must be explicitly pushed via
         # `wrangler secret put` so the live Worker can read them via env.*.
-        # Without this step the Worker returns { error: "server_misconfigured" }
-        # on every /api/* and /ops/health request.
+        #
+        # Guardrails:
+        # 1) Required secrets fail the deploy when absent.
+        # 2) Optional secrets are skipped when empty (never push empty strings),
+        #    which prevents server env validation from failing globally.
         run: |
-          echo "$SUPABASE_SERVICE_ROLE_KEY"  | npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY  --name sbbl-hq-worker
-          echo "$STRIPE_SECRET_KEY"          | npx wrangler secret put STRIPE_SECRET_KEY          --name sbbl-hq-worker
-          echo "$STRIPE_WEBHOOK_SECRET"      | npx wrangler secret put STRIPE_WEBHOOK_SECRET      --name sbbl-hq-worker
-          echo "$RESEND_API_KEY"             | npx wrangler secret put RESEND_API_KEY             --name sbbl-hq-worker
-          echo "$OMNIHUB_SYNC_URL"           | npx wrangler secret put OMNIHUB_SYNC_URL           --name sbbl-hq-worker
-          echo "$VITE_TURNSTILE_SECRET_KEY"  | npx wrangler secret put OPTIONAL_TURNSTILE_SECRET_KEY --name sbbl-hq-worker
+          set -euo pipefail
+
+          put_required_secret() {
+            local name="$1"
+            local value="$2"
+            if [ -z "$value" ]; then
+              echo "❌ Missing required GitHub secret: $name"
+              exit 1
+            fi
+            printf '%s' "$value" | npx wrangler secret put "$name" --name sbbl-hq-worker >/dev/null
+            echo "✅ Synced required secret: $name"
+          }
+
+          put_optional_secret() {
+            local name="$1"
+            local value="$2"
+            if [ -z "$value" ]; then
+              echo "ℹ️ Skipping optional secret (empty): $name"
+              return 0
+            fi
+            printf '%s' "$value" | npx wrangler secret put "$name" --name sbbl-hq-worker >/dev/null
+            echo "✅ Synced optional secret: $name"
+          }
+
+          put_required_secret SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
+
+          put_optional_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
+          put_optional_secret STRIPE_WEBHOOK_SECRET "$STRIPE_WEBHOOK_SECRET"
+          put_optional_secret RESEND_API_KEY "$RESEND_API_KEY"
+          put_optional_secret OMNIHUB_SYNC_URL "$OMNIHUB_SYNC_URL"
+          put_optional_secret OPTIONAL_TURNSTILE_SECRET_KEY "$TURNSTILE_SECRET_KEY"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_WORKERS || secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -64,7 +92,7 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           OMNIHUB_SYNC_URL: ${{ secrets.OMNIHUB_SYNC_URL }}
-          VITE_TURNSTILE_SECRET_KEY: ${{ secrets.VITE_TURNSTILE_SECRET_KEY }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.VITE_TURNSTILE_SECRET_KEY }}
 
       - name: Post-deploy live health gate (must have server secrets)
         shell: bash
