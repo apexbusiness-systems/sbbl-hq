@@ -34,7 +34,7 @@ export function OpsEditModal({ entity, id, initialData, onClose }: EditModalProp
       <div className="bg-slate-900 p-6 rounded-lg w-full max-w-md border border-slate-700">
         <h3 className="text-xl font-bold mb-4">Edit {entity}</h3>
         <div className="space-y-4">
-          {Object.entries(initialData).filter(([k]) => k !== 'id' && k !== 'created_at').map(([key, val]) => (
+          {Object.entries(initialData).filter(([k]) => k !== 'id' && k !== 'created_at').map(([key]) => (
             <div key={key}>
               <label className="block text-sm font-medium mb-1 capitalize">{key.replace('_', ' ')}</label>
               <input

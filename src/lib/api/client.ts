@@ -52,19 +52,35 @@ export async function apiFetch<T>(
   init: RequestInit = {},
   token?: string | null,
 ): Promise<T> {
+  // All mutating requests require an idempotency key — auto-generate one so
+  // callers don't have to manage this manually, but do it OUTSIDE the attempt loop
+  // to ensure retries use the identical key.
+  const method = (init.method ?? 'GET').toUpperCase();
+  const isMutation = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method);
+  
+  if (isMutation && !init.headers) {
+    init.headers = {};
+  }
+  
+  const headers = new Headers(init.headers);
+  if (isMutation && !headers.has('x-idempotency-key')) {
+      // Deterministic fallback hash based on body helps with cross-request idempotency. 
+      // Using UUID as ultimate fallback.
+      const bodyStr = typeof init.body === 'string' ? init.body : JSON.stringify(init.body || {});
+      let bodyHash = 0;
+      for (let i = 0; i < bodyStr.length; i++) {
+        bodyHash = ((bodyHash << 5) - bodyHash) + bodyStr.charCodeAt(i);
+        bodyHash |= 0;
+      }
+      headers.set('x-idempotency-key', `${path}-${bodyHash}-${crypto.randomUUID()}`);
+  }
+
   const attempt = async (authToken: string | null): Promise<Response> => {
-    const headers = new Headers(init.headers);
-    headers.set('content-type', headers.get('content-type') ?? 'application/json');
-    if (authToken) headers.set('authorization', `Bearer ${authToken}`);
+    const attemptHeaders = new Headers(headers);
+    attemptHeaders.set('content-type', attemptHeaders.get('content-type') ?? 'application/json');
+    if (authToken) attemptHeaders.set('authorization', `Bearer ${authToken}`);
 
-    // All mutating requests require an idempotency key — auto-generate one so
-    // callers don't have to manage this manually.
-    const method = (init.method ?? 'GET').toUpperCase();
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-      headers.set('x-idempotency-key', `${path}-${Date.now()}-${crypto.randomUUID()}`);
-    }
-
-    return fetch(`${API_BASE}${path}`, { ...init, headers });
+    return fetch(`${API_BASE}${path}`, { ...init, headers: attemptHeaders });
   };
 
   const authToken = token ?? (await getAuthToken());

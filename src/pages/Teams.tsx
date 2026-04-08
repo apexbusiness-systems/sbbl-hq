@@ -6,7 +6,7 @@ import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
 import { Users, Trophy, Briefcase, Activity } from 'lucide-react';
 import { useState, useMemo, useEffect } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { teams as mockTeams, leagues as mockLeagues } from '@/data/mock';
 
 type TabView = 'standings' | 'rosters' | 'stats';
@@ -99,9 +99,7 @@ const TeamsPage = () => {
       .sort((a, b) => b.stats.ptsFor - a.stats.ptsFor);
   }, [filteredTeams]);
 
-  const handleLogoError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
-    (e.target as HTMLImageElement).src = 'https://ui-avatars.com/api/?name=Team&background=random';
-  };
+
 
   const handleAvatarError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     (e.target as HTMLImageElement).src = 'https://ui-avatars.com/api/?name=Player&background=random';

@@ -1,0 +1,456 @@
+{
+  "generated_at": "2026-04-07",
+  "count": 90,
+  "routes": [
+    {
+      "method": "DELETE",
+      "path": "/api/cart/items/:itemId",
+      "type": "path"
+    },
+    {
+      "method": "DELETE",
+      "path": "/ops/events/:id",
+      "type": "path"
+    },
+    {
+      "method": "DELETE",
+      "path": "/ops/players/:id",
+      "type": "path"
+    },
+    {
+      "method": "DELETE",
+      "path": "/ops/products/:id",
+      "type": "path"
+    },
+    {
+      "method": "DELETE",
+      "path": "/ops/teams/:id",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "regex": "/^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/?$/",
+      "type": "regex"
+    },
+    {
+      "method": "GET",
+      "regex": "/^\\/ops\\/ingest\\/reconcile\\/?$/",
+      "type": "regex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/billing/history",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/cart",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/games/:id/stat-sheet",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/leaderboards",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/profile/me",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public-config",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/home",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/media",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/potg",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/products",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/public/schedule",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/scores",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/stats",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/streams/:gameId/access",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/streams/:gameId/comments",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/streams/:gameId/preview",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/streams/:gameId/reactions",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/streams/reactions",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/streams/status",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/api/teams",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/auth/session",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/access/lookup",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/bootstrap",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/coach/requests",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/headshots",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/health",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/imports/history",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/list/events",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/list/players",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/list/products",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/list/teams",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/metrics-lite",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/publish-jobs",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/revenue",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/review",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/streams/config",
+      "type": "path"
+    },
+    {
+      "method": "GET",
+      "path": "/ops/streams/sessions",
+      "type": "path"
+    },
+    {
+      "method": "PATCH",
+      "path": "/ops/events/:id",
+      "type": "path"
+    },
+    {
+      "method": "PATCH",
+      "path": "/ops/players/:id",
+      "type": "path"
+    },
+    {
+      "method": "PATCH",
+      "path": "/ops/products/:id",
+      "type": "path"
+    },
+    {
+      "method": "PATCH",
+      "path": "/ops/schedules/:id",
+      "type": "path"
+    },
+    {
+      "method": "PATCH",
+      "path": "/ops/teams/:id",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "regex": "/^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/approve\\/?$/",
+      "type": "regex"
+    },
+    {
+      "method": "POST",
+      "regex": "/^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/reject\\/?$/",
+      "type": "regex"
+    },
+    {
+      "method": "POST",
+      "regex": "/^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/replay\\/?$/",
+      "type": "regex"
+    },
+    {
+      "method": "POST",
+      "regex": "/^\\/ops\\/manual\\/(?<kind>[^\\/]+)\\/(?<action>[^\\/]+)\\/?$/",
+      "type": "regex"
+    },
+    {
+      "method": "POST",
+      "path": "/api/cart/items",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/coach/request",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/games/:id/stats/draft",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/games/:id/stats/finalize",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/ingress",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/invite/generate",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/invite/redeem",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/orders",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/orders/:id/pay",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/player/checkout",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/profile/headshot",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/profile/onboarding",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rewards/redeem",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/store/checkout",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/streams/:gameId/comments",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/streams/:gameId/purchase",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/streams/:gameId/react",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/streams/:gameId/session",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/streams/:gameId/session/end",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/api/streams/:gameId/session/heartbeat",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/access/override",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/coach/:id/resolve",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/imports/events",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/imports/players",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/imports/schedules",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/imports/teams",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/potg/parse",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/potg/submit",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/review/:id/resolve",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/scores/game",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/scores/import",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/scores/parse-image",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/store/media",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/streams/config",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/ops/streams/status",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/sync/drain",
+      "type": "path"
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/stripe",
+      "type": "path"
+    }
+  ]
+}

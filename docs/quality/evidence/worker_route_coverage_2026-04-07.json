@@ -1,0 +1,847 @@
+{
+  "generated_at": "2026-04-07",
+  "route_coverage_count": 90,
+  "route_coverage": [
+    {
+      "route_key": "DELETE /api/cart/items/:itemId",
+      "method": "DELETE",
+      "route_label": "/api/cart/items/:itemId",
+      "concrete_path": "/api/cart/items/item-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "DELETE /ops/events/:id",
+      "method": "DELETE",
+      "route_label": "/ops/events/:id",
+      "concrete_path": "/ops/events/id-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "DELETE /ops/players/:id",
+      "method": "DELETE",
+      "route_label": "/ops/players/:id",
+      "concrete_path": "/ops/players/id-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "DELETE /ops/products/:id",
+      "method": "DELETE",
+      "route_label": "/ops/products/:id",
+      "concrete_path": "/ops/products/id-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "DELETE /ops/teams/:id",
+      "method": "DELETE",
+      "route_label": "/ops/teams/:id",
+      "concrete_path": "/ops/teams/id-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/?$/",
+      "method": "GET",
+      "route_label": "/^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/?$/",
+      "concrete_path": "/ops/ingest/job-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /^\\/ops\\/ingest\\/reconcile\\/?$/",
+      "method": "GET",
+      "route_label": "/^\\/ops\\/ingest\\/reconcile\\/?$/",
+      "concrete_path": "/ops/ingest/reconcile",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/billing/history",
+      "method": "GET",
+      "route_label": "/api/billing/history",
+      "concrete_path": "/api/billing/history",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/cart",
+      "method": "GET",
+      "route_label": "/api/cart",
+      "concrete_path": "/api/cart",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/games/:id/stat-sheet",
+      "method": "GET",
+      "route_label": "/api/games/:id/stat-sheet",
+      "concrete_path": "/api/games/id-1/stat-sheet",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/leaderboards",
+      "method": "GET",
+      "route_label": "/api/leaderboards",
+      "concrete_path": "/api/leaderboards",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/profile/me",
+      "method": "GET",
+      "route_label": "/api/profile/me",
+      "concrete_path": "/api/profile/me",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/public-config",
+      "method": "GET",
+      "route_label": "/api/public-config",
+      "concrete_path": "/api/public-config",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-public-contract.test.ts",
+        "worker-routes.test.ts",
+        "worker-security-headers.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/public/home",
+      "method": "GET",
+      "route_label": "/api/public/home",
+      "concrete_path": "/api/public/home",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/public/media",
+      "method": "GET",
+      "route_label": "/api/public/media",
+      "concrete_path": "/api/public/media",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/public/potg",
+      "method": "GET",
+      "route_label": "/api/public/potg",
+      "concrete_path": "/api/public/potg",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/public/products",
+      "method": "GET",
+      "route_label": "/api/public/products",
+      "concrete_path": "/api/public/products",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/public/schedule",
+      "method": "GET",
+      "route_label": "/api/public/schedule",
+      "concrete_path": "/api/public/schedule",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/scores",
+      "method": "GET",
+      "route_label": "/api/scores",
+      "concrete_path": "/api/scores",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-scores-route.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/stats",
+      "method": "GET",
+      "route_label": "/api/stats",
+      "concrete_path": "/api/stats",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/streams/:gameId/access",
+      "method": "GET",
+      "route_label": "/api/streams/:gameId/access",
+      "concrete_path": "/api/streams/game-1/access",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/streams/:gameId/comments",
+      "method": "GET",
+      "route_label": "/api/streams/:gameId/comments",
+      "concrete_path": "/api/streams/game-1/comments",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-stream-hardening.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/streams/:gameId/preview",
+      "method": "GET",
+      "route_label": "/api/streams/:gameId/preview",
+      "concrete_path": "/api/streams/game-1/preview",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/streams/:gameId/reactions",
+      "method": "GET",
+      "route_label": "/api/streams/:gameId/reactions",
+      "concrete_path": "/api/streams/game-1/reactions",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/streams/reactions",
+      "method": "GET",
+      "route_label": "/api/streams/reactions",
+      "concrete_path": "/api/streams/reactions",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/streams/status",
+      "method": "GET",
+      "route_label": "/api/streams/status",
+      "concrete_path": "/api/streams/status",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-stream-hardening.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /api/teams",
+      "method": "GET",
+      "route_label": "/api/teams",
+      "concrete_path": "/api/teams",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /auth/session",
+      "method": "GET",
+      "route_label": "/auth/session",
+      "concrete_path": "/auth/session",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-auth.test.ts",
+        "worker-routes.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/access/lookup",
+      "method": "GET",
+      "route_label": "/ops/access/lookup",
+      "concrete_path": "/ops/access/lookup",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/bootstrap",
+      "method": "GET",
+      "route_label": "/ops/bootstrap",
+      "concrete_path": "/ops/bootstrap",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/coach/requests",
+      "method": "GET",
+      "route_label": "/ops/coach/requests",
+      "concrete_path": "/ops/coach/requests",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/headshots",
+      "method": "GET",
+      "route_label": "/ops/headshots",
+      "concrete_path": "/ops/headshots",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/health",
+      "method": "GET",
+      "route_label": "/ops/health",
+      "concrete_path": "/ops/health",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ops-health.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/imports/history",
+      "method": "GET",
+      "route_label": "/ops/imports/history",
+      "concrete_path": "/ops/imports/history",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/list/events",
+      "method": "GET",
+      "route_label": "/ops/list/events",
+      "concrete_path": "/ops/list/events",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/list/players",
+      "method": "GET",
+      "route_label": "/ops/list/players",
+      "concrete_path": "/ops/list/players",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/list/products",
+      "method": "GET",
+      "route_label": "/ops/list/products",
+      "concrete_path": "/ops/list/products",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/list/teams",
+      "method": "GET",
+      "route_label": "/ops/list/teams",
+      "concrete_path": "/ops/list/teams",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/metrics-lite",
+      "method": "GET",
+      "route_label": "/ops/metrics-lite",
+      "concrete_path": "/ops/metrics-lite",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/publish-jobs",
+      "method": "GET",
+      "route_label": "/ops/publish-jobs",
+      "concrete_path": "/ops/publish-jobs",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/revenue",
+      "method": "GET",
+      "route_label": "/ops/revenue",
+      "concrete_path": "/ops/revenue",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/review",
+      "method": "GET",
+      "route_label": "/ops/review",
+      "concrete_path": "/ops/review",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/streams/config",
+      "method": "GET",
+      "route_label": "/ops/streams/config",
+      "concrete_path": "/ops/streams/config",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "GET /ops/streams/sessions",
+      "method": "GET",
+      "route_label": "/ops/streams/sessions",
+      "concrete_path": "/ops/streams/sessions",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "PATCH /ops/events/:id",
+      "method": "PATCH",
+      "route_label": "/ops/events/:id",
+      "concrete_path": "/ops/events/id-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "PATCH /ops/players/:id",
+      "method": "PATCH",
+      "route_label": "/ops/players/:id",
+      "concrete_path": "/ops/players/id-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "PATCH /ops/products/:id",
+      "method": "PATCH",
+      "route_label": "/ops/products/:id",
+      "concrete_path": "/ops/products/id-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "PATCH /ops/schedules/:id",
+      "method": "PATCH",
+      "route_label": "/ops/schedules/:id",
+      "concrete_path": "/ops/schedules/id-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "PATCH /ops/teams/:id",
+      "method": "PATCH",
+      "route_label": "/ops/teams/:id",
+      "concrete_path": "/ops/teams/id-1",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/approve\\/?$/",
+      "method": "POST",
+      "route_label": "/^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/approve\\/?$/",
+      "concrete_path": "/ops/ingest/job-1/approve",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/reject\\/?$/",
+      "method": "POST",
+      "route_label": "/^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/reject\\/?$/",
+      "concrete_path": "/ops/ingest/job-1/reject",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/replay\\/?$/",
+      "method": "POST",
+      "route_label": "/^\\/ops\\/ingest\\/(?<jobId>[^\\/]+)\\/replay\\/?$/",
+      "concrete_path": "/ops/ingest/job-1/replay",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /^\\/ops\\/manual\\/(?<kind>[^\\/]+)\\/(?<action>[^\\/]+)\\/?$/",
+      "method": "POST",
+      "route_label": "/^\\/ops\\/manual\\/(?<kind>[^\\/]+)\\/(?<action>[^\\/]+)\\/?$/",
+      "concrete_path": "/ops/manual/store/delete",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/cart/items",
+      "method": "POST",
+      "route_label": "/api/cart/items",
+      "concrete_path": "/api/cart/items",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/coach/request",
+      "method": "POST",
+      "route_label": "/api/coach/request",
+      "concrete_path": "/api/coach/request",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/games/:id/stats/draft",
+      "method": "POST",
+      "route_label": "/api/games/:id/stats/draft",
+      "concrete_path": "/api/games/id-1/stats/draft",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/games/:id/stats/finalize",
+      "method": "POST",
+      "route_label": "/api/games/:id/stats/finalize",
+      "concrete_path": "/api/games/id-1/stats/finalize",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/ingress",
+      "method": "POST",
+      "route_label": "/api/ingress",
+      "concrete_path": "/api/ingress",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-ingress.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/invite/generate",
+      "method": "POST",
+      "route_label": "/api/invite/generate",
+      "concrete_path": "/api/invite/generate",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/invite/redeem",
+      "method": "POST",
+      "route_label": "/api/invite/redeem",
+      "concrete_path": "/api/invite/redeem",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-turnstile-rate-limit.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/orders",
+      "method": "POST",
+      "route_label": "/api/orders",
+      "concrete_path": "/api/orders",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/orders/:id/pay",
+      "method": "POST",
+      "route_label": "/api/orders/:id/pay",
+      "concrete_path": "/api/orders/id-1/pay",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/player/checkout",
+      "method": "POST",
+      "route_label": "/api/player/checkout",
+      "concrete_path": "/api/player/checkout",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/profile/headshot",
+      "method": "POST",
+      "route_label": "/api/profile/headshot",
+      "concrete_path": "/api/profile/headshot",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/profile/onboarding",
+      "method": "POST",
+      "route_label": "/api/profile/onboarding",
+      "concrete_path": "/api/profile/onboarding",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/rewards/redeem",
+      "method": "POST",
+      "route_label": "/api/rewards/redeem",
+      "concrete_path": "/api/rewards/redeem",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/store/checkout",
+      "method": "POST",
+      "route_label": "/api/store/checkout",
+      "concrete_path": "/api/store/checkout",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/streams/:gameId/comments",
+      "method": "POST",
+      "route_label": "/api/streams/:gameId/comments",
+      "concrete_path": "/api/streams/game-1/comments",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-stream-hardening.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/streams/:gameId/purchase",
+      "method": "POST",
+      "route_label": "/api/streams/:gameId/purchase",
+      "concrete_path": "/api/streams/game-1/purchase",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-turnstile-rate-limit.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/streams/:gameId/react",
+      "method": "POST",
+      "route_label": "/api/streams/:gameId/react",
+      "concrete_path": "/api/streams/game-1/react",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/streams/:gameId/session",
+      "method": "POST",
+      "route_label": "/api/streams/:gameId/session",
+      "concrete_path": "/api/streams/game-1/session",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-stream-hardening.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/streams/:gameId/session/end",
+      "method": "POST",
+      "route_label": "/api/streams/:gameId/session/end",
+      "concrete_path": "/api/streams/game-1/session/end",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /api/streams/:gameId/session/heartbeat",
+      "method": "POST",
+      "route_label": "/api/streams/:gameId/session/heartbeat",
+      "concrete_path": "/api/streams/game-1/session/heartbeat",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-stream-hardening.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/access/override",
+      "method": "POST",
+      "route_label": "/ops/access/override",
+      "concrete_path": "/ops/access/override",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/coach/:id/resolve",
+      "method": "POST",
+      "route_label": "/ops/coach/:id/resolve",
+      "concrete_path": "/ops/coach/id-1/resolve",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/imports/events",
+      "method": "POST",
+      "route_label": "/ops/imports/events",
+      "concrete_path": "/ops/imports/events",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/imports/players",
+      "method": "POST",
+      "route_label": "/ops/imports/players",
+      "concrete_path": "/ops/imports/players",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/imports/schedules",
+      "method": "POST",
+      "route_label": "/ops/imports/schedules",
+      "concrete_path": "/ops/imports/schedules",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/imports/teams",
+      "method": "POST",
+      "route_label": "/ops/imports/teams",
+      "concrete_path": "/ops/imports/teams",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-ops-imports.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/potg/parse",
+      "method": "POST",
+      "route_label": "/ops/potg/parse",
+      "concrete_path": "/ops/potg/parse",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/potg/submit",
+      "method": "POST",
+      "route_label": "/ops/potg/submit",
+      "concrete_path": "/ops/potg/submit",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/review/:id/resolve",
+      "method": "POST",
+      "route_label": "/ops/review/:id/resolve",
+      "concrete_path": "/ops/review/id-1/resolve",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/scores/game",
+      "method": "POST",
+      "route_label": "/ops/scores/game",
+      "concrete_path": "/ops/scores/game",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/scores/import",
+      "method": "POST",
+      "route_label": "/ops/scores/import",
+      "concrete_path": "/ops/scores/import",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/scores/parse-image",
+      "method": "POST",
+      "route_label": "/ops/scores/parse-image",
+      "concrete_path": "/ops/scores/parse-image",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-scores-route.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/store/media",
+      "method": "POST",
+      "route_label": "/ops/store/media",
+      "concrete_path": "/ops/store/media",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/streams/config",
+      "method": "POST",
+      "route_label": "/ops/streams/config",
+      "concrete_path": "/ops/streams/config",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /ops/streams/status",
+      "method": "POST",
+      "route_label": "/ops/streams/status",
+      "concrete_path": "/ops/streams/status",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /sync/drain",
+      "method": "POST",
+      "route_label": "/sync/drain",
+      "concrete_path": "/sync/drain",
+      "tests": [
+        "worker-all-routes-wiring.test.ts"
+      ]
+    },
+    {
+      "route_key": "POST /webhooks/stripe",
+      "method": "POST",
+      "route_label": "/webhooks/stripe",
+      "concrete_path": "/webhooks/stripe",
+      "tests": [
+        "worker-all-routes-wiring.test.ts",
+        "worker-ingress-render-checklist.test.ts",
+        "worker-stripe-webhook.test.ts"
+      ]
+    }
+  ]
+}

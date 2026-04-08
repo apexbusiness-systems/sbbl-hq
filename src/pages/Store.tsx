@@ -4,7 +4,7 @@ import { useBag } from '@/contexts/BagContext';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 import { Product } from '@/types';
-import { ShoppingBag, Filter } from 'lucide-react';
+import { ShoppingBag } from 'lucide-react';
 
 type Category = 'all' | 'tees' | 'hoodies' | 'jerseys' | 'caps' | 'accessories' | 'rewards';
 

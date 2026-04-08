@@ -1,4 +1,4 @@
-import * as Sentry from "@sentry/cloudflare";
+﻿import * as Sentry from "@sentry/cloudflare";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { safeServerEnv } from "@/lib/env";
 import { readIdempotencyKey } from "@/lib/api/idempotency";
@@ -21,7 +21,9 @@ type HandlerCtx = {
 
 type Handler = (ctx: HandlerCtx) => Promise<Response>;
 
-type Route = { method: string; regex: RegExp; handler: Handler };
+type Route =
+  | { method: string; path: string; handler: Handler; regex?: never }
+  | { method: string; regex: RegExp; handler: Handler; path?: never };
 const transientIdempotency = new Map<string, number>();
 const transientRateLimits = new Map<string, number[]>();
 
@@ -30,7 +32,7 @@ const transientRateLimits = new Map<string, number[]>();
 let _cachedAdmin: SupabaseClient | null = null;
 let _cachedAdminUrl: string | null = null;
 
-// ── Heartbeat batch queue ────────────────────────────────────────────────
+// â”€â”€ Heartbeat batch queue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Instead of writing every 25-second heartbeat to the DB individually (800
 // writes/s at 20K viewers), queue them in-memory and flush once every 30s
 // via a single batch_heartbeat_upsert() RPC call.
@@ -220,7 +222,7 @@ async function verifyTurnstileToken(
 }
 
 // SECURITY: session is established ONLY via a valid Supabase JWT Bearer token.
-// The x-sbbl-user-id fallback has been removed — any client-supplied identity
+// The x-sbbl-user-id fallback has been removed â€” any client-supplied identity
 // header is ignored. If JWT verification fails, session is null (unauthenticated).
 let jwksClient: ReturnType<typeof createRemoteJWKSet> | null = null;
 
@@ -445,7 +447,7 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
   return created.data as Record<string, unknown>;
 }
 
-// Cache TTL for public stream status — 10 s keeps Supabase load flat
+// Cache TTL for public stream status â€” 10 s keeps Supabase load flat
 // at 2,000 concurrent viewers polling every 15 s.
 // Uses Cloudflare Cache API (free, unlimited reads) instead of KV.
 //   without cache: ~267 DB queries/s  (hits PgBouncer pool limit)
@@ -505,14 +507,14 @@ export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   const gameId = url.searchParams.get("gameId") ?? null;
   const cacheKey = new Request(streamCacheUrl(gameId));
 
-  // ── Cache API hit (free, edge-local, unlimited) ───────────────────────────
+  // â”€â”€ Cache API hit (free, edge-local, unlimited) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Cast: DOM lib's CacheStorage lacks .default; CF Workers runtime adds it.
   const cfCaches = caches as unknown as { default: Cache };
   const cache = cfCaches.default;
   const cachedRes = await cache.match(cacheKey);
   if (cachedRes) return cachedRes;
 
-  // ── Cache miss — hit Supabase once, write back, serve ────────────────────
+  // â”€â”€ Cache miss â€” hit Supabase once, write back, serve â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const cfg = await getOrCreateStreamConfig(admin);
   let viewerCount = 0;
   const activeGameId = gameId ?? (cfg.active_game_id as string | null) ?? null;
@@ -536,7 +538,7 @@ export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
     },
   });
 
-  // Write to edge cache — best-effort with single retry
+  // Write to edge cache â€” best-effort with single retry
   cache.put(cacheKey, response.clone()).catch(() => {
     cache.put(cacheKey, response.clone()).catch(() => {});
   });
@@ -590,7 +592,7 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   if (error) throw new Error(error.message);
 
   // Bust edge cache so next poll picks up new collectionId / title / source.
-  // Retry once on failure — stale cache after Go Live is worse than a double-delete.
+  // Retry once on failure â€” stale cache after Go Live is worse than a double-delete.
   const cfCacheConfig = (caches as unknown as { default: Cache }).default;
   cfCacheConfig.delete(new Request(streamCacheUrl(null))).catch(() => {
     cfCacheConfig.delete(new Request(streamCacheUrl(null))).catch(() => {});
@@ -689,7 +691,7 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
 
   // Bust edge cache immediately so Go Live / End Broadcast is reflected
   // for all viewers on their next 15 s poll (not delayed by TTL).
-  // Retry once on failure — stale "offline" after Go Live is a P0 UX issue.
+  // Retry once on failure â€” stale "offline" after Go Live is a P0 UX issue.
   const cfCachesLive = (caches as unknown as { default: Cache }).default;
   const bustKey = new Request(streamCacheUrl(null));
   cfCachesLive.delete(bustKey).catch(() => { cfCachesLive.delete(bustKey).catch(() => {}); });
@@ -1262,13 +1264,13 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
     return json({ ok: false, error: "invalid_stripe_event" }, 400);
 
   // Fast dedup: insert into stripe_events; ON CONFLICT on stripe_event_id UNIQUE
-  // constraint = already processed → 200 no-op.
+  // constraint = already processed â†’ 200 no-op.
   // This is cheaper than calling the full process_stripe_webhook RPC for replayed events.
   const { error: dedupErr } = await ctx.admin
     .from("stripe_events")
     .insert({ stripe_event_id: event.id, event_type: event.type, payload: event, status: "received" });
   if (dedupErr && dedupErr.code === "23505") {
-    // Duplicate event — already seen and processed (or in-progress). Return 200 immediately.
+    // Duplicate event â€” already seen and processed (or in-progress). Return 200 immediately.
     return json({ ok: true, eventId: event.id, status: "duplicate_ignored" });
   }
 
@@ -1293,7 +1295,7 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
   });
   if (webhookProcess.error) throw new Error(webhookProcess.error.message);
 
-  // Best-effort post-payment side-effects — never block the 200 response.
+  // Best-effort post-payment side-effects â€” never block the 200 response.
   if (event.type === "checkout.session.completed" && userId) {
     const purchaseType =
       typeof metadata.purchase_type === "string"
@@ -1342,7 +1344,7 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
           p_idempotency_key: event.id ?? crypto.randomUUID(),
         });
       } catch {
-        /* non-critical — entitlement can be manually granted via ops */
+        /* non-critical â€” entitlement can be manually granted via ops */
       }
 
       // Auto-create a minimal fan profile so the buyer bypasses the onboarding
@@ -1370,7 +1372,7 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
             },
           );
       } catch {
-        /* non-critical — buyer can complete onboarding manually */
+        /* non-critical â€” buyer can complete onboarding manually */
       }
     }
 
@@ -1411,7 +1413,7 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
     }
   }
 
-  // Player subscription renewed — extend subscription window
+  // Player subscription renewed â€” extend subscription window
   if (event.type === "customer.subscription.updated" && userId) {
     const sub = event.data?.object ?? {};
     const currentPeriodEnd = typeof (sub as Record<string, unknown>).current_period_end === 'number'
@@ -1430,10 +1432,10 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
     }
   }
 
-  // Player subscription cancelled/expired — downgrade to fan (remove player role)
+  // Player subscription cancelled/expired â€” downgrade to fan (remove player role)
   if ((event.type === "customer.subscription.deleted") && userId) {
     try {
-      // Remove player role assignment — user reverts to fan
+      // Remove player role assignment â€” user reverts to fan
       await ctx.admin
         .from('user_role_assignments')
         .delete()
@@ -1802,9 +1804,82 @@ async function handleImportHistory({ req, admin }: HandlerCtx) {
   return json({ ok: true, jobs: data ?? [] });
 }
 
-// ── Canonical Ingest Pipeline ──────────────────────────────────────────────────
+// â”€â”€ Canonical Ingest Pipeline â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // All media ingest flows converge through createIngestJob.
-// State machine: uploaded → validated → written → projected → published | failed | needs_review
+
+interface InlineImageUpload {
+  base64: string;
+  mimeType: string;
+  fileName?: string;
+}
+
+const INLINE_IMAGE_MAX_BYTES = 6 * 1024 * 1024;
+const INLINE_IMAGE_ALLOWED_MIME = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function normalizeInlineBase64(raw: string): string {
+  const trimmed = raw.trim();
+  const commaIndex = trimmed.indexOf(",");
+  const payload = trimmed.startsWith("data:") && commaIndex >= 0
+    ? trimmed.slice(commaIndex + 1)
+    : trimmed;
+  return payload.replace(/\s+/g, "");
+}
+
+function decodeInlineImage(upload: InlineImageUpload): { bytes: Uint8Array; mimeType: string } {
+  if (typeof upload.base64 !== "string" || upload.base64.trim().length === 0) {
+    throw new Error("image_upload_base64_required");
+  }
+
+  const mimeType = (upload.mimeType ?? "").toLowerCase().trim();
+  if (!INLINE_IMAGE_ALLOWED_MIME.has(mimeType)) {
+    throw new Error("image_upload_mime_unsupported");
+  }
+
+  let binary: string;
+  try {
+    binary = atob(normalizeInlineBase64(upload.base64));
+  } catch {
+    throw new Error("image_upload_base64_invalid");
+  }
+
+  const bytes = Uint8Array.from(binary, (ch) => ch.charCodeAt(0));
+  if (bytes.byteLength === 0) {
+    throw new Error("image_upload_empty");
+  }
+  if (bytes.byteLength > INLINE_IMAGE_MAX_BYTES) {
+    throw new Error("image_upload_too_large");
+  }
+
+  return { bytes, mimeType };
+}
+
+function isInlineUploadValidationError(error: string): boolean {
+  return error.startsWith("image_upload_");
+}
+
+async function uploadInlineMediaImage(
+  admin: SupabaseClient,
+  upload: InlineImageUpload,
+  kind: "potg" | "store",
+  leagueId: string | null,
+): Promise<string> {
+  const { bytes, mimeType } = decodeInlineImage(upload);
+  const ext = mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
+  const objectPath = kind === "potg"
+    ? `potg/${leagueId ?? "unknown"}/${crypto.randomUUID()}.${ext}`
+    : `store/${crypto.randomUUID()}.${ext}`;
+
+  const uploadResult = await admin.storage.from("media").upload(objectPath, bytes, {
+    contentType: mimeType,
+    upsert: true,
+  });
+  if (uploadResult.error) {
+    throw new Error(`storage_upload_failed:${uploadResult.error.message}`);
+  }
+
+  return admin.storage.from("media").getPublicUrl(objectPath).data.publicUrl;
+}
+// State machine: uploaded â†’ validated â†’ written â†’ projected â†’ published | failed | needs_review
 
 type IngestSource = 'store_media' | 'potg_submit' | 'event_graphic' | 'manual_upload';
 type IngestState = 'uploaded' | 'validated' | 'written' | 'projected' | 'published' | 'failed' | 'needs_review';
@@ -1827,7 +1902,7 @@ async function createIngestJob(
   const autoPublish = opts.autoPublish ?? true;
   const idemKey = opts.idempotencyKey ?? null;
 
-  // Step 1: Idempotency check — return existing job if duplicate
+  // Step 1: Idempotency check â€” return existing job if duplicate
   if (idemKey) {
     const { data: existing } = await admin
       .from("ingest_jobs")
@@ -1917,7 +1992,7 @@ async function createIngestJob(
 
     await admin.from("ingest_jobs").update({ state: "written", media_asset_id: mediaAssetId }).eq("id", job.id);
 
-    // Step 6: Project → media_publications
+    // Step 6: Project â†’ media_publications
     const { data: pub, error: pubErr } = await admin
       .from("media_publications")
       .insert({
@@ -1953,16 +2028,39 @@ async function handleStoreMedia(ctx: HandlerCtx) {
     string,
     unknown
   > | null;
+
+  const inlineUpload = payload && typeof payload.imageUpload === "object" && payload.imageUpload !== null
+    ? (payload.imageUpload as InlineImageUpload)
+    : undefined;
+  const explicitImageUrl = payload && typeof payload.imageUrl === "string" && payload.imageUrl.trim().length > 0
+    ? payload.imageUrl.trim()
+    : null;
+
   if (
     !payload ||
     typeof payload.title !== "string" ||
     typeof payload.price !== "number" ||
-    typeof payload.imageUrl !== "string"
+    (!explicitImageUrl && !inlineUpload)
   ) {
     return json({ ok: false, error: "invalid_store_payload" }, 400);
   }
 
-  const result = await createIngestJob(ctx.admin, "store_media", payload, {
+  let imageUrl = explicitImageUrl;
+  if (!imageUrl && inlineUpload) {
+    try {
+      const leagueId = typeof payload.leagueId === "string" ? payload.leagueId : null;
+      imageUrl = await uploadInlineMediaImage(ctx.admin, inlineUpload, "store", leagueId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "image_upload_failed";
+      if (isInlineUploadValidationError(message)) {
+        return json({ ok: false, error: message }, 400);
+      }
+      throw error;
+    }
+  }
+
+  const ingestPayload = { ...payload, imageUrl };
+  const result = await createIngestJob(ctx.admin, "store_media", ingestPayload, {
     createdBy: session.userId,
     idempotencyKey: readIdempotencyKey(ctx.req.headers) ?? undefined,
     autoPublish: payload.publishStatus === "published",
@@ -1990,19 +2088,11 @@ async function handleStoreMedia(ctx: HandlerCtx) {
     publicationId: result.publicationId,
   });
 }
-
-// handlePublicSchedule, handlePublicPotg — extracted to src/worker/routes/public.ts
+// handlePublicSchedule, handlePublicPotg â€” extracted to src/worker/routes/public.ts
 const handlePublicSchedule = _handlePublicSchedule;
 const handlePublicPotg = _handlePublicPotg;
 
 // Ops List handlers
-function requireSuperAdmin(req: Request) {
-  const userId = requireAuth(req);
-  const roles = req.headers.get('x-sbbl-roles-verified')?.split(',') ?? [];
-  if (!roles.includes('super_admin')) throw new Error('forbidden');
-  return userId;
-}
-
 async function handleOpsListTeams({ req, admin }: HandlerCtx) {
   requireSuperAdmin(req);
   const { data, error } = await admin.from('teams').select('*').order('created_at', { ascending: false });
@@ -2085,10 +2175,10 @@ async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete
 async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('events', ctx.req, ctx.admin, ctx.params); }
 
 
-// handlePublicConfig — extracted to src/worker/routes/public.ts
+// handlePublicConfig â€” extracted to src/worker/routes/public.ts
 const handlePublicConfig = _handlePublicConfig;
 
-// handlePublicHome — extracted to src/worker/routes/public.ts
+// handlePublicHome â€” extracted to src/worker/routes/public.ts
 const handlePublicHome = _handlePublicHome;
 
 function splitProfileName(profile: Record<string, unknown> | undefined) {
@@ -2188,7 +2278,7 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
       }
     }
   } catch {
-    // mvw_standings may not exist on older DB (migration not yet applied) —
+    // mvw_standings may not exist on older DB (migration not yet applied) â€”
     // the dbRecord fallback below will fill in team records from teams.record.
   }
 
@@ -2356,7 +2446,7 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
             },
             {
               type: "text",
-              text: 'Extract player of the game data from this graphic. Return ONLY a JSON object with exactly these keys: playerName (string), team (string), pts (number), rebs (number), assts (number), gameResult (string, e.g. "TEAM A 77 vs TEAM B 63"). No markdown, no explanation — raw JSON only.',
+              text: 'Extract player of the game data from this graphic. Return ONLY a JSON object with exactly these keys: playerName (string), team (string), pts (number), rebs (number), assts (number), gameResult (string, e.g. "TEAM A 77 vs TEAM B 63"). No markdown, no explanation â€” raw JSON only.',
             },
           ],
         },
@@ -2393,12 +2483,28 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     leagueId: string;
     date?: string;
     imageUrl?: string;
+    imageUpload?: InlineImageUpload;
   } | null;
 
   if (!body?.playerName || !body?.team || !body?.leagueId) {
     return json({ ok: false, error: "missing_required_fields" }, 400);
   }
 
+  let imageUrl = typeof body.imageUrl === "string" && body.imageUrl.trim().length > 0
+    ? body.imageUrl.trim()
+    : undefined;
+
+  if (!imageUrl && body.imageUpload) {
+    try {
+      imageUrl = await uploadInlineMediaImage(ctx.admin, body.imageUpload, "potg", body.leagueId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "image_upload_failed";
+      if (isInlineUploadValidationError(message)) {
+        return json({ ok: false, error: message }, 400);
+      }
+      throw error;
+    }
+  }
   // Resolve league code (e.g. 'wbl') to UUID for FK references
   let leagueUuid: string | null = null;
   const { data: leagueLookup } = await ctx.admin
@@ -2431,7 +2537,7 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
         gameResult: body.gameResult,
         leagueId: body.leagueId,
         date: body.date ?? new Date().toISOString().split("T")[0],
-        imageUrl: body.imageUrl ?? null,
+        imageUrl: imageUrl ?? null,
         matched_profile_id: profileData?.user_id ?? null,
         source: "potg_image_parser",
       },
@@ -2441,7 +2547,7 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
       failed_rows: profileData ? 0 : 0,
       error_summary: profileData
         ? null
-        : "Player profile not yet in system — award queued for manual match",
+        : "Player profile not yet in system â€” award queued for manual match",
     })
     .select("id")
     .single();
@@ -2453,21 +2559,21 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
   // this upsert. The import_jobs record carries the full payload; a
   // subsequent manual-match step will write the stat row once a game_id
   // is available.
-  // DO NOT add a upsert({ game_id: null }) here — it violates the NOT NULL FK.
+  // DO NOT add a upsert({ game_id: null }) here â€” it violates the NOT NULL FK.
   if (profileData?.user_id) {
-    // stat write deferred — see import_jobs.payload for pending record
+    // stat write deferred â€” see import_jobs.payload for pending record
   }
 
   // Insert media_assets row so the POTG card renders on the Media page.
   // Only create if we have a thumbnail image to display.
-  if (body.imageUrl) {
+  if (imageUrl) {
     await ctx.admin.from("media_assets").insert({
       league_id: leagueUuid,
-      title: `POTG — ${body.playerName} (${body.team})`,
+      title: `POTG â€” ${body.playerName} (${body.team})`,
       status: "published",
       metadata: {
         type: "poster",
-        thumbnail: body.imageUrl,
+        thumbnail: imageUrl,
         date: body.date ?? new Date().toISOString().split("T")[0],
         potg: true,
         playerName: body.playerName,
@@ -2489,15 +2595,15 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
       p_idempotency_key: readIdempotencyKey(ctx.req.headers),
     });
   } catch {
-    /* non-critical audit log — suppress */
+    /* non-critical audit log â€” suppress */
   }
 
   return json({ ok: true, jobId: jobData.id, matched: !!profileData });
 }
 
-// ── PPV INVITE SYSTEM ────────────────────────────────────────────────────────
+// â”€â”€ PPV INVITE SYSTEM â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 //
-// VERIFIED: IP source — CF-Connecting-IP is the canonical Cloudflare Pages
+// VERIFIED: IP source â€” CF-Connecting-IP is the canonical Cloudflare Pages
 // header containing the real client IP (set by Cloudflare's edge before the
 // request reaches the Worker). We strictly rely on this header to prevent
 // IP spoofing from client-supplied headers like X-Forwarded-For.
@@ -2521,14 +2627,14 @@ async function getUserRolesFromDB(
  * POST /api/invite/generate
  * Auth required.  Eligible roles: player, paid_fan, super_admin.
  * Rate-limit: 1 invite per (user, game) enforced by UNIQUE DB constraint.
- * Returns { code: uuid } — the invite ID is the redemption token.
+ * Returns { code: uuid } â€” the invite ID is the redemption token.
  * On duplicate request for same game returns the existing code (idempotent).
  */
 async function handleInviteGenerate(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
 
-  // Fetch roles from DB — worker JWT session defaults to ['fan'] only
+  // Fetch roles from DB â€” worker JWT session defaults to ['fan'] only
   const userRoles = await getUserRolesFromDB(userId, ctx.admin);
   const canGenerate = userRoles.some(
     (r) => r === "player" || r === "paid_fan" || r === "super_admin",
@@ -2543,11 +2649,11 @@ async function handleInviteGenerate(ctx: HandlerCtx) {
   const gameId = body?.gameId;
   if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
 
-  // NOTE: game_id is now text (not UUID FK) — mock IDs like 'g1' are valid.
+  // NOTE: game_id is now text (not UUID FK) â€” mock IDs like 'g1' are valid.
   // Skip DB game existence check; the ppv_invites insert will succeed
   // with any non-empty game identifier.
 
-  // Check for an existing invite (idempotent — return same code on re-request)
+  // Check for an existing invite (idempotent â€” return same code on re-request)
   const { data: existing } = await ctx.admin
     .from("ppv_invites")
     .select("id")
@@ -2571,7 +2677,7 @@ async function handleInviteGenerate(ctx: HandlerCtx) {
     .single();
 
   if (insertErr) {
-    // Race condition: concurrent insert won — fetch the winner's row
+    // Race condition: concurrent insert won â€” fetch the winner's row
     if (insertErr.code === "23505" || insertErr.message.includes("duplicate")) {
       const { data: raceRow } = await ctx.admin
         .from("ppv_invites")
@@ -2595,9 +2701,9 @@ async function handleInviteGenerate(ctx: HandlerCtx) {
 /**
  * POST /api/invite/redeem
  * Auth required.  User must be a registered fan (any authenticated user qualifies).
- * Validates: exists → not expired → not already used by someone else.
+ * Validates: exists â†’ not expired â†’ not already used by someone else.
  * On first use: locks used_by = auth.uid() and ip_address = CF-Connecting-IP.
- * IP-mismatch on re-use → 403.  Different user on re-use → 403 (non-transferable).
+ * IP-mismatch on re-use â†’ 403.  Different user on re-use â†’ 403 (non-transferable).
  * Idempotent for same user + same IP (re-entry after page refresh).
  */
 export async function handleInviteRedeem(ctx: HandlerCtx) {
@@ -2655,15 +2761,15 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
   }
 
   if (inv.used_by) {
-    // Idempotent re-entry: same user, same IP → already granted
+    // Idempotent re-entry: same user, same IP â†’ already granted
     if (inv.used_by === userId && inv.ip_address === ip) {
       return json({ ok: true, granted: true, idempotent: true });
     }
-    // Same user but different IP (VPN switch, location change) → reject
+    // Same user but different IP (VPN switch, location change) â†’ reject
     if (inv.used_by === userId && inv.ip_address !== ip) {
       return json({ ok: false, error: "ip_mismatch" }, 403);
     }
-    // Different user entirely → non-transferable
+    // Different user entirely â†’ non-transferable
     return json({ ok: false, error: "non_transferable" }, 403);
   }
 
@@ -2683,7 +2789,7 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
 
   if (updateErr) throw new Error(updateErr.message);
 
-  // count === 0 means a concurrent request locked it first — re-check
+  // count === 0 means a concurrent request locked it first â€” re-check
   if (count === 0) {
     const { data: recheck } = await ctx.admin
       .from("ppv_invites")
@@ -2711,13 +2817,13 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
       p_idempotency_key: `invite-${code}-${userId}`,
     });
   } catch {
-    /* non-critical — ppv_invites path in RPC is the primary gate */
+    /* non-critical â€” ppv_invites path in RPC is the primary gate */
   }
 
   return json({ ok: true, granted: true });
 }
 
-// ── STREAM REACTIONS ────────────────────────────────────────────────────────
+// â”€â”€ STREAM REACTIONS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const REACTIONS_CACHE_TTL_S = 5;
 
@@ -2790,7 +2896,7 @@ async function handleStreamReact(ctx: HandlerCtx) {
   return json({ ok: true, gameId: pathGameId, type: reactionType });
 }
 
-// ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
+// â”€â”€ STREAM ACCESS & PURCHASE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleStreamAccess({ req, admin }: HandlerCtx) {
   const userId = requireAuth(req);
@@ -2820,13 +2926,13 @@ async function createOrRefreshPlaybackSession(
 ) {
   const nowIso = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 70_000).toISOString();
-  // Hard 6-hour ceiling — heartbeats may never extend past this
+  // Hard 6-hour ceiling â€” heartbeats may never extend past this
   const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
 
   // One-device enforcement: terminate any existing active session for this
   // user + game before creating the new one.  The displaced device's next
-  // heartbeat will return session_not_found → circuit breaker → "Connection
-  // lost" banner.  This is intentional — only one active session per viewer.
+  // heartbeat will return session_not_found â†’ circuit breaker â†’ "Connection
+  // lost" banner.  This is intentional â€” only one active session per viewer.
   await ctx.admin
     .from("stream_access_sessions")
     .update({ status: "displaced", expires_at: nowIso, updated_by: userId })
@@ -2835,7 +2941,7 @@ async function createOrRefreshPlaybackSession(
     .eq("status", "active")
     .neq("idempotency_key", sessionKey);
 
-  // Atomic upsert — eliminates the TOCTOU race where two rapid requests
+  // Atomic upsert â€” eliminates the TOCTOU race where two rapid requests
   // both miss the SELECT and create duplicate sessions. The unique constraint
   // on (user_id, game_id, idempotency_key) guarantees exactly one row.
   const { data, error } = await ctx.admin
@@ -2877,7 +2983,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     return json({ ok: false, error: "session_key_required" }, 400);
   }
 
-  // Validate game exists — reject phantom session creation for non-existent games
+  // Validate game exists â€” reject phantom session creation for non-existent games
   const gameCheck = await ctx.admin
     .from("games")
     .select("id")
@@ -2940,7 +3046,7 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
 
   const now = new Date().toISOString();
-  // Cap heartbeat extension at max_expires_at — never extend past the 6hr hard cap
+  // Cap heartbeat extension at max_expires_at â€” never extend past the 6hr hard cap
   const rawExpiry = Date.now() + 70_000;
   // We need the stored max_expires_at to clamp; look it up only when it's
   // plausible the session is near expiry (avoid DB read on every heartbeat by
@@ -2948,7 +3054,7 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   const expiresAt = new Date(rawExpiry).toISOString();
 
   // Queue heartbeat for batch flush instead of writing per-request.
-  // At 20K viewers × 25s interval this cuts ~800 writes/s → ~1 bulk call/30s.
+  // At 20K viewers Ã— 25s interval this cuts ~800 writes/s â†’ ~1 bulk call/30s.
   heartbeatQueue.push({
     session_id: body.sessionId,
     user_id: userId,
@@ -3170,7 +3276,7 @@ export async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
   return json({ ok: true, url: checkout.url, sessionId: checkout.id });
 }
 
-// ── PROFILE ONBOARDING & HEADSHOT ───────────────────────────────────────────
+// â”€â”€ PROFILE ONBOARDING & HEADSHOT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleProfileOnboarding({ req, admin }: HandlerCtx) {
   await ensureMutation(req, { req, env: {} as Env, admin, params: {} });
@@ -3253,7 +3359,7 @@ async function handleProfileHeadshot({ req, admin }: HandlerCtx) {
     const { data: mediaRow, error: mediaErr } = await admin
       .from("media_assets")
       .insert({
-        title: `Headshot — ${userId}`,
+        title: `Headshot â€” ${userId}`,
         status: "draft",
         metadata: { image_url: body.assetUrl, type: "headshot" },
       })
@@ -3276,7 +3382,7 @@ async function handleProfileHeadshot({ req, admin }: HandlerCtx) {
   return json({ ok: true, userId, assetId });
 }
 
-// ── CART & ORDERS ────────────────────────────────────────────────────────────
+// â”€â”€ CART & ORDERS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleGetCart({ req, admin }: HandlerCtx) {
   const userId = requireAuth(req);
@@ -3462,7 +3568,7 @@ async function handlePayOrder(ctx: HandlerCtx) {
   return json({ ok: true, url: checkout.url, sessionId: checkout.id });
 }
 
-// ── DIRECT STORE CHECKOUT ─────────────────────────────────────────────────────
+// â”€â”€ DIRECT STORE CHECKOUT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Accepts line items from the client (no DB variant records required).
 // Used by BagDrawer until real DB products/variants are seeded.
 async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
@@ -3501,7 +3607,7 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
     "metadata[user_id]": userId,
     "metadata[purchase_type]": "store_order",
   });
-  // price is in PHP whole units — Stripe expects centavos (×100)
+  // price is in PHP whole units â€” Stripe expects centavos (Ã—100)
   body.items.forEach((item, i) => {
     params.set(`line_items[${i}][price_data][currency]`, "php");
     params.set(`line_items[${i}][price_data][product_data][name]`, item.name);
@@ -3559,7 +3665,7 @@ async function handlePublicMedia({ req, admin }: HandlerCtx) {
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  // Transform DB rows → MediaAsset shape expected by the frontend
+  // Transform DB rows â†’ MediaAsset shape expected by the frontend
   const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
   const mapped = rows.map((r) => {
     const meta = (r.metadata ?? {}) as Record<string, unknown>;
@@ -3658,7 +3764,7 @@ async function handleBillingHistory({ req, admin }: HandlerCtx) {
   return json({ ok: true, data: data ?? [] });
 }
 
-// ── Observability: /ops/health + /ops/metrics-lite ───────────────────────────
+// â”€â”€ Observability: /ops/health + /ops/metrics-lite â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Lightweight endpoints for uptime checks and basic operational metrics.
 // /ops/health: no auth required (used by external monitors / load balancers).
 // /ops/metrics-lite: no auth required (best-effort rolling counters from Worker memory).
@@ -3682,7 +3788,7 @@ function computeP95(): number {
 }
 
 async function handleOpsHealth({ env, admin }: HandlerCtx) {
-  // Actually test the Supabase connection — this is the single most critical check.
+  // Actually test the Supabase connection â€” this is the single most critical check.
   // If this fails, EVERY route that queries the database will also fail.
   let dbStatus: "connected" | "error" | "timeout" = "error";
   let dbError: string | null = null;
@@ -3965,17 +4071,37 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
 
 // Lazy-compile: routes are registered via push() throughout the module,
 // so we compile on first access to capture all late-registered routes.
-let _compiled: Array<Route & { keys: string[] }> | null = null;
+type CompiledRoute = {
+  method: string;
+  regex: RegExp;
+  handler: Handler;
+  keys: string[];
+};
+
+let _compiled: CompiledRoute[] | null = null;
 function getCompiled() {
   if (!_compiled) {
-    _compiled = routes.map((route) => {
-      const compiledPath = compilePath(route.path);
-      return {
-        method: route.method,
-        regex: compiledPath.regex,
-        handler: route.handler,
-        keys: compiledPath.keys,
-      };
+    _compiled = routes.map((route): CompiledRoute => {
+      if ("path" in route && typeof route.path === "string") {
+        const compiledPath = compilePath(route.path);
+        return {
+          method: route.method,
+          regex: compiledPath.regex,
+          handler: route.handler,
+          keys: compiledPath.keys,
+        };
+      }
+
+      if ("regex" in route && route.regex instanceof RegExp) {
+        return {
+          method: route.method,
+          regex: route.regex,
+          handler: route.handler,
+          keys: [],
+        };
+      }
+
+      throw new Error("invalid_route_definition");
     });
   }
   return _compiled;
@@ -3992,7 +4118,7 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
-  // Facebook domains required for /live page embed (Switcher Studio → FB Live).
+  // Facebook domains required for /live page embed (Switcher Studio â†’ FB Live).
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net; " +
@@ -4064,12 +4190,15 @@ export default Sentry.withSentry(
     const cleanReq = new Request(req, { headers: cleanHeaders });
 
     const session = await getSession(cleanReq, env);
-
-    // ── Supabase admin client ─────────────────────────────────────────
+    // â”€â”€ Supabase admin client â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // CRITICAL: If the service role key is wrong or unset, EVERY database
     // query in EVERY route handler will fail with "Invalid API key".
-    // We validate the key format before creating the client.
-    if (!env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY.length < 20) {
+    // We validate the key format and guard against anon/publishable key mixups.
+    const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+    const publishableKey = env.SUPABASE_PUBLISHABLE_KEY ?? (env as unknown as Record<string, string>).SUPABASE_ANON_KEY ?? "";
+    const looksPublishable = serviceKey.startsWith("sb_publishable_") || (publishableKey.length > 0 && serviceKey === publishableKey);
+
+    if (!serviceKey || serviceKey.length < 20) {
       if (url.pathname.startsWith("/api") || url.pathname.startsWith("/ops") || url.pathname.startsWith("/auth")) {
         return addSecurityHeaders(json({
           ok: false,
@@ -4077,6 +4206,14 @@ export default Sentry.withSentry(
           detail: "SUPABASE_SERVICE_ROLE_KEY is not set or is too short. Set it via: wrangler secret put SUPABASE_SERVICE_ROLE_KEY",
         }, 500));
       }
+    }
+
+    if (looksPublishable && (url.pathname.startsWith("/api") || url.pathname.startsWith("/ops") || url.pathname.startsWith("/auth"))) {
+      return addSecurityHeaders(json({
+        ok: false,
+        error: "supabase_service_key_invalid",
+        detail: "SUPABASE_SERVICE_ROLE_KEY is using a publishable/anon value. Set the service-role secret via: wrangler secret put SUPABASE_SERVICE_ROLE_KEY",
+      }, 500));
     }
 
     const admin = getAdminClient(env);
@@ -4103,6 +4240,11 @@ export default Sentry.withSentry(
       route.keys.forEach((key, index) => {
         params[key] = match[index + 1] ?? "";
       });
+      if (match.groups) {
+        for (const [key, value] of Object.entries(match.groups)) {
+          params[key] = value ?? "";
+        }
+      }
 
       try {
         const handlerResponse = await route.handler({
@@ -4280,7 +4422,7 @@ async function handleManualOpsAction(ctx: HandlerCtx) {
   return json({ ok: true });
 }
 
-// ── Ingest Lifecycle Routes (Super-Admin Only) ────────────────────────────────
+// â”€â”€ Ingest Lifecycle Routes (Super-Admin Only) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function handleIngestStatus({ req, admin, params }: HandlerCtx) {
   requireSuperAdmin(req);
@@ -4352,7 +4494,7 @@ async function handleIngestReconcile({ req, admin }: HandlerCtx) {
     .in("state", ["uploaded", "validated", "written", "projected"])
     .lt("updated_at", twentyFourHoursAgo);
 
-  // 3. Auto-fix stuck jobs → needs_review
+  // 3. Auto-fix stuck jobs â†’ needs_review
   if ((stuckCount ?? 0) > 0) {
     await admin
       .from("ingest_jobs")
@@ -4387,7 +4529,7 @@ routes.push(
   { method: "GET",  regex: /^\/ops\/ingest\/reconcile\/?$/,        handler: handleIngestReconcile },
 );
 
-// B2 — register PATCH / DELETE / LIST routes that were defined but never wired
+// B2 â€” register PATCH / DELETE / LIST routes that were defined but never wired
 routes.push(
   { method: "PATCH",  path: "/ops/teams/:id",     handler: handleOpsPatchTeams },
   { method: "PATCH",  path: "/ops/players/:id",   handler: handleOpsPatchPlayers },
@@ -4404,9 +4546,9 @@ routes.push(
   { method: "GET",    path: "/ops/list/events",   handler: handleOpsListEvents },
 );
 
-// ── Scores handlers ────────────────────────────────────────────────────────
+// â”€â”€ Scores handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/** GET /api/scores — public, optionally filtered by league/category/status */
+/** GET /api/scores â€” public, optionally filtered by league/category/status */
 async function handleScoresList({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueParam = url.searchParams.get("league");
@@ -4414,7 +4556,7 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
   const statusParam = url.searchParams.get("status");
   const beforeCursor = url.searchParams.get("before");
 
-  // Single query — migration 20260404004000 is applied so all columns exist.
+  // Single query â€” migration 20260404004000 is applied so all columns exist.
   let query = admin
     .from("games")
     .select(
@@ -4502,7 +4644,7 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
   return json({ ok: true, games: filtered, nextCursor }, 200, { "Cache-Control": "public, s-maxage=60, max-age=30" });
 }
 
-/** POST /ops/scores/game — upsert a single game (super_admin only) */
+/** POST /ops/scores/game â€” upsert a single game (super_admin only) */
 async function handleScoreGameUpsert(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   await requireSuperAdminSession(ctx.req, ctx.admin);
@@ -4577,7 +4719,7 @@ async function handleScoreGameUpsert(ctx: HandlerCtx) {
   return json({ ok: true, gameId });
 }
 
-/** POST /ops/scores/import — bulk CSV import (super_admin only) */
+/** POST /ops/scores/import â€” bulk CSV import (super_admin only) */
 async function handleScoresCsvImport(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   await requireSuperAdminSession(ctx.req, ctx.admin);
@@ -4623,7 +4765,7 @@ async function handleScoresCsvImport(ctx: HandlerCtx) {
   return json({ ok: true, inserted, failed, errors });
 }
 
-/** POST /ops/scores/parse-image — scoreboard OCR via Groq vision (super_admin only) */
+/** POST /ops/scores/parse-image â€” scoreboard OCR via Groq vision (super_admin only) */
 async function handleScoreboardImageParse(ctx: HandlerCtx) {
   await requireAdminSession(ctx.req, ctx.admin);
   const apiKey = ctx.env.GROQ_API_KEY;
@@ -4687,3 +4829,10 @@ export async function handleStoreInventoryArchival(admin: SupabaseClient) {
 
   if (error) console.error("Failed to archive sold out products", error);
 }
+
+
+
+
+
+
+

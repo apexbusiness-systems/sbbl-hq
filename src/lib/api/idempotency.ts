@@ -9,6 +9,15 @@ export function readIdempotencyKey(headers: Headers) {
   return key;
 }
 
-export function createIdempotencyKey(scope: string) {
+export function createIdempotencyKey(scope: string, deterministicPayload?: unknown) {
+  if (deterministicPayload) {
+      const bodyStr = typeof deterministicPayload === 'string' ? deterministicPayload : JSON.stringify(deterministicPayload);
+      let bodyHash = 0;
+      for (let i = 0; i < bodyStr.length; i++) {
+        bodyHash = ((bodyHash << 5) - bodyHash) + bodyStr.charCodeAt(i);
+        bodyHash |= 0;
+      }
+      return `${scope}-hash-${bodyHash}`;
+  }
   return `${scope}-${Date.now()}-${crypto.randomUUID()}`;
 }

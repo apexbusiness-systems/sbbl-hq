@@ -186,7 +186,7 @@ export async function updateStreamConfig(
 ) {
   return apiFetch<{ ok: boolean; config: StreamConfig }>('/ops/streams/config', {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-stream-config') },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-stream-config', patch) },
     body: JSON.stringify(patch),
   }, token);
 }
@@ -197,7 +197,7 @@ export async function setStreamLive(isLive: boolean, token: string | null) {
     '/ops/streams/status',
     {
       method: 'POST',
-      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-stream-live-${isLive}`) },
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-stream-live-${isLive}`, { isLive }) },
       body: JSON.stringify({ isLive }),
     },
     token,
@@ -242,7 +242,7 @@ export async function submitAccessOverride(
     '/ops/access/override',
     {
       method: 'POST',
-      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-access-${payload.action}-${payload.gameId}`) },
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-access-${payload.action}-${payload.gameId}`, payload) },
       body: JSON.stringify(payload),
     },
     token,
@@ -266,7 +266,7 @@ export async function resolveReviewItem(
     `/ops/review/${id}/resolve`,
     {
       method: 'POST',
-      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-review-${id}`) },
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-review-${id}`, { resolution }) },
       body: JSON.stringify({ resolution }),
     },
     token,

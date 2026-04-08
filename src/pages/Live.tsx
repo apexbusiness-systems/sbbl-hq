@@ -7,7 +7,7 @@ import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { apiFetch } from '@/lib/api/client';
-import { games, players, products } from '@/data/mock';
+import { products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
 import { CASLNudge } from '@/components/CASLNudge';

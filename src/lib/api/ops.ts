@@ -29,7 +29,7 @@ export async function fetchImportHistory() {
 export async function submitCsvImport(kind: 'teams' | 'players' | 'schedules' | 'events', rows: Record<string, string>[]) {
   return apiFetch<{ ok: boolean; summary: ImportJob }>(`/ops/imports/${kind}`, {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-${kind}`) },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-${kind}`, { rows }) },
     body: JSON.stringify({ rows }),
   });
 }
@@ -47,10 +47,11 @@ export async function parsePotgImage(imageBase64: string, mimeType: string) {
 export async function submitPotgRecord(payload: {
   playerName: string; team: string; pts: number; rebs: number; assts: number;
   gameResult: string; leagueId: string; date: string; imageUrl?: string;
+  imageUpload?: { base64: string; mimeType: string; fileName?: string };
 }) {
   return apiFetch<{ ok: boolean; jobId: string; matched: boolean }>('/ops/potg/submit', {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-potg') },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-potg', payload) },
     body: JSON.stringify(payload),
   });
 }
@@ -61,12 +62,13 @@ export async function uploadStoreMedia(payload: {
   category: string;
   publishStatus: 'draft' | 'published';
   sale?: boolean;
-  imageUrl: string;
+  imageUrl?: string;
+  imageUpload?: { base64: string; mimeType: string; fileName?: string };
   leagueId?: string | null;
 }) {
   return apiFetch<{ ok: boolean; jobId: string; productId: string | null; mediaAssetId: string; publicationId: string | null }>('/ops/store/media', {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-store-media') },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-store-media', payload) },
     body: JSON.stringify(payload),
   });
 }
@@ -78,7 +80,7 @@ export async function fetchOpsList(entity: 'teams' | 'players' | 'products' | 'e
 export async function patchOpsEntity(entity: 'teams' | 'players' | 'products' | 'events' | 'schedules', id: string, payload: Record<string, unknown>) {
   return apiFetch<{ ok: boolean; data: unknown }>(`/ops/${entity}/${id}`, {
     method: 'PATCH',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-patch-${entity}-${id}`) },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-patch-${entity}-${id}`, payload) },
     body: JSON.stringify(payload),
   });
 }
@@ -93,7 +95,7 @@ export async function deleteOpsEntity(entity: 'teams' | 'players' | 'products' |
 export async function submitScoresImport(rows: Record<string, string>[]) {
   return apiFetch<{ ok: boolean; inserted: number; failed: number; errors: string[] }>('/ops/scores/import', {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-scores-csv') },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-scores-csv', { rows }) },
     body: JSON.stringify({ rows }),
   });
 }
@@ -105,12 +107,12 @@ export async function manualOpsAction(
 ) {
   return apiFetch<{ ok: boolean; error?: string }>(`/ops/manual/${kind}/${action}`, {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-manual-${kind}-${action}`) },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-manual-${kind}-${action}`, payload) },
     body: JSON.stringify(payload),
   });
 }
 
-// ── Ingest Lifecycle ─────────────────────────────────────────────────────────
+// â”€â”€ Ingest Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 export type IngestJob = {
   id: string;
@@ -132,20 +134,23 @@ export async function getIngestJobStatus(jobId: string) {
 export async function approveIngestJob(jobId: string) {
   return apiFetch<{ ok: boolean; state: string }>(`/ops/ingest/${jobId}/approve`, {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-approve-${jobId}`) },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-approve-${jobId}`, { action: 'approve' }) },
   });
 }
 
 export async function rejectIngestJob(jobId: string) {
   return apiFetch<{ ok: boolean; state: string }>(`/ops/ingest/${jobId}/reject`, {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-reject-${jobId}`) },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-reject-${jobId}`, { action: 'reject' }) },
   });
 }
 
 export async function replayIngestJob(jobId: string) {
   return apiFetch<{ ok: boolean; newJobId: string; state: string }>(`/ops/ingest/${jobId}/replay`, {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-replay-${jobId}`) },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-ingest-replay-${jobId}`, { action: 'replay' }) },
   });
 }
+
+
+

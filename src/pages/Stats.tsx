@@ -133,7 +133,7 @@ const StatsPage = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {visibleRows.map((p, i) => (
+                    {visibleRows.map((p) => (
                       <tr key={p.id} onClick={() => setSelectedPlayer(p.id)} className={`border-b border-border cursor-pointer transition-colors hover:bg-secondary/50 ${selectedPlayer === p.id ? 'bg-secondary' : ''}`}>
                         <td className="p-3">
                           <div className="flex items-center gap-2">

@@ -1,11 +1,10 @@
 import { parseCsv } from '@/lib/parseCsv';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
 import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord, manualOpsAction } from '@/lib/api/ops';
-import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
 import { fetchScores, submitScoreManual, submitScoresCsvImport, parseScoreboardImage } from '@/lib/api/scores';
@@ -40,7 +39,7 @@ const OpsPage = () => {
   const [potgForm, setPotgForm] = useState({ playerName: '', team: '', pts: '', rebs: '', assts: '', gameResult: '', leagueId: 'wbl', date: new Date().toISOString().split('T')[0] });
   const isSuperAdmin = roles.includes('super_admin');
 
-  // ── Admin CRUD form state ──────────────────────────────────────────────────
+  // â”€â”€ Admin CRUD form state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [teamForm, setTeamForm] = useState({ name: '', leagueId: '', seasonId: '', divisionId: '' });
   const [deleteTeamId, setDeleteTeamId] = useState('');
 
@@ -64,7 +63,7 @@ const OpsPage = () => {
   const [storeSuspendId, setStoreSuspendId] = useState('');
   const [storeDeleteId, setStoreDeleteId] = useState('');
 
-  // ── Scores state ──────────────────────────────────────────────────────────
+  // â”€â”€ Scores state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   // --- Event Graphics Parser State ---
   const eventFileRef = useRef<HTMLInputElement>(null);
@@ -79,7 +78,7 @@ const OpsPage = () => {
   const scoreboardFileRef = useRef<HTMLInputElement>(null);
   const scoresCsvFileRef = useRef<HTMLInputElement>(null);
   const [scoresCsvRows, setScoresCsvRows] = useState<Record<string, string>[]>([]);
-  const [scoreboardImageFile, setScoreboardImageFile] = useState<File | null>(null);
+  const [, setScoreboardImageFile] = useState<File | null>(null);
   const [scoreboardParseState, setScoreboardParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
   const [scoreboardParseError, setScoreboardParseError] = useState<string | null>(null);
   const defaultScoreForm = {
@@ -99,16 +98,19 @@ const OpsPage = () => {
   const updateStoreBatchItem = (i: number, field: string, value: string) =>
     setStoreBatchItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
 
+  const fileToBase64 = async (file: File) => {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+    return btoa(binary);
+  };
+
   const handlePotgImageUpload = async (file: File) => {
     setPotgParseState('parsing');
     setPotgParseError(null);
     setPotgImageFile(file);
     try {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-      const imageBase64 = btoa(binary);
+      const imageBase64 = await fileToBase64(file);
       const result = await parsePotgImage(imageBase64, file.type as string);
       if (result.ok && result.data) {
         setPotgForm(f => ({
@@ -122,7 +124,7 @@ const OpsPage = () => {
         }));
         setPotgParseState('parsed');
       } else {
-        setPotgParseError('Parse failed — fill in manually');
+        setPotgParseError('Parse failed â€” fill in manually');
         setPotgParseState('error');
       }
     } catch (e) {
@@ -147,17 +149,17 @@ const OpsPage = () => {
 
   const potgMutation = useMutation({
     mutationFn: async () => {
-      // Upload the POTG graphic to Supabase storage.
-      // Auto-detect portrait (560×747) vs landscape (747×560) and fill with cover crop.
-      let imageUrl: string | undefined;
-      if (potgImageFile && hasSupabaseClientConfig) {
-        const supabase = requireSupabaseClient();
+      // Worker-owned media ingest: client only sends resized image bytes,
+      // Worker performs storage write with service-role credentials.
+      let imageUpload: { base64: string; mimeType: string; fileName?: string } | undefined;
+      if (potgImageFile) {
         const dims = await inferTargetDimensions(potgImageFile);
         const resized = await resizeImageToFit(potgImageFile, dims.width, dims.height, dims.mode);
-        const objectPath = `potg/${potgForm.leagueId}/${crypto.randomUUID()}.jpg`;
-        const upload = await supabase.storage.from('media').upload(objectPath, resized, { upsert: true });
-        if (upload.error) throw upload.error;
-        imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
+        imageUpload = {
+          base64: await fileToBase64(resized),
+          mimeType: resized.type || 'image/jpeg',
+          fileName: resized.name,
+        };
       }
       return submitPotgRecord({
         playerName: potgForm.playerName,
@@ -168,7 +170,7 @@ const OpsPage = () => {
         gameResult: potgForm.gameResult,
         leagueId: potgForm.leagueId,
         date: potgForm.date,
-        imageUrl,
+        imageUpload,
       });
     },
     onSuccess: async () => {
@@ -180,24 +182,23 @@ const OpsPage = () => {
   const storeMutation = useMutation({
     mutationFn: async () => {
       if (!storeForm.imageFile) throw new Error('Image is required');
-      const supabase = requireSupabaseClient();
       const resized = await resizeImageToFit(storeForm.imageFile, 800, 800);
-      const objectPath = `store/${crypto.randomUUID()}.jpg`;
-      const upload = await supabase.storage.from('media').upload(objectPath, resized, { upsert: true });
-      if (upload.error) throw upload.error;
-      const imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
       return uploadStoreMedia({
         title: storeForm.title,
         price: Number(storeForm.price),
         category: storeForm.category,
         publishStatus: storeForm.publishStatus,
         sale: storeForm.sale,
-        imageUrl,
+        imageUpload: {
+          base64: await fileToBase64(resized),
+          mimeType: resized.type || 'image/jpeg',
+          fileName: resized.name,
+        },
       });
     },
   });
 
-  // ── Admin CRUD mutations ───────────────────────────────────────────────
+  // â”€â”€ Admin CRUD mutations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const createTeamMutation = useMutation({
     mutationFn: () => manualOpsAction('team', 'create', {
       name: teamForm.name,
@@ -325,7 +326,7 @@ const OpsPage = () => {
     },
   });
 
-  // ── Scores mutations ───────────────────────────────────────────────────────
+  // â”€â”€ Scores mutations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const scoresQuery = useQuery({
     queryKey: ['ops-scores-list'],
     queryFn: () => fetchScores(),
@@ -369,7 +370,7 @@ const OpsPage = () => {
     setEventParseState('parsing');
     setEventParseError('');
     try {
-      // Resize to correct AR before parsing and storage (landscape 747×560, portrait 560×747)
+      // Resize to correct AR before parsing and storage (landscape 747Ã—560, portrait 560Ã—747)
       const dims = await inferTargetDimensions(file);
       const resizedFile = await resizeImageToFit(file, dims.width, dims.height, dims.mode);
 
@@ -434,11 +435,7 @@ Return valid JSON only, no markdown.
     setScoreboardParseError(null);
     setScoreboardImageFile(file);
     try {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-      const imageBase64 = btoa(binary);
+      const imageBase64 = await fileToBase64(file);
       const result = await parseScoreboardImage(imageBase64, file.type);
       if (result.ok && result.data) {
         const d = result.data;
@@ -454,7 +451,7 @@ Return valid JSON only, no markdown.
         }));
         setScoreboardParseState('parsed');
       } else {
-        setScoreboardParseError('Parse failed — fill in manually');
+        setScoreboardParseError('Parse failed â€” fill in manually');
         setScoreboardParseState('error');
       }
     } catch (e) {
@@ -472,7 +469,7 @@ Return valid JSON only, no markdown.
         <Shield className="w-6 h-6 text-primary" />
         <div>
           <h1 className="font-display text-3xl md:text-4xl font-bold">Ops Console</h1>
-          <p className="text-xs text-muted-foreground">Signed in as {user?.email ?? 'unknown'} · roles: {roles.join(', ') || 'none'}</p>
+          <p className="text-xs text-muted-foreground">Signed in as {user?.email ?? 'unknown'} Â· roles: {roles.join(', ') || 'none'}</p>
         </div>
       </div>
 
@@ -491,7 +488,7 @@ Return valid JSON only, no markdown.
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Failed rows</p><p className="stat-numeral text-3xl text-destructive">{jobs.reduce((acc, j) => acc + (j.failed_rows || 0), 0)}</p></div>
           <div className="panel p-4 md:col-span-3">
             <h2 className="font-display text-xl mb-2">Recent Actions</h2>
-            {latestSummary.length === 0 ? <p className="text-sm text-muted-foreground">No imports yet.</p> : latestSummary.map((job) => <p key={job.id} className="text-sm">{job.job_type} · {job.status} · {job.inserted_rows}/{job.total_rows}</p>)}
+            {latestSummary.length === 0 ? <p className="text-sm text-muted-foreground">No imports yet.</p> : latestSummary.map((job) => <p key={job.id} className="text-sm">{job.job_type} Â· {job.status} Â· {job.inserted_rows}/{job.total_rows}</p>)}
           </div>
         </div>
       )}
@@ -500,11 +497,11 @@ Return valid JSON only, no markdown.
         <div className="space-y-6">
           {!isSuperAdmin && <p className="text-sm text-destructive font-semibold panel p-4">Super Admin role required for score management.</p>}
 
-          {/* ── Scoreboard image OCR ──────────────────────────────── */}
+          {/* â”€â”€ Scoreboard image OCR â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
           <div className="panel p-4 space-y-4 max-w-2xl">
             <div>
               <h2 className="font-display text-xl flex items-center gap-2"><Upload className="w-5 h-5 text-primary" /> Scoreboard Image Parser</h2>
-              <p className="text-xs text-muted-foreground mt-1">Upload a scoreboard photo — Claude Vision auto-extracts team names and scores.</p>
+              <p className="text-xs text-muted-foreground mt-1">Upload a scoreboard photo â€” Claude Vision auto-extracts team names and scores.</p>
             </div>
             <div
               className="border-2 border-dashed border-border rounded-sm p-6 text-center cursor-pointer hover:border-primary/40 transition-colors"
@@ -514,18 +511,18 @@ Return valid JSON only, no markdown.
             >
               <input ref={scoreboardFileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void handleScoreboardImage(f); }} />
               {scoreboardParseState === 'parsing' ? (
-                <div className="flex flex-col items-center gap-2"><Loader2 className="w-6 h-6 text-primary animate-spin" /><p className="text-sm text-muted-foreground">Parsing with Claude Vision…</p></div>
+                <div className="flex flex-col items-center gap-2"><Loader2 className="w-6 h-6 text-primary animate-spin" /><p className="text-sm text-muted-foreground">Parsing with Claude Visionâ€¦</p></div>
               ) : scoreboardParseState === 'parsed' ? (
-                <div className="flex flex-col items-center gap-1"><CheckCircle2 className="w-5 h-5 text-success" /><p className="text-xs text-success font-medium">Data extracted — review below</p><p className="text-[10px] text-muted-foreground">Click to parse another image</p></div>
+                <div className="flex flex-col items-center gap-1"><CheckCircle2 className="w-5 h-5 text-success" /><p className="text-xs text-success font-medium">Data extracted â€” review below</p><p className="text-[10px] text-muted-foreground">Click to parse another image</p></div>
               ) : scoreboardParseState === 'error' ? (
                 <div className="flex flex-col items-center gap-1"><AlertCircle className="w-5 h-5 text-destructive" /><p className="text-xs text-destructive">{scoreboardParseError}</p><p className="text-[10px] text-muted-foreground">Fill in fields manually below</p></div>
               ) : (
-                <div className="flex flex-col items-center gap-2"><Upload className="w-6 h-6 text-muted-foreground" /><p className="text-sm text-muted-foreground">Drop scoreboard photo or click to upload</p><p className="text-[10px] text-muted-foreground">PNG, JPG — reads team names, scores, date</p></div>
+                <div className="flex flex-col items-center gap-2"><Upload className="w-6 h-6 text-muted-foreground" /><p className="text-sm text-muted-foreground">Drop scoreboard photo or click to upload</p><p className="text-[10px] text-muted-foreground">PNG, JPG â€” reads team names, scores, date</p></div>
               )}
             </div>
           </div>
 
-          {/* ── Manual score entry ────────────────────────────────── */}
+          {/* â”€â”€ Manual score entry â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
           <div className="panel p-4 space-y-4 max-w-2xl">
             <h2 className="font-display text-xl flex items-center gap-2"><Trophy className="w-5 h-5 text-primary" /> Manual Score Entry</h2>
 
@@ -542,7 +539,7 @@ Return valid JSON only, no markdown.
               </div>
             </div>
 
-            {/* League selector — only for league games */}
+            {/* League selector â€” only for league games */}
             {scoresForm.category === 'league' && (
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">League</label>
@@ -558,7 +555,7 @@ Return valid JSON only, no markdown.
               </div>
             )}
 
-            {/* Event name — for special events */}
+            {/* Event name â€” for special events */}
             {scoresForm.category === 'special_event' && (
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Event Name</label>
@@ -582,11 +579,11 @@ Return valid JSON only, no markdown.
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Away Score</label>
-                <input type="number" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="—" value={scoresForm.awayScore} onChange={e => setScoresForm(f => ({ ...f, awayScore: e.target.value }))} />
+                <input type="number" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="â€”" value={scoresForm.awayScore} onChange={e => setScoresForm(f => ({ ...f, awayScore: e.target.value }))} />
               </div>
               <div>
                 <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Home Score</label>
-                <input type="number" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="—" value={scoresForm.homeScore} onChange={e => setScoresForm(f => ({ ...f, homeScore: e.target.value }))} />
+                <input type="number" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="â€”" value={scoresForm.homeScore} onChange={e => setScoresForm(f => ({ ...f, homeScore: e.target.value }))} />
               </div>
             </div>
 
@@ -610,7 +607,7 @@ Return valid JSON only, no markdown.
             {/* Notes */}
             <div>
               <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Notes (optional)</label>
-              <input className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="e.g. OT, playoff game, mercy rule…" value={scoresForm.notes} onChange={e => setScoresForm(f => ({ ...f, notes: e.target.value }))} />
+              <input className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="e.g. OT, playoff game, mercy ruleâ€¦" value={scoresForm.notes} onChange={e => setScoresForm(f => ({ ...f, notes: e.target.value }))} />
             </div>
 
             <button
@@ -618,13 +615,13 @@ Return valid JSON only, no markdown.
               className="w-full gold-bg py-2.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm disabled:opacity-50 transition-opacity"
               onClick={() => scoreManualMutation.mutate()}
             >
-              {scoreManualMutation.isPending ? 'Saving…' : 'Save Score'}
+              {scoreManualMutation.isPending ? 'Savingâ€¦' : 'Save Score'}
             </button>
             {scoreManualMutation.error && <p className="text-xs text-destructive">{(scoreManualMutation.error as Error).message}</p>}
-            {scoreManualMutation.isSuccess && <p className="text-xs text-success">Score saved — game ID: {scoreManualMutation.data?.gameId?.slice(0, 8)}</p>}
+            {scoreManualMutation.isSuccess && <p className="text-xs text-success">Score saved â€” game ID: {scoreManualMutation.data?.gameId?.slice(0, 8)}</p>}
           </div>
 
-          {/* ── CSV bulk import ───────────────────────────────────── */}
+          {/* â”€â”€ CSV bulk import â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
           <div className="panel p-4 space-y-3 max-w-2xl">
             <div>
               <h2 className="font-display text-xl">CSV Bulk Import</h2>
@@ -643,7 +640,7 @@ Return valid JSON only, no markdown.
             {scoresCsvRows.length > 0 && (
               <div className="max-h-44 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">
                 {scoresCsvRows.slice(0, 6).map((row, i) => <pre key={i} className="truncate">{JSON.stringify(row)}</pre>)}
-                {scoresCsvRows.length > 6 && <p className="text-muted-foreground mt-1">…and {scoresCsvRows.length - 6} more</p>}
+                {scoresCsvRows.length > 6 && <p className="text-muted-foreground mt-1">â€¦and {scoresCsvRows.length - 6} more</p>}
               </div>
             )}
             <button
@@ -651,23 +648,23 @@ Return valid JSON only, no markdown.
               className="gold-bg px-4 py-2 rounded-sm text-sm font-semibold disabled:opacity-60"
               onClick={() => scoresCsvMutation.mutate()}
             >
-              {scoresCsvMutation.isPending ? 'Importing…' : `Import ${scoresCsvRows.length} Row${scoresCsvRows.length !== 1 ? 's' : ''}`}
+              {scoresCsvMutation.isPending ? 'Importingâ€¦' : `Import ${scoresCsvRows.length} Row${scoresCsvRows.length !== 1 ? 's' : ''}`}
             </button>
             {scoresCsvMutation.error && <p className="text-xs text-destructive">{(scoresCsvMutation.error as Error).message}</p>}
             {scoresCsvMutation.data && (
               <p className="text-xs text-success">
-                Imported: {scoresCsvMutation.data.inserted} · Failed: {scoresCsvMutation.data.failed}
+                Imported: {scoresCsvMutation.data.inserted} Â· Failed: {scoresCsvMutation.data.failed}
                 {scoresCsvMutation.data.errors?.length > 0 && (
-                  <span className="text-warning"> · {scoresCsvMutation.data.errors[0]}</span>
+                  <span className="text-warning"> Â· {scoresCsvMutation.data.errors[0]}</span>
                 )}
               </p>
             )}
           </div>
 
-          {/* ── Recent scores list ────────────────────────────────── */}
+          {/* â”€â”€ Recent scores list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
           <div className="panel p-4 max-w-4xl">
             <h2 className="font-display text-xl mb-3">Recent Scores</h2>
-            {scoresQuery.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+            {scoresQuery.isLoading && <p className="text-sm text-muted-foreground">Loadingâ€¦</p>}
             {!scoresQuery.isLoading && (scoresQuery.data?.games ?? []).length === 0 && (
               <p className="text-sm text-muted-foreground">No scores yet. Add them above or import a CSV.</p>
             )}
@@ -681,7 +678,7 @@ Return valid JSON only, no markdown.
                     <span className="truncate font-medium">{g.awayLabel} vs {g.homeLabel}</span>
                   </div>
                   <div className="flex items-center gap-3 flex-shrink-0">
-                    <span className="stat-numeral text-sm">{g.awayScore ?? '—'} – {g.homeScore ?? '—'}</span>
+                    <span className="stat-numeral text-sm">{g.awayScore ?? 'â€”'} â€“ {g.homeScore ?? 'â€”'}</span>
                     <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${g.status === 'final' ? 'text-green-400 bg-green-500/10' : g.status === 'live' ? 'text-red-400 bg-red-500/15' : 'text-muted-foreground bg-secondary'}`}>{g.status}</span>
                     {g.gameDate && <span className="text-muted-foreground">{new Date(g.gameDate).toLocaleDateString('en-CA', { month: 'short', day: 'numeric' })}</span>}
                   </div>
@@ -695,7 +692,7 @@ Return valid JSON only, no markdown.
       {(['teams', 'players', 'schedules', 'events'] as const).includes(activeTab as never) && (
         <div className="panel p-4 space-y-3">
           <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
-          {/* League tag — every imported row gets this league_id */}
+          {/* League tag â€” every imported row gets this league_id */}
           <div>
             <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Target League</label>
             <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
@@ -726,7 +723,7 @@ Return valid JSON only, no markdown.
             className="gold-bg px-4 py-2 rounded-sm disabled:opacity-70"
             onClick={() => importMutation.mutate({ kind: activeTab as 'teams' | 'players' | 'schedules' | 'events', rows: csvRows })}
           >
-            {importMutation.isPending ? 'Importing…' : 'Submit Import'}
+            {importMutation.isPending ? 'Importingâ€¦' : 'Submit Import'}
           </button>
           {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
           {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
@@ -748,7 +745,7 @@ Return valid JSON only, no markdown.
                   <input placeholder="League ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.leagueId} onChange={e => setTeamForm(f => ({ ...f, leagueId: e.target.value }))} />
                   <input placeholder="Season ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.seasonId} onChange={e => setTeamForm(f => ({ ...f, seasonId: e.target.value }))} />
                   <input placeholder="Division ID (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.divisionId} onChange={e => setTeamForm(f => ({ ...f, divisionId: e.target.value }))} />
-                  <button disabled={!teamForm.name || !teamForm.leagueId || !teamForm.seasonId || createTeamMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createTeamMutation.mutate()}>{createTeamMutation.isPending ? 'Creating…' : 'Create Team'}</button>
+                  <button disabled={!teamForm.name || !teamForm.leagueId || !teamForm.seasonId || createTeamMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createTeamMutation.mutate()}>{createTeamMutation.isPending ? 'Creatingâ€¦' : 'Create Team'}</button>
                   {createTeamMutation.error && <p className="text-xs text-destructive">{(createTeamMutation.error as Error).message}</p>}
                   {createTeamMutation.isSuccess && <p className="text-xs text-success">Team created.</p>}
                 </div>
@@ -757,7 +754,7 @@ Return valid JSON only, no markdown.
                 <h3 className="text-sm font-semibold text-destructive mb-2">Delete Team</h3>
                 <div className="flex gap-2">
                   <input placeholder="Team ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={deleteTeamId} onChange={e => setDeleteTeamId(e.target.value)} />
-                  <button disabled={!deleteTeamId || deleteTeamMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteTeamMutation.mutate()}>{deleteTeamMutation.isPending ? '…' : 'Delete'}</button>
+                  <button disabled={!deleteTeamId || deleteTeamMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteTeamMutation.mutate()}>{deleteTeamMutation.isPending ? 'â€¦' : 'Delete'}</button>
                 </div>
                 {deleteTeamMutation.error && <p className="text-xs text-destructive mt-1">{(deleteTeamMutation.error as Error).message}</p>}
                 {deleteTeamMutation.isSuccess && <p className="text-xs text-success mt-1">Team archived.</p>}
@@ -784,7 +781,7 @@ Return valid JSON only, no markdown.
                     <input placeholder="Jersey #" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={playerForm.jerseyNumber} onChange={e => setPlayerForm(f => ({ ...f, jerseyNumber: e.target.value }))} />
                     <input placeholder="Position" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={playerForm.position} onChange={e => setPlayerForm(f => ({ ...f, position: e.target.value }))} />
                   </div>
-                  <button disabled={!playerForm.userId || createPlayerMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createPlayerMutation.mutate()}>{createPlayerMutation.isPending ? 'Creating…' : 'Create Player'}</button>
+                  <button disabled={!playerForm.userId || createPlayerMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createPlayerMutation.mutate()}>{createPlayerMutation.isPending ? 'Creatingâ€¦' : 'Create Player'}</button>
                   {createPlayerMutation.error && <p className="text-xs text-destructive">{(createPlayerMutation.error as Error).message}</p>}
                   {createPlayerMutation.isSuccess && <p className="text-xs text-success">Player created.</p>}
                 </div>
@@ -794,7 +791,7 @@ Return valid JSON only, no markdown.
                 <div className="space-y-2">
                   <div className="flex gap-2">
                     <input placeholder="Player ID to Suspend" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={suspendPlayerId} onChange={e => setSuspendPlayerId(e.target.value)} />
-                    <button disabled={!suspendPlayerId || suspendPlayerMutation.isPending} className="bg-warning hover:bg-warning/90 text-warning-foreground px-4 py-2 rounded-sm text-xs text-black disabled:opacity-60" onClick={() => suspendPlayerMutation.mutate()}>{suspendPlayerMutation.isPending ? '…' : 'Suspend'}</button>
+                    <button disabled={!suspendPlayerId || suspendPlayerMutation.isPending} className="bg-warning hover:bg-warning/90 text-warning-foreground px-4 py-2 rounded-sm text-xs text-black disabled:opacity-60" onClick={() => suspendPlayerMutation.mutate()}>{suspendPlayerMutation.isPending ? 'â€¦' : 'Suspend'}</button>
                   </div>
                   <input placeholder="Reason (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={suspendPlayerReason} onChange={e => setSuspendPlayerReason(e.target.value)} />
                   {suspendPlayerMutation.error && <p className="text-xs text-destructive">{(suspendPlayerMutation.error as Error).message}</p>}
@@ -805,7 +802,7 @@ Return valid JSON only, no markdown.
                 <h3 className="text-sm font-semibold text-destructive mb-2">Delete Player</h3>
                 <div className="flex gap-2">
                   <input placeholder="Player ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={deletePlayerId} onChange={e => setDeletePlayerId(e.target.value)} />
-                  <button disabled={!deletePlayerId || deletePlayerMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deletePlayerMutation.mutate()}>{deletePlayerMutation.isPending ? '…' : 'Delete'}</button>
+                  <button disabled={!deletePlayerId || deletePlayerMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deletePlayerMutation.mutate()}>{deletePlayerMutation.isPending ? 'â€¦' : 'Delete'}</button>
                 </div>
                 {deletePlayerMutation.error && <p className="text-xs text-destructive mt-1">{(deletePlayerMutation.error as Error).message}</p>}
                 {deletePlayerMutation.isSuccess && <p className="text-xs text-success mt-1">Player deleted.</p>}
@@ -838,7 +835,7 @@ Return valid JSON only, no markdown.
                       <input type="datetime-local" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm mt-1" value={scheduleForm.endsAt} onChange={e => setScheduleForm(f => ({ ...f, endsAt: e.target.value }))} />
                     </div>
                   </div>
-                  <button disabled={!scheduleForm.leagueId || !scheduleForm.seasonId || !scheduleForm.startsAt || createScheduleMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createScheduleMutation.mutate()}>{createScheduleMutation.isPending ? 'Creating…' : 'Create Schedule'}</button>
+                  <button disabled={!scheduleForm.leagueId || !scheduleForm.seasonId || !scheduleForm.startsAt || createScheduleMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createScheduleMutation.mutate()}>{createScheduleMutation.isPending ? 'Creatingâ€¦' : 'Create Schedule'}</button>
                   {createScheduleMutation.error && <p className="text-xs text-destructive">{(createScheduleMutation.error as Error).message}</p>}
                   {createScheduleMutation.isSuccess && <p className="text-xs text-success">Schedule slot created.</p>}
                 </div>
@@ -847,7 +844,7 @@ Return valid JSON only, no markdown.
                 <h3 className="text-sm font-semibold text-destructive mb-2">Delete Schedule Entry</h3>
                 <div className="flex gap-2">
                   <input placeholder="Schedule Slot ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={deleteScheduleId} onChange={e => setDeleteScheduleId(e.target.value)} />
-                  <button disabled={!deleteScheduleId || deleteScheduleMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteScheduleMutation.mutate()}>{deleteScheduleMutation.isPending ? '…' : 'Delete'}</button>
+                  <button disabled={!deleteScheduleId || deleteScheduleMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteScheduleMutation.mutate()}>{deleteScheduleMutation.isPending ? 'â€¦' : 'Delete'}</button>
                 </div>
                 {deleteScheduleMutation.error && <p className="text-xs text-destructive mt-1">{(deleteScheduleMutation.error as Error).message}</p>}
                 {deleteScheduleMutation.isSuccess && <p className="text-xs text-success mt-1">Schedule slot deleted.</p>}
@@ -871,7 +868,7 @@ Return valid JSON only, no markdown.
                   <input placeholder="Location (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventForm.location} onChange={e => setEventForm(f => ({ ...f, location: e.target.value }))} />
                   <input placeholder="League ID (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventForm.leagueId} onChange={e => setEventForm(f => ({ ...f, leagueId: e.target.value }))} />
                   <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventForm.date} onChange={e => setEventForm(f => ({ ...f, date: e.target.value }))} />
-                  <button disabled={!eventForm.title || createEventMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createEventMutation.mutate()}>{createEventMutation.isPending ? 'Creating…' : 'Create Event'}</button>
+                  <button disabled={!eventForm.title || createEventMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createEventMutation.mutate()}>{createEventMutation.isPending ? 'Creatingâ€¦' : 'Create Event'}</button>
                   {createEventMutation.error && <p className="text-xs text-destructive">{(createEventMutation.error as Error).message}</p>}
                   {createEventMutation.isSuccess && <p className="text-xs text-success">Event created.</p>}
                 </div>
@@ -894,7 +891,7 @@ Return valid JSON only, no markdown.
                   {eventParseState === 'parsing' ? (
                     <div className="flex flex-col items-center gap-2">
                       <Loader2 className="w-6 h-6 text-primary animate-spin" />
-                      <p className="text-sm text-muted-foreground">Extracting event details…</p>
+                      <p className="text-sm text-muted-foreground">Extracting event detailsâ€¦</p>
                     </div>
                   ) : eventParseState === 'parsed' ? (
                     <div className="flex flex-col items-center gap-1">
@@ -933,7 +930,7 @@ Return valid JSON only, no markdown.
                       setTimeout(() => createEventMutation.mutate(), 0);
                     }}
                   >
-                    {createEventMutation.isPending ? 'Creating…' : 'Create Event from Extraction'}
+                    {createEventMutation.isPending ? 'Creatingâ€¦' : 'Create Event from Extraction'}
                   </button>
                 </div>
               </div>
@@ -941,7 +938,7 @@ Return valid JSON only, no markdown.
                 <h3 className="text-sm font-semibold text-destructive mb-2">Delete Event</h3>
                 <div className="flex gap-2">
                   <input placeholder="Event ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={deleteEventId} onChange={e => setDeleteEventId(e.target.value)} />
-                  <button disabled={!deleteEventId || deleteEventMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteEventMutation.mutate()}>{deleteEventMutation.isPending ? '…' : 'Delete'}</button>
+                  <button disabled={!deleteEventId || deleteEventMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteEventMutation.mutate()}>{deleteEventMutation.isPending ? 'â€¦' : 'Delete'}</button>
                 </div>
                 {deleteEventMutation.error && <p className="text-xs text-destructive mt-1">{(deleteEventMutation.error as Error).message}</p>}
                 {deleteEventMutation.isSuccess && <p className="text-xs text-success mt-1">Event archived.</p>}
@@ -979,7 +976,7 @@ Return valid JSON only, no markdown.
                         </select>
                       </div>
                     ))}
-                    <button disabled={storeBatchItems.every(it => !it.title.trim()) || storeBatchMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => storeBatchMutation.mutate()}>{storeBatchMutation.isPending ? 'Submitting…' : 'Submit Batch'}</button>
+                    <button disabled={storeBatchItems.every(it => !it.title.trim()) || storeBatchMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => storeBatchMutation.mutate()}>{storeBatchMutation.isPending ? 'Submittingâ€¦' : 'Submit Batch'}</button>
                     {storeBatchMutation.error && <p className="text-xs text-destructive">{(storeBatchMutation.error as Error).message}</p>}
                     {storeBatchMutation.isSuccess && <p className="text-xs text-success">Products created.</p>}
                   </div>
@@ -992,14 +989,14 @@ Return valid JSON only, no markdown.
                     <div className="border border-warning/20 p-3 rounded-sm bg-warning/5">
                       <h4 className="text-[10px] font-semibold text-warning mb-2 uppercase tracking-widest">Suspend</h4>
                       <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" value={storeSuspendId} onChange={e => setStoreSuspendId(e.target.value)} />
-                      <button disabled={!storeSuspendId || storeSuspendMutation.isPending} className="bg-warning hover:bg-warning/90 text-warning-foreground px-3 py-1.5 rounded-sm text-[10px] w-full text-black disabled:opacity-60" onClick={() => storeSuspendMutation.mutate()}>{storeSuspendMutation.isPending ? '…' : 'Suspend'}</button>
+                      <button disabled={!storeSuspendId || storeSuspendMutation.isPending} className="bg-warning hover:bg-warning/90 text-warning-foreground px-3 py-1.5 rounded-sm text-[10px] w-full text-black disabled:opacity-60" onClick={() => storeSuspendMutation.mutate()}>{storeSuspendMutation.isPending ? 'â€¦' : 'Suspend'}</button>
                       {storeSuspendMutation.error && <p className="text-[10px] text-destructive mt-1">{(storeSuspendMutation.error as Error).message}</p>}
                       {storeSuspendMutation.isSuccess && <p className="text-[10px] text-success mt-1">Product suspended.</p>}
                     </div>
                     <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
                       <h4 className="text-[10px] font-semibold text-destructive mb-2 uppercase tracking-widest">Delete</h4>
                       <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" value={storeDeleteId} onChange={e => setStoreDeleteId(e.target.value)} />
-                      <button disabled={!storeDeleteId || storeDeleteMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-3 py-1.5 rounded-sm text-[10px] w-full disabled:opacity-60" onClick={() => storeDeleteMutation.mutate()}>{storeDeleteMutation.isPending ? '…' : 'Delete'}</button>
+                      <button disabled={!storeDeleteId || storeDeleteMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-3 py-1.5 rounded-sm text-[10px] w-full disabled:opacity-60" onClick={() => storeDeleteMutation.mutate()}>{storeDeleteMutation.isPending ? 'â€¦' : 'Delete'}</button>
                       {storeDeleteMutation.error && <p className="text-[10px] text-destructive mt-1">{(storeDeleteMutation.error as Error).message}</p>}
                       {storeDeleteMutation.isSuccess && <p className="text-[10px] text-success mt-1">Product archived.</p>}
                     </div>
@@ -1015,7 +1012,7 @@ Return valid JSON only, no markdown.
         <div className="panel p-4 space-y-5 max-w-xl">
           <div>
             <h2 className="font-display text-xl">POTG Image Parser</h2>
-            <p className="text-xs text-muted-foreground mt-1">Upload a Player of the Game graphic — Claude Vision extracts the data automatically, then you confirm before it writes to the pipeline.</p>
+            <p className="text-xs text-muted-foreground mt-1">Upload a Player of the Game graphic â€” Claude Vision extracts the data automatically, then you confirm before it writes to the pipeline.</p>
           </div>
 
           {/* Image drop zone */}
@@ -1029,12 +1026,12 @@ Return valid JSON only, no markdown.
             {potgParseState === 'parsing' ? (
               <div className="flex flex-col items-center gap-2">
                 <Loader2 className="w-6 h-6 text-primary animate-spin" />
-                <p className="text-sm text-muted-foreground">Parsing with Claude Vision…</p>
+                <p className="text-sm text-muted-foreground">Parsing with Claude Visionâ€¦</p>
               </div>
             ) : potgParseState === 'parsed' ? (
               <div className="flex flex-col items-center gap-1">
                 <CheckCircle2 className="w-5 h-5 text-success" />
-                <p className="text-xs text-success font-medium">Data extracted — review below</p>
+                <p className="text-xs text-success font-medium">Data extracted â€” review below</p>
                 <p className="text-[10px] text-muted-foreground">Click to parse another image</p>
               </div>
             ) : potgParseState === 'error' ? (
@@ -1047,7 +1044,7 @@ Return valid JSON only, no markdown.
               <div className="flex flex-col items-center gap-2">
                 <Upload className="w-6 h-6 text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">Drop POTG graphic or click to upload</p>
-                <p className="text-[10px] text-muted-foreground">PNG, JPG — Claude reads PTS / REB / AST / player name / team / game result</p>
+                <p className="text-[10px] text-muted-foreground">PNG, JPG â€” Claude reads PTS / REB / AST / player name / team / game result</p>
               </div>
             )}
           </div>
@@ -1096,7 +1093,7 @@ Return valid JSON only, no markdown.
             </div>
           </div>
 
-          {/* Live card preview — shown once fields are populated */}
+          {/* Live card preview â€” shown once fields are populated */}
           {(potgParseState === 'parsed' || potgParseState === 'error') && potgForm.playerName && (
             <div>
               <p className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">
@@ -1124,15 +1121,15 @@ Return valid JSON only, no markdown.
             onClick={() => potgMutation.mutate()}
             className="w-full gold-bg py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm disabled:opacity-50 transition-opacity"
           >
-            {potgMutation.isPending ? (potgImageFile ? 'Resizing & Uploading…' : 'Submitting to Pipeline…') : 'Submit to Data Pipeline'}
+            {potgMutation.isPending ? (potgImageFile ? 'Resizing & Uploadingâ€¦' : 'Submitting to Pipelineâ€¦') : 'Submit to Data Pipeline'}
           </button>
 
           {potgMutation.error && <p className="text-xs text-destructive">{(potgMutation.error as Error).message}</p>}
           {potgMutation.data && (
             <div className="p-3 bg-success/10 border border-success/20 rounded-sm">
               <p className="text-xs text-success font-medium">
-                ✓ Submitted — Job {potgMutation.data.jobId?.slice(0, 8)}
-                {potgMutation.data.matched ? ' · Player profile matched and stats written' : ' · Queued for manual player match'}
+                âœ“ Submitted â€” Job {potgMutation.data.jobId?.slice(0, 8)}
+                {potgMutation.data.matched ? ' Â· Player profile matched and stats written' : ' Â· Queued for manual player match'}
               </p>
             </div>
           )}
@@ -1146,8 +1143,8 @@ Return valid JSON only, no markdown.
             <div className="space-y-2">
               {jobs.map((job) => (
                 <div key={job.id} className="border border-border rounded-sm p-3 text-sm">
-                  <p className="font-medium">{job.job_type} · {job.status}</p>
-                  <p className="text-xs text-muted-foreground">Rows {job.inserted_rows}/{job.total_rows} · failed {job.failed_rows}</p>
+                  <p className="font-medium">{job.job_type} Â· {job.status}</p>
+                  <p className="text-xs text-muted-foreground">Rows {job.inserted_rows}/{job.total_rows} Â· failed {job.failed_rows}</p>
                 </div>
               ))}
             </div>
@@ -1159,3 +1156,4 @@ Return valid JSON only, no markdown.
 };
 
 export default OpsPage;
+

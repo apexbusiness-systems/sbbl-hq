@@ -1,0 +1,39 @@
+﻿{
+    "generated_at_utc":  "2026-04-07T22:10:59Z",
+    "source":  "docs/pipeline-maps",
+    "files":  [
+                  "PIPELINE_MAP_latest.md",
+                  "PIPELINE_MAP_v1.0.0.md",
+                  "PIPELINE_MAP_v1.0.1.md",
+                  "STATS_PIPELINE_latest.md",
+                  "STATS_PIPELINE_v1.1.0.md",
+                  "STATS_PIPELINE_v1.2.0.md",
+                  "STATS_PIPELINE_v1.2.1.md",
+                  "STREAM_GATING_latest.md",
+                  "STREAM_GATING_v1.1.0_archived.md",
+                  "STREAM_GATING_v1.2.0_archived.md",
+                  "STREAM_GATING_v1.3.0.md",
+                  "STREAM_GATING_v1.4.0.md",
+                  "STREAM_GATING_v1.4.1.md",
+                  "PIPELINE_MAP_v1.1.0.md",
+                  "STATS_PIPELINE_v1.2.2.md",
+                  "STREAM_GATING_v1.4.2.md"
+              ],
+    "latest":  {
+                   "PIPELINE_MAP":  {
+                                        "version":  "1.1.0",
+                                        "file":  "PIPELINE_MAP_v1.1.0.md",
+                                        "alias":  "PIPELINE_MAP_latest.md"
+                                    },
+                   "STATS_PIPELINE":  {
+                                          "version":  "1.2.2",
+                                          "file":  "STATS_PIPELINE_v1.2.2.md",
+                                          "alias":  "STATS_PIPELINE_latest.md"
+                                      },
+                   "STREAM_GATING":  {
+                                         "version":  "1.4.2",
+                                         "file":  "STREAM_GATING_v1.4.2.md",
+                                         "alias":  "STREAM_GATING_latest.md"
+                                     }
+               }
+}
