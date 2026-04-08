@@ -1,3 +1,4 @@
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { parseCsv } from '@/lib/parseCsv';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -500,16 +501,20 @@ Return valid JSON only, no markdown.
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
+      <Tabs value={activeTab} onValueChange={(val) => setActiveTab(val as Tab)} className="space-y-6">
+      <TabsList className="flex flex-wrap h-auto w-full justify-start gap-2 bg-transparent p-0">
         {tabs.map((tab) => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)} className={`px-3 py-2 rounded-sm text-sm border ${activeTab === tab.id ? 'border-primary text-primary bg-primary/10' : 'border-border text-muted-foreground'}`}>
+          <TabsTrigger
+            key={tab.id}
+            value={tab.id}
+            className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-primary border border-border bg-card"
+          >
             {tab.label}
-          </button>
+          </TabsTrigger>
         ))}
-      </div>
+      </TabsList>
 
-      {activeTab === 'overview' && (
-        <div className="grid md:grid-cols-3 gap-4">
+      <TabsContent value="overview"><div className="grid md:grid-cols-3 gap-4">
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Import jobs</p><p className="stat-numeral text-3xl">{jobs.length}</p></div>
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Recent successful rows</p><p className="stat-numeral text-3xl">{jobs.reduce((acc, j) => acc + (j.inserted_rows || 0), 0)}</p></div>
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Failed rows</p><p className="stat-numeral text-3xl text-destructive">{jobs.reduce((acc, j) => acc + (j.failed_rows || 0), 0)}</p></div>
@@ -518,10 +523,9 @@ Return valid JSON only, no markdown.
             {latestSummary.length === 0 ? <p className="text-sm text-muted-foreground">No imports yet.</p> : latestSummary.map((job) => <p key={job.id} className="text-sm">{job.job_type} · {job.status} · {job.inserted_rows}/{job.total_rows}</p>)}
           </div>
         </div>
-      )}
+      </TabsContent>
 
-      {activeTab === 'scores' && (
-        <div className="space-y-6">
+      <TabsContent value="scores"><div className="space-y-6">
           {!isSuperAdmin && <p className="text-sm text-destructive font-semibold panel p-4">Super Admin role required for score management.</p>}
 
           {/* ── Scoreboard image OCR ──────────────────────────────── */}
@@ -714,10 +718,11 @@ Return valid JSON only, no markdown.
             </div>
           </div>
         </div>
-      )}
+      </TabsContent>
 
-      {(['teams', 'players', 'schedules', 'events'] as const).includes(activeTab as never) && (
-        <div className="panel p-4 space-y-3">
+      <TabsContent value="teams">
+<div className="panel p-4 space-y-3">
+
           <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
           {/* League tag — every imported row gets this league_id */}
           <div>
@@ -755,11 +760,7 @@ Return valid JSON only, no markdown.
           {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
           {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
         </div>
-      )}
-
-
-      {activeTab === 'teams' && (
-        <div className="panel p-4 max-w-xl">
+<div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Teams Manual Ops</h2>
           {!isSuperAdmin ? (
             <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage teams.</p>
@@ -789,10 +790,49 @@ Return valid JSON only, no markdown.
             </div>
           )}
         </div>
-      )}
+      </TabsContent>
 
-      {activeTab === 'players' && (
-        <div className="panel p-4 max-w-xl">
+      <TabsContent value="players">
+<div className="panel p-4 space-y-3">
+
+          <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
+          {/* League tag — every imported row gets this league_id */}
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Target League</label>
+            <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
+              {LEAGUE_REGISTRY.map(l => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setCsvLeagueId(l.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${csvLeagueId === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  <img src={l.logo} alt="" width={12} height={12} className="flex-shrink-0 opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  {l.shortName}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">All imported rows will be tagged with this league.</p>
+          </div>
+          <input type="file" accept=".csv,text/csv" onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const raw = await file.text();
+            setCsvRows(parseCsv(raw));
+          }} />
+          <p className="text-xs text-muted-foreground">Preview rows: {csvRows.length}</p>
+          <div className="max-h-52 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">{csvRows.slice(0, 8).map((row, i) => <pre key={i}>{JSON.stringify(row)}</pre>)}</div>
+          <button
+            disabled={csvRows.length === 0 || importMutation.isPending}
+            className="gold-bg px-4 py-2 rounded-sm disabled:opacity-70"
+            onClick={() => importMutation.mutate({ kind: activeTab as 'teams' | 'players' | 'schedules' | 'events', rows: csvRows })}
+          >
+            {importMutation.isPending ? 'Importing…' : 'Submit Import'}
+          </button>
+          {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
+          {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
+        </div>
+<div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Players Manual Ops</h2>
           {!isSuperAdmin ? (
             <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage players.</p>
@@ -837,11 +877,50 @@ Return valid JSON only, no markdown.
             </div>
           )}
         </div>
-      )}
+      </TabsContent>
 
 
-      {activeTab === 'schedules' && (
-        <div className="panel p-4 max-w-xl">
+      <TabsContent value="schedules">
+<div className="panel p-4 space-y-3">
+
+          <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
+          {/* League tag — every imported row gets this league_id */}
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Target League</label>
+            <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
+              {LEAGUE_REGISTRY.map(l => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setCsvLeagueId(l.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${csvLeagueId === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  <img src={l.logo} alt="" width={12} height={12} className="flex-shrink-0 opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  {l.shortName}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">All imported rows will be tagged with this league.</p>
+          </div>
+          <input type="file" accept=".csv,text/csv" onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const raw = await file.text();
+            setCsvRows(parseCsv(raw));
+          }} />
+          <p className="text-xs text-muted-foreground">Preview rows: {csvRows.length}</p>
+          <div className="max-h-52 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">{csvRows.slice(0, 8).map((row, i) => <pre key={i}>{JSON.stringify(row)}</pre>)}</div>
+          <button
+            disabled={csvRows.length === 0 || importMutation.isPending}
+            className="gold-bg px-4 py-2 rounded-sm disabled:opacity-70"
+            onClick={() => importMutation.mutate({ kind: activeTab as 'teams' | 'players' | 'schedules' | 'events', rows: csvRows })}
+          >
+            {importMutation.isPending ? 'Importing…' : 'Submit Import'}
+          </button>
+          {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
+          {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
+        </div>
+<div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Schedules Manual Ops</h2>
           {!isSuperAdmin ? (
             <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage schedules.</p>
@@ -879,10 +958,49 @@ Return valid JSON only, no markdown.
             </div>
           )}
         </div>
-      )}
+      </TabsContent>
 
-      {activeTab === 'events' && (
-        <div className="panel p-4 max-w-xl">
+      <TabsContent value="events">
+<div className="panel p-4 space-y-3">
+
+          <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
+          {/* League tag — every imported row gets this league_id */}
+          <div>
+            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Target League</label>
+            <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
+              {LEAGUE_REGISTRY.map(l => (
+                <button
+                  key={l.id}
+                  type="button"
+                  onClick={() => setCsvLeagueId(l.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${csvLeagueId === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}
+                >
+                  <img src={l.logo} alt="" width={12} height={12} className="flex-shrink-0 opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                  {l.shortName}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">All imported rows will be tagged with this league.</p>
+          </div>
+          <input type="file" accept=".csv,text/csv" onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            const raw = await file.text();
+            setCsvRows(parseCsv(raw));
+          }} />
+          <p className="text-xs text-muted-foreground">Preview rows: {csvRows.length}</p>
+          <div className="max-h-52 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">{csvRows.slice(0, 8).map((row, i) => <pre key={i}>{JSON.stringify(row)}</pre>)}</div>
+          <button
+            disabled={csvRows.length === 0 || importMutation.isPending}
+            className="gold-bg px-4 py-2 rounded-sm disabled:opacity-70"
+            onClick={() => importMutation.mutate({ kind: activeTab as 'teams' | 'players' | 'schedules' | 'events', rows: csvRows })}
+          >
+            {importMutation.isPending ? 'Importing…' : 'Submit Import'}
+          </button>
+          {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
+          {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
+        </div>
+<div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Events Manual Ops</h2>
           {!isSuperAdmin ? (
             <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage events.</p>
@@ -982,11 +1100,9 @@ Return valid JSON only, no markdown.
             </div>
           )}
         </div>
-      )}
+      </TabsContent>
 
-
-      {activeTab === 'store' && (
-        <div className="panel p-4 max-w-xl space-y-8">
+      <TabsContent value="store"><div className="panel p-4 max-w-xl space-y-8">
           <div>
             <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Store Media & Product Ops</h2>
             {!isSuperAdmin ? (
@@ -1119,9 +1235,8 @@ Return valid JSON only, no markdown.
             )}
           </div>
         </div>
-      )}
-{activeTab === 'potg' && (
-        <div className="panel p-4 space-y-5 max-w-xl">
+      </TabsContent>
+      <TabsContent value="potg"><div className="panel p-4 space-y-5 max-w-xl">
           <div>
             <h2 className="font-display text-xl">POTG Image Parser</h2>
             <p className="text-xs text-muted-foreground mt-1">Upload a Player of the Game graphic — Claude Vision extracts the data automatically, then you confirm before it writes to the pipeline.</p>
@@ -1246,10 +1361,9 @@ Return valid JSON only, no markdown.
             </div>
           )}
         </div>
-      )}
+      </TabsContent>
 
-      {activeTab === 'history' && (
-        <div className="panel p-4">
+      <TabsContent value="history"><div className="panel p-4">
           <h2 className="font-display text-xl mb-3">Import History</h2>
           {jobs.length === 0 ? <p className="text-sm text-muted-foreground">No import history.</p> : (
             <div className="space-y-2">
@@ -1262,7 +1376,8 @@ Return valid JSON only, no markdown.
             </div>
           )}
         </div>
-      )}
+      </TabsContent>
+      </Tabs>
     </div>
   );
 };
