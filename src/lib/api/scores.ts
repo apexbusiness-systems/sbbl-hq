@@ -35,14 +35,14 @@ export async function fetchScores(params?: {
   if (params?.category && params.category !== 'all') qs.set('category', params.category);
   if (params?.status && params.status !== 'all') qs.set('status', params.status);
   const query = qs.toString();
-  return apiFetch<ScoresResponse>(`/api/scores${query ? `?${query}` : ''}`);
+  return apiFetch<ScoresResponse>(`/api/scores${query ? \`?\${query}\` : ''}`);
 }
 
 /** Create or update a single game score (super admin only) */
 export async function submitScoreManual(payload: ScoreUpsertPayload) {
   return apiFetch<{ ok: boolean; gameId: string }>('/ops/scores/game', {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-score-${payload.gameId ?? 'new'}-${Date.now()}`) },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-score-${payload.gameId ?? 'new'}`, payload) },
     body: JSON.stringify(payload),
   });
 }
@@ -51,7 +51,7 @@ export async function submitScoreManual(payload: ScoreUpsertPayload) {
 export async function submitScoresCsvImport(rows: Record<string, string>[]) {
   return apiFetch<{ ok: boolean; inserted: number; failed: number; errors: string[] }>('/ops/scores/import', {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-scores-csv') },
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-scores-csv', rows) },
     body: JSON.stringify({ rows }),
   });
 }
