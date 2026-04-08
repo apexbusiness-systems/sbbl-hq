@@ -4,7 +4,17 @@ import { describe, expect, it, vi } from 'vitest';
 import LoginPage from '@/pages/Login';
 
 vi.mock('@/hooks/use-auth', () => ({
-  useAuth: () => ({ roles: [], isAdmin: false, isSignedIn: false, needsOnboarding: false, configAvailable: true, loading: false }),
+  useAuth: () => ({
+    roles: [],
+    isAdmin: false,
+    isSignedIn: false,
+    isGuest: false,
+    continueAsGuest: vi.fn(),
+    exitGuestMode: vi.fn(),
+    needsOnboarding: false,
+    configAvailable: true,
+    loading: false,
+  }),
 }));
 
 describe('login page', () => {
@@ -38,7 +48,17 @@ describe('login page', () => {
 
   it('shows branded fallback when config unavailable', () => {
     vi.doMock('@/hooks/use-auth', () => ({
-      useAuth: () => ({ roles: [], isAdmin: false, isSignedIn: false, needsOnboarding: false, configAvailable: false, loading: false }),
+      useAuth: () => ({
+        roles: [],
+        isAdmin: false,
+        isSignedIn: false,
+        isGuest: false,
+        continueAsGuest: vi.fn(),
+        exitGuestMode: vi.fn(),
+        needsOnboarding: false,
+        configAvailable: false,
+        loading: false,
+      }),
     }));
 
     // Re-import to get mocked version
