@@ -190,6 +190,27 @@ export async function manualOpsAction(
   return { ok: false, error: `no_route_for_${kind}_${action}` };
 }
 
+// ── Generic media publish ─────────────────────────────────────────────────
+// Writes media_assets + media_publications for any surface without creating a
+// store product. Used by the Events tab (surface='event') and ad-hoc uploads.
+export async function publishMedia(payload: {
+  title: string;
+  surface: 'potg' | 'event' | 'store' | 'media_feed';
+  leagueId?: string | null;
+  date?: string;
+  imageUrl: string;
+  publishStatus?: 'draft' | 'published';
+}) {
+  return apiFetch<{ ok: boolean; mediaAssetId: string; publicationId: string }>(
+    '/ops/media/publish',
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-media-publish-${payload.surface}-${payload.title}`) },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
 // ── Canonical ingest API ──────────────────────────────────────────────────
 
 export type IngestKind = 'potg' | 'store' | 'event' | 'generic';

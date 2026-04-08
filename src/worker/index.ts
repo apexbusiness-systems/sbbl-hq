@@ -4563,6 +4563,71 @@ async function handleOpsBatchProducts(ctx: HandlerCtx) {
   return json({ ok: true });
 }
 
+// POST /ops/media/publish
+// Generic "publish a media asset" endpoint — writes media_assets + media_publications
+// without creating a product row (unlike /ops/store/media). Used by Events tab and any
+// surface that needs to push an already-uploaded image into the public render layer.
+async function handleOpsMediaPublish(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  requireSuperAdmin(ctx.req);
+
+  const body = await ctx.req.json().catch(() => null) as {
+    title?: string;
+    surface?: string;
+    leagueId?: string | null;
+    date?: string;
+    imageUrl?: string;
+    publishStatus?: string;
+  } | null;
+
+  if (!body?.title || !body?.imageUrl || !body?.surface) {
+    return json({ ok: false, error: "title, imageUrl, and surface are required" }, 400);
+  }
+
+  const validSurfaces = ["potg", "event", "store", "media_feed"];
+  if (!validSurfaces.includes(body.surface)) {
+    return json({ ok: false, error: `surface must be one of: ${validSurfaces.join(", ")}` }, 400);
+  }
+
+  const status = body.publishStatus === "published" ? "published" : "draft";
+  const leagueId = body.leagueId ?? null;
+  const sortAt = body.date ? new Date(body.date).toISOString() : new Date().toISOString();
+  const mediaType = body.surface === "potg" ? "poster" : "photo";
+  const meta = {
+    type: mediaType,
+    thumbnail: body.imageUrl,
+    date: body.date ?? new Date().toISOString().split("T")[0],
+    surface: body.surface,
+  };
+
+  const { data: asset, error: assetErr } = await ctx.admin
+    .from("media_assets")
+    .insert({ league_id: leagueId, title: body.title, status, metadata: meta })
+    .select("id")
+    .single();
+  if (assetErr) throw new Error(assetErr.message);
+
+  const { data: pub, error: pubErr } = await ctx.admin
+    .from("media_publications")
+    .insert({
+      media_asset_id: asset.id,
+      surface: body.surface,
+      league_id: leagueId,
+      title: body.title,
+      type: mediaType,
+      thumbnail_url: body.imageUrl,
+      status,
+      published_at: status === "published" ? new Date().toISOString() : null,
+      sort_at: sortAt,
+      render_payload: meta,
+    })
+    .select("id")
+    .single();
+  if (pubErr) throw new Error(pubErr.message);
+
+  return json({ ok: true, mediaAssetId: asset.id, publicationId: pub.id }, 201);
+}
+
 routes.push(
   { method: "PATCH",  path: "/ops/teams/:id",      handler: handleOpsPatchTeams },
   { method: "PATCH",  path: "/ops/players/:id",    handler: handleOpsPatchPlayers },
@@ -4574,7 +4639,8 @@ routes.push(
   { method: "DELETE", path: "/ops/products/:id",   handler: handleOpsDeleteProducts },
   { method: "DELETE", path: "/ops/events/:id",     handler: handleOpsDeleteEvents },
   { method: "DELETE", path: "/ops/schedules/:id",  handler: handleOpsDeleteSchedules },
-  { method: "POST",   path: "/ops/products/batch", handler: handleOpsBatchProducts },
+  { method: "POST",   path: "/ops/products/batch",  handler: handleOpsBatchProducts  },
+  { method: "POST",   path: "/ops/media/publish",   handler: handleOpsMediaPublish   },
   { method: "GET",    path: "/ops/list/teams",     handler: handleOpsListTeams },
   { method: "GET",    path: "/ops/list/players",   handler: handleOpsListPlayers },
   { method: "GET",    path: "/ops/list/products",  handler: handleOpsListProducts },
