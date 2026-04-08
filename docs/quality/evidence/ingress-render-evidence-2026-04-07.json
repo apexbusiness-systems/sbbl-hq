@@ -1,0 +1,48 @@
+{
+  "version": "1.3.0",
+  "date": "2026-04-07",
+  "scope": "ops_ingress_parser_render_and_env_separation",
+  "artifacts": [
+    {
+      "id": "t_ingress_render_checklist",
+      "type": "test",
+      "path": "src/test/endpoint-ingress-render-checklist.test.ts",
+      "purpose": "Endpoint-by-endpoint ingress and render wiring verification"
+    },
+    {
+      "id": "t_env_system_separation",
+      "type": "test",
+      "path": "src/test/env-system-separation-audit.test.ts",
+      "purpose": "Frontend Vite env vs Worker secret separation enforcement"
+    },
+    {
+      "id": "t_worker_ingest_pipeline",
+      "type": "test",
+      "path": "src/test/worker-ingest-pipeline.test.ts",
+      "purpose": "Canonical ingest state machine, publication projection, and resize checks"
+    },
+    {
+      "id": "doc_qa_matrix_signed",
+      "type": "document",
+      "path": "docs/quality/INGRESS_RENDER_QA_MATRIX_2026-04-07_v1.3.0.md",
+      "purpose": "Signed checklist and pass/fail matrix"
+    },
+    {
+      "id": "doc_pipeline_map_internal",
+      "type": "document",
+      "path": "docs/features/PIPELINE_MAP_v1.3.0.md",
+      "purpose": "Internal canonical data pipeline map"
+    },
+    {
+      "id": "doc_pipeline_map_public",
+      "type": "document",
+      "path": "public/features/PIPELINE_MAP_v1.3.0.md",
+      "purpose": "Public-facing pipeline flow documentation"
+    }
+  ],
+  "signature": {
+    "signed_by": "APEX Codex",
+    "signed_at": "2026-04-07T23:59:00Z",
+    "method": "deterministic_static_audit"
+  }
+}
