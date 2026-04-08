@@ -6,13 +6,20 @@ import { useMemo } from 'react';
 import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { apiFetch } from '@/lib/api/client';
+import { apiFetch, getAuthToken } from '@/lib/api/client';
 import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
 import { CASLNudge } from '@/components/CASLNudge';
 import { fetchPublicHome } from '@/lib/api/public';
-import { fetchStreamComments, postStreamComment } from '@/lib/api/stream';
+import {
+  fetchAdminStreamConfig,
+  fetchPublicStreamStatus,
+  fetchStreamComments,
+  postStreamComment,
+  setStreamLive,
+  updateStreamConfig,
+} from '@/lib/api/stream';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
@@ -69,8 +76,7 @@ function AdminStreamOverlay({
     const nextLive = !isLive;
     setSaving(true);
     try {
-      const { setStreamLive, updateStreamConfig } = await import('@/lib/api/stream');
-      const token = await import('@/lib/api/client').then(m => m.getAuthToken());
+      const token = await getAuthToken();
       // Step 1: Save config (URL + title)
       await updateStreamConfig({ collectionId: customStreamUrl, title: streamTitle }, token);
       // Step 2: Toggle live status — if this fails, config is saved but
@@ -255,7 +261,6 @@ const LivePage = () => {
           // Admin needs full config — pass null so apiFetch uses getAuthToken()
           // which auto-refreshes expired JWTs. Never pass an explicit token from
           // a React closure here; it goes stale and causes endless 401 loops.
-          const { fetchAdminStreamConfig } = await import('@/lib/api/stream');
           const res = await fetchAdminStreamConfig(null);
           if (active && res?.config) {
             setIsStreamLive(res.config.isLive);
@@ -264,7 +269,6 @@ const LivePage = () => {
           }
         } else {
           // Public poller
-          const { fetchPublicStreamStatus } = await import('@/lib/api/stream');
           const res = await fetchPublicStreamStatus();
           if (active && res?.ok) {
             setIsStreamLive(Boolean(res.isLive));
