@@ -34,6 +34,16 @@ export async function submitCsvImport(kind: 'teams' | 'players' | 'schedules' | 
   });
 }
 
+export async function parseEventImage(imageBase64: string, mimeType: string) {
+  return apiFetch<{
+    ok: boolean;
+    data: { title: string; location: string; date: string; leagueId: string };
+  }>('/ops/event/parse', {
+    method: 'POST',
+    body: JSON.stringify({ imageBase64, mimeType }),
+  });
+}
+
 export async function parsePotgImage(imageBase64: string, mimeType: string) {
   return apiFetch<{
     ok: boolean;

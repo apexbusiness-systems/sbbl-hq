@@ -5,7 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
-import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parsePotgImage, submitPotgRecord, manualOpsAction, publishMedia } from '@/lib/api/ops';
+import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parseEventImage, parsePotgImage, submitPotgRecord, manualOpsAction, publishMedia } from '@/lib/api/ops';
 import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
@@ -398,47 +398,15 @@ const OpsPage = () => {
       const resizedFile = await resizeImageToFit(file, dims.width, dims.height, dims.mode);
       setEventResizedBlob(resizedFile);
 
-      const reader = new FileReader();
-      const b64 = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(resizedFile);
-      });
-      const dataUrl = b64.startsWith('data:') ? b64 : `data:${resizedFile.type};base64,${b64}`;
+      const buffer = await resizedFile.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      const imageBase64 = btoa(binary);
 
-      const promptText = `Extract event details from this image.
-Return valid JSON only, no markdown.
-{
-  "title": "String, name of the event (e.g. '2v2 Fred & Mark vs Yllbiee & Justin')",
-  "location": "String, location if present",
-  "date": "String, event date and time if present",
-  "leagueId": "String, league abbreviation if present (wbl, tgif, sbbl)"
-}`;
-
-      const reqBody = {
-        messages: [{
-          role: "user",
-          content: [
-            { type: "image_url", image_url: { url: dataUrl } },
-            { type: "text", text: promptText }
-          ]
-        }]
-      };
-
-      const aiUrl = 'https://ai.peak-services.workers.dev/v1/chat/completions';
-      const aiRes = await fetch(aiUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(reqBody)
-      });
-      if (!aiRes.ok) throw new Error(`AI service returned ${aiRes.status}`);
-
-      const aiData = await aiRes.json();
-      const contentStr = aiData.choices?.[0]?.message?.content || '{}';
-
-      const match = contentStr.match(/\{.*?\}/s);
-      const cleaned = match ? match[0] : '{}';
-      const parsed = JSON.parse(cleaned);
+      const result = await parseEventImage(imageBase64, resizedFile.type);
+      if (!result.ok) throw new Error('Failed to extract event details');
+      const parsed = result.data;
 
       setEventGraphicForm({
         title: parsed.title || '',
