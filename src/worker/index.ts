@@ -4614,8 +4614,6 @@ async function handleOpsMediaPublish(ctx: HandlerCtx) {
       surface: body.surface,
       league_id: leagueId,
       title: body.title,
-      type: mediaType,
-      thumbnail_url: body.imageUrl,
       status,
       published_at: status === "published" ? new Date().toISOString() : null,
       sort_at: sortAt,
