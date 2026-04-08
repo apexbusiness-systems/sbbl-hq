@@ -18,7 +18,15 @@ const AppHomePage = () => {
         {/* Photo background */}
         <picture className="absolute inset-0 w-full h-full">
           <source media="(min-width: 768px)" srcSet="/assets/hero-desktop.png" />
-          <img src="/assets/hero-mobile.png" alt="" className="w-full h-full object-contain object-center" draggable={false} />
+          <img
+            src="/assets/hero-mobile.png"
+            alt=""
+            className="w-full h-full object-contain object-center"
+            draggable={false}
+            fetchPriority="high"
+            decoding="sync"
+            loading="eager"
+          />
         </picture>
         <div className="absolute inset-0 bg-black/45" />
         <div className="absolute inset-0 [background:linear-gradient(to_right,rgba(10,10,10,0.85)_0%,rgba(10,10,10,0.3)_55%,transparent_100%)]" />
