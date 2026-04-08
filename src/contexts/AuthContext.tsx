@@ -15,6 +15,9 @@ type AuthState = {
   isAdmin: boolean;
   needsOnboarding: boolean;
   configAvailable: boolean;
+  isGuest: boolean;
+  continueAsGuest: () => void;
+  exitGuestMode: () => void;
   refresh: () => Promise<void>;
 };
 
@@ -27,6 +30,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AuthProfile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [configAvailable, setConfigAvailable] = useState(true);
+  const [isGuest, setIsGuest] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('sbbl:guest-mode') === 'true';
+  });
 
   const load = async () => {
     const client = getSupabaseClient();
@@ -107,6 +114,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (event === 'INITIAL_SESSION') return;
 
         setSession(nextSession ?? null);
+        if (nextSession?.user) {
+          setIsGuest(false);
+          if (typeof window !== 'undefined') window.localStorage.removeItem('sbbl:guest-mode');
+        }
         setUser(nextSession?.user ?? null);
 
         if (nextSession?.user?.id) {
@@ -158,9 +169,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         Boolean(user && !profile?.onboarding_completed_at) &&
         !canAccessOps(roles),
       configAvailable,
+      isGuest,
+      continueAsGuest: () => {
+        if (typeof window !== 'undefined') window.localStorage.setItem('sbbl:guest-mode', 'true');
+        setIsGuest(true);
+      },
+      exitGuestMode: () => {
+        if (typeof window !== 'undefined') window.localStorage.removeItem('sbbl:guest-mode');
+        setIsGuest(false);
+      },
       refresh: load,
     }),
-    [loading, session, user, profile, roles, configAvailable],
+    [loading, session, user, profile, roles, configAvailable, isGuest],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

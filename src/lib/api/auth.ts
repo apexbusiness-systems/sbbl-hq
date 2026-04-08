@@ -35,6 +35,19 @@ export async function signUpWithPassword(email: string, password: string, captch
   if (error) throw error;
 }
 
+
+export async function signInWithMagicLink(email: string, captchaToken?: string) {
+  const supabase = requireSupabaseClient();
+  const { error } = await supabase.auth.signInWithOtp({
+    email: email.trim().toLowerCase(),
+    options: {
+      emailRedirectTo: `${window.location.origin}/login`,
+      ...(captchaToken ? { captchaToken } : {}),
+    },
+  });
+  if (error) throw error;
+}
+
 export async function signOut() {
   const supabase = requireSupabaseClient();
   const { error } = await supabase.auth.signOut();
