@@ -67,9 +67,27 @@ const StatsPage = () => {
   }, [leagueFilter, players]);
   const visibleRows = filtered;
 
-  const detail = selectedPlayer ? players.find(p => p.id === selectedPlayer) : null;
+  // ⚡ Bolt Performance Optimization: Memoize the selected player lookup to avoid O(N) find on every render
+  const detail = useMemo(() =>
+    selectedPlayer ? players.find(p => p.id === selectedPlayer) : null,
+  [selectedPlayer, players]);
 
-  const maxStat = (key: StatKey) => Math.max(...filtered.map(p => p.stats[key]));
+  // ⚡ Bolt Performance Optimization: Pre-calculate maximums in a single O(N) pass
+  // instead of O(K * N) where K is number of stats. Prevents array allocation from .map()
+  // and avoids call stack limits with spread operator.
+  const maxStats = useMemo(() => {
+    const maxes: Record<StatKey, number> = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, fls: 0, min: 0 };
+    for (const p of filtered) {
+      if (p.stats.pts > maxes.pts) maxes.pts = p.stats.pts;
+      if (p.stats.reb > maxes.reb) maxes.reb = p.stats.reb;
+      if (p.stats.ast > maxes.ast) maxes.ast = p.stats.ast;
+      if (p.stats.stl > maxes.stl) maxes.stl = p.stats.stl;
+      if (p.stats.blk > maxes.blk) maxes.blk = p.stats.blk;
+      if (p.stats.fls > maxes.fls) maxes.fls = p.stats.fls;
+      if (p.stats.min > maxes.min) maxes.min = p.stats.min;
+    }
+    return maxes;
+  }, [filtered]);
 
   const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
 
@@ -178,7 +196,7 @@ const StatsPage = () => {
                 <div className="grid grid-cols-2 gap-3">
                   {statKeys.map(k => {
                     const val = detail.stats[k];
-                    const max = maxStat(k);
+                    const max = maxStats[k];
                     const pct = max > 0 ? (val / max) * 100 : 0;
                     const circumference = 2 * Math.PI * 28;
                     const dashOffset = circumference - (pct / 100) * circumference;
