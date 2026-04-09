@@ -1,6 +1,6 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes, useLocation, useSearchParams } from 'react-router-dom';
 import { Toaster as Sonner } from '@/components/ui/sonner';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -75,6 +75,77 @@ function RegisterRedirect() {
   return <Navigate to={target} replace />;
 }
 
+const MARKETING_SUPPRESSED_ROUTES = new Set(['/login', '/register', '/onboarding', '/offline']);
+
+const DeferredShellEnhancements = () => {
+  const [ready, setReady] = useState(false);
+  const location = useLocation();
+
+  useEffect(() => {
+    const schedule = globalThis.requestIdleCallback
+      ? (callback: IdleRequestCallback) => globalThis.requestIdleCallback(callback)
+      : (callback: IdleRequestCallback) => window.setTimeout(
+        () => callback({ didTimeout: false, timeRemaining: () => 0 } as IdleDeadline),
+        250,
+      );
+    const cancel = globalThis.cancelIdleCallback
+      ? (id: number) => globalThis.cancelIdleCallback(id)
+      : (id: number) => window.clearTimeout(id);
+
+    const id = schedule(() => setReady(true));
+    return () => cancel(id);
+  }, []);
+
+  // Avoid loading non-critical marketing widgets on auth/offline routes.
+  if (!ready || MARKETING_SUPPRESSED_ROUTES.has(location.pathname)) {
+    return null;
+  }
+
+  return (
+    <>
+      <StickyMusicPlayer />
+      <AppDownloadPill />
+    </>
+  );
+};
+
+const AppShell = () => (
+  <div className="min-h-screen bg-background">
+    <OfflineBanner />
+    <Header />
+    <BagDrawer />
+    <DeferredShellEnhancements />
+    <main>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/" element={<AppHome />} />
+          <Route path="/league/:leagueId" element={<Home />} />
+          <Route path="/live" element={<Live />} />
+          <Route path="/schedules" element={<Schedules />} />
+          <Route path="/store" element={<Store />} />
+          <Route path="/profiles" element={<Profiles />} />
+          <Route path="/stats" element={<Stats />} />
+          <Route path="/leaderboards" element={<Leaderboards />} />
+          <Route path="/media" element={<Media />} />
+          <Route path="/scores" element={<Scores />} />
+          <Route path="/teams" element={<Teams />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/register" element={<RegisterRedirect />} />
+          <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
+          <Route path="/billing" element={<RequireAuth><Billing /></RequireAuth>} />
+          <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+          <Route path="/ops" element={<RequireAdmin><Ops /></RequireAdmin>} />
+          <Route path="/support" element={<Support />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfService />} />
+          <Route path="/offline" element={<Offline />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </main>
+  </div>
+);
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -86,41 +157,7 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <div className="min-h-screen bg-background">
-              <OfflineBanner />
-              <Header />
-              <BagDrawer />
-              <StickyMusicPlayer />
-              <AppDownloadPill />
-              <main>
-                <Suspense fallback={<RouteFallback />}>
-                  <Routes>
-                    <Route path="/" element={<AppHome />} />
-                    <Route path="/league/:leagueId" element={<Home />} />
-                    <Route path="/live" element={<Live />} />
-                    <Route path="/schedules" element={<Schedules />} />
-                    <Route path="/store" element={<Store />} />
-                    <Route path="/profiles" element={<Profiles />} />
-                    <Route path="/stats" element={<Stats />} />
-                    <Route path="/leaderboards" element={<Leaderboards />} />
-                    <Route path="/media" element={<Media />} />
-                    <Route path="/scores" element={<Scores />} />
-                    <Route path="/teams" element={<Teams />} />
-                    <Route path="/login" element={<Login />} />
-                    <Route path="/register" element={<RegisterRedirect />} />
-                    <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
-                    <Route path="/billing" element={<RequireAuth><Billing /></RequireAuth>} />
-                    <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
-                    <Route path="/ops" element={<RequireAdmin><Ops /></RequireAdmin>} />
-                    <Route path="/support" element={<Support />} />
-                    <Route path="/privacy" element={<PrivacyPolicy />} />
-                    <Route path="/terms" element={<TermsOfService />} />
-                    <Route path="/offline" element={<Offline />} />
-                    <Route path="*" element={<NotFound />} />
-                  </Routes>
-                </Suspense>
-              </main>
-            </div>
+            <AppShell />
           </BrowserRouter>
         </AppProvider>
         </BagProvider>
