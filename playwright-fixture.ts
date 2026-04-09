@@ -26,7 +26,7 @@ export async function seedSuperAdminSession(page: Page) {
     user,
   };
 
-  await page.route(`${SUPABASE_URL}/auth/v1/user**`, async (route) => {
+  await page.route('**/auth/v1/user**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -34,7 +34,7 @@ export async function seedSuperAdminSession(page: Page) {
     });
   });
 
-  await page.route(`${SUPABASE_URL}/auth/v1/token**`, async (route) => {
+  await page.route('**/auth/v1/token**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -42,8 +42,8 @@ export async function seedSuperAdminSession(page: Page) {
     });
   });
 
-  await page.route(`${SUPABASE_URL}/rest/v1/profiles**`, async (route) => {
-    const accept = route.request().headerValue('accept') ?? '';
+  await page.route('**/rest/v1/profiles**', async (route) => {
+    const accept = (await route.request().headerValue('accept')) ?? '';
     const profile = {
       id: 'profile-1',
       user_id: DEFAULT_USER_ID,
@@ -64,7 +64,7 @@ export async function seedSuperAdminSession(page: Page) {
     });
   });
 
-  await page.route(`${SUPABASE_URL}/rest/v1/user_role_assignments**`, async (route) => {
+  await page.route('**/rest/v1/user_role_assignments**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -73,10 +73,16 @@ export async function seedSuperAdminSession(page: Page) {
   });
 
   await page.addInitScript(
-    ({ key, value }) => {
+    ({ key, legacyKey, value }) => {
+      // Seed both modern and legacy auth keys for deterministic auth hydration.
       window.localStorage.setItem(key, value);
+      window.localStorage.setItem(legacyKey, value);
     },
-    { key: buildSessionStorageKey(), value: JSON.stringify(session) },
+    {
+      key: buildSessionStorageKey(),
+      legacyKey: 'supabase.auth.token',
+      value: JSON.stringify(session),
+    },
   );
 }
 
