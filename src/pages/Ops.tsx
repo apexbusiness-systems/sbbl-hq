@@ -5,8 +5,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
-import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parseEventImage, parsePotgImage, submitPotgRecord, manualOpsAction, publishMedia } from '@/lib/api/ops';
-import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
+import {
+  fetchOpsBootstrap, fetchImportHistory, submitCsvImport,
+  parseEventImage, parsePotgImage, manualOpsAction,
+  ingestPresign, ingestSubmit, ingestApprove, ingestReject,
+} from '@/lib/api/ops';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
 import { fetchScores, submitScoreManual, submitScoresCsvImport, parseScoreboardImage } from '@/lib/api/scores';
@@ -97,6 +100,7 @@ const OpsPage = () => {
     notes: '',
   };
   const [scoresForm, setScoresForm] = useState(defaultScoreForm);
+  const [ingestJob, setIngestJob] = useState<{ jobId: string; state: string } | null>(null);
 
   const updateStoreBatchItem = (i: number, field: string, value: string) =>
     setStoreBatchItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
@@ -149,31 +153,33 @@ const OpsPage = () => {
 
   const potgMutation = useMutation({
     mutationFn: async () => {
-      // Upload the POTG graphic to Supabase storage.
-      // Auto-detect portrait (560×747) vs landscape (747×560) and fill with cover crop.
-      let imageUrl: string | undefined;
-      if (potgImageFile && hasSupabaseClientConfig) {
-        const supabase = requireSupabaseClient();
-        const dims = await inferTargetDimensions(potgImageFile);
-        const resized = await resizeImageToFit(potgImageFile, dims.width, dims.height, dims.mode);
-        const objectPath = `potg/${potgForm.leagueId}/${crypto.randomUUID()}.jpg`;
-        const upload = await supabase.storage.from('media').upload(objectPath, resized, { upsert: true });
-        if (upload.error) throw upload.error;
-        imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
-      }
-      return submitPotgRecord({
-        playerName: potgForm.playerName,
-        team: potgForm.team,
-        pts: Number(potgForm.pts),
-        rebs: Number(potgForm.rebs),
-        assts: Number(potgForm.assts),
-        gameResult: potgForm.gameResult,
+      if (!potgImageFile) throw new Error('Image is required');
+      const dims = await inferTargetDimensions(potgImageFile);
+      const resized = await resizeImageToFit(potgImageFile, dims.width, dims.height, dims.mode);
+
+      const { signedUrl, objectPath } = await ingestPresign('potg', potgImageFile.name);
+      const uploadResp = await fetch(signedUrl, { method: 'PUT', body: resized });
+      if (!uploadResp.ok) throw new Error('Upload to signed URL failed: ' + uploadResp.status);
+
+      return ingestSubmit({
+        kind: 'potg',
+        objectPath,
+        publicUrl: objectPath,
+        title: potgForm.playerName,
         leagueId: potgForm.leagueId,
-        date: potgForm.date,
-        imageUrl,
+        meta: {
+          date: potgForm.date,
+          playerName: potgForm.playerName,
+          team: potgForm.team,
+          pts: Number(potgForm.pts),
+          rebs: Number(potgForm.rebs),
+          assts: Number(potgForm.assts),
+          gameResult: potgForm.gameResult,
+        },
       });
     },
-    onSuccess: async () => {
+    onSuccess: async (data) => {
+      setIngestJob(data);
       await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
       await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
     },
@@ -182,43 +188,56 @@ const OpsPage = () => {
   const storeMutation = useMutation({
     mutationFn: async () => {
       if (!storeForm.imageFile) throw new Error('Image is required');
-      const supabase = requireSupabaseClient();
       const resized = await resizeImageToFit(storeForm.imageFile, 800, 800);
-      const objectPath = `store/${crypto.randomUUID()}.jpg`;
-      const upload = await supabase.storage.from('media').upload(objectPath, resized, { upsert: true });
-      if (upload.error) throw upload.error;
-      const imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
-      return uploadStoreMedia({
+
+      const { signedUrl, objectPath } = await ingestPresign('store', storeForm.imageFile.name);
+      const uploadResp = await fetch(signedUrl, { method: 'PUT', body: resized });
+      if (!uploadResp.ok) throw new Error('Upload to signed URL failed: ' + uploadResp.status);
+
+      return ingestSubmit({
+        kind: 'store',
+        objectPath,
+        publicUrl: objectPath,
         title: storeForm.title,
-        price: Number(storeForm.price),
-        category: storeForm.category,
         publishStatus: storeForm.publishStatus,
-        sale: storeForm.sale,
-        imageUrl,
+        meta: {
+          price: Number(storeForm.price),
+          category: storeForm.category,
+          sale: storeForm.sale,
+        },
       });
     },
-    onSuccess: () => setStoreForm({ title: '', price: '0', category: 'apparel', publishStatus: 'draft', imageFile: null, sale: false }),
+    onSuccess: (data) => {
+      setIngestJob(data);
+      setStoreForm({
+        title: '', price: '0', category: 'apparel',
+        publishStatus: 'draft', imageFile: null, sale: false,
+      });
+    },
   });
 
-  // Uploads the resized event graphic to Supabase Storage and writes
-  // media_assets + media_publications (surface='event') so it appears on /media.
+  // Uploads the resized event graphic via ingest pipeline.
   const eventMediaMutation = useMutation({
     mutationFn: async () => {
       if (!eventResizedBlob || !eventGraphicForm.title) return null;
-      const supabase = requireSupabaseClient();
-      const objectPath = `events/${crypto.randomUUID()}.jpg`;
-      const upload = await supabase.storage.from('media').upload(objectPath, eventResizedBlob, { upsert: true });
-      if (upload.error) throw upload.error;
-      const imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
-      return publishMedia({
+      const filename = `event-${crypto.randomUUID()}.jpg`;
+
+      const { signedUrl, objectPath } = await ingestPresign('event', filename);
+      const uploadResp = await fetch(signedUrl, { method: 'PUT', body: eventResizedBlob });
+      if (!uploadResp.ok) throw new Error('Upload to signed URL failed: ' + uploadResp.status);
+
+      return ingestSubmit({
+        kind: 'event',
+        objectPath,
+        publicUrl: objectPath,
         title: eventGraphicForm.title,
-        surface: 'event',
-        leagueId: eventGraphicForm.leagueId || null,
-        date: eventGraphicForm.date || undefined,
-        imageUrl,
-        publishStatus: 'published',
+        leagueId: eventGraphicForm.leagueId || undefined,
+        meta: {
+          date: eventGraphicForm.date || undefined,
+        },
       });
     },
+    // No onSuccess — eventMediaMutation has none in the current file. Do not add one.
   });
 
   // ── Admin CRUD mutations ───────────────────────────────────────────────
@@ -1320,12 +1339,38 @@ const OpsPage = () => {
           </button>
 
           {potgMutation.error && <p className="text-xs text-destructive">{(potgMutation.error as Error).message}</p>}
-          {potgMutation.data && (
-            <div className="p-3 bg-success/10 border border-success/20 rounded-sm">
+          {ingestJob && (
+            <div className="p-3 bg-success/10 border border-success/20 rounded-sm space-y-2">
               <p className="text-xs text-success font-medium">
-                ✓ Submitted — Job {potgMutation.data.jobId?.slice(0, 8)}
-                {potgMutation.data.matched ? ' · Player profile matched and stats written' : ' · Queued for manual player match'}
+                ✓ Job {ingestJob.jobId.slice(0, 8)} · state: <strong>{ingestJob.state}</strong>
               </p>
+              {ingestJob.state === 'needs_review' && (
+                <div className="flex gap-2 mt-1">
+                  <button
+                    className="px-3 py-1.5 rounded-sm text-xs bg-success text-white font-semibold"
+                    onClick={async () => {
+                      await ingestApprove(ingestJob.jobId);
+                      setIngestJob(prev => prev ? { ...prev, state: 'published' } : null);
+                    }}
+                  >
+                    Approve
+                  </button>
+                  <button
+                    className="px-3 py-1.5 rounded-sm text-xs bg-destructive text-white font-semibold"
+                    onClick={async () => {
+                      await ingestReject(ingestJob.jobId);
+                      setIngestJob(prev => prev ? { ...prev, state: 'archived' } : null);
+                    }}
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
+              {ingestJob.state === 'published' && (
+                <a href="/media" className="text-xs text-primary underline">
+                  View on /media →
+                </a>
+              )}
             </div>
           )}
         </div>
