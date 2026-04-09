@@ -8,7 +8,7 @@ import { PotgCard } from '@/components/ui/PotgCard';
 import {
   fetchOpsBootstrap, fetchImportHistory, submitCsvImport,
   parseEventImage, parsePotgImage, manualOpsAction,
-  ingestPresign, ingestSubmit,
+  ingestPresign, ingestSubmit, ingestApprove, ingestReject,
 } from '@/lib/api/ops';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
@@ -1420,7 +1420,7 @@ const OpsPage = () => {
                   <button
                     className="px-3 py-1.5 rounded-sm text-xs bg-success text-white font-semibold"
                     onClick={async () => {
-                      await fetch(`/ops/ingest/${ingestJob.jobId}/approve`, { method: 'POST' });
+                      await ingestApprove(ingestJob.jobId);
                       setIngestJob(prev => prev ? { ...prev, state: 'published' } : null);
                     }}
                   >
@@ -1429,7 +1429,7 @@ const OpsPage = () => {
                   <button
                     className="px-3 py-1.5 rounded-sm text-xs bg-destructive text-white font-semibold"
                     onClick={async () => {
-                      await fetch(`/ops/ingest/${ingestJob.jobId}/reject`, { method: 'POST' });
+                      await ingestReject(ingestJob.jobId);
                       setIngestJob(prev => prev ? { ...prev, state: 'archived' } : null);
                     }}
                   >
