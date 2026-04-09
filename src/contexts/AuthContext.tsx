@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as Sentry from '@sentry/react';
 import { initSupabaseClient, getSupabaseClient } from '@/lib/supabase/client';
 import { canAccessOps, type AppRole } from '@/lib/auth/roles';
@@ -28,35 +28,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [configAvailable, setConfigAvailable] = useState(true);
 
-  const load = async () => {
+  const clearAuthState = useCallback(() => {
+    setSession(null);
+    setUser(null);
+    setProfile(null);
+    setRoles([]);
+    Sentry.setUser(null);
+  }, []);
+
+  const load = useCallback(async () => {
     const client = getSupabaseClient();
     if (!client) {
-      setSession(null);
-      setUser(null);
-      setProfile(null);
-      setRoles([]);
+      clearAuthState();
       setLoading(false);
       return;
     }
 
     setLoading(true);
 
-    // GUARDRAIL: Read the cached session first (instant, localStorage only),
-    // then force a live token refresh via getUser() ONLY when the access_token
-    // is expired or about to expire (<60 s remaining).  This eliminates a
-    // ~150-300 ms network round-trip on every cold mount for fresh tokens
-    // while still preventing stale/expired access_tokens from causing
-    // "unauthorized" errors on Save Config / Go Live.
     let { data } = await client.auth.getSession();
-
     if (data.session) {
-      const expiresAt = (data.session.expires_at ?? 0) * 1000; // seconds → ms
-      const needsRefresh = expiresAt - Date.now() < 60_000;
-      if (needsRefresh) {
-        await client.auth.getUser().catch(() => null);
-        // Re-read session after the refresh has updated localStorage
-        ({ data } = await client.auth.getSession());
+      const { data: userData, error: userError } = await client.auth.getUser();
+      if (userError || !userData.user) {
+        clearAuthState();
+        setLoading(false);
+        return;
       }
+
+      ({ data } = await client.auth.getSession());
     }
 
     setSession(data.session ?? null);
@@ -72,12 +71,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         username: details.profile?.display_name ?? undefined,
       });
     } else {
-      setProfile(null);
-      setRoles([]);
-      Sentry.setUser(null);
+      clearAuthState();
     }
     setLoading(false);
-  };
+  }, [clearAuthState]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -142,7 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     void boot();
     return () => unsubscribe?.();
-  }, []);
+  }, [load]);
 
   const value = useMemo(
     () => ({
@@ -160,7 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       configAvailable,
       refresh: load,
     }),
-    [loading, session, user, profile, roles, configAvailable],
+    [loading, session, user, profile, roles, configAvailable, load],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

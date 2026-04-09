@@ -1,4 +1,4 @@
-import { expect, test } from '../playwright-fixture';
+import { expect, seedSuperAdminSession, test } from '../playwright-fixture';
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -115,7 +115,15 @@ async function registerOpsMediaRoutes(page: import('@playwright/test').Page) {
 }
 
 test.describe('ops media ingest tabs', () => {
+  test('no session shows fail-closed reauth state', async ({ page }) => {
+    await page.goto('/ops', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('Session expired. Sign in again.')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Store Media' })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'POTG Parser' })).toHaveCount(0);
+  });
+
   test('store and events tabs enforce super-admin guard in UI', async ({ page }) => {
+    await seedSuperAdminSession(page);
     await registerOpsMediaRoutes(page);
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
@@ -127,6 +135,7 @@ test.describe('ops media ingest tabs', () => {
   });
 
   test('potg upload submits ingest job and approve/reject use wrapped ops endpoints', async ({ page }) => {
+    await seedSuperAdminSession(page);
     const captures = await registerOpsMediaRoutes(page);
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });

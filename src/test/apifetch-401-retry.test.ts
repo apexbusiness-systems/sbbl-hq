@@ -18,11 +18,13 @@ const mockFetch = vi.fn<(...args: unknown[]) => Promise<Response>>();
 const mockRefreshSession = vi.fn();
 const mockGetSession = vi.fn();
 const mockGetUser = vi.fn();
+const mockSignOut = vi.fn();
 const mockSupabaseClient = {
   auth: {
     refreshSession: mockRefreshSession,
     getSession: mockGetSession,
     getUser: mockGetUser,
+    signOut: mockSignOut,
   },
 };
 
@@ -54,6 +56,7 @@ describe('apiFetch 401 retry guard', () => {
     mockRefreshSession.mockReset();
     mockGetSession.mockReset();
     mockGetUser.mockReset();
+    mockSignOut.mockReset();
   });
 
   afterEach(() => {
@@ -113,23 +116,23 @@ describe('apiFetch 401 retry guard', () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 
-  it('does not retry when refresh yields the same token (prevents loops)', async () => {
+  it('fails closed with reauth_required after retry also returns 401', async () => {
     const { apiFetch } = await import('@/lib/api/client');
 
-    // 401 with explicit token
+    mockFetch.mockResolvedValueOnce(jsonResponse(401, { ok: false, error: 'unauthorized' }));
     mockFetch.mockResolvedValueOnce(jsonResponse(401, { ok: false, error: 'unauthorized' }));
 
-    // Refresh returns same token — no point retrying
     mockRefreshSession.mockResolvedValueOnce({
       data: { session: { access_token: 'stale-token' } },
       error: null,
     });
 
-    await expect(apiFetch('/test', {}, 'stale-token')).rejects.toThrow('unauthorized');
-    expect(mockFetch).toHaveBeenCalledTimes(1); // No retry
+    await expect(apiFetch('/test', {}, 'stale-token')).rejects.toThrow('reauth_required');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockSignOut).toHaveBeenCalledWith({ scope: 'local' });
   });
 
-  it('does not retry when refresh fails (no session)', async () => {
+  it('fails closed with reauth_required when refresh fails', async () => {
     const { apiFetch } = await import('@/lib/api/client');
 
     mockFetch.mockResolvedValueOnce(jsonResponse(401, { ok: false, error: 'unauthorized' }));
@@ -139,8 +142,9 @@ describe('apiFetch 401 retry guard', () => {
       error: { message: 'refresh_failed' },
     });
 
-    await expect(apiFetch('/test', {}, 'stale-token')).rejects.toThrow('unauthorized');
+    await expect(apiFetch('/test', {}, 'stale-token')).rejects.toThrow('reauth_required');
     expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockSignOut).toHaveBeenCalledWith({ scope: 'local' });
   });
 
   it('succeeds without retry when token is valid', async () => {
