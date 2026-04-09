@@ -5,14 +5,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
-import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, uploadStoreMedia, parseEventImage, parsePotgImage, submitPotgRecord, manualOpsAction, publishMedia } from '@/lib/api/ops';
-import { requireSupabaseClient, hasSupabaseClientConfig } from '@/lib/supabase/client';
+import { fetchOpsBootstrap, fetchImportHistory, submitCsvImport, ingestPresign, ingestSubmit, ingestApprove, ingestReject, ingestReplay } from '@/lib/api/ops';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
 import { fetchScores, submitScoreManual, submitScoresCsvImport, parseScoreboardImage } from '@/lib/api/scores';
 import type { ScoreCategory } from '@/types';
 
-type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
+type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history' | 'media';
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'overview',  label: 'Overview'       },
@@ -23,6 +22,7 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'events',    label: 'Events'         },
   { id: 'store',     label: 'Store Media'    },
   { id: 'potg',      label: 'POTG Parser'    },
+  { id: 'media',     label: 'Generic Media'  },
   { id: 'history',   label: 'Import History' },
 ];
 
@@ -40,28 +40,15 @@ const OpsPage = () => {
   const [potgImageFile, setPotgImageFile] = useState<File | null>(null);
   const [potgForm, setPotgForm] = useState({ playerName: '', team: '', pts: '', rebs: '', assts: '', gameResult: '', leagueId: 'wbl', date: new Date().toISOString().split('T')[0] });
   const isSuperAdmin = roles.includes('super_admin');
+  const [genericMediaForm, setGenericMediaForm] = useState({ title: '', file: null as File | null });
 
-  // ── Admin CRUD form state ──────────────────────────────────────────────────
   const [teamForm, setTeamForm] = useState({ name: '', leagueId: '', seasonId: '', divisionId: '' });
-  const [deleteTeamId, setDeleteTeamId] = useState('');
 
   const [playerForm, setPlayerForm] = useState({ userId: '', teamId: '', leagueId: '', jerseyNumber: '', position: '' });
-  const [deletePlayerId, setDeletePlayerId] = useState('');
-  const [suspendPlayerId, setSuspendPlayerId] = useState('');
-  const [suspendPlayerReason, setSuspendPlayerReason] = useState('');
 
   const [scheduleForm, setScheduleForm] = useState({ leagueId: '', seasonId: '', startsAt: '', endsAt: '' });
-  const [deleteScheduleId, setDeleteScheduleId] = useState('');
 
-  const [eventForm, setEventForm] = useState({ title: '', location: '', date: '', leagueId: '' });
-  const [deleteEventId, setDeleteEventId] = useState('');
 
-  const [storeBatchItems, setStoreBatchItems] = useState([
-    { title: '', price: '', category: 'apparel' },
-    { title: '', price: '', category: 'apparel' },
-    { title: '', price: '', category: 'apparel' },
-    { title: '', price: '', category: 'apparel' },
-  ]);
   const [storeSuspendId, setStoreSuspendId] = useState('');
   const [storeDeleteId, setStoreDeleteId] = useState('');
 
@@ -71,12 +58,12 @@ const OpsPage = () => {
   const eventFileRef = useRef<HTMLInputElement>(null);
   const [eventParseState, setEventParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
   const [eventParseError, setEventParseError] = useState('');
-  const [eventResizedBlob, setEventResizedBlob] = useState<Blob | null>(null);
   const [eventGraphicForm, setEventGraphicForm] = useState({
     title: '',
     location: '',
     date: '',
     leagueId: 'sbbl',
+    file: null as File | null,
   });
   const scoreboardFileRef = useRef<HTMLInputElement>(null);
   const scoresCsvFileRef = useRef<HTMLInputElement>(null);
@@ -98,39 +85,10 @@ const OpsPage = () => {
   };
   const [scoresForm, setScoresForm] = useState(defaultScoreForm);
 
-  const updateStoreBatchItem = (i: number, field: string, value: string) =>
-    setStoreBatchItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
 
   const handlePotgImageUpload = async (file: File) => {
-    setPotgParseState('parsing');
-    setPotgParseError(null);
     setPotgImageFile(file);
-    try {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-      const imageBase64 = btoa(binary);
-      const result = await parsePotgImage(imageBase64, file.type as string);
-      if (result.ok && result.data) {
-        setPotgForm(f => ({
-          ...f,
-          playerName: result.data.playerName ?? '',
-          team: result.data.team ?? '',
-          pts: String(result.data.pts ?? ''),
-          rebs: String(result.data.rebs ?? ''),
-          assts: String(result.data.assts ?? ''),
-          gameResult: result.data.gameResult ?? '',
-        }));
-        setPotgParseState('parsed');
-      } else {
-        setPotgParseError('Parse failed — fill in manually');
-        setPotgParseState('error');
-      }
-    } catch (e) {
-      setPotgParseError(e instanceof Error ? e.message : 'Unknown error');
-      setPotgParseState('error');
-    }
+    setPotgParseState('parsed'); // Bypass client-side parsing
   };
 
   const bootstrapQuery = useQuery({ queryKey: ['ops-bootstrap'], queryFn: fetchOpsBootstrap });
@@ -147,30 +105,45 @@ const OpsPage = () => {
     },
   });
 
+  const approveJobMutation = useMutation({
+    mutationFn: (jobId: string) => ingestApprove(jobId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ops-import-history'] }),
+  });
+
+  const rejectJobMutation = useMutation({
+    mutationFn: (jobId: string) => ingestReject(jobId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ops-import-history'] }),
+  });
+
+  const replayJobMutation = useMutation({
+    mutationFn: (jobId: string) => ingestReplay(jobId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['ops-import-history'] }),
+  });
+
   const potgMutation = useMutation({
     mutationFn: async () => {
-      // Upload the POTG graphic to Supabase storage.
-      // Auto-detect portrait (560×747) vs landscape (747×560) and fill with cover crop.
-      let imageUrl: string | undefined;
-      if (potgImageFile && hasSupabaseClientConfig) {
-        const supabase = requireSupabaseClient();
-        const dims = await inferTargetDimensions(potgImageFile);
-        const resized = await resizeImageToFit(potgImageFile, dims.width, dims.height, dims.mode);
-        const objectPath = `potg/${potgForm.leagueId}/${crypto.randomUUID()}.jpg`;
-        const upload = await supabase.storage.from('media').upload(objectPath, resized, { upsert: true });
-        if (upload.error) throw upload.error;
-        imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
-      }
-      return submitPotgRecord({
-        playerName: potgForm.playerName,
-        team: potgForm.team,
-        pts: Number(potgForm.pts),
-        rebs: Number(potgForm.rebs),
-        assts: Number(potgForm.assts),
-        gameResult: potgForm.gameResult,
+      if (!potgImageFile) throw new Error("Missing file");
+      const dims = await inferTargetDimensions(potgImageFile);
+      const resized = await resizeImageToFit(potgImageFile, dims.width, dims.height, dims.mode);
+      const { signedUrl, objectPath } = await ingestPresign('potg', potgImageFile.name);
+      await fetch(signedUrl, { method: 'PUT', body: resized });
+
+      return ingestSubmit({
+        kind: 'potg',
+        objectPath,
+        publicUrl: objectPath,
+        title: `POTG: ${potgForm.playerName}`,
         leagueId: potgForm.leagueId,
-        date: potgForm.date,
-        imageUrl,
+        publishStatus: 'published',
+        meta: {
+          playerName: potgForm.playerName,
+          team: potgForm.team,
+          pts: Number(potgForm.pts),
+          rebs: Number(potgForm.rebs),
+          assts: Number(potgForm.assts),
+          gameResult: potgForm.gameResult,
+          date: potgForm.date,
+        }
       });
     },
     onSuccess: async () => {
@@ -182,171 +155,66 @@ const OpsPage = () => {
   const storeMutation = useMutation({
     mutationFn: async () => {
       if (!storeForm.imageFile) throw new Error('Image is required');
-      const supabase = requireSupabaseClient();
       const resized = await resizeImageToFit(storeForm.imageFile, 800, 800);
-      const objectPath = `store/${crypto.randomUUID()}.jpg`;
-      const upload = await supabase.storage.from('media').upload(objectPath, resized, { upsert: true });
-      if (upload.error) throw upload.error;
-      const imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
-      return uploadStoreMedia({
+      const { signedUrl, objectPath } = await ingestPresign('store', storeForm.imageFile.name);
+      await fetch(signedUrl, { method: 'PUT', body: resized });
+
+      return ingestSubmit({
+        kind: 'store',
+        objectPath,
+        publicUrl: objectPath,
         title: storeForm.title,
-        price: Number(storeForm.price),
-        category: storeForm.category,
         publishStatus: storeForm.publishStatus,
-        sale: storeForm.sale,
-        imageUrl,
+        meta: {
+          price: Number(storeForm.price),
+          category: storeForm.category,
+          sale: storeForm.sale,
+        }
       });
     },
     onSuccess: () => setStoreForm({ title: '', price: '0', category: 'apparel', publishStatus: 'draft', imageFile: null, sale: false }),
   });
 
-  // Uploads the resized event graphic to Supabase Storage and writes
-  // media_assets + media_publications (surface='event') so it appears on /media.
   const eventMediaMutation = useMutation({
     mutationFn: async () => {
-      if (!eventResizedBlob || !eventGraphicForm.title) return null;
-      const supabase = requireSupabaseClient();
-      const objectPath = `events/${crypto.randomUUID()}.jpg`;
-      const upload = await supabase.storage.from('media').upload(objectPath, eventResizedBlob, { upsert: true });
-      if (upload.error) throw upload.error;
-      const imageUrl = supabase.storage.from('media').getPublicUrl(objectPath).data.publicUrl;
-      return publishMedia({
+      if (!eventGraphicForm.file || !eventGraphicForm.title) return null;
+      const { signedUrl, objectPath } = await ingestPresign('event', eventGraphicForm.file.name);
+      await fetch(signedUrl, { method: 'PUT', body: eventGraphicForm.file });
+
+      return ingestSubmit({
+        kind: 'event',
+        objectPath,
+        publicUrl: objectPath,
         title: eventGraphicForm.title,
-        surface: 'event',
         leagueId: eventGraphicForm.leagueId || null,
-        date: eventGraphicForm.date || undefined,
-        imageUrl,
+        publishStatus: 'published',
+        meta: {
+          date: eventGraphicForm.date || undefined,
+        }
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
+    }
+  });
+
+  const genericMediaMutation = useMutation({
+    mutationFn: async () => {
+      if (!genericMediaForm.file) throw new Error("File is required");
+      const { signedUrl, objectPath } = await ingestPresign('generic', genericMediaForm.file.name);
+      await fetch(signedUrl, { method: 'PUT', body: genericMediaForm.file });
+      return ingestSubmit({
+        kind: 'generic',
+        objectPath,
+        publicUrl: objectPath,
+        title: genericMediaForm.title,
         publishStatus: 'published',
       });
     },
-  });
-
-  // ── Admin CRUD mutations ───────────────────────────────────────────────
-  const createTeamMutation = useMutation({
-    mutationFn: () => manualOpsAction('team', 'create', {
-      name: teamForm.name,
-      leagueId: teamForm.leagueId,
-      seasonId: teamForm.seasonId,
-      divisionId: teamForm.divisionId || undefined,
-    }),
     onSuccess: async () => {
-      setTeamForm({ name: '', leagueId: '', seasonId: '', divisionId: '' });
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const deleteTeamMutation = useMutation({
-    mutationFn: () => manualOpsAction('team', 'delete', { id: deleteTeamId }),
-    onSuccess: async () => {
-      setDeleteTeamId('');
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const createPlayerMutation = useMutation({
-    mutationFn: () => manualOpsAction('player', 'create', {
-      userId: playerForm.userId,
-      teamId: playerForm.teamId || undefined,
-      leagueId: playerForm.leagueId || undefined,
-      jerseyNumber: playerForm.jerseyNumber ? Number(playerForm.jerseyNumber) : undefined,
-      position: playerForm.position || undefined,
-    }),
-    onSuccess: async () => {
-      setPlayerForm({ userId: '', teamId: '', leagueId: '', jerseyNumber: '', position: '' });
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const suspendPlayerMutation = useMutation({
-    mutationFn: () => manualOpsAction('player', 'suspend', { id: suspendPlayerId, reason: suspendPlayerReason || undefined }),
-    onSuccess: async () => {
-      setSuspendPlayerId('');
-      setSuspendPlayerReason('');
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const deletePlayerMutation = useMutation({
-    mutationFn: () => manualOpsAction('player', 'delete', { id: deletePlayerId }),
-    onSuccess: async () => {
-      setDeletePlayerId('');
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const createScheduleMutation = useMutation({
-    mutationFn: () => manualOpsAction('schedule', 'create', {
-      leagueId: scheduleForm.leagueId,
-      seasonId: scheduleForm.seasonId,
-      startsAt: scheduleForm.startsAt,
-      endsAt: scheduleForm.endsAt || undefined,
-    }),
-    onSuccess: async () => {
-      setScheduleForm({ leagueId: '', seasonId: '', startsAt: '', endsAt: '' });
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const deleteScheduleMutation = useMutation({
-    mutationFn: () => manualOpsAction('schedule', 'delete', { id: deleteScheduleId }),
-    onSuccess: async () => {
-      setDeleteScheduleId('');
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const createEventMutation = useMutation({
-    mutationFn: () => manualOpsAction('event', 'create', {
-      title: eventForm.title,
-      location: eventForm.location || undefined,
-      date: eventForm.date || undefined,
-      leagueId: eventForm.leagueId || undefined,
-    }),
-    onSuccess: async () => {
-      setEventForm({ title: '', location: '', date: '', leagueId: '' });
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const deleteEventMutation = useMutation({
-    mutationFn: () => manualOpsAction('event', 'delete', { id: deleteEventId }),
-    onSuccess: async () => {
-      setDeleteEventId('');
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const storeBatchMutation = useMutation({
-    mutationFn: () => manualOpsAction('store', 'batch_create', {
-      items: storeBatchItems
-        .filter(it => it.title.trim())
-        .map(it => ({ title: it.title, price: Number(it.price) || 0, category: it.category })),
-    }),
-    onSuccess: async () => {
-      setStoreBatchItems([
-        { title: '', price: '', category: 'apparel' },
-        { title: '', price: '', category: 'apparel' },
-        { title: '', price: '', category: 'apparel' },
-        { title: '', price: '', category: 'apparel' },
-      ]);
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const storeSuspendMutation = useMutation({
-    mutationFn: () => manualOpsAction('store', 'suspend', { id: storeSuspendId }),
-    onSuccess: async () => {
-      setStoreSuspendId('');
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
-  });
-
-  const storeDeleteMutation = useMutation({
-    mutationFn: () => manualOpsAction('store', 'delete', { id: storeDeleteId }),
-    onSuccess: async () => {
-      setStoreDeleteId('');
-      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
-    },
+      setGenericMediaForm({ title: '', file: null });
+      await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
+    }
   });
 
   // ── Scores mutations ───────────────────────────────────────────────────────
@@ -389,38 +257,7 @@ const OpsPage = () => {
 
 
   const handleEventImageUpload = async (file: File) => {
-    if (!file) return;
-    setEventParseState('parsing');
-    setEventParseError('');
-    try {
-      // Resize to correct AR before parsing and storage (landscape 747×560, portrait 560×747)
-      const dims = await inferTargetDimensions(file);
-      const resizedFile = await resizeImageToFit(file, dims.width, dims.height, dims.mode);
-      setEventResizedBlob(resizedFile);
-
-      const buffer = await resizedFile.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-      const imageBase64 = btoa(binary);
-
-      const result = await parseEventImage(imageBase64, resizedFile.type);
-      if (!result.ok) throw new Error('Failed to extract event details');
-      const parsed = result.data;
-
-      setEventGraphicForm({
-        title: parsed.title || '',
-        location: parsed.location || '',
-        date: parsed.date || '',
-        leagueId: (parsed.leagueId || 'sbbl').toLowerCase(),
-      });
-      setEventParseState('parsed');
-
-    } catch (err: Error | unknown) {
-      console.error('Event extraction failed:', err);
-      setEventParseError((err as Error).message || 'Failed to parse image');
-      setEventParseState('error');
-    }
+    setEventGraphicForm(f => ({ ...f, file }));
   };
   const handleScoreboardImage = async (file: File) => {
     setScoreboardParseState('parsing');
@@ -728,37 +565,7 @@ const OpsPage = () => {
           {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
           {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
         </div>
-<div className="panel p-4 max-w-xl">
-          <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Teams Manual Ops</h2>
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage teams.</p>
-          ) : (
-            <div className="space-y-4">
-              <div className="border border-border p-3 rounded-sm">
-                <h3 className="text-sm font-semibold mb-2">Create Team</h3>
-                <div className="space-y-2">
-                  <input placeholder="Team Name *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.name} onChange={e => setTeamForm(f => ({ ...f, name: e.target.value }))} />
-                  <input placeholder="League ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.leagueId} onChange={e => setTeamForm(f => ({ ...f, leagueId: e.target.value }))} />
-                  <input placeholder="Season ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.seasonId} onChange={e => setTeamForm(f => ({ ...f, seasonId: e.target.value }))} />
-                  <input placeholder="Division ID (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={teamForm.divisionId} onChange={e => setTeamForm(f => ({ ...f, divisionId: e.target.value }))} />
-                  <button disabled={!teamForm.name || !teamForm.leagueId || !teamForm.seasonId || createTeamMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createTeamMutation.mutate()}>{createTeamMutation.isPending ? 'Creating…' : 'Create Team'}</button>
-                  {createTeamMutation.error && <p className="text-xs text-destructive">{(createTeamMutation.error as Error).message}</p>}
-                  {createTeamMutation.isSuccess && <p className="text-xs text-success">Team created.</p>}
-                </div>
-              </div>
-              <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
-                <h3 className="text-sm font-semibold text-destructive mb-2">Delete Team</h3>
-                <div className="flex gap-2">
-                  <input placeholder="Team ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={deleteTeamId} onChange={e => setDeleteTeamId(e.target.value)} />
-                  <button disabled={!deleteTeamId || deleteTeamMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteTeamMutation.mutate()}>{deleteTeamMutation.isPending ? '…' : 'Delete'}</button>
-                </div>
-                {deleteTeamMutation.error && <p className="text-xs text-destructive mt-1">{(deleteTeamMutation.error as Error).message}</p>}
-                {deleteTeamMutation.isSuccess && <p className="text-xs text-success mt-1">Team archived.</p>}
-              </div>
-            </div>
-          )}
-        </div>
-      </TabsContent>
+</TabsContent>
 
       <TabsContent value="players">
 <div className="panel p-4 space-y-3">
@@ -888,45 +695,7 @@ const OpsPage = () => {
           {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
           {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
         </div>
-<div className="panel p-4 max-w-xl">
-          <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Schedules Manual Ops</h2>
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage schedules.</p>
-          ) : (
-            <div className="space-y-4">
-              <div className="border border-border p-3 rounded-sm">
-                <h3 className="text-sm font-semibold mb-2">Create Schedule Slot</h3>
-                <div className="space-y-2">
-                  <input placeholder="League ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={scheduleForm.leagueId} onChange={e => setScheduleForm(f => ({ ...f, leagueId: e.target.value }))} />
-                  <input placeholder="Season ID (UUID) *" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={scheduleForm.seasonId} onChange={e => setScheduleForm(f => ({ ...f, seasonId: e.target.value }))} />
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Starts At *</label>
-                      <input type="datetime-local" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm mt-1" value={scheduleForm.startsAt} onChange={e => setScheduleForm(f => ({ ...f, startsAt: e.target.value }))} />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-muted-foreground uppercase tracking-wider">Ends At</label>
-                      <input type="datetime-local" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm mt-1" value={scheduleForm.endsAt} onChange={e => setScheduleForm(f => ({ ...f, endsAt: e.target.value }))} />
-                    </div>
-                  </div>
-                  <button disabled={!scheduleForm.leagueId || !scheduleForm.seasonId || !scheduleForm.startsAt || createScheduleMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createScheduleMutation.mutate()}>{createScheduleMutation.isPending ? 'Creating…' : 'Create Schedule'}</button>
-                  {createScheduleMutation.error && <p className="text-xs text-destructive">{(createScheduleMutation.error as Error).message}</p>}
-                  {createScheduleMutation.isSuccess && <p className="text-xs text-success">Schedule slot created.</p>}
-                </div>
-              </div>
-              <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
-                <h3 className="text-sm font-semibold text-destructive mb-2">Delete Schedule Entry</h3>
-                <div className="flex gap-2">
-                  <input placeholder="Schedule Slot ID to Delete" className="flex-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={deleteScheduleId} onChange={e => setDeleteScheduleId(e.target.value)} />
-                  <button disabled={!deleteScheduleId || deleteScheduleMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-4 py-2 rounded-sm text-xs disabled:opacity-60" onClick={() => deleteScheduleMutation.mutate()}>{deleteScheduleMutation.isPending ? '…' : 'Delete'}</button>
-                </div>
-                {deleteScheduleMutation.error && <p className="text-xs text-destructive mt-1">{(deleteScheduleMutation.error as Error).message}</p>}
-                {deleteScheduleMutation.isSuccess && <p className="text-xs text-success mt-1">Schedule slot deleted.</p>}
-              </div>
-            </div>
-          )}
-        </div>
-      </TabsContent>
+</TabsContent>
 
       <TabsContent value="events">
 <div className="panel p-4 space-y-3">
@@ -1072,36 +841,11 @@ const OpsPage = () => {
 
       <TabsContent value="store"><div className="panel p-4 max-w-xl space-y-8">
           <div>
-            <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Store Media & Product Ops</h2>
+            <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Store Media Upload</h2>
             {!isSuperAdmin ? (
               <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage store operations.</p>
             ) : (
               <div className="space-y-6">
-
-                {/* Batch Create Products */}
-                <div className="border border-border p-3 rounded-sm">
-                  <h3 className="text-sm font-semibold mb-3">Batch Create Products (Max 4)</h3>
-                  <div className="space-y-4">
-                    {[0, 1, 2, 3].map(i => (
-                      <div key={i} className="border border-secondary p-3 rounded-sm space-y-2 relative">
-                        <div className="absolute top-2 right-2 text-[10px] text-muted-foreground font-semibold">Item {i+1}</div>
-                        <input placeholder="Title" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={storeBatchItems[i].title} onChange={e => updateStoreBatchItem(i, 'title', e.target.value)} />
-                        <div className="grid grid-cols-2 gap-2">
-                          <input type="number" placeholder="Price (CAD)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={storeBatchItems[i].price} onChange={e => updateStoreBatchItem(i, 'price', e.target.value)} />
-                        </div>
-                        <select className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={storeBatchItems[i].category} onChange={e => updateStoreBatchItem(i, 'category', e.target.value)}>
-                          <option value="apparel">Apparel</option>
-                          <option value="accessories">Accessories</option>
-                          <option value="rewards">Rewards</option>
-                        </select>
-                      </div>
-                    ))}
-                    <button disabled={storeBatchItems.every(it => !it.title.trim()) || storeBatchMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => storeBatchMutation.mutate()}>{storeBatchMutation.isPending ? 'Submitting…' : 'Submit Batch'}</button>
-                    {storeBatchMutation.error && <p className="text-xs text-destructive">{(storeBatchMutation.error as Error).message}</p>}
-                    {storeBatchMutation.isSuccess && <p className="text-xs text-success">Products created.</p>}
-                  </div>
-                </div>
-
                 {/* Upload Store Product with Image */}
                 <div className="border border-primary/30 p-3 rounded-sm bg-primary/5">
                   <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
@@ -1129,39 +873,36 @@ const OpsPage = () => {
                         onChange={e => setStoreForm(f => ({ ...f, category: e.target.value }))}
                       >
                         <option value="apparel">Apparel</option>
+                        <option value="gear">Gear</option>
                         <option value="accessories">Accessories</option>
                         <option value="rewards">Rewards</option>
                       </select>
                     </div>
-                    <div className="flex gap-4 items-center">
-                      <label className="flex items-center gap-2 text-xs cursor-pointer">
-                        <input type="checkbox" checked={storeForm.sale} onChange={e => setStoreForm(f => ({ ...f, sale: e.target.checked }))} />
+                    <div className="flex gap-4 mb-2">
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <input type="checkbox" checked={storeForm.sale} onChange={e => setStoreForm(f => ({ ...f, sale: e.target.checked }))} className="rounded bg-secondary border-border" />
                         On Sale
                       </label>
-                      <select
-                        className="bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs"
-                        value={storeForm.publishStatus}
-                        onChange={e => setStoreForm(f => ({ ...f, publishStatus: e.target.value as 'draft' | 'published' }))}
-                      >
-                        <option value="draft">Draft</option>
-                        <option value="published">Published</option>
-                      </select>
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <input type="radio" checked={storeForm.publishStatus === 'published'} onChange={() => setStoreForm(f => ({ ...f, publishStatus: 'published' }))} name="status" /> Published
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <input type="radio" checked={storeForm.publishStatus === 'draft'} onChange={() => setStoreForm(f => ({ ...f, publishStatus: 'draft' }))} name="status" /> Draft
+                      </label>
                     </div>
                     <div
-                      className="border-2 border-dashed border-border rounded-sm p-4 text-center cursor-pointer hover:border-primary/40 transition-colors"
-                      onClick={() => document.getElementById('store-image-input')?.click()}
-                      onDragOver={e => e.preventDefault()}
-                      onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setStoreForm(prev => ({ ...prev, imageFile: f })); }}
+                      className="border border-dashed border-border rounded-sm p-4 text-center cursor-pointer relative overflow-hidden"
                     >
                       <input
-                        id="store-image-input"
                         type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={e => { const f = e.target.files?.[0]; if (f) setStoreForm(prev => ({ ...prev, imageFile: f })); }}
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        onChange={e => {
+                          const f = e.target.files?.[0];
+                          if (f) setStoreForm(prev => ({ ...prev, imageFile: f }));
+                        }}
                       />
                       {storeForm.imageFile ? (
-                        <p className="text-xs text-success font-medium">✓ {storeForm.imageFile.name}</p>
+                        <p className="text-xs text-primary">{storeForm.imageFile.name}</p>
                       ) : (
                         <p className="text-xs text-muted-foreground">Drop product image or click to select (PNG/JPG)</p>
                       )}
@@ -1174,31 +915,23 @@ const OpsPage = () => {
                       {storeMutation.isPending ? 'Uploading & Creating…' : 'Upload & Create Product'}
                     </button>
                     {storeMutation.error && <p className="text-xs text-destructive">{(storeMutation.error as Error).message}</p>}
-                    {storeMutation.isSuccess && <p className="text-xs text-success">✓ Product created and image published to store.</p>}
+                    {storeMutation.data && (
+                      <div className="p-3 bg-secondary/30 border border-border rounded-sm mt-3 space-y-2">
+                        <p className="text-xs font-medium">✓ Submitted — Job {storeMutation.data.jobId?.slice(0, 8)}</p>
+                        <p className="text-[10px] text-muted-foreground">State: {storeMutation.data.state}</p>
+                        {storeMutation.data.state === 'needs_review' && (
+                          <div className="flex gap-2 mt-2">
+                            <button disabled={approveJobMutation.isPending} onClick={() => approveJobMutation.mutate(storeMutation.data.jobId)} className="bg-success/20 text-success px-3 py-1 rounded text-xs">Approve</button>
+                            <button disabled={rejectJobMutation.isPending} onClick={() => rejectJobMutation.mutate(storeMutation.data.jobId)} className="bg-destructive/20 text-destructive px-3 py-1 rounded text-xs">Reject</button>
+                          </div>
+                        )}
+                        {storeMutation.data.state === 'published' && (
+                          <p className="text-[10px] text-success">✓ Published to <a href="/media" className="underline">/media</a></p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                {/* Manage Products */}
-                <div className="border border-border p-3 rounded-sm">
-                  <h3 className="text-sm font-semibold mb-2">Manage Products</h3>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="border border-warning/20 p-3 rounded-sm bg-warning/5">
-                      <h4 className="text-[10px] font-semibold text-warning mb-2 uppercase tracking-widest">Suspend</h4>
-                      <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" value={storeSuspendId} onChange={e => setStoreSuspendId(e.target.value)} />
-                      <button disabled={!storeSuspendId || storeSuspendMutation.isPending} className="bg-warning hover:bg-warning/90 text-warning-foreground px-3 py-1.5 rounded-sm text-[10px] w-full text-black disabled:opacity-60" onClick={() => storeSuspendMutation.mutate()}>{storeSuspendMutation.isPending ? '…' : 'Suspend'}</button>
-                      {storeSuspendMutation.error && <p className="text-[10px] text-destructive mt-1">{(storeSuspendMutation.error as Error).message}</p>}
-                      {storeSuspendMutation.isSuccess && <p className="text-[10px] text-success mt-1">Product suspended.</p>}
-                    </div>
-                    <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
-                      <h4 className="text-[10px] font-semibold text-destructive mb-2 uppercase tracking-widest">Delete</h4>
-                      <input placeholder="Product ID" className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-xs mb-2" value={storeDeleteId} onChange={e => setStoreDeleteId(e.target.value)} />
-                      <button disabled={!storeDeleteId || storeDeleteMutation.isPending} className="bg-destructive hover:bg-destructive/90 text-destructive-foreground px-3 py-1.5 rounded-sm text-[10px] w-full disabled:opacity-60" onClick={() => storeDeleteMutation.mutate()}>{storeDeleteMutation.isPending ? '…' : 'Delete'}</button>
-                      {storeDeleteMutation.error && <p className="text-[10px] text-destructive mt-1">{(storeDeleteMutation.error as Error).message}</p>}
-                      {storeDeleteMutation.isSuccess && <p className="text-[10px] text-success mt-1">Product archived.</p>}
-                    </div>
-                  </div>
-                </div>
-
               </div>
             )}
           </div>
@@ -1321,16 +1054,90 @@ const OpsPage = () => {
 
           {potgMutation.error && <p className="text-xs text-destructive">{(potgMutation.error as Error).message}</p>}
           {potgMutation.data && (
-            <div className="p-3 bg-success/10 border border-success/20 rounded-sm">
-              <p className="text-xs text-success font-medium">
-                ✓ Submitted — Job {potgMutation.data.jobId?.slice(0, 8)}
-                {potgMutation.data.matched ? ' · Player profile matched and stats written' : ' · Queued for manual player match'}
-              </p>
+            <div className="p-3 bg-secondary/30 border border-border rounded-sm mt-3 space-y-2">
+              <p className="text-xs font-medium">✓ Submitted — Job {potgMutation.data.jobId?.slice(0, 8)}</p>
+              <p className="text-[10px] text-muted-foreground">State: {potgMutation.data.state}</p>
+              {potgMutation.data.state === 'needs_review' && (
+                <div className="flex gap-2 mt-2">
+                  <button disabled={approveJobMutation.isPending} onClick={() => approveJobMutation.mutate(potgMutation.data.jobId)} className="bg-success/20 text-success px-3 py-1 rounded text-xs">Approve</button>
+                  <button disabled={rejectJobMutation.isPending} onClick={() => rejectJobMutation.mutate(potgMutation.data.jobId)} className="bg-destructive/20 text-destructive px-3 py-1 rounded text-xs">Reject</button>
+                </div>
+              )}
+              {potgMutation.data.state === 'published' && (
+                <p className="text-[10px] text-success">✓ Published to <a href="/media" className="underline">/media</a></p>
+              )}
             </div>
           )}
         </div>
       </TabsContent>
 
+
+      <TabsContent value="media">
+        <div className="panel p-4 max-w-xl space-y-8">
+          <div>
+            <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Upload className="w-5 h-5 text-primary" /> Generic Media Upload</h2>
+            {!isSuperAdmin ? (
+              <p className="text-sm text-destructive font-semibold">Super Admin required to upload media.</p>
+            ) : (
+              <div className="space-y-6">
+                <div className="border border-primary/30 p-3 rounded-sm bg-primary/5 mb-6">
+                  <h3 className="text-sm font-semibold mb-3">Upload Generic Media</h3>
+                  <p className="text-xs text-muted-foreground mb-4">Upload an image or video to the media feed.</p>
+
+                  <div className="space-y-2">
+                    <input
+                      placeholder="Title *"
+                      className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm"
+                      value={genericMediaForm.title}
+                      onChange={e => setGenericMediaForm(f => ({ ...f, title: e.target.value }))}
+                    />
+                    <div
+                      className="border border-dashed border-border rounded-sm p-4 text-center cursor-pointer relative overflow-hidden"
+                    >
+                      <input
+                        type="file"
+                        className="absolute inset-0 opacity-0 cursor-pointer"
+                        onChange={e => {
+                          const f = e.target.files?.[0];
+                          if (f) setGenericMediaForm(prev => ({ ...prev, file: f }));
+                        }}
+                      />
+                      {genericMediaForm.file ? (
+                        <p className="text-xs text-primary">{genericMediaForm.file.name}</p>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">Drop media or click to select</p>
+                      )}
+                    </div>
+                    <button
+                      disabled={!genericMediaForm.title || !genericMediaForm.file || genericMediaMutation.isPending}
+                      className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60"
+                      onClick={() => genericMediaMutation.mutate()}
+                    >
+                      {genericMediaMutation.isPending ? 'Uploading…' : 'Upload Media'}
+                    </button>
+                    {genericMediaMutation.error && <p className="text-xs text-destructive">{(genericMediaMutation.error as Error).message}</p>}
+                    {genericMediaMutation.data && (
+                      <div className="p-3 bg-secondary/30 border border-border rounded-sm mt-3 space-y-2">
+                        <p className="text-xs font-medium">✓ Submitted — Job {genericMediaMutation.data.jobId?.slice(0, 8)}</p>
+                        <p className="text-[10px] text-muted-foreground">State: {genericMediaMutation.data.state}</p>
+                        {genericMediaMutation.data.state === 'needs_review' && (
+                          <div className="flex gap-2 mt-2">
+                            <button disabled={approveJobMutation.isPending} onClick={() => approveJobMutation.mutate(genericMediaMutation.data.jobId)} className="bg-success/20 text-success px-3 py-1 rounded text-xs">Approve</button>
+                            <button disabled={rejectJobMutation.isPending} onClick={() => rejectJobMutation.mutate(genericMediaMutation.data.jobId)} className="bg-destructive/20 text-destructive px-3 py-1 rounded text-xs">Reject</button>
+                          </div>
+                        )}
+                        {genericMediaMutation.data.state === 'published' && (
+                          <p className="text-[10px] text-success">✓ Published to <a href="/media" className="underline">/media</a></p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </TabsContent>
       <TabsContent value="history"><div className="panel p-4">
           <h2 className="font-display text-xl mb-3">Import History</h2>
           {jobs.length === 0 ? <p className="text-sm text-muted-foreground">No import history.</p> : (

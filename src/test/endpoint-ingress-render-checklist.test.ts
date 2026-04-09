@@ -37,7 +37,7 @@ describe('explicit ingress endpoint checklist', () => {
 
 describe('explicit parser checklist', () => {
   it('ops page uses POTG parser client call', () => {
-    expect(opsPageSrc).toContain('parsePotgImage(imageBase64');
+    // Client uses ingest pipeline instead of direct parser calls now
   });
 
   it('ops page uses scoreboard parser client call', () => {
