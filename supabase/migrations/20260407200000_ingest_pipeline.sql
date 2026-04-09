@@ -132,10 +132,10 @@ create or replace view public.v_ingest_reconciliation as
     'stale_draft',
     mp.id,
     mp.title,
-    mp.created_at
+    mp.sort_at
   from public.media_publications mp
   where mp.status = 'draft'
-    and mp.created_at < now() - interval '7 days'
+    and mp.sort_at < now() - interval '7 days'
 
   union all
 
