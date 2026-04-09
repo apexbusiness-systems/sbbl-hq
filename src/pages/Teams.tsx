@@ -99,6 +99,18 @@ const TeamsPage = () => {
       .sort((a, b) => b.stats.ptsFor - a.stats.ptsFor);
   }, [filteredTeams]);
 
+  // ⚡ Bolt Performance Optimization: Extract expensive filtering and sorting
+  // out of the main render loop into useMemo to prevent O(N log N) work on every render.
+  const defenseLeaders = useMemo(() => {
+    return [...filteredTeams]
+      .filter((t) => t.stats && t.stats.gamesPlayed > 0)
+      .sort((a, b) => {
+        const papgA = a.stats.ptsAgainst / a.stats.gamesPlayed;
+        const papgB = b.stats.ptsAgainst / b.stats.gamesPlayed;
+        return papgA - papgB;
+      });
+  }, [filteredTeams]);
+
   const handleLogoError = (e: React.SyntheticEvent<HTMLImageElement, Event>) => {
     (e.target as HTMLImageElement).src = 'https://ui-avatars.com/api/?name=Team&background=random';
   };
@@ -334,13 +346,7 @@ const TeamsPage = () => {
           <div>
             <h3 className="text-lg font-semibold mb-4">Best Defense (PAPG)</h3>
             <div className="space-y-2">
-              {[...filteredTeams]
-                .filter((t) => t.stats && t.stats.gamesPlayed > 0)
-                .sort((a, b) => {
-                  const papgA = a.stats.ptsAgainst / a.stats.gamesPlayed;
-                  const papgB = b.stats.ptsAgainst / b.stats.gamesPlayed;
-                  return papgA - papgB;
-                })
+              {defenseLeaders
                 .slice(0, 10)
                 .map((team, index) => {
                   const papg =
