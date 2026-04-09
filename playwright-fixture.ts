@@ -26,6 +26,20 @@ export async function seedSuperAdminSession(page: Page) {
     user,
   };
 
+
+  await page.route('**/api/public-config', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        supabaseUrl: SUPABASE_URL,
+        supabasePublishableKey: 'playwright-publishable-key',
+        appName: 'SBBL HQ',
+        defaultLeague: 'SBBL',
+      }),
+    });
+  });
   await page.route('**/auth/v1/user**', async (route) => {
     await route.fulfill({
       status: 200,
