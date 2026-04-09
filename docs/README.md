@@ -1,8 +1,8 @@
-<!-- Version: v2.2.0 | Date: 2026-04-05 | Status: Current -->
+<!-- Version: v2.3.0 | Date: 2026-04-09 | Status: Current -->
 # SBBL HQ — Documentation Hub
 
-**Version:** v2.2.0
-**Last Updated:** 2026-04-05
+**Version:** v2.3.0
+**Last Updated:** 2026-04-09
 **Maintainer:** APEX Business Systems Ltd. — Engineering Lead
 
 > Single source of truth for all SBBL HQ engineering, operational, and product documentation.
@@ -81,6 +81,8 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
+| [RELEASE GATE AUDIT 2026-04-09](./quality/RELEASE_GATE_AUDIT_2026-04-09_v1.3.0.md) | v1.3.0 | Final RC gate run — lint/typecheck/tests/build all PASS; gate decision: GO |
+| [RELEASE GATE AUDIT 2026-04-06](./quality/RELEASE_GATE_AUDIT_2026-04-06_v1.2.0.md) | v1.2.0 | 20K concurrency hardening, session/device enforcement, livestream ingest validation — gate decision: PASS |
 | [RELEASE GATE AUDIT 2026-04-04](./quality/RELEASE_GATE_AUDIT_2026-04-04_v1.1.0.md) | v1.1.0 | 10K concurrency hardening + CI pipeline fixes — gate decision: PASS |
 | [LIVESTREAM WORKFLOW AUDIT 2026-04-05](./quality/LIVESTREAM_WORKFLOW_AUDIT_2026-04-04.md) | v2.0.0 | Livestream pipeline audit — 20K hardening pass complete, all gaps resolved |
 | [BUILD AUDIT 2026-03-28](./quality/BUILD_AUDIT_2026-03-28_v1.0.0.md) | v1.0.0 | End-to-end build audit — historical baseline |

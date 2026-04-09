@@ -1,0 +1,23 @@
+# Playwright E2E Validation — 2026-04-09 (UTC)
+
+## Scope
+Entire build E2E suite in `e2e/*.spec.ts` (Chromium project).
+
+## First Attempt
+- Command: `npx playwright test`
+- Result: FAIL (11/11 failed)
+- Root cause: missing system shared library `libatk-1.0.so.0` for Chromium headless shell.
+
+## Remediation
+- Installed Playwright browser + system dependencies:
+  - `npx playwright install chromium`
+  - `npx playwright install-deps chromium`
+
+## Final Attempt
+- Command: `npx playwright test`
+- Result: PASS
+- Summary: `11 passed (23.7s)`
+
+## Covered specs
+- `e2e/critical-paths.spec.ts`
+- `e2e/ops-media-tabs.spec.ts`

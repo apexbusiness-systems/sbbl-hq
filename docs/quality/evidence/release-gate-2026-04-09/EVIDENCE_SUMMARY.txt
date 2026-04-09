@@ -1,0 +1,44 @@
+# Release Gate Evidence Summary — 2026-04-09 (UTC)
+
+## Command: npm run lint
+Result: PASS (exit code 0)
+Key output:
+> vite_react_shadcn_ts@1.0.0 lint
+> eslint .
+
+## Command: npm run typecheck
+Result: PASS (exit code 0)
+Key output:
+> vite_react_shadcn_ts@1.0.0 typecheck
+> tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json
+
+## Command: npm test -- --run
+Result: PASS (exit code 0)
+Key output:
+Test Files  47 passed | 1 skipped (48)
+Tests       309 passed | 7 skipped (316)
+Duration    17.35s
+
+## Command: npm run build
+Result: PASS (exit code 0)
+Key output:
+✓ built in 11.93s
+PWA v1.2.0
+mode      generateSW
+precache  68 entries (1428.50 KiB)
+files generated
+  dist/sw.js
+  dist/workbox-05e41235.js
+
+## Integrity (sha256)
+293e806bb80cff2c04c6c0a2c953bc54ef466a8b1ef3842c93129044e9ad5343  lint.log
+2d6da66c10f475d3535ba4990ccb18bdbdccd72225e828a3acf267ee1defd340  typecheck.log
+4d2e5f8901a0d79f607b62dd9864dafe74479e734cb6d79574fe5917ef0a7463  test.log
+d43b998d092c8148479cbb86772a9be9530c98b4272d0e9913676dbb13786a26  build.log
+
+
+## Command: npx playwright test
+Result: PASS (exit code 0)
+Key output:
+Running 11 tests using 8 workers
+11 passed (23.7s)
