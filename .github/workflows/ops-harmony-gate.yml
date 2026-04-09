@@ -1,0 +1,59 @@
+name: Ops Harmony Gate
+
+on:
+  pull_request:
+    paths:
+      - 'src/lib/api/client.ts'
+      - 'src/lib/supabase/client.ts'
+      - 'src/lib/runtime-config.ts'
+      - 'src/lib/api/ops.ts'
+      - 'src/pages/Ops.tsx'
+      - 'src/pages/Media.tsx'
+      - 'src/contexts/AuthContext.tsx'
+      - 'src/test/**'
+      - 'e2e/**'
+      - 'playwright-fixture.ts'
+      - 'playwright.config.ts'
+      - 'package.json'
+      - '.github/workflows/ops-harmony-gate.yml'
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ops-harmony-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: Auth + Ingest + Render Harmony
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://ezanilxygnpucwkwpsoc.supabase.co' }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo' }}
+      VITE_APP_NAME: SBBL HQ
+      VITE_DEFAULT_LEAGUE: SBBL
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Auth/Ops unit guardrails
+        run: npx vitest run src/test/runtime-config.test.ts src/test/apifetch-401-retry.test.ts src/test/ops-auth-gating.test.tsx
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Ops harmony e2e
+        run: npx playwright test e2e/ops-auth-ingest-harmony.spec.ts e2e/critical-paths.spec.ts
