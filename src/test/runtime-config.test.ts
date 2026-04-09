@@ -103,3 +103,78 @@ describe('runtime-config → Supabase client init (login chain)', () => {
     expect(getSupabaseClient()).toBeNull();
   });
 });
+
+describe('supabase config drift guardrails', () => {
+  beforeEach(() => {
+    vi.resetModules();
+    createClientSpy.mockClear();
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://build.supabase.co');
+    vi.stubEnv('VITE_SUPABASE_PUBLISHABLE_KEY', 'build-key-123');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'build-key-123');
+  });
+
+  it('prefers runtime config over build-time env during init', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        supabaseUrl: 'https://runtime.supabase.co',
+        supabasePublishableKey: 'runtime-key-xyz',
+        appName: 'SBBL HQ',
+        defaultLeague: 'SBBL',
+      }),
+    }));
+
+    const { initSupabaseClient } = await import('@/lib/supabase/client');
+    await initSupabaseClient();
+
+    expect(createClientSpy).toHaveBeenCalledTimes(1);
+    expect(createClientSpy).toHaveBeenNthCalledWith(
+      1,
+      'https://runtime.supabase.co',
+      'runtime-key-xyz',
+      expect.objectContaining({
+        auth: expect.objectContaining({ persistSession: true }),
+      }),
+    );
+  });
+
+  it('rebuilds a stale pre-init build client when runtime config disagrees', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        supabaseUrl: 'https://runtime.supabase.co',
+        supabasePublishableKey: 'runtime-key-xyz',
+        appName: 'SBBL HQ',
+        defaultLeague: 'SBBL',
+      }),
+    }));
+
+    const { getSupabaseClient, initSupabaseClient } = await import('@/lib/supabase/client');
+
+    // Simulate an early access path that instantiates from stale build env.
+    expect(getSupabaseClient()).not.toBeNull();
+    expect(createClientSpy).toHaveBeenNthCalledWith(
+      1,
+      'https://build.supabase.co',
+      'build-key-123',
+      expect.objectContaining({
+        auth: expect.objectContaining({ persistSession: true }),
+      }),
+    );
+
+    await initSupabaseClient();
+
+    // Guardrail: init must self-heal to runtime config to avoid JWT split-brain.
+    expect(createClientSpy).toHaveBeenCalledTimes(2);
+    expect(createClientSpy).toHaveBeenNthCalledWith(
+      2,
+      'https://runtime.supabase.co',
+      'runtime-key-xyz',
+      expect.objectContaining({
+        auth: expect.objectContaining({ persistSession: true }),
+      }),
+    );
+  });
+});
