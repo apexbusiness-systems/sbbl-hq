@@ -52,6 +52,16 @@ export async function apiFetch<T>(
   init: RequestInit = {},
   token?: string | null,
 ): Promise<T> {
+  const clearLocalAuthState = async () => {
+    const supabaseClient = getSupabaseClient();
+    if (!supabaseClient) return;
+    try {
+      await supabaseClient.auth.signOut({ scope: 'local' });
+    } catch (error) {
+      console.warn('[apiFetch] Failed to clear local auth state:', error);
+    }
+  };
+
   const attempt = async (authToken: string | null): Promise<Response> => {
     const headers = new Headers(init.headers);
     headers.set('content-type', headers.get('content-type') ?? 'application/json');
@@ -80,10 +90,15 @@ export async function apiFetch<T>(
     if (supabaseClient) {
       const { data: refreshData } = await supabaseClient.auth.refreshSession();
       const freshToken = refreshData.session?.access_token ?? null;
-      if (freshToken && freshToken !== authToken) {
+      if (freshToken) {
         response = await attempt(freshToken);
       }
     }
+  }
+
+  if (response.status === 401) {
+    await clearLocalAuthState();
+    throw new Error('reauth_required');
   }
 
   const payload = await response.json().catch(() => ({ ok: false, error: 'invalid_json_response' }));

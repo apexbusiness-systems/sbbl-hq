@@ -20,11 +20,13 @@ const mockFetch = vi.fn<(...args: unknown[]) => Promise<Response>>();
 const mockRefreshSession = vi.fn();
 const mockGetSession = vi.fn();
 const mockGetUser = vi.fn();
+const mockSignOut = vi.fn();
 const mockSupabaseClient = {
   auth: {
     refreshSession: mockRefreshSession,
     getSession: mockGetSession,
     getUser: mockGetUser,
+    signOut: mockSignOut,
   },
 };
 
@@ -60,6 +62,7 @@ describe('Stream Chaos Battery', () => {
     mockRefreshSession.mockReset();
     mockGetSession.mockReset();
     mockGetUser.mockReset();
+    mockSignOut.mockReset();
   });
 
   afterEach(() => {
@@ -160,7 +163,7 @@ describe('Stream Chaos Battery', () => {
     expect(result).toHaveProperty('ok', true);
   });
 
-  it('CHAOS-5: double 401 (refresh also returns expired) does not infinite loop', async () => {
+  it('CHAOS-5: double 401 (refresh also returns expired) fails closed without loops', async () => {
     const { apiFetch } = await import('@/lib/api/client');
 
     // 401 with explicit token
@@ -172,9 +175,10 @@ describe('Stream Chaos Battery', () => {
     });
 
     // Should fail cleanly, not loop
-    await expect(apiFetch('/ops/streams/config', {}, 'dead-token')).rejects.toThrow('unauthorized');
+    await expect(apiFetch('/ops/streams/config', {}, 'dead-token')).rejects.toThrow('reauth_required');
     expect(mockFetch).toHaveBeenCalledTimes(1); // No retry attempted
     expect(mockRefreshSession).toHaveBeenCalledTimes(1);
+    expect(mockSignOut).toHaveBeenCalledWith({ scope: 'local' });
   });
 
   it('CHAOS-6: concurrent calls from two tabs both get fresh tokens', async () => {

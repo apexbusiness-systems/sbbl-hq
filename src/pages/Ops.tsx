@@ -29,10 +29,21 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'history',   label: 'Import History' },
 ];
 
+export const isOpsAuthError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : '';
+  return message === 'unauthorized' || message === 'forbidden' || message === 'reauth_required';
+};
+
+export const shouldRetryOpsQuery = (failureCount: number, error: unknown): boolean =>
+  !isOpsAuthError(error) && failureCount < 2;
+
+export const assertOpsAccess = (canRunOps: boolean) => {
+  if (!canRunOps) throw new Error('reauth_required');
+};
 
 const OpsPage = () => {
   const queryClient = useQueryClient();
-  const { user, roles } = useAuth();
+  const { loading, session, user, roles } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
   const [storeForm, setStoreForm] = useState({ title: '', price: '0', category: 'apparel', publishStatus: 'draft' as 'draft' | 'published', imageFile: null as File | null, sale: false });
@@ -43,6 +54,10 @@ const OpsPage = () => {
   const [potgImageFile, setPotgImageFile] = useState<File | null>(null);
   const [potgForm, setPotgForm] = useState({ playerName: '', team: '', pts: '', rebs: '', assts: '', gameResult: '', leagueId: 'wbl', date: new Date().toISOString().split('T')[0] });
   const isSuperAdmin = roles.includes('super_admin');
+  const canRunOps = !loading && !!session && isSuperAdmin;
+  const ensureOpsAccess = () => {
+    assertOpsAccess(canRunOps);
+  };
 
   // ── Admin CRUD form state ──────────────────────────────────────────────────
   const [teamForm, setTeamForm] = useState({ name: '', leagueId: '', seasonId: '', divisionId: '' });
@@ -106,6 +121,7 @@ const OpsPage = () => {
     setStoreBatchItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
 
   const handlePotgImageUpload = async (file: File) => {
+    ensureOpsAccess();
     setPotgParseState('parsing');
     setPotgParseError(null);
     setPotgImageFile(file);
@@ -137,8 +153,18 @@ const OpsPage = () => {
     }
   };
 
-  const bootstrapQuery = useQuery({ queryKey: ['ops-bootstrap'], queryFn: fetchOpsBootstrap });
-  const historyQuery = useQuery({ queryKey: ['ops-import-history'], queryFn: fetchImportHistory });
+  const bootstrapQuery = useQuery({
+    queryKey: ['ops-bootstrap'],
+    queryFn: fetchOpsBootstrap,
+    enabled: canRunOps,
+    retry: shouldRetryOpsQuery,
+  });
+  const historyQuery = useQuery({
+    queryKey: ['ops-import-history'],
+    queryFn: fetchImportHistory,
+    enabled: canRunOps,
+    retry: shouldRetryOpsQuery,
+  });
 
   const importMutation = useMutation({
     mutationFn: ({ kind, rows }: { kind: 'teams' | 'players' | 'schedules' | 'events'; rows: Record<string, string>[] }) =>
@@ -187,6 +213,7 @@ const OpsPage = () => {
 
   const storeMutation = useMutation({
     mutationFn: async () => {
+      ensureOpsAccess();
       if (!storeForm.imageFile) throw new Error('Image is required');
       const resized = await resizeImageToFit(storeForm.imageFile, 800, 800);
 
@@ -220,6 +247,7 @@ const OpsPage = () => {
   // media_assets + media_publications (surface='event') so it appears on /media.
   const eventMediaMutation = useMutation({
     mutationFn: async () => {
+      ensureOpsAccess();
       if (!eventResizedBlob || !eventGraphicForm.title) return null;
       const filename = `event-${crypto.randomUUID()}.jpg`;
 
@@ -409,6 +437,7 @@ const OpsPage = () => {
 
 
   const handleEventImageUpload = async (file: File) => {
+    ensureOpsAccess();
     if (!file) return;
     setEventParseState('parsing');
     setEventParseError('');
@@ -478,6 +507,47 @@ const OpsPage = () => {
 
   const jobs = useMemo(() => historyQuery.data?.jobs ?? bootstrapQuery.data?.importHistory ?? [], [historyQuery.data?.jobs, bootstrapQuery.data?.importHistory]);
   const latestSummary = useMemo(() => jobs.slice(0, 5), [jobs]);
+  const reauthRequired = useMemo(
+    () =>
+      [
+        bootstrapQuery.error,
+        historyQuery.error,
+        potgMutation.error,
+        storeMutation.error,
+        eventMediaMutation.error,
+      ].some((error) => isOpsAuthError(error)),
+    [
+      bootstrapQuery.error,
+      historyQuery.error,
+      potgMutation.error,
+      storeMutation.error,
+      eventMediaMutation.error,
+    ],
+  );
+
+  if (loading) {
+    return (
+      <div className="container py-8 md:py-12 max-w-6xl">
+        <div className="panel p-4 text-sm text-muted-foreground">Loading Ops session…</div>
+      </div>
+    );
+  }
+
+  if (!session || reauthRequired) {
+    return (
+      <div className="container py-8 md:py-12 max-w-6xl">
+        <div className="panel p-4 text-sm text-destructive font-semibold">Session expired. Sign in again.</div>
+      </div>
+    );
+  }
+
+  if (!isSuperAdmin) {
+    return (
+      <div className="container py-8 md:py-12 max-w-6xl">
+        <div className="panel p-4 text-sm text-destructive font-semibold">Access denied. Super Admin role required.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="container py-8 md:py-12 max-w-6xl space-y-6">
