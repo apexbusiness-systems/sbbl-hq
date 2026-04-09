@@ -7,6 +7,9 @@
 ## 2024-05-18 - [Missing useMemo for Expensive Array Sorting]
 **Learning:** Found an instance in React components (like `Teams.tsx`) where raw arrays coming from APIs or mock data were being processed (like `sort()` with mathematical divisions nested inside) directly inside the JSX render loop. This leads to `O(N log N)` work being performed on every re-render.
 **Action:** Always wrap `filter()`, `reduce()`, and `map()` chains or `sort()` operations in `useMemo` when they are inside a React component's main rendering scope and do not need to be recomputed unless their dependencies change.
+## 2024-04-09 - Supabase Migration column rename
+**Learning:** `media_publications` table had its `created_at` column renamed to `sort_at` during the `20260407103137_media_publications.sql` migration, but the subsequent `20260407200000_ingest_pipeline.sql` migration was still referencing `created_at` in the `v_ingest_reconciliation` view definition, causing Supabase Preview CI failures with "ERROR: column mp.created_at does not exist (SQLSTATE 42703)".
+**Action:** Always ensure that subsequent migrations are updated to reflect column renames or schema changes made in previous migrations.
 
 ## 2026-04-09 - Ops.tsx refactor to Ingest Pipeline
 **Learning:** Legacy direct calls to parsers and storage in `Ops.tsx` created brittle front-end coupling. By converting everything (POTG, Store, Events, and Generic Media) to use `ingestPresign` and `ingestSubmit`, we shifted heavy processing (and potential failures) out of the client browser context and into the Cloudflare Worker data pipeline map.
