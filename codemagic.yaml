@@ -1,0 +1,336 @@
+workflows:
+  sbbl_ios_testflight:
+    name: SBBL HQ iOS -> TestFlight (Green Lane)
+    instance_type: mac_mini_m2
+    max_build_duration: 90
+
+    environment:
+      xcode: 16.4
+      cocoapods: default
+      node: 22
+      groups:
+        - ios_credentials
+        - appstore_credentials
+      vars:
+        NODE_OPTIONS: "--max_old_space_size=8192"
+        XCODE_SCHEME: "App"
+        INFO_PLIST_PATH: "ios/App/App/Info.plist"
+        XCODE_WORKSPACE_PRIMARY: "ios/App/App.xcworkspace"
+        XCODE_WORKSPACE_FALLBACK: "ios/App/App.xcodeproj/project.xcworkspace"
+
+        # Authoritative app bundle id for this repo
+        BUNDLE_ID_OVERRIDE: "com.sbblhq.app"
+
+        # Canonical icon in this repository
+        ICON_SOURCE: "public/icons/app-icon.png"
+        ICON_BACKGROUND_COLOR: "#0A0A0A"
+
+        # Safe default: fetch existing signing assets, do not create new ones
+        ALLOW_CREATE_SIGNING: "false"
+
+        # Update this to match your App Store Connect internal group name
+        TESTFLIGHT_INTERNAL_GROUP: "SBBL Internal"
+
+    scripts:
+      - name: Preflight (env normalization + guardrails)
+        script: |
+          set -euo pipefail
+
+          if [ -n "${BUNDLE_ID:-}" ] && [ "${BUNDLE_ID}" != "${BUNDLE_ID_OVERRIDE}" ]; then
+            echo "ERROR: BUNDLE_ID collision. env BUNDLE_ID='${BUNDLE_ID}' conflicts with BUNDLE_ID_OVERRIDE='${BUNDLE_ID_OVERRIDE}'."
+            echo "Fix: remove BUNDLE_ID from Codemagic env groups."
+            exit 1
+          fi
+
+          KEY_IDENTIFIER="${APP_STORE_CONNECT_KEY_IDENTIFIER:-${APP_STORE_CONNECT_KEY_ID:-${APP_STORE_CONNECT_KEY_iD:-}}}"
+          if [ -z "${KEY_IDENTIFIER}" ]; then
+            echo "ERROR: Missing App Store Connect key id. Set APP_STORE_CONNECT_KEY_ID (or APP_STORE_CONNECT_KEY_IDENTIFIER)."
+            exit 1
+          fi
+
+          # Export canonical + legacy key names for downstream scripts/publishing.
+          echo "APP_STORE_CONNECT_KEY_IDENTIFIER=${KEY_IDENTIFIER}" >> "$CM_ENV"
+          echo "APP_STORE_CONNECT_KEY_ID=${KEY_IDENTIFIER}" >> "$CM_ENV"
+
+          for v in TEAM_ID APP_STORE_CONNECT_ISSUER_ID APP_STORE_CONNECT_PRIVATE_KEY CERTIFICATE_PRIVATE_KEY; do
+            if [ -z "${!v:-}" ]; then
+              echo "ERROR: Missing required env var: $v"
+              exit 1
+            fi
+          done
+
+          test -f package.json || (echo "ERROR: package.json missing at repo root" && exit 1)
+          test -f "${ICON_SOURCE}" || (echo "ERROR: icon source missing at ${ICON_SOURCE}" && exit 1)
+
+          if ! echo "${BUNDLE_ID_OVERRIDE}" | grep -qE '^[A-Za-z0-9.-]+\.[A-Za-z0-9.-]+$'; then
+            echo "ERROR: invalid BUNDLE_ID_OVERRIDE='${BUNDLE_ID_OVERRIDE}'."
+            exit 1
+          fi
+
+          echo "Preflight OK: bundle_id=${BUNDLE_ID_OVERRIDE} allow_create_signing=${ALLOW_CREATE_SIGNING}"
+
+      - name: Pin npm
+        script: |
+          set -euo pipefail
+          node -v
+          npm install -g npm@10
+          npm -v
+
+      - name: Install JS deps
+        script: |
+          set -euo pipefail
+          export NODE_OPTIONS="--max_old_space_size=8192"
+          npm ci
+
+      - name: Ensure iOS platform exists
+        script: |
+          set -euo pipefail
+          if [ ! -d "ios/App" ]; then
+            echo "iOS platform missing. Running npx cap add ios..."
+            npx cap add ios
+          else
+            echo "iOS platform already present."
+          fi
+
+      - name: Build web assets
+        script: |
+          set -euo pipefail
+          export NODE_OPTIONS="--max_old_space_size=8192"
+          npm run build
+
+      - name: Capacitor sync iOS
+        script: |
+          set -euo pipefail
+          npx cap sync ios
+
+      - name: Generate app icon (flatten alpha + normalize to 1024x1024)
+        script: |
+          set -euo pipefail
+
+          if command -v magick >/dev/null 2>&1; then
+            IM="magick"
+          elif command -v convert >/dev/null 2>&1; then
+            IM="convert"
+          else
+            echo "ERROR: ImageMagick not found."
+            exit 1
+          fi
+
+          mkdir -p assets
+
+          "${IM}" "${ICON_SOURCE}" \
+            -background "${ICON_BACKGROUND_COLOR}" \
+            -flatten \
+            -alpha off \
+            -resize 1024x1024^ \
+            -gravity center \
+            -extent 1024x1024 \
+            assets/icon.png
+
+          CHANNELS="$("${IM}" identify -format '%[channels]' assets/icon.png)"
+          if echo "${CHANNELS}" | grep -qi 'a'; then
+            echo "ERROR: assets/icon.png still has alpha channel (${CHANNELS})."
+            exit 1
+          fi
+
+          DIMS="$("${IM}" identify -format '%wx%h' assets/icon.png)"
+          if [ "${DIMS}" != "1024x1024" ]; then
+            echo "ERROR: assets/icon.png dimensions are ${DIMS}, expected 1024x1024."
+            exit 1
+          fi
+
+          echo "Icon ready: dims=${DIMS}, channels=${CHANNELS}"
+
+      - name: Generate AppIcon set via @capacitor/assets
+        script: |
+          set -euo pipefail
+          test -f assets/icon.png || (echo "ERROR: assets/icon.png missing" && exit 1)
+
+          npx @capacitor/assets generate \
+            --ios \
+            --assetPath assets \
+            --iconBackgroundColor "${ICON_BACKGROUND_COLOR}" \
+            --splashBackgroundColor "${ICON_BACKGROUND_COLOR}"
+
+      - name: Verify AppIcon assets
+        script: |
+          set -euo pipefail
+
+          APPICONSET="ios/App/App/Assets.xcassets/AppIcon.appiconset"
+          [ -d "${APPICONSET}" ] || (echo "ERROR: missing ${APPICONSET}" && exit 1)
+
+          PNG_COUNT="$(find "${APPICONSET}" -name '*.png' | wc -l | tr -d ' ')"
+          if [ "${PNG_COUNT}" -lt 1 ]; then
+            echo "ERROR: no PNGs in ${APPICONSET}"
+            ls -la "${APPICONSET}" || true
+            exit 1
+          fi
+
+          IM="$(command -v magick 2>/dev/null || command -v convert)"
+          ALPHA_FOUND=0
+          while IFS= read -r png; do
+            CHANNELS="$("${IM}" identify -format '%[channels]' "${png}")"
+            if echo "${CHANNELS}" | grep -qi 'a'; then
+              echo "WARN: alpha detected in ${png} (${CHANNELS})"
+              ALPHA_FOUND=1
+            fi
+          done < <(find "${APPICONSET}" -name '*.png')
+
+          if [ "${ALPHA_FOUND}" -eq 1 ]; then
+            echo "ERROR: one or more AppIcon PNGs still contain alpha channel."
+            exit 1
+          fi
+
+          echo "AppIcon verified: ${PNG_COUNT} PNG file(s), no alpha channel"
+
+      - name: CocoaPods (if Podfile exists)
+        script: |
+          set -euo pipefail
+          if [ -f "ios/App/Podfile" ]; then
+            cd ios/App
+            pod install
+            cd ../..
+            echo "CocoaPods installed"
+          else
+            echo "No Podfile found. Skipping pod install."
+          fi
+
+      - name: Resolve workspace + hard-lock bundle id
+        script: |
+          set -euo pipefail
+
+          if [ -d "${XCODE_WORKSPACE_PRIMARY}" ]; then
+            XCODE_WORKSPACE="${XCODE_WORKSPACE_PRIMARY}"
+          elif [ -d "${XCODE_WORKSPACE_FALLBACK}" ]; then
+            XCODE_WORKSPACE="${XCODE_WORKSPACE_FALLBACK}"
+          else
+            echo "ERROR: no Xcode workspace found."
+            ls -la ios/App || true
+            exit 1
+          fi
+          echo "XCODE_WORKSPACE=${XCODE_WORKSPACE}" >> "$CM_ENV"
+
+          PBXPROJ="ios/App/App.xcodeproj/project.pbxproj"
+          if [ -f "${PBXPROJ}" ]; then
+            PBXPROJ_IDS="$(grep -oE 'PRODUCT_BUNDLE_IDENTIFIER = [^;]+' "${PBXPROJ}" \
+              | sed -E 's/PRODUCT_BUNDLE_IDENTIFIER = //g' \
+              | tr -d '"' \
+              | awk '{$1=$1};1' \
+              | grep -v '^NO$' \
+              | sort -u || true)"
+
+            if ! echo "${PBXPROJ_IDS}" | grep -qxF "${BUNDLE_ID_OVERRIDE}"; then
+              echo "ERROR: BUNDLE_ID_OVERRIDE=${BUNDLE_ID_OVERRIDE} not found in pbxproj values: ${PBXPROJ_IDS}"
+              exit 1
+            fi
+          fi
+
+          echo "BUNDLE_ID=${BUNDLE_ID_OVERRIDE}" >> "$CM_ENV"
+          echo "Workspace and bundle id resolved"
+
+      - name: Validate Info.plist + ensure CFBundleIconName
+        script: |
+          set -euo pipefail
+          test -f "${INFO_PLIST_PATH}" || (echo "ERROR: Info.plist missing at ${INFO_PLIST_PATH}" && exit 1)
+
+          CURRENT="$(/usr/libexec/PlistBuddy -c "Print :CFBundleIconName" "${INFO_PLIST_PATH}" 2>/dev/null || echo "")"
+          if [ "${CURRENT}" != "AppIcon" ]; then
+            /usr/libexec/PlistBuddy -c "Set :CFBundleIconName AppIcon" "${INFO_PLIST_PATH}" 2>/dev/null \
+              || /usr/libexec/PlistBuddy -c "Add :CFBundleIconName string AppIcon" "${INFO_PLIST_PATH}"
+          fi
+
+          echo "CFBundleIconName is AppIcon"
+
+      - name: Set unique build number
+        script: |
+          set -euo pipefail
+          BUILD="$(date -u +%Y%m%d%H%M%S)"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD}" "${INFO_PLIST_PATH}" \
+            || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string ${BUILD}" "${INFO_PLIST_PATH}"
+          echo "Build number set to ${BUILD}"
+
+      - name: Initialize keychain + fetch signing files
+        script: |
+          set -euo pipefail
+
+          : "${BUNDLE_ID:?BUNDLE_ID missing}"
+          : "${APP_STORE_CONNECT_ISSUER_ID:?APP_STORE_CONNECT_ISSUER_ID missing}"
+          : "${APP_STORE_CONNECT_KEY_IDENTIFIER:?APP_STORE_CONNECT_KEY_IDENTIFIER missing}"
+          : "${APP_STORE_CONNECT_PRIVATE_KEY:?APP_STORE_CONNECT_PRIVATE_KEY missing}"
+          : "${CERTIFICATE_PRIVATE_KEY:?CERTIFICATE_PRIVATE_KEY missing}"
+
+          if [ "${BUNDLE_ID}" = "NO" ] || ! echo "${BUNDLE_ID}" | grep -q '\.'; then
+            echo "ERROR: invalid BUNDLE_ID='${BUNDLE_ID}'"
+            exit 1
+          fi
+
+          keychain initialize
+
+          FETCH_ARGS=(
+            "${BUNDLE_ID}"
+            --type IOS_APP_STORE
+            --issuer-id "${APP_STORE_CONNECT_ISSUER_ID}"
+            --key-id "${APP_STORE_CONNECT_KEY_IDENTIFIER}"
+            --private-key @env:APP_STORE_CONNECT_PRIVATE_KEY
+            --certificate-key @env:CERTIFICATE_PRIVATE_KEY
+          )
+
+          if [ "${ALLOW_CREATE_SIGNING:-false}" = "true" ]; then
+            FETCH_ARGS+=(--create)
+            echo "ALLOW_CREATE_SIGNING=true: CI may create missing signing assets"
+          else
+            echo "ALLOW_CREATE_SIGNING=false: fetching existing signing assets only"
+          fi
+
+          app-store-connect fetch-signing-files "${FETCH_ARGS[@]}"
+          keychain add-certificates
+
+      - name: Configure code signing
+        script: |
+          set -euo pipefail
+          xcode-project use-profiles
+
+      - name: Build IPA
+        script: |
+          set -euo pipefail
+          xcode-project build-ipa \
+            --workspace "${XCODE_WORKSPACE}" \
+            --scheme "${XCODE_SCHEME}"
+
+      - name: Verify IPA exists + export IPA_PATH
+        script: |
+          set -euo pipefail
+          IPA="$(ls -1 build/ios/ipa/*.ipa 2>/dev/null | head -n 1 || true)"
+          if [ -z "${IPA}" ]; then
+            echo "ERROR: IPA not found in build/ios/ipa"
+            ls -la build/ios || true
+            exit 1
+          fi
+          echo "IPA_PATH=${IPA}" >> "$CM_ENV"
+          echo "IPA ready: ${IPA}"
+
+      - name: Verify AppIcon exists inside IPA
+        script: |
+          set -euo pipefail
+          : "${IPA_PATH:?IPA_PATH missing}"
+          ICON_COUNT="$(unzip -l "${IPA_PATH}" | grep -i 'AppIcon' | wc -l | tr -d ' ')"
+          if [ "${ICON_COUNT}" -eq 0 ]; then
+            echo "ERROR: no AppIcon entries found inside IPA"
+            unzip -l "${IPA_PATH}" | grep -i 'icon' || true
+            exit 1
+          fi
+          echo "IPA icon verification passed (${ICON_COUNT} icon entries)"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.dSYM
+
+    publishing:
+      app_store_connect:
+        api_key: $APP_STORE_CONNECT_PRIVATE_KEY
+        key_id: $APP_STORE_CONNECT_KEY_ID
+        issuer_id: $APP_STORE_CONNECT_ISSUER_ID
+        submit_to_testflight: true
+        beta_groups:
+          - $TESTFLIGHT_INTERNAL_GROUP
