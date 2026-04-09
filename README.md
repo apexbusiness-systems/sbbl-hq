@@ -1,5 +1,5 @@
 <!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
-# LampStand (repository currently contains SBBL HQ code)
+# SBBL HQ
 
 Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alberta
 
@@ -9,22 +9,14 @@ Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alber
 
 ---
 
-## Architecture Snapshot
+## Stack
 
-- **Frontend:** Vite + React + TypeScript
+- **Frontend:** Vite + React + TypeScript (strict mode not yet enabled; see tsconfig.app.json)
 - **Styling:** Tailwind CSS (dark-first, `#C9A84C` gold accent)
 - **Database:** Supabase (PostgreSQL + Realtime + Auth + Storage)
 - **Hosting:** Cloudflare Workers — NOT Vercel
 - **Payments:** Stripe
 - **CI/CD:** GitHub Actions → Cloudflare deploy
-- **Auth modes:** guest mode + Supabase auth (password, magic link, Google OAuth)
-- **Consent model:** local-first opt-in consent state in browser storage
-
-## Provider and runtime design
-
-- AI provider adapters and voice runtime are not present in this repository today.
-- Current architecture remains modular around API clients (`src/lib/api/*`) and Worker routes (`src/worker/*`).
-- Groq is currently used only in specific Worker routes where configured by `GROQ_API_KEY`.
 
 ---
 
@@ -64,23 +56,6 @@ cp .env.example .env        # fill in VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY
 cp .dev.vars.example .dev.vars  # fill in service keys
 npm run dev
 ```
-
-## Auth and privacy behavior
-
-- Users can continue in guest mode without forced sign-in.
-- Email magic link flow is supported from the login page.
-- Local memory, cloud sync, notifications, and microphone are explicit opt-in toggles.
-- Reset control clears local consent and local history keys.
-- Legal routes: `/privacy`, `/terms`, `/acceptable-use`, `/ai-disclaimer`, `/license`.
-
-## Cloudflare deployment (non-interactive CI-safe)
-
-- Wrangler is pinned in `devDependencies`.
-- Use explicit config (`wrangler.jsonc` and `wrangler.toml`) instead of relying on auto-detection.
-- Build output is `dist` and configured for SPA fallback in Wrangler assets.
-- Deploy commands:
-  - `npm run cf:deploy`
-  - `npm run cf:deploy:staging`
 
 ## Quality Gates (must all pass before merge)
 

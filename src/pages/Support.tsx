@@ -137,20 +137,6 @@ const SupportPage = () => {
               <p className="text-[11px] text-muted-foreground">Rules and conditions of use</p>
             </div>
           </Link>
-          <Link to="/acceptable-use" className="panel p-4 flex items-center gap-3 hover:border-primary/30 transition-colors">
-            <ScrollText className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-            <div>
-              <p className="text-sm font-medium">Acceptable Use Policy</p>
-              <p className="text-[11px] text-muted-foreground">Allowed and prohibited conduct</p>
-            </div>
-          </Link>
-          <Link to="/ai-disclaimer" className="panel p-4 flex items-center gap-3 hover:border-primary/30 transition-colors">
-            <Shield className="w-5 h-5 text-muted-foreground flex-shrink-0" />
-            <div>
-              <p className="text-sm font-medium">AI Guidance Disclaimer</p>
-              <p className="text-[11px] text-muted-foreground">Limits and safety boundaries</p>
-            </div>
-          </Link>
         </div>
 
         <p className="text-xs text-muted-foreground text-center mt-10">
