@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import * as Sentry from '@sentry/react';
 import { initSupabaseClient, getSupabaseClient } from '@/lib/supabase/client';
 import { canAccessOps, type AppRole } from '@/lib/auth/roles';
@@ -28,15 +28,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [configAvailable, setConfigAvailable] = useState(true);
 
-  const clearAuthState = () => {
+  const clearAuthState = useCallback(() => {
     setSession(null);
     setUser(null);
     setProfile(null);
     setRoles([]);
     Sentry.setUser(null);
-  };
+  }, []);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const client = getSupabaseClient();
     if (!client) {
       clearAuthState();
@@ -74,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearAuthState();
     }
     setLoading(false);
-  };
+  }, [clearAuthState]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
@@ -139,7 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     void boot();
     return () => unsubscribe?.();
-  }, []);
+  }, [load]);
 
   const value = useMemo(
     () => ({
@@ -157,7 +157,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       configAvailable,
       refresh: load,
     }),
-    [loading, session, user, profile, roles, configAvailable],
+    [loading, session, user, profile, roles, configAvailable, load],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
