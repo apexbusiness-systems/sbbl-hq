@@ -30,6 +30,13 @@ coverage
 bun.lockb
 package-lock.json
 
+# Playwright
+test-results/
+playwright-report/
+
+# Vite PWA dev artifacts
+dev-dist/
+
 # Internal APEX tooling — must never be committed to product repos
 *.zip
 apex-*.md

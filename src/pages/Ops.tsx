@@ -179,7 +179,6 @@ const OpsPage = () => {
 
   const potgMutation = useMutation({
     mutationFn: async () => {
-      ensureOpsAccess();
       if (!potgImageFile) throw new Error('Image is required');
       const dims = await inferTargetDimensions(potgImageFile);
       const resized = await resizeImageToFit(potgImageFile, dims.width, dims.height, dims.mode);
@@ -244,7 +243,8 @@ const OpsPage = () => {
     },
   });
 
-  // Uploads the resized event graphic via ingest pipeline.
+  // Uploads the resized event graphic via ingest pipeline and writes
+  // media_assets + media_publications (surface='event') so it appears on /media.
   const eventMediaMutation = useMutation({
     mutationFn: async () => {
       ensureOpsAccess();
@@ -266,7 +266,7 @@ const OpsPage = () => {
         },
       });
     },
-    // No onSuccess — eventMediaMutation has none in the current file. Do not add one.
+    // No onSuccess — eventMediaMutation has none in the current file.
   });
 
   // ── Admin CRUD mutations ───────────────────────────────────────────────
