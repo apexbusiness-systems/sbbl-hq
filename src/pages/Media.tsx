@@ -137,6 +137,20 @@ const MediaPage = () => {
           ))}
         </div>
 
+        {mediaQuery.isLoading && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 items-start" aria-live="polite" aria-busy="true">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={`media-loading-${index}`} className="panel overflow-hidden animate-pulse">
+                <div className="bg-secondary/80" style={{ aspectRatio: '3/4' }} />
+                <div className="px-3 py-3 border-t border-border/50 space-y-2">
+                  <div className="h-3 rounded-sm bg-secondary/80 w-1/3" />
+                  <div className="h-3 rounded-sm bg-secondary/80 w-2/3" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {mediaQuery.isError && (
           <div className="panel p-6 mb-4 flex items-center gap-3 border-destructive/40 bg-destructive/5">
             <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0" />
@@ -146,7 +160,7 @@ const MediaPage = () => {
           </div>
         )}
 
-        {!mediaQuery.isError && mediaQuery.isSuccess && filtered.length === 0 ? (
+        {!mediaQuery.isLoading && !mediaQuery.isError && mediaQuery.isSuccess && filtered.length === 0 ? (
           <div className="panel p-12 text-center">
             <p className="text-sm text-muted-foreground">
               {allMedia.length === 0 ? 'No published media yet.' : 'No media found for this filter.'}
@@ -158,9 +172,10 @@ const MediaPage = () => {
           // its natural dimensions — poster/photo fills cover-top, video/clip
           // is contained and framed by an ambient blurred version of itself.
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
-            {filtered.map(m => {
+            {filtered.map((m, index) => {
               const isPortrait = m.type === 'poster' || m.type === 'photo';
               const isPlayable = m.type === 'highlight' || m.type === 'clip';
+              const isLcpCandidate = index === 0;
               return (
                 <div key={m.id} className="panel overflow-hidden group flex flex-col">
                   {/* ── Image cell: always 3/4 tall, adapts internally ── */}
@@ -170,13 +185,18 @@ const MediaPage = () => {
                       src={m.thumbnail}
                       alt=""
                       aria-hidden
+                      loading="lazy"
+                      decoding="async"
+                      fetchPriority="low"
                       className="absolute inset-0 w-full h-full object-cover scale-125 blur-3xl opacity-30 pointer-events-none select-none"
                     />
                     {/* Sharp primary image — cover+top for portrait, contain for landscape */}
                     <img
                       src={m.thumbnail}
                       alt={m.title}
-                      loading="lazy"
+                      loading={isLcpCandidate ? 'eager' : 'lazy'}
+                      decoding="async"
+                      fetchPriority={isLcpCandidate ? 'high' : 'auto'}
                       className={`absolute inset-0 w-full h-full transition-transform duration-500 group-hover:scale-105 ${
                         isPortrait ? 'object-cover object-top' : 'object-contain'
                       }`}
