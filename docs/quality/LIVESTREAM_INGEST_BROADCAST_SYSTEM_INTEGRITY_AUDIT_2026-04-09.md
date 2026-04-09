@@ -172,3 +172,55 @@ The architecture is **fundamentally sound for 20K concurrent viewers** with stro
 3. stream public contract cleanup.
 
 These are targeted corrections, not a platform rewrite.
+
+
+## Capacity guarantee boundary (explicit)
+
+[UNVERIFIED: check production load runbook + live telemetry] We **cannot truthfully guarantee zero overload/crash risk** from repository inspection alone.
+
+What is verified in-repo today:
+
+- Architecture has anti-amplification controls (edge cache + heartbeat batching).
+- PPV gating and entitlement paths exist and are enforced server-side for session creation.
+- Test assets include high-concurrency scenarios, but the `stream-20k-stress` suite is currently skipped in CI snapshots; therefore no current-run empirical pass at 20K can be claimed from this revision alone.
+
+## Compute placement audit (cost + efficiency)
+
+### Current placement model
+
+- **Client-side (majority):**
+  - Video decode/render (`ReactPlayer`), UI composition, reactions/chat rendering, polling orchestration.
+  - This is the dominant compute footprint and scales with user device capability, not origin CPU.
+- **Edge/worker-side (control plane only):**
+  - Auth/session checks, status/read APIs, heartbeat queue flush scheduling, paywall/session gate enforcement, webhook processing.
+- **DB-side (authoritative state):**
+  - Entitlement truth, session state truth, ingest/publication projections, RLS enforcement.
+
+### Efficiency posture
+
+- Stream media distribution is externalized (YouTube/Twitch/HLS URL model), which is the primary reason server compute does not linearly scale with viewer decode workload.
+- Worker should remain a thin control plane: authorization + metadata + small JSON responses.
+- Keep heavy transforms/parsing out of hot viewer paths; only ingest/admin paths may perform heavier writes.
+
+## PPV paywall integrity at scale ($4.99 CAD path)
+
+- Purchase path and entitlement creation are server-side, preserving gate integrity under client tampering attempts.
+- Playback session creation checks access before returning playback URL; unauthorized viewers should not obtain valid session payloads.
+- To reduce false-negative kickouts for valid paid users, heartbeat path must move to authoritative ACK semantics (P0) so displaced/expired logic is deterministic and user-correct.
+
+## 20K go/no-go checklist (must-pass before claiming hard guarantee)
+
+1. Unskip and pass `src/test/stream-20k-stress.test.ts` in CI on current HEAD.
+2. Execute sustained load profile with realistic poll/heartbeat mix and confirm:
+   - stable worker error rate,
+   - bounded DB write throughput,
+   - no session duplication spikes,
+   - no paid-user false kickouts.
+3. Verify P0 heartbeat ACK hardening in production-like environment with failure injection.
+4. Capture and archive evidence artifact (timestamped) before event go-live.
+
+## Operational answer to user concern
+
+- **Will this definitely never overload or crash?** No absolute guarantee can be made without current-run load evidence.
+- **Is compute placement cost-efficient and mostly client-side?** Yes — by architecture, media rendering/decoding is client-side and backend remains control-plane focused.
+- **Will valid $4.99 PPV users avoid wrongful kicks?** Mostly yes with current design intent, but P0 heartbeat acknowledgment hardening is the key correction to make this robust under peak concurrency.
