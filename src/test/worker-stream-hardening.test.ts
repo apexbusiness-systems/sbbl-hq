@@ -197,6 +197,63 @@ describe('stream hardening worker handlers', () => {
     expect((state.stream_access_sessions[0].status)).toBe('active');
   });
 
+  it('session heartbeat returns session_not_found for displaced/missing sessions', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      stream_access_sessions: [{ id: 'sess-1', game_id: 'game-1', user_id: 'allowed-user', status: 'displaced', expires_at: new Date(Date.now() + 10000).toISOString() }],
+    } as Record<string, Row[]>;
+
+    const res = await handleStreamSessionHeartbeat({
+      req: new Request('https://local/api/streams/game-1/session/heartbeat', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'idempotency-key-623456789', 'x-sbbl-user-id-verified': 'allowed-user' },
+        body: JSON.stringify({ sessionId: 'sess-1' }),
+      }),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'session_not_found' });
+  });
+
+  it('playback session keeps one-device displacement and 6-hour maxExpiresAt', async () => {
+    const now = Date.now();
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      games: [{ id: 'game-1', status: 'live' }],
+      stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_access_sessions: [{
+        id: 'old-sess',
+        game_id: 'game-1',
+        user_id: 'allowed-user',
+        status: 'active',
+        expires_at: new Date(now + 30_000).toISOString(),
+        idempotency_key: 'old-session-key',
+      }],
+    } as Record<string, Row[]>;
+
+    const res = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/game-1/session', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'idempotency-key-723456789', 'x-sbbl-user-id-verified': 'allowed-user' },
+        body: JSON.stringify({ sessionKey: 'new-session-key' }),
+      }),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, any>;
+    const maxExpiresAt = new Date(body.session.maxExpiresAt).getTime();
+    expect(maxExpiresAt).toBeGreaterThanOrEqual(now + (6 * 60 * 60 * 1000) - 2_000);
+    expect(maxExpiresAt).toBeLessThanOrEqual(Date.now() + (6 * 60 * 60 * 1000) + 2_000);
+    expect((state.stream_access_sessions[0].status)).toBe('displaced');
+  });
+
   it('chat validation blocks invalid input and enforces message length', async () => {
     const state = { api_idempotency_keys: [], stream_chat_messages: [] } as Record<string, Row[]>;
 

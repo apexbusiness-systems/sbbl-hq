@@ -2915,11 +2915,41 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
 
   const now = new Date().toISOString();
-  // Cap heartbeat extension at max_expires_at — never extend past the 6hr hard cap
+  // Authoritative ACK gate: confirm the session exists, belongs to the caller,
+  // is scoped to the same game, and is still active before we acknowledge.
+  const sessionRes = await ctx.admin
+    .from("stream_access_sessions")
+    .select("id,status,max_expires_at")
+    .eq("id", body.sessionId)
+    .eq("user_id", userId)
+    .eq("game_id", gameId)
+    .maybeSingle();
+  if (sessionRes.error) throw new Error(sessionRes.error.message);
+  if (!sessionRes.data) {
+    return json({ ok: false, error: "session_not_found" }, 404);
+  }
+  if (String(sessionRes.data.status) !== "active") {
+    return json({ ok: false, error: "session_not_found" }, 404);
+  }
+  // Hard 6-hour cap guard: if the authoritative max expiry is reached, end
+  // the session immediately and reject the heartbeat.
+  if (sessionRes.data.max_expires_at && now >= String(sessionRes.data.max_expires_at)) {
+    await ctx.admin
+      .from("stream_access_sessions")
+      .update({
+        status: "ended",
+        expires_at: now,
+        updated_at: now,
+        updated_by: userId,
+      })
+      .eq("id", body.sessionId)
+      .eq("user_id", userId)
+      .eq("game_id", gameId);
+    return json({ ok: false, error: "session_expired" }, 403);
+  }
+
+  // Requested extension (authoritative clamping happens in batch_heartbeat_upsert).
   const rawExpiry = Date.now() + 70_000;
-  // We need the stored max_expires_at to clamp; look it up only when it's
-  // plausible the session is near expiry (avoid DB read on every heartbeat by
-  // always trusting the client's session start time embedded in the queue flush).
   const expiresAt = new Date(rawExpiry).toISOString();
 
   // Queue heartbeat for batch flush instead of writing per-request.
