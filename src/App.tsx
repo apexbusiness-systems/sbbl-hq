@@ -36,9 +36,6 @@ const NotFound = lazy(() => import('./pages/NotFound'));
 const Offline = lazy(() => import('./pages/Offline'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('./pages/TermsOfService'));
-const AcceptableUsePolicy = lazy(() => import('./pages/AcceptableUsePolicy'));
-const AIDisclaimer = lazy(() => import('./pages/AIDisclaimer'));
-const LicenseNotice = lazy(() => import('./pages/LicenseNotice'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -118,24 +115,11 @@ const App = () => (
                     <Route path="/support" element={<Support />} />
                     <Route path="/privacy" element={<PrivacyPolicy />} />
                     <Route path="/terms" element={<TermsOfService />} />
-                    <Route path="/acceptable-use" element={<AcceptableUsePolicy />} />
-                    <Route path="/ai-disclaimer" element={<AIDisclaimer />} />
-                    <Route path="/license" element={<LicenseNotice />} />
                     <Route path="/offline" element={<Offline />} />
                     <Route path="*" element={<NotFound />} />
                   </Routes>
                 </Suspense>
               </main>
-              <footer className="border-t border-border mt-10">
-                <div className="container py-4 text-xs text-muted-foreground flex flex-wrap gap-3">
-                  <a href="/settings" className="hover:text-foreground">Settings</a>
-                  <a href="/privacy" className="hover:text-foreground">Privacy</a>
-                  <a href="/terms" className="hover:text-foreground">Terms</a>
-                  <a href="/acceptable-use" className="hover:text-foreground">Acceptable Use</a>
-                  <a href="/ai-disclaimer" className="hover:text-foreground">AI Disclaimer</a>
-                  <a href="/license" className="hover:text-foreground">License</a>
-                </div>
-              </footer>
             </div>
           </BrowserRouter>
         </AppProvider>

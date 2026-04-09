@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { signInWithMagicLink, signInWithPassword, signUpWithPassword } from '@/lib/api/auth';
+import { signInWithPassword, signUpWithPassword } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { LEAGUE_CONFIGS } from '@/lib/leagues';
@@ -9,7 +9,6 @@ import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { Shield, BarChart3, Users, Zap, CheckCircle2 } from 'lucide-react';
 
 type Mode = 'signin' | 'signup';
-type SignInMethod = 'password' | 'magic-link';
 
 const LoginPage = () => {
   const location = useLocation();
@@ -18,14 +17,13 @@ const LoginPage = () => {
   const initialMode: Mode = urlParams.get('mode') === 'signup' ? 'signup' : 'signin';
 
   const [mode, setMode] = useState<Mode>(initialMode);
-  const [signInMethod, setSignInMethod] = useState<SignInMethod>('magic-link');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
-  const { isSignedIn, isGuest, continueAsGuest, needsOnboarding, configAvailable, loading } = useAuth();
+  const { isSignedIn, needsOnboarding, configAvailable, loading } = useAuth();
   const { containerRef: turnstileRef, resolveToken, ready: captchaReady } = useTurnstile();
   const navigate = useNavigate();
 
@@ -34,7 +32,7 @@ const LoginPage = () => {
   // between /onboarding and the target page (avoids wrong redirect flash).
   const redirectTo = urlParams.get('redirect');
   useEffect(() => {
-    if ((!isSignedIn && !isGuest) || loading) return;
+    if (!isSignedIn || loading) return;
     if (needsOnboarding) {
       // Pass the original redirect target through onboarding so fans land on
       // /live (or their intended page) immediately after setup completes.
@@ -45,7 +43,7 @@ const LoginPage = () => {
     } else {
       navigate(redirectTo || '/live');
     }
-  }, [isSignedIn, isGuest, loading, needsOnboarding, navigate, redirectTo]);
+  }, [isSignedIn, loading, needsOnboarding, navigate, redirectTo]);
 
   const switchMode = (next: Mode) => {
     setMode(next);
@@ -88,13 +86,8 @@ const LoginPage = () => {
     try {
       const captchaToken = await resolveToken();
       if (mode === 'signin') {
-        if (signInMethod === 'magic-link') {
-          await signInWithMagicLink(email, captchaToken);
-          setMessage('Magic link sent. Open your email and use the secure sign-in link.');
-        } else {
-          await signInWithPassword(email, password, captchaToken);
-          // AuthContext onAuthStateChange will handle the SIGNED_IN event and redirect
-        }
+        await signInWithPassword(email, password, captchaToken);
+        // AuthContext onAuthStateChange will handle the SIGNED_IN event and redirect
       } else {
         await signUpWithPassword(email, password, captchaToken);
         setMessage('Account created — check your inbox to confirm your email, then sign in.');
@@ -131,11 +124,7 @@ const LoginPage = () => {
 
   const isEmailValid = email.includes('@') && email.includes('.');
   const isPasswordValid = password.length >= 6;
-  const canSubmit = isEmailValid &&
-    (mode === 'signin' ? (signInMethod === 'magic-link' || isPasswordValid) : isPasswordValid) &&
-    !submitting &&
-    configAvailable &&
-    captchaReady;
+  const canSubmit = isEmailValid && isPasswordValid && !submitting && configAvailable && captchaReady;
 
   return (
     <div className="min-h-[calc(100vh-6rem)] flex items-center justify-center px-4 py-10">
@@ -195,26 +184,7 @@ const LoginPage = () => {
               </div>
             )}
 
-            {mode === 'signin' && (
-              <div className="mt-6 grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSignInMethod('magic-link')}
-                  className={`px-3 py-2 text-xs rounded-sm border ${signInMethod === 'magic-link' ? 'border-primary text-primary bg-primary/10' : 'border-border text-muted-foreground'}`}
-                >
-                  Magic Link
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSignInMethod('password')}
-                  className={`px-3 py-2 text-xs rounded-sm border ${signInMethod === 'password' ? 'border-primary text-primary bg-primary/10' : 'border-border text-muted-foreground'}`}
-                >
-                  Password
-                </button>
-              </div>
-            )}
-
-            <form onSubmit={onSubmit} className="mt-4 space-y-4">
+            <form onSubmit={onSubmit} className="mt-6 space-y-4">
               <div>
                 <label htmlFor="login-email" className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   Email address
@@ -231,25 +201,23 @@ const LoginPage = () => {
                   disabled={!configAvailable}
                 />
               </div>
-              {(mode === 'signup' || signInMethod === 'password') && (
-                <div>
-                  <label htmlFor="login-password" className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                    Password
-                  </label>
-                  <input
-                    id="login-password"
-                    type="password"
-                    required
-                    autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    className="mt-1.5 w-full bg-secondary border border-border rounded-sm px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors"
-                    placeholder={mode === 'signup' ? 'At least 6 characters' : '••••••••'}
-                    disabled={!configAvailable}
-                    minLength={6}
-                  />
-                </div>
-              )}
+              <div>
+                <label htmlFor="login-password" className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Password
+                </label>
+                <input
+                  id="login-password"
+                  type="password"
+                  required
+                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  className="mt-1.5 w-full bg-secondary border border-border rounded-sm px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 focus:border-primary/50 transition-colors"
+                  placeholder={mode === 'signup' ? 'At least 6 characters' : '••••••••'}
+                  disabled={!configAvailable}
+                  minLength={6}
+                />
+              </div>
               {/* Hidden Turnstile widget mount point — rendered invisibly, executed on submit */}
               <div ref={turnstileRef} className="sr-only" aria-hidden="true" />
               {/* Divider */}
@@ -279,20 +247,8 @@ const LoginPage = () => {
                 disabled={!canSubmit}
                 className="gold-bg px-4 py-3 rounded-sm font-display font-bold text-sm uppercase tracking-wider w-full disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
               >
-                {submitting ? (mode === 'signin' ? 'Submitting…' : 'Creating account…') : (mode === 'signin' ? (signInMethod === 'magic-link' ? 'Send Magic Link' : 'Sign In') : 'Create Account')}
+                {submitting ? (mode === 'signin' ? 'Signing in…' : 'Creating account…') : (mode === 'signin' ? 'Sign In' : 'Create Account')}
               </button>
-              {mode === 'signin' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    continueAsGuest();
-                    navigate(redirectTo || '/live');
-                  }}
-                  className="w-full border border-border px-4 py-2.5 rounded-sm text-xs font-semibold tracking-wider uppercase text-muted-foreground hover:text-foreground"
-                >
-                  Continue as Guest
-                </button>
-              )}
             </form>
 
             {location.state && (
