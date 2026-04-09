@@ -21,8 +21,10 @@ function fromBuildEnv(): RuntimeConfig {
 }
 
 async function fetchRuntimeConfig(): Promise<RuntimeConfig> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 2_500);
   try {
-    const resp = await fetch('/api/public-config');
+    const resp = await fetch('/api/public-config', { signal: controller.signal });
     if (!resp.ok) throw new Error(`config_fetch_${resp.status}`);
     const data = (await resp.json()) as {
       ok: boolean;
@@ -40,6 +42,8 @@ async function fetchRuntimeConfig(): Promise<RuntimeConfig> {
     };
   } catch {
     return fromBuildEnv();
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
