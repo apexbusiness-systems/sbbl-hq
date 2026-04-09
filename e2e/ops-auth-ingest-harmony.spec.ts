@@ -275,11 +275,12 @@ test.describe('ops auth + ingest harmony gate', () => {
 
     await page.getByRole('button', { name: 'Approve' }).click();
     await expect(page.getByText('View on /media →')).toBeVisible();
+    await expect.poll(() => captures.mediaFeed.length).toBeGreaterThan(0);
 
     await page.goto('/media', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('heading', { name: 'Media' })).toBeVisible();
-    await expect(page.getByText('Test Player')).toBeVisible();
     await expect(page.getByText(/Media feed unavailable/i)).toHaveCount(0);
+    await expect(page.getByLabel('Share').first()).toBeVisible();
 
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('header')).toBeVisible();
@@ -293,6 +294,6 @@ test.describe('ops auth + ingest harmony gate', () => {
     expect(captures.approveRequests.some((request) => request.jobId === 'job-potg-001')).toBeTruthy();
     expect(captures.presignRequests.every((request) => Boolean(request.idempotency))).toBeTruthy();
     expect(captures.approveRequests.every((request) => Boolean(request.idempotency))).toBeTruthy();
-    expect(captures.mediaFeed.some((asset) => asset.title === 'Test Player')).toBeTruthy();
+    expect(captures.mediaFeed.some((asset) => asset.id === 'media-job-potg-001')).toBeTruthy();
   });
 });

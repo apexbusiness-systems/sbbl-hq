@@ -128,9 +128,19 @@ describe('supabase config drift guardrails', () => {
     const { initSupabaseClient } = await import('@/lib/supabase/client');
     await initSupabaseClient();
 
-    expect(createClientSpy).toHaveBeenCalledTimes(1);
+    // Module load eagerly creates the legacy exported client from build env,
+    // then init must self-heal to runtime config to avoid split-brain.
+    expect(createClientSpy).toHaveBeenCalledTimes(2);
     expect(createClientSpy).toHaveBeenNthCalledWith(
       1,
+      'https://build.supabase.co',
+      'build-key-123',
+      expect.objectContaining({
+        auth: expect.objectContaining({ persistSession: true }),
+      }),
+    );
+    expect(createClientSpy).toHaveBeenNthCalledWith(
+      2,
       'https://runtime.supabase.co',
       'runtime-key-xyz',
       expect.objectContaining({

@@ -65,8 +65,8 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
     });
   });
 
-  await page.route('**/api/streams/status**', async (route) => {
-    const call = bump(state, 'api/streams/status');
+  await page.route('**/ops/streams/config**', async (route) => {
+    const call = bump(state, 'ops/streams/config');
     if (call === 1) {
       await route.fulfill({
         status: 500,
@@ -81,10 +81,13 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
       contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        isLive: false,
-        title: 'Chaos-safe offline state',
-        viewerCount: 0,
-        collectionId: '',
+        config: {
+          collectionId: '',
+          title: 'Chaos-safe offline state',
+          source: 'main',
+          isLive: false,
+          viewerCount: 0,
+        },
       }),
     });
   });
@@ -231,7 +234,7 @@ test.describe('full-build chaos battery', () => {
         path: '/',
         verify: async () => {
           await expect(page.locator('header')).toBeVisible();
-          await expect(page.getByRole('link', { name: 'Live' })).toBeVisible();
+          await expect(page.getByRole('link', { name: 'Live', exact: true })).toBeVisible();
         },
       },
       {
@@ -284,7 +287,7 @@ test.describe('full-build chaos battery', () => {
 
     expect((state.counters.get('ops/bootstrap') ?? 0) >= 2).toBeTruthy();
     expect((state.counters.get('api/public/home') ?? 0) >= 2).toBeTruthy();
-    expect((state.counters.get('api/streams/status') ?? 0) >= 2).toBeTruthy();
+    expect((state.counters.get('ops/streams/config') ?? 0) >= 2).toBeTruthy();
     expect((state.counters.get('api/scores') ?? 0) >= 2).toBeTruthy();
     expect((state.counters.get('api/teams') ?? 0) >= 2).toBeTruthy();
     expect((state.counters.get('api/public/schedule') ?? 0) >= 2).toBeTruthy();
