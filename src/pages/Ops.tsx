@@ -167,13 +167,15 @@ const OpsPage = () => {
         publicUrl: objectPath,
         title: potgForm.playerName,
         leagueId: potgForm.leagueId,
-        date: potgForm.date,
-        playerName: potgForm.playerName,
-        team: potgForm.team,
-        pts: Number(potgForm.pts),
-        rebs: Number(potgForm.rebs),
-        assts: Number(potgForm.assts),
-        gameResult: potgForm.gameResult,
+        meta: {
+          date: potgForm.date,
+          playerName: potgForm.playerName,
+          team: potgForm.team,
+          pts: Number(potgForm.pts),
+          rebs: Number(potgForm.rebs),
+          assts: Number(potgForm.assts),
+          gameResult: potgForm.gameResult,
+        },
       });
     },
     onSuccess: async (data) => {
@@ -197,10 +199,12 @@ const OpsPage = () => {
         objectPath,
         publicUrl: objectPath,
         title: storeForm.title,
-        price: Number(storeForm.price),
-        category: storeForm.category,
         publishStatus: storeForm.publishStatus,
-        sale: storeForm.sale,
+        meta: {
+          price: Number(storeForm.price),
+          category: storeForm.category,
+          sale: storeForm.sale,
+        },
       });
     },
     onSuccess: (data) => {
@@ -212,7 +216,7 @@ const OpsPage = () => {
     },
   });
 
-  // Uploads the resized event graphic to Supabase Storage and writes
+  // Uploads the resized event graphic via ingest pipeline and writes
   // media_assets + media_publications (surface='event') so it appears on /media.
   const eventMediaMutation = useMutation({
     mutationFn: async () => {
@@ -229,7 +233,9 @@ const OpsPage = () => {
         publicUrl: objectPath,
         title: eventGraphicForm.title,
         leagueId: eventGraphicForm.leagueId || undefined,
-        date: eventGraphicForm.date || undefined,
+        meta: {
+          date: eventGraphicForm.date || undefined,
+        },
       });
     },
     // No onSuccess — eventMediaMutation has none in the current file.
