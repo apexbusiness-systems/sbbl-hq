@@ -86,27 +86,19 @@ export async function seedSuperAdminSession(page: Page) {
     });
   });
 
-  await page.addInitScript(
-    ({ key, legacyKey, value }) => {
-      // Ensure any Supabase storage key can hydrate from a deterministic seeded session.
-      const originalGetItem = Storage.prototype.getItem;
-      Storage.prototype.getItem = function patchedGetItem(k) {
-        const existing = originalGetItem.call(this, k);
-        if (existing) return existing;
-        if (k === legacyKey || k.endsWith('-auth-token')) return value;
-        return existing;
-      };
-
-      // Persist both common keys up front for clients that read from storage directly.
-      window.localStorage.setItem(key, value);
-      window.localStorage.setItem(legacyKey, value);
-    },
-    {
-      key: buildSessionStorageKey(),
-      legacyKey: 'supabase.auth.token',
-      value: JSON.stringify(session),
-    },
-  );
+  const sessionPayload = JSON.stringify(session);
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+  await page.evaluate(({ key, legacyKey, value }) => {
+    // Seed auth storage on the app origin so Supabase can recover session deterministically.
+    window.localStorage.setItem(key, value);
+    window.localStorage.setItem(legacyKey, value);
+    window.sessionStorage.setItem(key, value);
+    window.sessionStorage.setItem(legacyKey, value);
+  }, {
+    key: buildSessionStorageKey(),
+    legacyKey: 'supabase.auth.token',
+    value: sessionPayload,
+  });
 }
 
 export { expect, test };
