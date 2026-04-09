@@ -36,7 +36,7 @@ jobs:
           VITE_DEFAULT_LEAGUE: SBBL
 
       - name: Deploy to Cloudflare Workers
-        run: npx wrangler deploy
+        run: npx wrangler deploy --config wrangler.deploy.jsonc
         env:
           # Prefer the Workers-scoped token when available; fall back to
           # CLOUDFLARE_API_TOKEN for backwards compatibility.
