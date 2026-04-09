@@ -1,4 +1,4 @@
-import { expect, test } from '../playwright-fixture';
+import { expect, seedSuperAdminSession, test } from '../playwright-fixture';
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -115,21 +115,44 @@ async function registerOpsMediaRoutes(page: import('@playwright/test').Page) {
 }
 
 test.describe('ops media ingest tabs', () => {
-  test('store and events tabs enforce super-admin guard in UI', async ({ page }) => {
+  test('no session shows fail-closed reauth state', async ({ page }) => {
+    // Mock public-config to prevent real fetch / timeout during boot
+    await page.route('**/api/public-config', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, appName: 'SBBL HQ', defaultLeague: 'SBBL' }),
+      });
+    });
+
+    await page.goto('/ops', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('Session expired. Sign in again.')).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Store Media' })).toHaveCount(0);
+    await expect(page.getByRole('tab', { name: 'POTG Parser' })).toHaveCount(0);
+  });
+
+  test('store and events tabs are reachable for super-admin sessions', async ({ page }) => {
+    await seedSuperAdminSession(page);
     await registerOpsMediaRoutes(page);
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('tab', { name: 'Store Media' })).toBeVisible();
+
     await page.getByRole('tab', { name: 'Store Media' }).click();
-    await expect(page.getByText('Super Admin required to manually manage store operations.')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Store Media & Product Ops' })).toBeVisible();
+    await expect(page.getByText('Super Admin required to manually manage store operations.')).toHaveCount(0);
 
     await page.getByRole('tab', { name: 'Events' }).click();
-    await expect(page.getByText('Super Admin required to manually manage events.')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Events Manual Ops' })).toBeVisible();
+    await expect(page.getByText('Super Admin required to manually manage events.')).toHaveCount(0);
   });
 
   test('potg upload submits ingest job and approve/reject use wrapped ops endpoints', async ({ page }) => {
+    await seedSuperAdminSession(page);
     const captures = await registerOpsMediaRoutes(page);
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('tab', { name: 'POTG Parser' })).toBeVisible();
     await page.getByRole('tab', { name: 'POTG Parser' }).click();
 
     const potgInput = page.locator('div:has-text("Drop POTG graphic or click to upload") input[type="file"]');
