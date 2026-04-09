@@ -2218,6 +2218,63 @@ function compilePath(path: string) {
   return { regex: new RegExp(`^${pattern}$`), keys };
 }
 
+async function handleParseEventImage(ctx: HandlerCtx) {
+  await requireAdminSession(ctx.req, ctx.admin);
+  const apiKey = ctx.env.GROQ_API_KEY;
+  if (!apiKey) return json({ ok: false, error: "groq_api_key_missing" }, 503);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    imageBase64: string;
+    mimeType: string;
+  } | null;
+  if (!body?.imageBase64 || !body?.mimeType)
+    return json({ ok: false, error: "image_required" }, 400);
+
+  const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "llama-3.2-11b-vision-preview",
+      max_tokens: 256,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${body.mimeType};base64,${body.imageBase64}`,
+              },
+            },
+            {
+              type: "text",
+              text: 'Extract event details from this graphic. Return ONLY a JSON object with exactly these keys: title (string, name of the event), location (string, location if present, empty string if not), date (string, event date and time if present, empty string if not), leagueId (string, league abbreviation if present: wbl, tgif, or sbbl, default to sbbl). No markdown, no explanation — raw JSON only.',
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!resp.ok)
+    return json({ ok: false, error: "groq_error", status: resp.status }, 502);
+  const ai = (await resp.json()) as {
+    choices: Array<{ message: { content: string } }>;
+  };
+  const raw = ai.choices[0]?.message?.content ?? "";
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return json({ ok: false, error: "parse_failed", raw }, 422);
+  try {
+    const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+    return json({ ok: true, data: parsed });
+  } catch {
+    return json({ ok: false, error: "invalid_json", raw }, 422);
+  }
+}
+
 async function handleParsePotgImage(ctx: HandlerCtx) {
   await requireAdminSession(ctx.req, ctx.admin);
   const apiKey = ctx.env.GROQ_API_KEY;
@@ -3855,6 +3912,7 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   { method: "GET", path: "/ops/imports/history", handler: handleImportHistory },
   { method: "POST", path: "/ops/store/media", handler: handleStoreMedia },
+  { method: "POST", path: "/ops/event/parse", handler: handleParseEventImage },
   { method: "POST", path: "/ops/potg/parse", handler: handleParsePotgImage },
   { method: "POST", path: "/ops/potg/submit", handler: handleSubmitPotg },
   { method: "GET", path: "/api/public-config", handler: handlePublicConfig },
@@ -4614,8 +4672,6 @@ async function handleOpsMediaPublish(ctx: HandlerCtx) {
       surface: body.surface,
       league_id: leagueId,
       title: body.title,
-      type: mediaType,
-      thumbnail_url: body.imageUrl,
       status,
       published_at: status === "published" ? new Date().toISOString() : null,
       sort_at: sortAt,

@@ -13,20 +13,33 @@ const clientEnvSchema = z.object({
   VITE_WORKER_API_BASE: z.string().optional(),
 });
 
+// Normalize empty secrets from runtime env/deploy systems.
+// Cloudflare/GitHub can materialize unset optional secrets as empty strings,
+// which should be treated as "not set" instead of hard-failing validation.
+const emptyToUndefined = (value: unknown) => {
+  if (typeof value !== 'string') return value;
+  return value.trim() === '' ? undefined : value;
+};
+
+const optionalServerKey = z.preprocess(emptyToUndefined, z.string().min(10).optional());
+const optionalServerSecret = z.preprocess(emptyToUndefined, z.string().min(16).optional());
+const optionalServerUrl = z.preprocess(emptyToUndefined, z.string().url().optional());
+const optionalServerString = z.preprocess(emptyToUndefined, z.string().optional());
+
 const serverEnvSchema = z.object({
   SUPABASE_URL: z.string().url(),
-  SUPABASE_PUBLISHABLE_KEY: z.string().min(10).optional(),
+  SUPABASE_PUBLISHABLE_KEY: optionalServerKey,
   // Backward-compatible alias used in some deployments.
-  SUPABASE_ANON_KEY: z.string().min(10).optional(),
+  SUPABASE_ANON_KEY: optionalServerKey,
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(16),
-  STRIPE_SECRET_KEY: z.string().min(16).optional(),
-  STRIPE_WEBHOOK_SECRET: z.string().min(16).optional(),
-  RESEND_API_KEY: z.string().min(16).optional(),
-  OMNIHUB_SYNC_URL: z.string().url().optional(),
-  OMNIHUB_SIGNING_SECRET: z.string().min(16).optional(),
-  OMNIHUB_VERIFY_KEY: z.string().min(16).optional(),
-  OPTIONAL_SOCIAL_API_KEYS: z.string().optional(),
-  OPTIONAL_TURNSTILE_SECRET_KEY: z.string().optional(),
+  STRIPE_SECRET_KEY: optionalServerSecret,
+  STRIPE_WEBHOOK_SECRET: optionalServerSecret,
+  RESEND_API_KEY: optionalServerSecret,
+  OMNIHUB_SYNC_URL: optionalServerUrl,
+  OMNIHUB_SIGNING_SECRET: optionalServerSecret,
+  OMNIHUB_VERIFY_KEY: optionalServerSecret,
+  OPTIONAL_SOCIAL_API_KEYS: optionalServerString,
+  OPTIONAL_TURNSTILE_SECRET_KEY: optionalServerString,
 });
 
 export type ClientEnv = z.infer<typeof clientEnvSchema>;
