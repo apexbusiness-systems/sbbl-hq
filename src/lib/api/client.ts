@@ -32,7 +32,6 @@ export async function getAuthToken(): Promise<string | null> {
     }
     return null;
   }
-
   return refreshData.session?.access_token ?? null;
 }
 
@@ -56,12 +55,10 @@ export async function apiFetch<T>(
 
   const method = (init.method ?? 'GET').toUpperCase();
   const baseHeaders = new Headers(init.headers);
-
   const isFormDataBody = typeof FormData !== 'undefined' && init.body instanceof FormData;
   if (init.body != null && !isFormDataBody && !baseHeaders.has('content-type')) {
     baseHeaders.set('content-type', 'application/json');
   }
-
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !baseHeaders.has('x-idempotency-key')) {
     baseHeaders.set('x-idempotency-key', `${path}-${Date.now()}-${crypto.randomUUID()}`);
   }
@@ -77,7 +74,6 @@ export async function apiFetch<T>(
       headers.delete('authorization');
     }
     if (stableIdempotencyKey) headers.set('x-idempotency-key', stableIdempotencyKey);
-
     return fetch(`${API_BASE}${path}`, { ...init, method, headers });
   };
 
@@ -104,15 +100,19 @@ export async function apiFetch<T>(
   }
 
   if (response.status === 401) {
-    await clearLocalAuthState();
+    // Only destroy the local session when we actually sent a token the server
+    // rejected (expired / revoked JWT). If authToken is null the caller had no
+    // session; a 401 here is expected and must NOT trigger a sign-out — doing
+    // so kills in-progress login flows (e.g. background ops prefetch races).
+    if (authToken) {
+      await clearLocalAuthState();
+    }
     throw new Error('reauth_required');
   }
 
   const payload = await response.json().catch(() => ({ ok: false, error: 'invalid_json_response' }));
-
   if (!response.ok) {
     throw new Error(typeof payload?.error === 'string' ? payload.error : `request_failed_${response.status}`);
   }
-
   return payload as T;
 }
