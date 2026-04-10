@@ -4284,7 +4284,9 @@ async function handleIngestPresign(ctx: HandlerCtx) {
   }
 
   const { token, url } = await res.json() as { token: string; url: string };
-  return json({ ok: true, signedUrl: url, token, objectPath });
+  // Supabase returns a relative path — build the full upload URL.
+  const signedUrl = url.startsWith("http") ? url : `${supabaseUrl}/storage/v1${url}`;
+  return json({ ok: true, signedUrl, token, objectPath });
 }
 
 /**
