@@ -168,8 +168,12 @@ export async function manualOpsAction(
   // ── Events ─────────────────────────────────────────────────────────────
   if (kind === 'event') {
     if (action === 'create') {
+      const interactionIdempotencyKey = typeof payload.idempotencyKey === 'string' && payload.idempotencyKey.trim()
+        ? payload.idempotencyKey
+        : createIdempotencyKey('manual-event-create');
       return apiFetch('/ops/imports/events', {
-        method: 'POST', ...idem('manual-event-create'),
+        method: 'POST',
+        headers: { [IDEMPOTENCY_HEADER]: interactionIdempotencyKey },
         body: JSON.stringify({ rows: [{ title: payload.title, location: payload.location, date: payload.date, leagueId: payload.leagueId }] }),
       });
     }
@@ -263,6 +267,9 @@ export async function ingestSubmit(payload: {
   idempotencyKey?: string;
   meta?: Record<string, unknown>;
 }) {
+  const idempotencyKey = payload.idempotencyKey || `ingest-fallback-${crypto.randomUUID()}`;
+  const { idempotencyKey: _, ...cleanPayload } = payload;
+
   return apiFetch<{
     ok: boolean;
     jobId: string;
@@ -272,8 +279,8 @@ export async function ingestSubmit(payload: {
     deduplicated?: boolean;
   }>('/ops/ingest/submit', {
     method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: payload.idempotencyKey ?? createIdempotencyKey(`ingest-submit-${payload.kind}`) },
-    body: JSON.stringify(payload),
+    headers: { [IDEMPOTENCY_HEADER]: idempotencyKey },
+    body: JSON.stringify(cleanPayload),
   });
 }
 

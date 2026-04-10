@@ -14,8 +14,20 @@ import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
 import { fetchScores, submitScoreManual, submitScoresCsvImport, parseScoreboardImage } from '@/lib/api/scores';
 import type { ScoreCategory } from '@/types';
+import { toast } from 'sonner';
 
 type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
+
+type EventPublishPayload = {
+  title: string;
+  location?: string;
+  date?: string;
+  leagueId?: string;
+};
+
+type EventMediaMutationPayload = EventPublishPayload & {
+  idempotencyKey: string;
+};
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'overview',  label: 'Overview'       },
@@ -246,9 +258,9 @@ const OpsPage = () => {
   // Uploads the resized event graphic via ingest pipeline and writes
   // media_assets + media_publications (surface='event') so it appears on /media.
   const eventMediaMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (payload: EventMediaMutationPayload) => {
       ensureOpsAccess();
-      if (!eventResizedBlob || !eventGraphicForm.title) return null;
+      if (!eventResizedBlob || !payload.title) return null;
       const filename = `event-${crypto.randomUUID()}.jpg`;
 
       const { signedUrl, objectPath } = await ingestPresign('event', filename);
@@ -259,10 +271,11 @@ const OpsPage = () => {
         kind: 'event',
         objectPath,
         publicUrl: objectPath,
-        title: eventGraphicForm.title,
-        leagueId: eventGraphicForm.leagueId || undefined,
+        title: payload.title,
+        leagueId: payload.leagueId || undefined,
+        idempotencyKey: payload.idempotencyKey,
         meta: {
-          date: eventGraphicForm.date || undefined,
+          date: payload.date || undefined,
         },
       });
     },
@@ -344,17 +357,50 @@ const OpsPage = () => {
   });
 
   const createEventMutation = useMutation({
-    mutationFn: () => manualOpsAction('event', 'create', {
-      title: eventForm.title,
-      location: eventForm.location || undefined,
-      date: eventForm.date || undefined,
-      leagueId: eventForm.leagueId || undefined,
+    mutationFn: (payload: EventMediaMutationPayload) => manualOpsAction('event', 'create', {
+      title: payload.title,
+      location: payload.location || undefined,
+      date: payload.date || undefined,
+      leagueId: payload.leagueId || undefined,
+      idempotencyKey: payload.idempotencyKey,
     }),
     onSuccess: async () => {
       setEventForm({ title: '', location: '', date: '', leagueId: '' });
       await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
     },
   });
+
+  const handlePublish = (parsedData: EventPublishPayload, options?: { publishMedia?: boolean }) => {
+    // 1. Generate Idempotency Key at interaction time for network-retry safety.
+    const interactionIdempotencyKey = `ops-event-${crypto.randomUUID()}`;
+
+    // 2. Update UI state asynchronously (standard React behavior).
+    setEventForm({
+      title: parsedData.title,
+      location: parsedData.location ?? '',
+      date: parsedData.date ?? '',
+      leagueId: parsedData.leagueId ?? '',
+    });
+
+    // 3. BYPASS React state closure trap. Pass synchronous memory reference and key.
+    const mutationPayload: EventMediaMutationPayload = {
+      ...parsedData,
+      idempotencyKey: interactionIdempotencyKey,
+    };
+
+    createEventMutation.mutate(mutationPayload, {
+      onSuccess: () => toast.success('Pipeline job queued successfully.'),
+      onError: (err) => {
+        const message = err instanceof Error ? err.message : 'Unknown pipeline error';
+        toast.error(`Pipeline failure: ${message}`);
+      },
+    });
+
+    // 4. Reuse the exact same idempotency key for ingest submit to dedupe retries end-to-end.
+    if (options?.publishMedia && eventResizedBlob) {
+      eventMediaMutation.mutate(mutationPayload);
+    }
+  };
 
   const deleteEventMutation = useMutation({
     mutationFn: () => manualOpsAction('event', 'delete', { id: deleteEventId }),
@@ -1071,7 +1117,7 @@ const OpsPage = () => {
                   <input placeholder="Location (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventForm.location} onChange={e => setEventForm(f => ({ ...f, location: e.target.value }))} />
                   <input placeholder="League ID (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventForm.leagueId} onChange={e => setEventForm(f => ({ ...f, leagueId: e.target.value }))} />
                   <input type="date" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={eventForm.date} onChange={e => setEventForm(f => ({ ...f, date: e.target.value }))} />
-                  <button disabled={!eventForm.title || createEventMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => createEventMutation.mutate()}>{createEventMutation.isPending ? 'Creating…' : 'Create Event'}</button>
+                  <button disabled={!eventForm.title || createEventMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => handlePublish(eventForm)}>{createEventMutation.isPending ? 'Creating…' : 'Create Event'}</button>
                   {createEventMutation.error && <p className="text-xs text-destructive">{(createEventMutation.error as Error).message}</p>}
                   {createEventMutation.isSuccess && <p className="text-xs text-success">Event created.</p>}
                 </div>
@@ -1124,16 +1170,12 @@ const OpsPage = () => {
                     disabled={!eventGraphicForm.title || createEventMutation.isPending || eventMediaMutation.isPending}
                     className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60 flex justify-center items-center gap-2"
                     onClick={() => {
-                      setEventForm({
+                      handlePublish({
                         title: eventGraphicForm.title,
                         location: eventGraphicForm.location,
                         date: eventGraphicForm.date,
                         leagueId: eventGraphicForm.leagueId,
-                      });
-                      setTimeout(() => {
-                        createEventMutation.mutate();
-                        if (eventResizedBlob) eventMediaMutation.mutate();
-                      }, 0);
+                      }, { publishMedia: true });
                     }}
                   >
                     {(createEventMutation.isPending || eventMediaMutation.isPending) ? 'Publishing…' : 'Create Event & Publish to Media'}

@@ -6,10 +6,11 @@ type SupabaseConfig = {
   key: string;
 };
 
-let _client: SupabaseClient | null = null;
-let _initPromise: Promise<void> | null = null;
-let _clientConfig: SupabaseConfig | null = null;
-let _reportedConfigMismatch = false;
+// Mutable reference for the runtime-configured client
+let activeClient: SupabaseClient | null = null;
+let initPromise: Promise<SupabaseClient | null> | null = null;
+let activeConfig: SupabaseConfig | null = null;
+let reportedConfigMismatch = false;
 
 function buildClient(url: string, key: string): SupabaseClient {
   return createClient(url, key, {
@@ -34,54 +35,50 @@ function sameConfig(left: SupabaseConfig, right: SupabaseConfig): boolean {
   return left.url === right.url && left.key === right.key;
 }
 
-function selectPreferredConfig(
-  runtimeConfig: SupabaseConfig | null,
-  buildConfig: SupabaseConfig | null,
-): SupabaseConfig | null {
-  if (
-    runtimeConfig &&
-    buildConfig &&
-    !sameConfig(runtimeConfig, buildConfig) &&
-    !_reportedConfigMismatch
-  ) {
-    _reportedConfigMismatch = true;
-    // Guardrail: if build-time and runtime Supabase credentials diverge, prefer
-    // Worker-served runtime config so JWT issuer/audience never split-brains.
-    console.error(
-      '[supabase] Config mismatch detected: using /api/public-config credentials to avoid auth split-brain.',
-    );
+function selectPreferredConfig(runtimeConfig: SupabaseConfig | null, buildConfig: SupabaseConfig | null): SupabaseConfig | null {
+  if (runtimeConfig && buildConfig && !sameConfig(runtimeConfig, buildConfig) && !reportedConfigMismatch) {
+    reportedConfigMismatch = true;
+    console.error('[supabase] Config mismatch detected: using runtime credentials to avoid auth split-brain.');
   }
-
   return runtimeConfig ?? buildConfig;
 }
 
 function ensureClient(config: SupabaseConfig): SupabaseClient {
-  if (_client && _clientConfig && sameConfig(_clientConfig, config)) return _client;
-  _client = buildClient(config.url, config.key);
-  _clientConfig = config;
-  return _client;
+  if (activeClient && activeConfig && sameConfig(activeConfig, config)) return activeClient;
+  activeClient = buildClient(config.url, config.key);
+  activeConfig = config;
+  return activeClient;
 }
 
-export async function initSupabaseClient(): Promise<void> {
-  if (_initPromise) return _initPromise;
-  _initPromise = (async () => {
+export async function initSupabaseClient(config?: { url: string; key: string }): Promise<SupabaseClient | null> {
+  if (config?.url && config?.key) return ensureClient(config);
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
     const runtime = await getRuntimeConfig();
     const runtimeConfig = runtime.supabaseUrl && runtime.supabasePublishableKey
       ? { url: runtime.supabaseUrl, key: runtime.supabasePublishableKey }
       : null;
-
     const selected = selectPreferredConfig(runtimeConfig, readBuildConfig());
-    if (!selected) return;
-    ensureClient(selected);
+    if (!selected) return null;
+    return ensureClient(selected);
   })();
-  return _initPromise;
+
+  return initPromise;
 }
 
 export function getSupabaseClient(): SupabaseClient | null {
-  if (_client) return _client;
+  if (activeClient) return activeClient;
   const selected = selectPreferredConfig(readRuntimeConfig(), readBuildConfig());
   if (!selected) return null;
   return ensureClient(selected);
+}
+
+
+const initialBuildConfig = readBuildConfig();
+if (initialBuildConfig) {
+  // Prime legacy behavior: allow early auth reads before async runtime config resolves.
+  ensureClient(initialBuildConfig);
 }
 
 export const hasSupabaseClientConfig = (() => Boolean(readRuntimeConfig() ?? readBuildConfig()))();
@@ -92,5 +89,16 @@ export function requireSupabaseClient(): SupabaseClient {
   return client;
 }
 
-// Legacy compat
-export const supabaseClient = getSupabaseClient();
+// Context-Bound Proxy guarantees all legacy imports point to the active runtime client
+export const supabaseClient = new Proxy({} as SupabaseClient, {
+  get: (_, prop: keyof SupabaseClient) => {
+    const client = getSupabaseClient();
+    if (!client) {
+      console.warn(`[Supabase Proxy] Accessed property '${String(prop)}' before initSupabaseClient was called.`);
+      return undefined;
+    }
+    const value = client[prop];
+    // Explicitly bind functions to prevent 'Illegal invocation' context loss
+    return typeof value === 'function' ? value.bind(client) : value;
+  },
+});
