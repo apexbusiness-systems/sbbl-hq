@@ -12,5 +12,6 @@ interface Env {
   OPTIONAL_SOCIAL_API_KEYS?: string;
   OPTIONAL_TURNSTILE_SECRET_KEY?: string;
   GROQ_API_KEY?: string;
+  ENABLE_STREAM_VALIDATION?: string;
   ASSETS: { fetch: (req: Request) => Promise<Response> };
 }
