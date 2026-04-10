@@ -44,18 +44,37 @@ type HeartbeatEntry = {
 const heartbeatQueue: HeartbeatEntry[] = [];
 let heartbeatFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const HEARTBEAT_FLUSH_INTERVAL_MS = 30_000;
+const HEARTBEAT_QUEUE_MAX = 5_000; // OOM guard — drop oldest if queue exceeds this
+const HEARTBEAT_MAX_RETRIES = 3;    // Stop retrying after 3 consecutive failures
+let heartbeatConsecutiveFailures = 0;
 
 async function flushHeartbeatQueue(env: Env): Promise<void> {
   if (heartbeatQueue.length === 0) return;
+
+  // OOM guard: if queue grew past cap (sustained DB failure), drop oldest
+  if (heartbeatQueue.length > HEARTBEAT_QUEUE_MAX) {
+    const dropped = heartbeatQueue.length - HEARTBEAT_QUEUE_MAX;
+    heartbeatQueue.splice(0, dropped);
+    console.warn(`[heartbeat-flush] Dropped ${dropped} oldest entries (queue exceeded ${HEARTBEAT_QUEUE_MAX})`);
+  }
+
   const batch = heartbeatQueue.splice(0, heartbeatQueue.length);
   const admin = getAdminClient(env);
   const { error } = await admin.rpc("batch_heartbeat_upsert", {
     p_heartbeats: JSON.stringify(batch),
   });
   if (error) {
-    // On failure, push entries back so the next flush retries them
-    heartbeatQueue.unshift(...batch);
-    console.error("[heartbeat-flush] batch_heartbeat_upsert failed:", error.message);
+    heartbeatConsecutiveFailures += 1;
+    if (heartbeatConsecutiveFailures <= HEARTBEAT_MAX_RETRIES) {
+      // Retry: push entries back for next flush
+      heartbeatQueue.unshift(...batch);
+      console.error(`[heartbeat-flush] batch_heartbeat_upsert failed (attempt ${heartbeatConsecutiveFailures}/${HEARTBEAT_MAX_RETRIES}):`, error.message);
+    } else {
+      // Drop the batch — DB is persistently down, don't OOM the worker
+      console.error(`[heartbeat-flush] Dropping ${batch.length} heartbeats after ${HEARTBEAT_MAX_RETRIES} consecutive failures:`, error.message);
+    }
+  } else {
+    heartbeatConsecutiveFailures = 0; // Reset on success
   }
 }
 
@@ -454,14 +473,16 @@ function streamCacheUrl(gameId: string | null): string {
 
 async function getActiveViewerCount(admin: SupabaseClient, gameId: string | null) {
   if (!gameId) return 0;
-  const activeSessions = await admin
+  // Use DB-side count instead of pulling all rows into Worker memory.
+  // At 20K viewers this avoids transferring ~20K rows over the wire.
+  const { count, error } = await admin
     .from("stream_access_sessions")
-    .select("user_id")
+    .select("user_id", { count: "exact", head: true })
     .eq("game_id", gameId)
     .eq("status", "active")
     .gt("expires_at", new Date().toISOString());
-  if (activeSessions.error) return 0;
-  return new Set((activeSessions.data ?? []).map((row: Record<string, unknown>) => String(row.user_id))).size;
+  if (error) return 0;
+  return count ?? 0;
 }
 
 async function refreshLiveSessionMetrics(
@@ -4082,11 +4103,18 @@ function addSecurityHeaders(res: Response): Response {
 const ipRateMap = new Map<string, { count: number; windowStart: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 120; // 120 req/min per IP
+const IP_RATE_MAP_MAX = 50_000; // OOM guard — hard cap on tracked IPs
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
   const entry = ipRateMap.get(ip);
   if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    // OOM guard: if map exceeds cap, sweep expired entries first
+    if (ipRateMap.size >= IP_RATE_MAP_MAX) {
+      for (const [k, v] of ipRateMap.entries()) {
+        if (now - v.windowStart > RATE_LIMIT_WINDOW_MS) ipRateMap.delete(k);
+      }
+    }
     ipRateMap.set(ip, { count: 1, windowStart: now });
     return true;
   }
