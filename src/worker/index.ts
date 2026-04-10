@@ -2253,7 +2253,7 @@ async function handleParseEventImage(ctx: HandlerCtx) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.2-11b-vision-preview",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
       max_tokens: 256,
       messages: [
         {
@@ -2310,7 +2310,7 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.2-11b-vision-preview",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
       max_tokens: 256,
       messages: [
         {
@@ -4981,7 +4981,7 @@ async function handleScoreboardImageParse(ctx: HandlerCtx) {
     method: "POST",
     headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: "llama-3.2-11b-vision-preview",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
       max_tokens: 256,
       messages: [{
         role: "user",
