@@ -104,10 +104,7 @@ function extractEvidence(playwrightJson) {
     for (const child of suite.suites ?? []) stack.push(child);
     for (const spec of suite.specs ?? []) {
       const title = String(spec.title ?? '').toLowerCase();
-      const passed = (spec.tests ?? []).some((test) =>
-        test.status === 'expected' || test.status === 'passed' ||
-        (test.results ?? []).some((r) => r.status === 'passed'),
-      );
+      const passed = (spec.tests ?? []).some((test) => test.status === 'passed');
       if (!passed) continue;
       if (title.includes('[evidence:playback]')) evidence.playback = true;
       if (title.includes('[evidence:paywall]')) evidence.paywall = true;
@@ -137,7 +134,6 @@ async function runPerf() {
   ];
 
   const timings = [];
-  let serverReachable = false;
   for (const [metric, route] of targets) {
     const started = Date.now();
     let status = 0;
@@ -146,7 +142,6 @@ async function runPerf() {
       const res = await fetch(`${baseUrl}${route}`);
       status = res.status;
       ok = res.status < 500;
-      serverReachable = true;
     } catch {
       ok = false;
     }
@@ -163,17 +158,10 @@ async function runPerf() {
     });
   }
 
-  // When no server is reachable (e.g. the Playwright dev server already shut
-  // down), treat perf as not-applicable rather than hard-failing the gate.
-  const perfOk = serverReachable
-    ? timings.every((row) => row.ok && row.within_threshold)
-    : true;
-
   return {
     started_at: nowIso(),
     finished_at: nowIso(),
-    ok: perfOk,
-    server_reachable: serverReachable,
+    ok: timings.every((row) => row.ok && row.within_threshold),
     timings,
   };
 }
