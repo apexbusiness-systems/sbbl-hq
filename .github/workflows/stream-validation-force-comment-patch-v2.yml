@@ -1,0 +1,35 @@
+name: Stream Validation Force Comment Patch V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/stream-validation-final-main-pass1
+
+permissions:
+  contents: write
+
+jobs:
+  force-patch-v2:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Apply safe prelive workflow verdict-comment patch
+        run: node ops/validation/apply-prelive-comment-patch-v2.mjs
+
+      - name: Commit patched prelive workflow
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add .github/workflows/stream-validation-prelive.yml
+            git commit -m "chore(stream-validation): add PR verdict comment step to prelive workflow"
+            git push
+          else
+            echo "No forced v2 patch changes detected"
+          fi
