@@ -114,7 +114,7 @@ async function registerEntitledStreamMocks(page: import('@playwright/test').Page
     });
   });
 
-  await page.route(`**/api/streams/${GAME_ID}/reactions**`, async (route) => {
+  await page.route(new RegExp(`/api/streams/${GAME_ID}/reactions(?:\\?.*)?$`), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -122,7 +122,7 @@ async function registerEntitledStreamMocks(page: import('@playwright/test').Page
     });
   });
 
-  await page.route(`**/api/streams/${GAME_ID}/react**`, async (route) => {
+  await page.route(new RegExp(`/api/streams/${GAME_ID}/react(?:\\?.*)?$`), async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -213,6 +213,15 @@ test.describe('stream prelive validation', () => {
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ ok: true, liveGames: [], upcomingGames: [], recentGames: [] }),
+      });
+    });
+
+
+    await page.route('**/api/streams/status**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, isLive: true, title: 'Validation Stream', viewerCount: 0, gameId: GAME_ID }),
       });
     });
 

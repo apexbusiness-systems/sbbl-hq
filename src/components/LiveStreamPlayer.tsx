@@ -277,6 +277,7 @@ export function LiveStreamPlayer({
             <ReactPlayer
               url={playbackUrl}
               playing={true}
+              muted={true}
               controls={true}
               width="100%"
               height="100%"
