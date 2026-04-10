@@ -266,7 +266,12 @@ const OpsPage = () => {
         },
       });
     },
-    // No onSuccess — eventMediaMutation has none in the current file.
+    onSuccess: async (data) => {
+      if (!data) return;
+      setIngestJob(data);
+      await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
   });
 
   // ── Admin CRUD mutations ───────────────────────────────────────────────
