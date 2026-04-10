@@ -10,19 +10,19 @@ const API_BASE = import.meta.env.VITE_WORKER_API_BASE?.trim() || '';
  * - active non-expired session => current access token
  * - near-expiry token => refresh once, then return fresh token or null
  */
-export async function getAuthToken(): Promise<string | null> {
+export async function getAuthToken(forceRefresh = false): Promise<string | null> {
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) return null;
 
-  const { data: sessionData } = await supabaseClient.auth.getSession();
-  const currentSession = sessionData.session;
+  const sessionResponse = await supabaseClient.auth.getSession();
+  const currentSession = sessionResponse?.data?.session ?? null;
   if (!currentSession?.access_token) return null;
 
   const expiresAtMs = typeof currentSession.expires_at === 'number'
     ? currentSession.expires_at * 1000
     : 0;
   const isFresh = expiresAtMs === 0 || expiresAtMs - Date.now() > 60_000;
-  if (isFresh) return currentSession.access_token;
+  if (!forceRefresh && isFresh) return currentSession.access_token;
 
   const { data: refreshData, error: refreshError } = await supabaseClient.auth.refreshSession();
   if (refreshError) {
@@ -44,16 +44,6 @@ export async function apiFetch<T>(
   init: RequestInit = {},
   token?: string | null,
 ): Promise<T> {
-  const clearLocalAuthState = async () => {
-    const supabaseClient = getSupabaseClient();
-    if (!supabaseClient) return;
-    try {
-      await supabaseClient.auth.signOut({ scope: 'local' });
-    } catch (error) {
-      console.warn('[apiFetch] Failed to clear local auth state:', error);
-    }
-  };
-
   const method = (init.method ?? 'GET').toUpperCase();
   const baseHeaders = new Headers(init.headers);
 
@@ -66,53 +56,57 @@ export async function apiFetch<T>(
     baseHeaders.set('x-idempotency-key', `${path}-${Date.now()}-${crypto.randomUUID()}`);
   }
 
-  // Keep one deterministic idempotency key across retries.
-  const stableIdempotencyKey = baseHeaders.get('x-idempotency-key');
-
-  const attempt = async (authToken: string | null): Promise<Response> => {
-    const headers = new Headers(baseHeaders);
-    if (authToken) {
-      headers.set('authorization', `Bearer ${authToken}`);
-    } else {
-      headers.delete('authorization');
-    }
-    if (stableIdempotencyKey) headers.set('x-idempotency-key', stableIdempotencyKey);
-
-    return fetch(`${API_BASE}${path}`, { ...init, method, headers });
-  };
-
-  const isOpsRoute = path.startsWith('/ops/');
-  let authToken = token ?? (await getAuthToken());
-
-  // Non-discoverable fast-fail for auth-protected ops routes when session is gone.
-  if (isOpsRoute && !authToken) {
-    throw new Error('reauth_required');
+  const initialToken = token ?? (await getAuthToken(false));
+  if (initialToken) {
+    baseHeaders.set('Authorization', `Bearer ${initialToken}`);
   }
 
-  let response = await attempt(authToken);
+  const endpoint = `${API_BASE}${path}`;
+  const options: RequestInit = { ...init, method, headers: baseHeaders };
 
-  if (response.status === 401 && authToken) {
-    const supabaseClient = getSupabaseClient();
-    if (supabaseClient) {
-      const { data: refreshData, error: refreshError } = await supabaseClient.auth.refreshSession();
-      const freshToken = refreshError ? null : (refreshData.session?.access_token ?? null);
-      if (freshToken) {
-        authToken = freshToken;
-        response = await attempt(authToken);
-      }
-    }
-  }
+  // 1. Execute primary network request
+  let response = await fetch(endpoint, options);
 
+  // 2. Intercept 401 Unauthorized
   if (response.status === 401) {
-    await clearLocalAuthState();
-    throw new Error('reauth_required');
+    // Safely extract headers using the native API to preserve Content-Type/Accept
+    const safeHeaders = new Headers(options.headers || {});
+    const hadToken = safeHeaders.has('Authorization') || !!(await getAuthToken(false));
+
+    // 3. 1-Pass Turbulence Recovery (Only if session was previously authenticated)
+    const retryableOptions = options as RequestInit & { _retry?: boolean };
+    if (hadToken && !retryableOptions._retry) {
+      retryableOptions._retry = true;
+
+      const freshToken = await getAuthToken(true); // Force refresh
+
+      if (freshToken) {
+        safeHeaders.set('Authorization', `Bearer ${freshToken}`);
+        options.headers = safeHeaders;
+
+        response = await fetch(endpoint, options); // Retry
+
+        if (response.ok) return response as unknown as T; // Immediate unblock on success
+      }
+
+      // 4. Terminal Auth Failure: Token existed but refresh/retry failed. Kill session.
+      await getSupabaseClient()?.auth.signOut();
+    }
+
+    // 5. Terminal Rejection: Paywall hits (No token) OR Retry Failed.
+    // Throws absolute 401 to UI without destroying local storage (Preserves PR #243).
+    const authError = new Error('Unauthorized') as Error & { status: number };
+    authError.status = 401;
+    throw authError;
   }
 
-  const payload = await response.json().catch(() => ({ ok: false, error: 'invalid_json_response' }));
-
+  // 6. Standard Error Rejection
   if (!response.ok) {
-    throw new Error(typeof payload?.error === 'string' ? payload.error : `request_failed_${response.status}`);
+    const apiError = new Error(`API Error: ${response.status} ${response.statusText}`) as Error & { status: number };
+    apiError.status = response.status;
+    throw apiError;
   }
 
-  return payload as T;
+  // 7. CRITICAL: Return valid payload to unblock downstream JSON parsers
+  return response as unknown as T;
 }
