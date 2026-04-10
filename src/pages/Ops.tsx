@@ -14,6 +14,8 @@ import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
 import { fetchScores, submitScoreManual, submitScoresCsvImport, parseScoreboardImage } from '@/lib/api/scores';
 import type { ScoreCategory } from '@/types';
+import { toast } from 'sonner';
+import { getSupabaseClient } from '@/lib/supabase/client';
 
 type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
 
@@ -117,6 +119,41 @@ const OpsPage = () => {
   const [scoresForm, setScoresForm] = useState(defaultScoreForm);
   const [ingestJob, setIngestJob] = useState<{ jobId: string; state: string } | null>(null);
 
+  useEffect(() => {
+    if (!ingestJob?.jobId) return;
+    const supabase = getSupabaseClient();
+    if (!supabase) return;
+
+    // CODEX: realtime ingest_jobs subscription gives immediate state feedback without polling.
+    const channel = supabase
+      .channel(`ops-ingest-job-${ingestJob.jobId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'ingest_jobs',
+          filter: `id=eq.${ingestJob.jobId}`,
+        },
+        (payload) => {
+          const nextState = String((payload.new as { state?: string } | null)?.state ?? '');
+          if (!nextState) return;
+          setIngestJob((prev) => {
+            if (!prev) return prev;
+            if (prev.state === nextState) return prev;
+            // CODEX: suppress duplicate realtime toasts when duplicate UPDATE payloads repeat the same state.
+            toast.success(`Ingest job ${ingestJob.jobId.slice(0, 8)} updated: ${nextState}`);
+            return { ...prev, state: nextState };
+          });
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [ingestJob?.jobId]);
+
   const updateStoreBatchItem = (i: number, field: string, value: string) =>
     setStoreBatchItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
 
@@ -206,6 +243,8 @@ const OpsPage = () => {
     },
     onSuccess: async (data) => {
       setIngestJob(data);
+      // CODEX: immediate success toast confirms signed-URL upload + ingest submit completed.
+      toast.success(`Ingest submitted (job ${data.jobId.slice(0, 8)})`);
       await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
       await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
     },
@@ -236,6 +275,8 @@ const OpsPage = () => {
     },
     onSuccess: (data) => {
       setIngestJob(data);
+      // CODEX: immediate success toast confirms signed-URL upload + ingest submit completed.
+      toast.success(`Store ingest submitted (job ${data.jobId.slice(0, 8)})`);
       setStoreForm({
         title: '', price: '0', category: 'apparel',
         publishStatus: 'draft', imageFile: null, sale: false,
@@ -266,7 +307,12 @@ const OpsPage = () => {
         },
       });
     },
-    // No onSuccess — eventMediaMutation has none in the current file.
+    onSuccess: (data) => {
+      if (!data) return;
+      setIngestJob(data);
+      // CODEX: immediate success toast confirms event upload entered ingest pipeline.
+      toast.success(`Event ingest submitted (job ${data.jobId.slice(0, 8)})`);
+    },
   });
 
   // ── Admin CRUD mutations ───────────────────────────────────────────────

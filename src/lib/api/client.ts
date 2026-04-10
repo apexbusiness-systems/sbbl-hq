@@ -1,6 +1,12 @@
 import { getSupabaseClient } from '@/lib/supabase/client';
 
 const API_BASE = import.meta.env.VITE_WORKER_API_BASE?.trim() || '';
+const OPS_401_WINDOW_MS = 60_000;
+let opsUnauthorizedTracker: { count: number; lastAt: number; tokenHint: string | null } = {
+  count: 0,
+  lastAt: 0,
+  tokenHint: null,
+};
 
 /**
  * getAuthToken returns a fresh Supabase JWT when possible.
@@ -32,6 +38,12 @@ export async function getAuthToken(): Promise<string | null> {
     }
     return null;
   }
+
+  // CODEX: emit refresh observability to verify token churn stabilizes after login.
+  console.log('[AUTH] session refreshed', {
+    userId: refreshData.session?.user?.id,
+    expiresAt: refreshData.session?.expires_at,
+  });
 
   return refreshData.session?.access_token ?? null;
 }
@@ -90,23 +102,57 @@ export async function apiFetch<T>(
   }
 
   let response = await attempt(authToken);
+  const supabaseClient = getSupabaseClient();
 
-  if (response.status === 401 && authToken) {
-    const supabaseClient = getSupabaseClient();
-    if (supabaseClient) {
-      const { data: refreshData, error: refreshError } = await supabaseClient.auth.refreshSession();
-      const freshToken = refreshError ? null : (refreshData.session?.access_token ?? null);
-      if (freshToken) {
-        authToken = freshToken;
-        response = await attempt(authToken);
-      }
-    }
+  for (let attemptIndex = 0; response.status === 401 && authToken && attemptIndex < 3; attemptIndex += 1) {
+    const delayMs = 500 * (2 ** attemptIndex);
+    // CODEX: exponential back-off prevents tight refresh loops during transient auth edge errors.
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+
+    if (!supabaseClient) break;
+    const refreshResult = await supabaseClient.auth.refreshSession();
+    const refreshData = refreshResult?.data;
+    const refreshError = refreshResult?.error;
+    const freshToken = refreshError ? null : (refreshData?.session?.access_token ?? null);
+    if (!freshToken) break;
+
+    // CODEX: emit refresh observability after every successful refresh retry.
+    console.log('[AUTH] session refreshed', {
+      userId: refreshData.session?.user?.id,
+      expiresAt: refreshData.session?.expires_at,
+    });
+    authToken = freshToken;
+    response = await attempt(authToken);
   }
 
   if (response.status === 401) {
+    if (!isOpsRoute) {
+      await clearLocalAuthState();
+      throw new Error('reauth_required');
+    }
+    const now = Date.now();
+    const tokenHint = authToken ? authToken.slice(0, 24) : null;
+    const shouldResetCounter = !opsUnauthorizedTracker.tokenHint
+      || opsUnauthorizedTracker.tokenHint !== tokenHint
+      || now - opsUnauthorizedTracker.lastAt > OPS_401_WINDOW_MS;
+    if (shouldResetCounter) {
+      // CODEX: reset the 401 tracker when auth context changes or failures are no longer consecutive.
+      opsUnauthorizedTracker = { count: 0, lastAt: now, tokenHint };
+    }
+    opsUnauthorizedTracker = {
+      count: opsUnauthorizedTracker.count + 1,
+      lastAt: now,
+      tokenHint,
+    };
+    if (opsUnauthorizedTracker.count < 3) {
+      throw new Error('unauthorized');
+    }
+    // CODEX: force local logout only after three consecutive 401s to avoid immediate kick-outs.
     await clearLocalAuthState();
+    opsUnauthorizedTracker = { count: 0, lastAt: 0, tokenHint: null };
     throw new Error('reauth_required');
   }
+  opsUnauthorizedTracker = { count: 0, lastAt: 0, tokenHint: null };
 
   const payload = await response.json().catch(() => ({ ok: false, error: 'invalid_json_response' }));
 

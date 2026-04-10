@@ -24,6 +24,15 @@ function readBuildConfig(): SupabaseConfig | null {
   return url && key ? { url, key } : null;
 }
 
+function assertNoServiceRoleLeakInBrowser(): void {
+  if (!import.meta.env.DEV) return;
+  const leakedServiceRoleKey = import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY as string | undefined;
+  if (!leakedServiceRoleKey) return;
+  // CODEX: fail closed in development if a service-role key leaks into browser env.
+  console.error('[supabase] Refusing browser client init: VITE_SUPABASE_SERVICE_ROLE_KEY must never be exposed.');
+  throw new Error('supabase_service_role_key_exposed_in_browser');
+}
+
 function readRuntimeConfig(): SupabaseConfig | null {
   const cfg = getRuntimeConfigSync();
   if (!cfg?.supabaseUrl || !cfg?.supabasePublishableKey) return null;
@@ -57,6 +66,8 @@ function selectPreferredConfig(
 
 function ensureClient(config: SupabaseConfig): SupabaseClient {
   if (_client && _clientConfig && sameConfig(_clientConfig, config)) return _client;
+  // CODEX: re-init any stale client reference whenever credentials rotate at runtime/build time.
+  if (_client && _clientConfig && !sameConfig(_clientConfig, config)) _client = null;
   _client = buildClient(config.url, config.key);
   _clientConfig = config;
   return _client;
@@ -65,6 +76,7 @@ function ensureClient(config: SupabaseConfig): SupabaseClient {
 export async function initSupabaseClient(): Promise<void> {
   if (_initPromise) return _initPromise;
   _initPromise = (async () => {
+    assertNoServiceRoleLeakInBrowser();
     const runtime = await getRuntimeConfig();
     const runtimeConfig = runtime.supabaseUrl && runtime.supabasePublishableKey
       ? { url: runtime.supabaseUrl, key: runtime.supabasePublishableKey }
@@ -78,6 +90,7 @@ export async function initSupabaseClient(): Promise<void> {
 }
 
 export function getSupabaseClient(): SupabaseClient | null {
+  assertNoServiceRoleLeakInBrowser();
   if (_client) return _client;
   const selected = selectPreferredConfig(readRuntimeConfig(), readBuildConfig());
   if (!selected) return null;

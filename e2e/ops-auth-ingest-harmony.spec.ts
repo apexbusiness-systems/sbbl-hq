@@ -112,6 +112,8 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
   const mediaFeed: MediaAsset[] = [];
   const potgUploadDimensions: UploadDimensions[] = [];
   const submitPayloadByJobId = new Map<string, Record<string, JsonValue>>();
+  // CODEX: track imported score rows so UI assertions can verify leaderboard updates.
+  const leaderboardRows: Array<{ participant1Label: string; participant2Label: string; homeScore: number; awayScore: number }> = [];
 
   let bootstrapCalls = 0;
 
@@ -153,6 +155,44 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
 
   await page.route('**/ops/imports/history', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, jobs: [] }) });
+  });
+
+  await page.route('**/api/scores**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        games: leaderboardRows.map((row, index) => ({
+          id: `game-${index + 1}`,
+          category: 'league',
+          leagueId: 'sbbl',
+          participant1Label: row.participant1Label,
+          participant2Label: row.participant2Label,
+          homeScore: row.homeScore,
+          awayScore: row.awayScore,
+          status: 'final',
+        })),
+      }),
+    });
+  });
+
+  await page.route('**/ops/scores/import', async (route) => {
+    const payload = route.request().postDataJSON() as { rows?: Array<Record<string, string>> };
+    const rows = payload.rows ?? [];
+    for (const row of rows) {
+      leaderboardRows.push({
+        participant1Label: row.participant1Label ?? row.home_label ?? 'Unknown Home',
+        participant2Label: row.participant2Label ?? row.away_label ?? 'Unknown Away',
+        homeScore: Number(row.homeScore ?? row.home_score ?? 0),
+        awayScore: Number(row.awayScore ?? row.away_score ?? 0),
+      });
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, inserted: rows.length, failed: 0, errors: [] }),
+    });
   });
 
   await page.route('**/ops/potg/parse', async (route) => {
@@ -303,6 +343,28 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
 }
 
 test.describe('ops auth + ingest harmony gate', () => {
+  test('login to ops and import scores CSV updates leaderboard row', async ({ page }) => {
+    // CODEX: cover login → ops CSV import → leaderboard render in one end-to-end flow.
+    await seedSuperAdminSession(page);
+    await registerHarmonyRoutes(page);
+
+    await page.goto('/login', { waitUntil: 'domcontentloaded' });
+    await page.goto('/ops', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('tab', { name: 'Scores' }).click();
+
+    const csvInput = page.locator('input[type="file"][accept=".csv,text/csv"]').first();
+    await csvInput.setInputFiles({
+      name: 'scores.csv',
+      mimeType: 'text/csv',
+      buffer: Buffer.from('participant1Label,participant2Label,homeScore,awayScore\\nFalcons,Wolves,84,79\\n'),
+    });
+
+    await page.getByRole('button', { name: 'Import 1 Row' }).click();
+    await expect(page.getByText('Imported: 1 · Failed: 0')).toBeVisible();
+    await expect(page.getByText('Falcons')).toBeVisible();
+    await expect(page.getByText('Wolves')).toBeVisible();
+  });
+
   test('recovers from initial /ops/bootstrap 401 and keeps ops usable', async ({ page }) => {
     await seedSuperAdminSession(page);
     await registerHarmonyRoutes(page, { bootstrap401Once: true });
