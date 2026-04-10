@@ -205,6 +205,7 @@ const OpsPage = () => {
         publicUrl: objectPath,
         title: potgForm.playerName,
         leagueId: potgForm.leagueId,
+        publishStatus: 'published',
         meta: {
           date: potgForm.date,
           playerName: potgForm.playerName,
@@ -273,6 +274,7 @@ const OpsPage = () => {
         publicUrl: objectPath,
         title: eventGraphicForm.title,
         leagueId: eventGraphicForm.leagueId || undefined,
+        publishStatus: 'published',
         meta: {
           date: eventGraphicForm.date || undefined,
         },
