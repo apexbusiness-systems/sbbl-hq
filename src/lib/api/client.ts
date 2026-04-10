@@ -2,6 +2,15 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 
 const API_BASE = import.meta.env.VITE_WORKER_API_BASE?.trim() || '';
 
+// CODEX: Enforce bounded auth retry behavior before fail-closed logout.
+const MAX_CONSECUTIVE_401 = 3;
+// CODEX: 500ms exponential backoff base (500ms, 1000ms) to stop tight 401 loops.
+const AUTH_RETRY_BASE_DELAY_MS = 500;
+
+const wait = (ms: number) => new Promise<void>((resolve) => {
+  setTimeout(resolve, ms);
+});
+
 /**
  * getAuthToken returns a fresh Supabase JWT when possible.
  *
@@ -33,7 +42,13 @@ export async function getAuthToken(): Promise<string | null> {
     return null;
   }
 
-  return refreshData.session?.access_token ?? null;
+  const session = refreshData.session ?? null;
+  if (session?.access_token) {
+    // CODEX: Emit refresh observability for post-login token stability diagnostics.
+    console.log('[AUTH] session refreshed', { userId: session?.user?.id, expiresAt: session?.expires_at });
+  }
+
+  return session?.access_token ?? null;
 }
 
 /**
@@ -89,18 +104,36 @@ export async function apiFetch<T>(
     throw new Error('reauth_required');
   }
 
-  let response = await attempt(authToken);
+  let response: Response | null = null;
 
-  if (response.status === 401 && authToken) {
+  for (let auth401Count = 1; auth401Count <= MAX_CONSECUTIVE_401; auth401Count += 1) {
+    response = await attempt(authToken);
+
+    if (response.status !== 401) {
+      break;
+    }
+
     const supabaseClient = getSupabaseClient();
     if (supabaseClient) {
       const { data: refreshData, error: refreshError } = await supabaseClient.auth.refreshSession();
-      const freshToken = refreshError ? null : (refreshData.session?.access_token ?? null);
-      if (freshToken) {
-        authToken = freshToken;
-        response = await attempt(authToken);
+      const session = refreshError ? null : (refreshData.session ?? null);
+      if (session?.access_token) {
+        // CODEX: Emit refresh observability on every successful 401 recovery refresh.
+        console.log('[AUTH] session refreshed', { userId: session?.user?.id, expiresAt: session?.expires_at });
+        authToken = session.access_token;
       }
     }
+
+    if (auth401Count < MAX_CONSECUTIVE_401) {
+      // CODEX: Exponential backoff prevents immediate 401 spin loops while preserving recovery attempts.
+      const delayMs = AUTH_RETRY_BASE_DELAY_MS * (2 ** (auth401Count - 1));
+      await wait(delayMs);
+      continue;
+    }
+  }
+
+  if (!response) {
+    throw new Error('request_failed_unknown');
   }
 
   if (response.status === 401) {

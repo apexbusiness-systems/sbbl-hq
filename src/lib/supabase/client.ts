@@ -17,7 +17,28 @@ function buildClient(url: string, key: string): SupabaseClient {
   });
 }
 
+function getLeakedServiceRoleKey(): string | null {
+  const viteLeak = (import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY as string | undefined)?.trim();
+  const legacyLeak = (import.meta.env as Record<string, unknown>).SUPABASE_SERVICE_ROLE_KEY;
+  if (viteLeak) return viteLeak;
+  if (typeof legacyLeak === 'string' && legacyLeak.trim().length > 0) return legacyLeak.trim();
+  return null;
+}
+
+function assertNoServiceRoleLeakInBrowser(): void {
+  if (!import.meta.env.DEV) return;
+  const leakedKey = getLeakedServiceRoleKey();
+  if (!leakedKey) return;
+
+  // CODEX: Fail closed in dev when service-role credentials leak into browser config.
+  console.error('[supabase] Refusing browser client init: SERVICE_ROLE_KEY is exposed to frontend runtime.');
+  throw new Error('supabase_service_role_key_exposed');
+}
+
 function readBuildConfig(): SupabaseConfig | null {
+  // CODEX: Validate browser env before reading build-time config so leaked secrets hard-stop immediately.
+  assertNoServiceRoleLeakInBrowser();
+
   const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
   const key = (import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined)
     ?? (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
@@ -78,9 +99,18 @@ export async function initSupabaseClient(): Promise<void> {
 }
 
 export function getSupabaseClient(): SupabaseClient | null {
-  if (_client) return _client;
   const selected = selectPreferredConfig(readRuntimeConfig(), readBuildConfig());
   if (!selected) return null;
+
+  if (_client && _clientConfig && sameConfig(_clientConfig, selected)) return _client;
+
+  if (_client && (!_clientConfig || !sameConfig(_clientConfig, selected))) {
+    // CODEX: Rebuild stale singleton when runtime/build config rotates after first access.
+    _client = buildClient(selected.url, selected.key);
+    _clientConfig = selected;
+    return _client;
+  }
+
   return ensureClient(selected);
 }
 
