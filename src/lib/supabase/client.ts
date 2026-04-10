@@ -11,7 +11,18 @@ let _initPromise: Promise<void> | null = null;
 let _clientConfig: SupabaseConfig | null = null;
 let _reportedConfigMismatch = false;
 
+function isServiceRoleKey(key: string): boolean {
+  // CODEX: guard browser builds from ever booting with privileged server credentials.
+  return key.startsWith('sb_secret_') || /service[_-]?role/i.test(key);
+}
+
 function buildClient(url: string, key: string): SupabaseClient {
+  if (import.meta.env.DEV && typeof window !== 'undefined' && isServiceRoleKey(key)) {
+    // CODEX: fail closed in local/dev browser if a service-role key leaks into client config.
+    console.error('[supabase] SERVICE_ROLE_KEY detected in browser config. Aborting client initialization.');
+    throw new Error('supabase_service_role_key_detected_in_browser');
+  }
+
   return createClient(url, key, {
     auth: { persistSession: true, autoRefreshToken: true },
   });
@@ -60,6 +71,16 @@ function ensureClient(config: SupabaseConfig): SupabaseClient {
   _client = buildClient(config.url, config.key);
   _clientConfig = config;
   return _client;
+}
+
+export function ensureFreshSupabaseClient(staleRef: SupabaseClient | null | undefined): SupabaseClient | null {
+  const current = getSupabaseClient();
+  if (!staleRef) return current;
+  if (current && staleRef !== current) {
+    // CODEX: explicit stale-reference guard for modules that cached a pre-reinit client instance.
+    return current;
+  }
+  return staleRef;
 }
 
 export async function initSupabaseClient(): Promise<void> {

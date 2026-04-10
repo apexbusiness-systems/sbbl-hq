@@ -103,6 +103,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // loaded session + profile, so skip to avoid a redundant fetch.
         if (event === 'INITIAL_SESSION') return;
 
+        if (event === 'TOKEN_REFRESHED' && nextSession) {
+          // CODEX: emit refresh observability breadcrumbs to confirm refresh-loop fix stability in prod.
+          console.log('[AUTH] session refreshed', { userId: nextSession?.user?.id, expiresAt: nextSession?.expires_at });
+        }
+
         setSession(nextSession ?? null);
         setUser(nextSession?.user ?? null);
 
