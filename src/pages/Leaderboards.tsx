@@ -73,6 +73,21 @@ const LeaderboardsPage = () => {
   }, [leagueFilter, activeCategory, players]);
   const visible = hasPremiumPlayerAccess ? filtered : filtered.slice(0, 3);
 
+  // ⚡ Bolt Performance Optimization: Replace O(N*M) nested loop with O(1) hash map lookup
+  // Pre-computing a dictionary for team names prevents expensive `.find()`
+  // array traversals on every player row render.
+  const teamMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const t of teams) {
+      map[t.id] = t.name;
+    }
+    return map;
+  }, []);
+
+  const activeCategoryLabel = useMemo(() => {
+    return categories.find(c => c.key === activeCategory)?.label;
+  }, [activeCategory]);
+
   const rankIcon = (i: number) => {
     if (i === 0) return <Crown className="w-4 h-4 text-primary" />;
     if (i === 1) return <Medal className="w-4 h-4 text-wbl" />;
@@ -142,7 +157,7 @@ const LeaderboardsPage = () => {
                   <p className="font-display font-bold text-sm">{p.name}</p>
                   <LeagueBadge leagueId={p.leagueId} />
                   <p className="stat-numeral text-3xl text-primary mt-2">{p.stats[activeCategory]}</p>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{categories.find(c => c.key === activeCategory)?.label}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{activeCategoryLabel}</p>
                 </div>
               ))}
             </div>
@@ -158,7 +173,7 @@ const LeaderboardsPage = () => {
                   <p className="text-sm font-medium">{p.name}</p>
                   <div className="flex items-center gap-2">
                     <LeagueBadge leagueId={p.leagueId} />
-                    <span className="text-[10px] text-muted-foreground">{p.position} · {teams.find(t => t.id === p.teamId)?.name}</span>
+                    <span className="text-[10px] text-muted-foreground">{p.position} · {teamMap[p.teamId]}</span>
                   </div>
                 </div>
                 <div className="text-right">

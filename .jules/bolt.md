@@ -10,3 +10,7 @@
 ## 2024-04-09 - Supabase Migration column rename
 **Learning:** `media_publications` table had its `created_at` column renamed to `sort_at` during the `20260407103137_media_publications.sql` migration, but the subsequent `20260407200000_ingest_pipeline.sql` migration was still referencing `created_at` in the `v_ingest_reconciliation` view definition, causing Supabase Preview CI failures with "ERROR: column mp.created_at does not exist (SQLSTATE 42703)".
 **Action:** Always ensure that subsequent migrations are updated to reflect column renames or schema changes made in previous migrations.
+
+## 2024-05-18 - [Optimize Nested Lookups During Render in React Mappings]
+**Learning:** O(N) array traversals (like `.find()`) inside `.map()` rendering loops result in expensive O(N*M) time complexity. In dynamic components like `Leaderboards.tsx` or `Profiles.tsx`, this can severely lag the main thread on every re-render.
+**Action:** Always extract O(N) mapping operations into an O(1) Dictionary/Map lookup pre-computed using `useMemo` before returning the rendered list to keep renders fast and main thread unblocked.
