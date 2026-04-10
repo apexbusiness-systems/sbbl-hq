@@ -223,7 +223,7 @@ async function getSession(req: Request, env: Env) {
 
   try {
     if (!jwksClient) {
-      const url = new URL("/auth/v1/jwks", env.SUPABASE_URL);
+      const url = new URL("/auth/v1/.well-known/jwks.json", env.SUPABASE_URL);
       jwksClient = createRemoteJWKSet(url);
     }
 
@@ -1582,10 +1582,26 @@ async function handleImportRoute(
   const body = (await ctx.req.json().catch(() => null)) as {
     rows?: Array<Record<string, string>>;
   } | null;
-  const rows = body?.rows ?? [];
-  if (!Array.isArray(rows) || rows.length === 0) {
+  const rawRows = body?.rows ?? [];
+  if (!Array.isArray(rawRows) || rawRows.length === 0) {
     return json({ ok: false, error: "rows_required" }, 400);
   }
+
+  // Normalize camelCase keys (from manual Ops creates) to snake_case (DB columns).
+  // CSV bulk imports already use snake_case, so the fallback is harmless.
+  const rows = rawRows.map((r): Record<string, string> => ({
+    ...r,
+    league_id: r.league_id ?? r.leagueId,
+    season_id: r.season_id ?? r.seasonId,
+    division_id: r.division_id ?? r.divisionId ?? r.division,
+    user_id: r.user_id ?? r.userId,
+    team_id: r.team_id ?? r.teamId,
+    jersey_number: r.jersey_number ?? r.jerseyNumber,
+    starts_at: r.starts_at ?? r.startsAt,
+    ends_at: r.ends_at ?? r.endsAt,
+    venue_id: r.venue_id ?? r.venueId,
+    court_id: r.court_id ?? r.courtId,
+  }));
 
   let insertedRows = 0;
   let failedRows = 0;
@@ -2237,7 +2253,7 @@ async function handleParseEventImage(ctx: HandlerCtx) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.2-11b-vision-preview",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
       max_tokens: 256,
       messages: [
         {
@@ -2294,7 +2310,7 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.2-11b-vision-preview",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
       max_tokens: 256,
       messages: [
         {
@@ -4965,7 +4981,7 @@ async function handleScoreboardImageParse(ctx: HandlerCtx) {
     method: "POST",
     headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: "llama-3.2-11b-vision-preview",
+      model: "meta-llama/llama-4-scout-17b-16e-instruct",
       max_tokens: 256,
       messages: [{
         role: "user",

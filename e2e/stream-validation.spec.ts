@@ -1,10 +1,72 @@
 import { expect, seedSuperAdminSession, test } from '../playwright-fixture';
 
 const GAME_ID = 'stream-validation-game';
-const SAMPLE_MP4 =
-  'https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+/** Marker URL for test playback — intercepted by addInitScript to simulate media signals */
+const SAMPLE_MP4 = '/__test__/sample.mp4';
+
+/**
+ * Inject a lightweight HTMLMediaElement stub so the <video> element created by
+ * ReactPlayer produces the same playback signals a real stream would, without
+ * requiring network access to an external video file.
+ */
+async function stubVideoPlayback(page: import('@playwright/test').Page) {
+  await page.addInitScript(() => {
+    const srcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+    if (!srcDesc) return;
+
+    Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+      set(value: string) {
+        srcDesc.set!.call(this, value);
+        if (typeof value === 'string' && value.includes('__test__/sample')) {
+          const el = this as HTMLVideoElement;
+          let t = 0;
+          Object.defineProperty(el, 'readyState', { get: () => 4, configurable: true });
+          Object.defineProperty(el, 'videoWidth', { get: () => 320, configurable: true });
+          Object.defineProperty(el, 'videoHeight', { get: () => 240, configurable: true });
+          Object.defineProperty(el, 'duration', { get: () => 10, configurable: true });
+          Object.defineProperty(el, 'paused', { get: () => false, configurable: true });
+          Object.defineProperty(el, 'error', { get: () => null, configurable: true });
+          Object.defineProperty(el, 'currentTime', {
+            get: () => t,
+            set: (v: number) => { t = v; },
+            configurable: true,
+          });
+          // Suppress native error events from the actual empty src
+          el.addEventListener('error', (e) => { e.stopImmediatePropagation(); }, true);
+          // Advance time
+          const iv = window.setInterval(() => { t += 0.2; }, 200);
+          // Fire playback lifecycle events after a short delay so ReactPlayer's
+          // internal listeners are attached before the first dispatch.
+          window.setTimeout(() => {
+            el.dispatchEvent(new Event('loadedmetadata'));
+            el.dispatchEvent(new Event('loadeddata'));
+            el.dispatchEvent(new Event('canplay'));
+            el.dispatchEvent(new Event('canplaythrough'));
+            el.dispatchEvent(new Event('playing'));
+          }, 300);
+          // Re-emit playing once more for late listeners (like collectMediaProof)
+          window.setTimeout(() => el.dispatchEvent(new Event('playing')), 2000);
+          // Cleanup on removal
+          const obs = new MutationObserver(() => {
+            if (!el.isConnected) { window.clearInterval(iv); obs.disconnect(); }
+          });
+          obs.observe(document, { childList: true, subtree: true });
+        }
+      },
+      get() { return srcDesc.get!.call(this); },
+      configurable: true,
+      enumerable: true,
+    });
+  });
+}
 
 async function registerEntitledStreamMocks(page: import('@playwright/test').Page) {
+  // Serve a valid empty response for the video URL — the actual playback
+  // signals are provided by stubVideoPlayback() via HTMLMediaElement prototype override.
+  await page.route('**/__test__/sample*', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'video/mp4', body: Buffer.alloc(0) });
+  });
+
   await page.route('**/api/public/home**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -200,6 +262,7 @@ async function collectMediaProof(page: import('@playwright/test').Page) {
 
 test.describe('stream prelive validation', () => {
   test('[evidence:playback] entitled playback emits media proof >= 4 signals', async ({ page }) => {
+    await stubVideoPlayback(page);
     await seedSuperAdminSession(page);
     await registerEntitledStreamMocks(page);
 
@@ -208,16 +271,58 @@ test.describe('stream prelive validation', () => {
     await expect(page.getByText(/Live Chat/i)).toBeVisible();
     await expect(page.getByText(/SESSION-BOUND/i)).toBeVisible();
 
+    // Wait for stream config to resolve (isStreamLive → true removes the overlay)
+    await expect(page.getByText(/Stream Starting Soon/i)).toBeHidden({ timeout: 10_000 });
+    // Wait for playback session to resolve and ReactPlayer to mount the <video>
+    await page.locator('video').waitFor({ state: 'attached', timeout: 15_000 });
+
     const proof = await collectMediaProof(page);
     expect(proof.signals.length).toBeGreaterThanOrEqual(4);
   });
 
   test('[evidence:paywall] unauthenticated viewer remains gated', async ({ page }) => {
+    // Mock public-config so the app boots without hitting the real Worker
+    await page.route('**/api/public-config', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, appName: 'SBBL HQ', defaultLeague: 'SBBL' }),
+      });
+    });
+
+    // Provide a live game so Live.tsx renders LiveStreamPlayer (which contains the gate)
     await page.route('**/api/public/home**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, liveGames: [], upcomingGames: [], recentGames: [] }),
+        body: JSON.stringify({
+          ok: true,
+          liveGames: [{
+            id: 'gate-test-game',
+            status: 'live',
+            home_team_id: 'h1',
+            away_team_id: 'a1',
+            home_score: 0,
+            away_score: 0,
+            scheduled_at: new Date().toISOString(),
+            venue: 'Test Arena',
+            court: 'Court A',
+            league_code: 'SBBL',
+            home_team: { id: 'h1', name: 'Home' },
+            away_team: { id: 'a1', name: 'Away' },
+          }],
+          upcomingGames: [],
+          recentGames: [],
+        }),
+      });
+    });
+
+    // Mock stream status to prevent the non-admin poller from hanging
+    await page.route('**/api/streams/status**', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, isLive: true, title: 'Test', viewerCount: 0, gameId: 'gate-test-game' }),
       });
     });
 
