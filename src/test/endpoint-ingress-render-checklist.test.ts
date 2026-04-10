@@ -90,4 +90,10 @@ describe('automatic resize checklist', () => {
   it('media render containers are constrained to 3:4 card ratio', () => {
     expect(mediaPageSrc).toContain("style={{ aspectRatio: '3/4' }}");
   });
+
+  it('event upload continuation stores ingest job after submit succeeds', () => {
+    expect(opsPageSrc).toContain('onSuccess: async (data) => {');
+    expect(opsPageSrc).toContain('setIngestJob(data);');
+    expect(opsPageSrc).toContain("queryKey: ['ops-import-history']");
+  });
 });

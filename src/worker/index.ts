@@ -4274,7 +4274,7 @@ async function handleIngestPresign(ctx: HandlerCtx) {
         authorization: `Bearer ${serviceKey}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ expiresIn: 3600 }),
     }
   );
 
