@@ -31,7 +31,9 @@ const tabs: Array<{ id: Tab; label: string }> = [
 
 export const isOpsAuthError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : '';
-  return message === 'unauthorized' || message === 'forbidden' || message === 'reauth_required';
+  // 'forbidden' = authenticated but wrong role (403) — NOT a session loss.
+  // Only true session loss ('unauthorized', 'reauth_required') should wipe the UI.
+  return message === 'unauthorized' || message === 'reauth_required';
 };
 
 export const shouldRetryOpsQuery = (failureCount: number, error: unknown): boolean =>
