@@ -1,0 +1,15 @@
+{
+  "paywall_render_latency_ms": 2500,
+  "entitlement_decision_latency_ms": 450,
+  "access_session_acquisition_latency_ms": 600,
+  "playback_start_latency_ms": 8000,
+  "reconnect_recovery_latency_ms": 3000,
+  "replay_response_latency_ms": 600,
+  "comment_broadcast_latency_ms": 750,
+  "reaction_broadcast_latency_ms": 500,
+  "viewer_counter_update_latency_ms": 1200,
+  "max_uncaught_worker_exceptions": 0,
+  "max_browser_rejected_promises": 0,
+  "max_media_start_failures": 0,
+  "max_duplicate_session_conflicts": 0
+}
