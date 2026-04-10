@@ -1,6 +1,6 @@
 {
-  "started_at": "2026-04-10T02:56:36.034Z",
-  "finished_at": "2026-04-10T02:56:36.034Z",
+  "started_at": "2026-04-10T03:35:38.370Z",
+  "finished_at": "2026-04-10T03:35:38.370Z",
   "ok": true,
   "timings": [
     {
@@ -35,7 +35,7 @@
       "route": "/live",
       "status": 200,
       "ok": true,
-      "latency_ms": 2,
+      "latency_ms": 3,
       "threshold_ms": 8000,
       "within_threshold": true
     },
@@ -62,7 +62,7 @@
       "route": "/api/streams/stream-validation-game/comments",
       "status": 200,
       "ok": true,
-      "latency_ms": 1,
+      "latency_ms": 2,
       "threshold_ms": 750,
       "within_threshold": true
     },
@@ -80,7 +80,7 @@
       "route": "/api/streams/stream-validation-game/viewer-count",
       "status": 200,
       "ok": true,
-      "latency_ms": 3,
+      "latency_ms": 2,
       "threshold_ms": 1200,
       "within_threshold": true
     }
