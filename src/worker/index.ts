@@ -4238,7 +4238,7 @@ export default Sentry.withSentry(
 /**
  * POST /ops/ingest/presign
  * Body: { kind: 'potg'|'store'|'event'|'generic', filename: string }
- * Returns a Supabase Storage signed upload URL for the private media-ingest bucket.
+ * Returns a Supabase Storage signed upload URL for the private media bucket.
  * Frontend uploads the binary directly; then calls /ops/ingest/submit.
  */
 async function handleIngestPresign(ctx: HandlerCtx) {
@@ -4263,7 +4263,7 @@ async function handleIngestPresign(ctx: HandlerCtx) {
   const objectPath = `${kind}/${crypto.randomUUID()}.${ext}`;
 
   // Generate signed upload URL via Supabase Storage REST API.
-  // The media-ingest bucket is private — the signed URL is the only write path.
+  // The media bucket is private — the signed URL is the only write path.
   const supabaseUrl = ctx.env.SUPABASE_URL;
   const serviceKey = ctx.env.SUPABASE_SERVICE_ROLE_KEY;
   const res = await fetch(
