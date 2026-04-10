@@ -4267,7 +4267,7 @@ async function handleIngestPresign(ctx: HandlerCtx) {
   const supabaseUrl = ctx.env.SUPABASE_URL;
   const serviceKey = ctx.env.SUPABASE_SERVICE_ROLE_KEY;
   const res = await fetch(
-    `${supabaseUrl}/storage/v1/object/sign/upload/media/${objectPath}`,
+    `${supabaseUrl}/storage/v1/object/upload/sign/media/${objectPath}`,
     {
       method: "POST",
       headers: {
