@@ -1,0 +1,15 @@
+{
+  "validation_run_id": "vrun_1775789767586_7f017fcd",
+  "audited_at": "2026-04-10T02:56:36.035Z",
+  "mutation_routes_checked": [
+    "purchase",
+    "access",
+    "resume",
+    "revoke",
+    "expire",
+    "comments",
+    "reactions"
+  ],
+  "sensitive_hits": 0,
+  "status": "VERIFIED"
+}
