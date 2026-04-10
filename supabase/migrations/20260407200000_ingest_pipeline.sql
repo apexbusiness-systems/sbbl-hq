@@ -4,9 +4,12 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- ── 1. Private upload bucket for raw ingest ────────────────────────────────
-insert into storage.buckets (id, name, public)
-values ('media-ingest', 'media-ingest', false)
-on conflict (id) do nothing;
+-- media-ingest bucket replaced by existing `media` bucket for ingest pipeline.
+-- SQL INSERT is insufficient to initialize Supabase Storage signing engine;
+-- the `media` bucket was properly initialized at project creation via Supabase CLI.
+-- insert into storage.buckets (id, name, public)
+-- values ('media-ingest', 'media-ingest', false)
+-- on conflict (id) do nothing;
 
 -- Ensure the legacy 'media' bucket exists (used by current frontend uploader)
 insert into storage.buckets (id, name, public)
