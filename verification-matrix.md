@@ -1,7 +1,7 @@
 # Stream Validation Matrix
 
-- validation_run_id: vrun_1775792109585_aebd5e53
-- generated_at: 2026-04-10T03:35:38.373Z
+- validation_run_id: vrun_1775793423691_68f5a86b
+- generated_at: 2026-04-10T03:57:54.918Z
 
 | Check | Verdict |
 |---|---|
@@ -26,8 +26,6 @@
 | Final Verdict | REJECTED |
 
 ## Failing Checks
-- typecheck
-- lint
 - playback_verdict
 - paywall_verdict
 - comments_verdict
@@ -35,8 +33,6 @@
 - viewer_counter_verdict
 
 ## Remediation
-- Resolve typecheck and rerun: npm run validate:prelive
-- Resolve lint and rerun: npm run validate:prelive
 - Resolve playback_verdict and rerun: npm run validate:prelive
 - Resolve paywall_verdict and rerun: npm run validate:prelive
 - Resolve comments_verdict and rerun: npm run validate:prelive
