@@ -1589,7 +1589,7 @@ async function handleImportRoute(
 
   // Normalize camelCase keys (from manual Ops creates) to snake_case (DB columns).
   // CSV bulk imports already use snake_case, so the fallback is harmless.
-  const rows = rawRows.map((r) => ({
+  const rows = rawRows.map((r): Record<string, string> => ({
     ...r,
     league_id: r.league_id ?? r.leagueId,
     season_id: r.season_id ?? r.seasonId,
