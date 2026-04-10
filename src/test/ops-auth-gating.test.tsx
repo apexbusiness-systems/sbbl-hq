@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import OpsPage, { assertOpsAccess, shouldRetryOpsQuery } from '@/pages/Ops';
+import OpsPage, { assertOpsAccess, isSessionFresh, shouldRetryOpsQuery } from '@/pages/Ops';
 
 const {
   fetchOpsBootstrap,
@@ -88,9 +88,29 @@ describe('ops auth gating', () => {
     expect(() => assertOpsAccess(true)).not.toThrow();
   });
 
+  it('treats expired auth sessions as invalid for ops access', () => {
+    expect(isSessionFresh({ expires_at: 1 }, 2_000)).toBe(false);
+    expect(isSessionFresh({ expires_at: 3 }, 2_000)).toBe(true);
+  });
+
   it('invalid session shows reauth state and blocks ops actions', () => {
     authState.loading = false;
     authState.session = null;
+    authState.roles = ['super_admin'];
+
+    renderOps();
+
+    expect(screen.getByText('Session expired. Sign in again.')).toBeInTheDocument();
+    expect(fetchOpsBootstrap).not.toHaveBeenCalled();
+  });
+
+  it('expired session shows reauth state and blocks ops actions', () => {
+    authState.loading = false;
+    authState.session = {
+      access_token: 'token',
+      user: { id: 'u1', email: 'admin@test.com' },
+      expires_at: 1,
+    };
     authState.roles = ['super_admin'];
 
     renderOps();

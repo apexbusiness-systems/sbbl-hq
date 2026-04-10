@@ -41,6 +41,15 @@ export const assertOpsAccess = (canRunOps: boolean) => {
   if (!canRunOps) throw new Error('reauth_required');
 };
 
+export const isSessionFresh = (
+  session: { expires_at?: number | null } | null | undefined,
+  nowMs: number = Date.now(),
+): boolean => {
+  if (!session) return false;
+  if (!session.expires_at) return true;
+  return session.expires_at * 1000 > nowMs;
+};
+
 const OpsPage = () => {
   const queryClient = useQueryClient();
   const { loading, session, user, roles } = useAuth();
@@ -54,7 +63,8 @@ const OpsPage = () => {
   const [potgImageFile, setPotgImageFile] = useState<File | null>(null);
   const [potgForm, setPotgForm] = useState({ playerName: '', team: '', pts: '', rebs: '', assts: '', gameResult: '', leagueId: 'wbl', date: new Date().toISOString().split('T')[0] });
   const isSuperAdmin = roles.includes('super_admin');
-  const canRunOps = !loading && !!session && isSuperAdmin;
+  const sessionFresh = isSessionFresh(session);
+  const canRunOps = !loading && sessionFresh && isSuperAdmin;
   const ensureOpsAccess = () => {
     assertOpsAccess(canRunOps);
   };
@@ -266,7 +276,12 @@ const OpsPage = () => {
         },
       });
     },
-    // No onSuccess — eventMediaMutation has none in the current file.
+    onSuccess: async (data) => {
+      if (!data) return;
+      setIngestJob(data);
+      await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
   });
 
   // ── Admin CRUD mutations ───────────────────────────────────────────────
@@ -533,7 +548,7 @@ const OpsPage = () => {
     );
   }
 
-  if (!session || reauthRequired) {
+  if (!sessionFresh || reauthRequired) {
     return (
       <div className="container py-8 md:py-12 max-w-6xl">
         <div className="panel p-4 text-sm text-destructive font-semibold">Session expired. Sign in again.</div>
