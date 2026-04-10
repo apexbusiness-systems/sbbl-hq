@@ -65,6 +65,7 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
     });
   });
 
+  // Admin stream config polling path (when current auth role resolves to super_admin).
   await page.route('**/ops/streams/config**', async (route) => {
     const call = bump(state, 'ops/streams/config');
     if (call === 1) {
@@ -88,6 +89,31 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
           isLive: false,
           viewerCount: 0,
         },
+      }),
+    });
+  });
+
+  // Public stream status polling path (when current auth role is not super_admin).
+  await page.route('**/api/streams/status**', async (route) => {
+    const call = bump(state, 'api/streams/status');
+    if (call === 1) {
+      await route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: false, error: 'chaos_stream_turbulence' }),
+      });
+      return;
+    }
+
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        isLive: false,
+        title: 'Chaos-safe offline state',
+        viewerCount: 0,
+        collectionId: '',
       }),
     });
   });
@@ -287,7 +313,13 @@ test.describe('full-build chaos battery', () => {
 
     expect((state.counters.get('ops/bootstrap') ?? 0) >= 2).toBeTruthy();
     expect((state.counters.get('api/public/home') ?? 0) >= 2).toBeTruthy();
-    expect((state.counters.get('ops/streams/config') ?? 0) >= 2).toBeTruthy();
+
+    // /live may poll either admin config or public status depending on resolved role context.
+    const streamPollCalls =
+      (state.counters.get('ops/streams/config') ?? 0) +
+      (state.counters.get('api/streams/status') ?? 0);
+    expect(streamPollCalls >= 2).toBeTruthy();
+
     expect((state.counters.get('api/scores') ?? 0) >= 2).toBeTruthy();
     expect((state.counters.get('api/teams') ?? 0) >= 2).toBeTruthy();
     expect((state.counters.get('api/public/schedule') ?? 0) >= 2).toBeTruthy();
