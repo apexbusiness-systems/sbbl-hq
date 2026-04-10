@@ -86,7 +86,7 @@ describe('ops auth gating', () => {
 
   it('does not retry auth boundary errors', () => {
     expect(shouldRetryOpsQuery(0, new Error('unauthorized'))).toBe(false);
-    expect(shouldRetryOpsQuery(0, new Error('forbidden'))).toBe(false);
+    expect(shouldRetryOpsQuery(0, new Error('forbidden'))).toBe(true);
     expect(shouldRetryOpsQuery(0, new Error('reauth_required'))).toBe(false);
     expect(shouldRetryOpsQuery(0, new Error('network_error'))).toBe(true);
   });

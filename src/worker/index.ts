@@ -4243,7 +4243,7 @@ export default Sentry.withSentry(
  */
 async function handleIngestPresign(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  requireSuperAdmin(ctx.req);
+  await requireSuperAdminSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     kind?: string;
@@ -4305,7 +4305,7 @@ async function handleIngestPresign(ctx: HandlerCtx) {
  */
 async function handleIngestSubmit(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     kind?: string;
@@ -4452,7 +4452,7 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
  * Returns current state of an ingest job.
  */
 async function handleIngestStatus(ctx: HandlerCtx) {
-  requireSuperAdmin(ctx.req);
+  await requireSuperAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
@@ -4472,7 +4472,7 @@ async function handleIngestStatus(ctx: HandlerCtx) {
  */
 async function handleIngestApprove(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
@@ -4518,7 +4518,7 @@ async function handleIngestApprove(ctx: HandlerCtx) {
  */
 async function handleIngestReject(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
@@ -4559,7 +4559,7 @@ async function handleIngestReject(ctx: HandlerCtx) {
  */
 async function handleIngestReplay(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
