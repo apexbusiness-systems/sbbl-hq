@@ -257,7 +257,7 @@ test.describe('full-build chaos battery', () => {
 
     const routeChecks: Array<{ path: string; verify: () => Promise<void> }> = [
       {
-        path: '/',
+        path: '/league/sbbl',
         verify: async () => {
           await expect(page.locator('header')).toBeVisible();
           await expect(page.getByRole('link', { name: 'Live', exact: true })).toBeVisible();
