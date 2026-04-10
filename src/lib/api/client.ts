@@ -103,20 +103,26 @@ export async function apiFetch<T>(
       if (freshToken) {
         // Safely map headers to handle undefined or varying Fetch types
         options.headers = {
-          ...(options.headers instanceof Headers ? Object.fromEntries(options.headers.entries()) : options.headers),
-          Authorization: `Bearer ${freshToken}`,
+          ...(options.headers as Record<string, string>),
+          'Authorization': `Bearer ${freshToken}`
         };
 
         // Execute retry
         response = await fetch(endpoint, options);
 
         // Return immediately if recovery succeeds
-        if (response.ok) return await response.json() as T;
+        if (response.ok) {
+          const retryPayload = await response.json().catch(() => ({ ok: false, error: 'invalid_json_response' }));
+          return retryPayload as T;
+        }
       }
 
       // 4. Terminal Auth Failure (Token existed, but refresh/retry failed)
       // Nuke the dead session to prevent infinite ghost loops.
-      await getSupabaseClient().auth.signOut();
+      const supabaseClient = getSupabaseClient();
+      if (supabaseClient) {
+        await supabaseClient.auth.signOut();
+      }
     }
 
     // 5. Terminal Rejection (Tokenless 401 Paywall hits OR Failed Recovery)
