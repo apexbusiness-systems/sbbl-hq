@@ -1934,7 +1934,7 @@ async function handleOpsListProducts({ req, admin }: HandlerCtx) {
 }
 async function handleOpsListEvents({ req, admin }: HandlerCtx) {
   requireSuperAdmin(req);
-  const { data, error } = await admin.from('events').select('*').order('created_at', { ascending: false });
+  const { data, error } = await admin.from('league_events').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
@@ -1965,8 +1965,8 @@ async function handleOpsPatch(table: string, req: Request, admin: import("@supab
 async function handleOpsPatchTeams(ctx: HandlerCtx) { return handleOpsPatch('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchPlayers(ctx: HandlerCtx) { return handleOpsPatch('players', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchProducts(ctx: HandlerCtx) { return handleOpsPatch('products', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsPatchEvents(ctx: HandlerCtx) { return handleOpsPatch('events', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch('schedules', ctx.req, ctx.admin, ctx.params); }
+async function handleOpsPatchEvents(ctx: HandlerCtx) { return handleOpsPatch('league_events', ctx.req, ctx.admin, ctx.params); }
+async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch('schedule_slots', ctx.req, ctx.admin, ctx.params); }
 
 // Ops Delete (Archive) handlers
 async function handleOpsDelete(table: string, req: Request, admin: import("@supabase/supabase-js").SupabaseClient, params: Record<string, string>) {
@@ -1993,7 +1993,7 @@ async function handleOpsDelete(table: string, req: Request, admin: import("@supa
 async function handleOpsDeleteTeams(ctx: HandlerCtx) { return handleOpsDelete('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeletePlayers(ctx: HandlerCtx) { return handleOpsDelete('players', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete('products', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('events', ctx.req, ctx.admin, ctx.params); }
+async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('league_events', ctx.req, ctx.admin, ctx.params); }
 
 
 // handlePublicConfig — extracted to src/worker/routes/public.ts
@@ -4354,18 +4354,28 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
   const publicUrl = body.publicUrl ?? "";
 
   // ── Step 1: Create ingest_job (state=uploaded) ──────────────────────────
-  const { data: job, error: jobErr } = await ctx.admin
+  const baseJobInsert = {
+    submitted_by: userId,
+    kind: body.kind,
+    state: "uploaded",
+    payload: { title: body.title, leagueId: body.leagueId ?? null, publicUrl, meta },
+    idempotency_key: idempotencyKey,
+  };
+  // Backward-compat: some environments still have object_path instead of asset_path.
+  let { data: job, error: jobErr } = await ctx.admin
     .from("ingest_jobs")
-    .insert({
-      submitted_by: userId,
-      kind: body.kind,
-      state: "uploaded",
-      asset_path: body.objectPath,
-      payload: { title: body.title, leagueId: body.leagueId ?? null, publicUrl, meta },
-      idempotency_key: idempotencyKey,
-    })
+    .insert({ ...baseJobInsert, asset_path: body.objectPath })
     .select("id")
     .single();
+  if (jobErr && /asset_path/i.test(jobErr.message)) {
+    const fallbackInsert = await ctx.admin
+      .from("ingest_jobs")
+      .insert({ ...baseJobInsert, object_path: body.objectPath })
+      .select("id")
+      .single();
+    job = fallbackInsert.data;
+    jobErr = fallbackInsert.error;
+  }
   if (jobErr) throw new Error(jobErr.message);
   const jobId = job.id;
 
@@ -4460,11 +4470,14 @@ async function handleIngestStatus(ctx: HandlerCtx) {
 
   const { data, error } = await ctx.admin
     .from("ingest_jobs")
-    .select("id,kind,state,confidence,asset_path,payload,parse_result,media_asset_id,publication_id,error_message,created_at,updated_at")
+    .select("*")
     .eq("id", jobId)
     .single();
   if (error || !data) return json({ ok: false, error: "not_found" }, 404);
-  return json({ ok: true, job: data });
+  const objectPath = typeof data.asset_path === "string"
+    ? data.asset_path
+    : (typeof data.object_path === "string" ? data.object_path : null);
+  return json({ ok: true, job: { ...data, asset_path: objectPath } });
 }
 
 /**
@@ -4592,12 +4605,15 @@ async function handleIngestReplay(ctx: HandlerCtx) {
 
   // Re-run the ingest pipeline with original payload.
   const payload = job.payload as Record<string, unknown>;
+  const replayObjectPath =
+    typeof job.asset_path === "string" ? job.asset_path
+      : (typeof job.object_path === "string" ? job.object_path : "");
   const replayReq = new Request(ctx.req.url, {
     method: "POST",
     headers: ctx.req.headers,
     body: JSON.stringify({
       kind: job.kind,
-      objectPath: job.asset_path,
+      objectPath: replayObjectPath,
       publicUrl: payload.publicUrl ?? "",
       title: payload.title ?? "",
       leagueId: payload.leagueId ?? null,
@@ -4633,7 +4649,7 @@ routes.push(
 //  schema drift on products and players tables. These dedicated handlers are correct.)
 // B2 — register PATCH / DELETE / LIST routes + missing schedule delete + products batch
 async function handleOpsDeleteSchedules(ctx: HandlerCtx) {
-  return handleOpsDelete('schedules', ctx.req, ctx.admin, ctx.params);
+  return handleOpsDelete('schedule_slots', ctx.req, ctx.admin, ctx.params);
 }
 
 /**

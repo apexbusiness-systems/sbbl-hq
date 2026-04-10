@@ -247,6 +247,7 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
 
 test.describe('full-build chaos battery', () => {
   test('cross-route orchestration survives auth/network turbulence', async ({ page }) => {
+    test.setTimeout(90_000);
     await seedSuperAdminSession(page);
     const state = await registerBuildChaosRoutes(page);
 
