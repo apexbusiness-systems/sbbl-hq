@@ -16,10 +16,14 @@ let scriptLoading = false;
 const scriptCallbacks: Array<() => void> = [];
 
 function loadTurnstileScript(onReady: () => void): void {
-  if (scriptLoaded) { onReady(); return; }
+  if (scriptLoaded) {
+    onReady();
+    return;
+  }
   scriptCallbacks.push(onReady);
   if (scriptLoading) return;
   scriptLoading = true;
+
   const script = document.createElement('script');
   script.src = SCRIPT_SRC;
   script.async = true;
@@ -33,23 +37,30 @@ function loadTurnstileScript(onReady: () => void): void {
 }
 
 /**
- * Manages a single Cloudflare Turnstile widget in `execution: 'execute'` mode
- * (invisible until `resolveToken()` is called).
+ * Manages one Cloudflare Turnstile widget in execution="execute" mode.
  *
- * Usage:
- *   const { containerRef, resolveToken, ready } = useTurnstile();
- *   // Mount: <div ref={containerRef} className="sr-only" aria-hidden />
- *   // Before submit: const token = await resolveToken();
- *
- * When VITE_TURNSTILE_SITE_KEY is absent, `resolveToken` returns `undefined`
- * and the Supabase call skips captcha — safe for local/dev environments.
+ * Timeout policy:
+ * - if Turnstile does not resolve inside TOKEN_TIMEOUT_MS, resolveToken() returns
+ *   undefined so sign-in can attempt the server-side fallback path instead of
+ *   hard-blocking the user in a local timeout loop.
  */
 export function useTurnstile() {
   const siteKey = (import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined)?.trim();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const widgetIdRef = useRef<string | null>(null);
-  const pendingRef = useRef<{ resolve: (t: string) => void; reject: (e: Error) => void } | null>(null);
+  const pendingRef = useRef<{
+    resolve: (token: string | undefined) => void;
+    reject: (error: Error) => void;
+  } | null>(null);
+  const timeoutRef = useRef<number | null>(null);
   const [ready, setReady] = useState(false);
+
+  const clearPendingTimeout = () => {
+    if (timeoutRef.current !== null) {
+      window.clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
 
   useEffect(() => {
     if (!siteKey || !containerRef.current) return;
@@ -57,58 +68,69 @@ export function useTurnstile() {
     const mountWidget = () => {
       const tw = (window as unknown as TurnstileWindow).turnstile;
       if (!tw || !containerRef.current || widgetIdRef.current) return;
+
       widgetIdRef.current = tw.render(containerRef.current, {
         sitekey: siteKey,
         execution: 'execute',
         appearance: 'interaction-only',
         callback: (token: string) => {
+          clearPendingTimeout();
           pendingRef.current?.resolve(token);
           pendingRef.current = null;
         },
         'error-callback': () => {
+          clearPendingTimeout();
           pendingRef.current?.reject(new Error('captcha_failed'));
           pendingRef.current = null;
         },
         'expired-callback': () => {
-          // Token expired before it was consumed — will be reset on next execute()
+          // Token expired before use; next resolveToken() call resets + executes.
         },
       } as Record<string, unknown>);
+
       setReady(true);
     };
 
     loadTurnstileScript(mountWidget);
 
-    // If script was already loaded synchronously, mountWidget ran immediately;
-    // if it loaded async, it ran via the callback. Either way we're good.
     return () => {
-      // Don't destroy the widget on cleanup — it may be remounted quickly
-      // (e.g. StrictMode double-effect). The widgetIdRef guard prevents double-render.
+      clearPendingTimeout();
+      if (pendingRef.current) {
+        pendingRef.current.reject(new Error('captcha_cancelled'));
+        pendingRef.current = null;
+      }
     };
   }, [siteKey]);
 
   /**
-   * Resolves a fresh Turnstile token. Returns `undefined` when no site key is
-   * configured (dev/local). Throws with `.message` of:
-   *   - 'captcha_loading'  — widget not yet mounted
-   *   - 'captcha_timeout'  — Cloudflare didn't respond within 15 s
-   *   - 'captcha_failed'   — Cloudflare returned an error
+   * Resolves a fresh Turnstile token.
+   *
+   * Returns undefined when no site key is configured or when challenge times out.
    */
   async function resolveToken(): Promise<string | undefined> {
     if (!siteKey) return undefined;
+
     const tw = (window as unknown as TurnstileWindow).turnstile;
     if (!tw || !widgetIdRef.current) throw new Error('captcha_loading');
 
+    clearPendingTimeout();
+    if (pendingRef.current) {
+      pendingRef.current.reject(new Error('captcha_replaced'));
+      pendingRef.current = null;
+    }
+
     tw.reset(widgetIdRef.current);
 
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<string | undefined>((resolve, reject) => {
       pendingRef.current = { resolve, reject };
       tw.execute(widgetIdRef.current!);
 
-      window.setTimeout(() => {
-        if (pendingRef.current) {
-          pendingRef.current.reject(new Error('captcha_timeout'));
-          pendingRef.current = null;
-        }
+      timeoutRef.current = window.setTimeout(() => {
+        if (!pendingRef.current) return;
+        const pending = pendingRef.current;
+        pendingRef.current = null;
+        clearPendingTimeout();
+        pending.resolve(undefined);
       }, TOKEN_TIMEOUT_MS);
     });
   }

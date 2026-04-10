@@ -3,49 +3,41 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 const API_BASE = import.meta.env.VITE_WORKER_API_BASE?.trim() || '';
 
 /**
- * getAuthToken — always returns a fresh, non-expired Supabase JWT.
+ * getAuthToken returns a fresh Supabase JWT when possible.
  *
- * ROOT CAUSE FIX: The previous implementation used `getSession()` which only
- * reads the cached token from localStorage without checking expiry or
- * refreshing it. If the magic-link session token had expired, the stale
- * access_token was sent to the Worker, `jwtVerify()` failed, and the
- * request was rejected with "unauthorized".
- *
- * Fix: use `getUser()` which makes a live round-trip to Supabase Auth and
- * will automatically refresh the token via the refresh_token if the
- * access_token is expired. After that, `getSession()` gives us the fresh
- * token without an extra network call.
+ * Behavior contract:
+ * - no active session => null (silent)
+ * - active non-expired session => current access token
+ * - near-expiry token => refresh once, then return fresh token or null
  */
 export async function getAuthToken(): Promise<string | null> {
   const supabaseClient = getSupabaseClient();
   if (!supabaseClient) return null;
 
-  // getUser() contacts the Supabase Auth server and auto-refreshes the
-  // access_token when it is expired (unlike getSession() which only reads
-  // the local cache and can return a stale, expired token).
-  const { error } = await supabaseClient.auth.getUser();
-  if (error) {
-    // If the refresh fails (e.g. refresh_token revoked / user logged out),
-    // return null so callers see a clean auth failure rather than a
-    // cryptic network error.
-    console.warn('[getAuthToken] Token refresh failed:', error.message);
+  const { data: sessionData } = await supabaseClient.auth.getSession();
+  const currentSession = sessionData.session;
+  if (!currentSession?.access_token) return null;
+
+  const expiresAtMs = typeof currentSession.expires_at === 'number'
+    ? currentSession.expires_at * 1000
+    : 0;
+  const isFresh = expiresAtMs === 0 || expiresAtMs - Date.now() > 60_000;
+  if (isFresh) return currentSession.access_token;
+
+  const { data: refreshData, error: refreshError } = await supabaseClient.auth.refreshSession();
+  if (refreshError) {
+    // Suppress expected "no session" noise while still surfacing unexpected refresh failures.
+    if (!/auth session missing/i.test(refreshError.message)) {
+      console.warn('[getAuthToken] Token refresh failed:', refreshError.message);
+    }
     return null;
   }
 
-  // After getUser() the local session is guaranteed to be fresh.
-  const { data } = await supabaseClient.auth.getSession();
-  return data.session?.access_token ?? null;
+  return refreshData.session?.access_token ?? null;
 }
 
 /**
- * apiFetch — typed fetch wrapper with automatic auth, idempotency keys,
- * and a single-retry guardrail for transient 401s.
- *
- * GUARDRAIL: If the server returns 401, we proactively refresh the session
- * and retry the request exactly once. This applies whether the token was
- * auto-fetched OR explicitly passed — callers often capture a token in a
- * React closure that goes stale when the JWT expires, so we must always
- * attempt a refresh on 401.
+ * apiFetch typed fetch wrapper with automatic auth, idempotency, and single retry on 401.
  */
 export async function apiFetch<T>(
   path: string,
@@ -62,36 +54,51 @@ export async function apiFetch<T>(
     }
   };
 
+  const method = (init.method ?? 'GET').toUpperCase();
+  const baseHeaders = new Headers(init.headers);
+
+  const isFormDataBody = typeof FormData !== 'undefined' && init.body instanceof FormData;
+  if (init.body != null && !isFormDataBody && !baseHeaders.has('content-type')) {
+    baseHeaders.set('content-type', 'application/json');
+  }
+
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !baseHeaders.has('x-idempotency-key')) {
+    baseHeaders.set('x-idempotency-key', `${path}-${Date.now()}-${crypto.randomUUID()}`);
+  }
+
+  // Keep one deterministic idempotency key across retries.
+  const stableIdempotencyKey = baseHeaders.get('x-idempotency-key');
+
   const attempt = async (authToken: string | null): Promise<Response> => {
-    const headers = new Headers(init.headers);
-    headers.set('content-type', headers.get('content-type') ?? 'application/json');
-    if (authToken) headers.set('authorization', `Bearer ${authToken}`);
-
-    // All mutating requests require an idempotency key — auto-generate one so
-    // callers don't have to manage this manually.
-    const method = (init.method ?? 'GET').toUpperCase();
-    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
-      headers.set('x-idempotency-key', `${path}-${Date.now()}-${crypto.randomUUID()}`);
+    const headers = new Headers(baseHeaders);
+    if (authToken) {
+      headers.set('authorization', `Bearer ${authToken}`);
+    } else {
+      headers.delete('authorization');
     }
+    if (stableIdempotencyKey) headers.set('x-idempotency-key', stableIdempotencyKey);
 
-    return fetch(`${API_BASE}${path}`, { ...init, headers });
+    return fetch(`${API_BASE}${path}`, { ...init, method, headers });
   };
 
-  const authToken = token ?? (await getAuthToken());
+  const isOpsRoute = path.startsWith('/ops/');
+  let authToken = token ?? (await getAuthToken());
+
+  // Non-discoverable fast-fail for auth-protected ops routes when session is gone.
+  if (isOpsRoute && !authToken) {
+    throw new Error('reauth_required');
+  }
+
   let response = await attempt(authToken);
 
-  // GUARDRAIL: single retry on 401 — refresh session and try once more.
-  // This fires whether the token was auto-fetched or explicitly passed.
-  // Explicit tokens (e.g. from useAuth() closures) go stale when the JWT
-  // expires, producing endless 401 loops if we don't retry with a refresh.
-  if (response.status === 401) {
-    console.warn('[apiFetch] 401 received, refreshing session and retrying:', path);
+  if (response.status === 401 && authToken) {
     const supabaseClient = getSupabaseClient();
     if (supabaseClient) {
-      const { data: refreshData } = await supabaseClient.auth.refreshSession();
-      const freshToken = refreshData.session?.access_token ?? null;
+      const { data: refreshData, error: refreshError } = await supabaseClient.auth.refreshSession();
+      const freshToken = refreshError ? null : (refreshData.session?.access_token ?? null);
       if (freshToken) {
-        response = await attempt(freshToken);
+        authToken = freshToken;
+        response = await attempt(authToken);
       }
     }
   }
