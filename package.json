@@ -23,7 +23,14 @@
     "cap:add:ios": "npx cap add ios",
     "cap:add:android": "npx cap add android",
     "cap:build:ios": "npm run build && npx cap sync ios && npx cap open ios",
-    "cap:build:android": "npm run build && npx cap sync android && npx cap open android"
+    "cap:build:android": "npm run build && npx cap sync android && npx cap open android",
+    "test:stream:unit": "node ops/validation/stream-validation.mjs unit",
+    "test:stream:int": "node ops/validation/stream-validation.mjs int",
+    "test:stream:e2e": "node ops/validation/stream-validation.mjs e2e",
+    "test:stream:perf": "node ops/validation/stream-validation.mjs perf",
+    "test:stream:all": "npm run test:stream:unit && npm run test:stream:int && npm run test:stream:e2e && npm run test:stream:perf",
+    "validate:stream:gate": "node ops/validation/stream-validation.mjs gate",
+    "validate:prelive": "node ops/validation/stream-validation.mjs prelive"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.0",
