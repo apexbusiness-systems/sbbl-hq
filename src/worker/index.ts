@@ -1934,7 +1934,7 @@ async function handleOpsListProducts({ req, admin }: HandlerCtx) {
 }
 async function handleOpsListEvents({ req, admin }: HandlerCtx) {
   requireSuperAdmin(req);
-  const { data, error } = await admin.from('events').select('*').order('created_at', { ascending: false });
+  const { data, error } = await admin.from('league_events').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
@@ -1965,8 +1965,8 @@ async function handleOpsPatch(table: string, req: Request, admin: import("@supab
 async function handleOpsPatchTeams(ctx: HandlerCtx) { return handleOpsPatch('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchPlayers(ctx: HandlerCtx) { return handleOpsPatch('players', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchProducts(ctx: HandlerCtx) { return handleOpsPatch('products', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsPatchEvents(ctx: HandlerCtx) { return handleOpsPatch('events', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch('schedules', ctx.req, ctx.admin, ctx.params); }
+async function handleOpsPatchEvents(ctx: HandlerCtx) { return handleOpsPatch('league_events', ctx.req, ctx.admin, ctx.params); }
+async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch('schedule_slots', ctx.req, ctx.admin, ctx.params); }
 
 // Ops Delete (Archive) handlers
 async function handleOpsDelete(table: string, req: Request, admin: import("@supabase/supabase-js").SupabaseClient, params: Record<string, string>) {
@@ -1993,7 +1993,7 @@ async function handleOpsDelete(table: string, req: Request, admin: import("@supa
 async function handleOpsDeleteTeams(ctx: HandlerCtx) { return handleOpsDelete('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeletePlayers(ctx: HandlerCtx) { return handleOpsDelete('players', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete('products', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('events', ctx.req, ctx.admin, ctx.params); }
+async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('league_events', ctx.req, ctx.admin, ctx.params); }
 
 
 // handlePublicConfig — extracted to src/worker/routes/public.ts
@@ -4633,7 +4633,7 @@ routes.push(
 //  schema drift on products and players tables. These dedicated handlers are correct.)
 // B2 — register PATCH / DELETE / LIST routes + missing schedule delete + products batch
 async function handleOpsDeleteSchedules(ctx: HandlerCtx) {
-  return handleOpsDelete('schedules', ctx.req, ctx.admin, ctx.params);
+  return handleOpsDelete('schedule_slots', ctx.req, ctx.admin, ctx.params);
 }
 
 /**

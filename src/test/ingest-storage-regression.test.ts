@@ -19,7 +19,7 @@ const migrationSrc = readFileSync(
 
 describe('ingest presign storage bucket regression guard', () => {
   it('uses the initialized media bucket for signed uploads', () => {
-    expect(workerSrc).toContain('/storage/v1/object/sign/upload/media/${objectPath}');
+    expect(workerSrc).toContain('/storage/v1/object/upload/sign/media/${objectPath}');
   });
 
   it('does not fall back to media-ingest for signed uploads', () => {
