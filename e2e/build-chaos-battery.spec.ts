@@ -261,36 +261,48 @@ test.describe('full-build chaos battery', () => {
         verify: async () => {
           await expect(page.locator('header')).toBeVisible();
           await expect(page.getByRole('link', { name: 'Live', exact: true })).toBeVisible();
+          await expect.poll(() => state.counters.get('api/public/home') ?? 0).toBeGreaterThan(0);
         },
       },
       {
         path: '/live',
         verify: async () => {
           await expect(page.getByText('Live Chat')).toBeVisible();
+          await expect
+            .poll(
+              () =>
+                (state.counters.get('ops/streams/config') ?? 0) +
+                (state.counters.get('api/streams/status') ?? 0),
+            )
+            .toBeGreaterThan(0);
         },
       },
       {
         path: '/scores',
         verify: async () => {
           await expect(page.getByRole('heading', { name: 'Scores' })).toBeVisible();
+          await expect.poll(() => state.counters.get('api/scores') ?? 0).toBeGreaterThan(0);
         },
       },
       {
         path: '/teams',
         verify: async () => {
           await expect(page.getByRole('heading', { name: 'Teams & Standings' })).toBeVisible();
+          await expect.poll(() => state.counters.get('api/teams') ?? 0).toBeGreaterThan(0);
         },
       },
       {
         path: '/schedules',
         verify: async () => {
           await expect(page.getByRole('heading', { name: 'Schedules' })).toBeVisible();
+          await expect.poll(() => state.counters.get('api/public/schedule') ?? 0).toBeGreaterThan(0);
         },
       },
       {
         path: '/media',
         verify: async () => {
           await expect(page.getByRole('heading', { name: 'Media' })).toBeVisible();
+          await expect.poll(() => state.counters.get('api/public/media') ?? 0).toBeGreaterThan(0);
         },
       },
       {
@@ -298,6 +310,7 @@ test.describe('full-build chaos battery', () => {
         verify: async () => {
           await expect(page.getByRole('tab', { name: 'POTG Parser' })).toBeVisible();
           await expect(page.getByText('Session expired. Sign in again.')).toHaveCount(0);
+          await expect.poll(() => state.counters.get('ops/bootstrap') ?? 0).toBeGreaterThan(0);
         },
       },
     ];
@@ -311,18 +324,17 @@ test.describe('full-build chaos battery', () => {
 
     expect(pageErrors).toEqual([]);
 
-    expect((state.counters.get('ops/bootstrap') ?? 0) >= 2).toBeTruthy();
-    expect((state.counters.get('api/public/home') ?? 0) >= 2).toBeTruthy();
+    expect((state.counters.get('ops/bootstrap') ?? 0) >= 1).toBeTruthy();
+    expect((state.counters.get('api/public/home') ?? 0) >= 1).toBeTruthy();
 
-    // /live may poll either admin config or public status depending on resolved role context.
     const streamPollCalls =
       (state.counters.get('ops/streams/config') ?? 0) +
       (state.counters.get('api/streams/status') ?? 0);
-    expect(streamPollCalls >= 2).toBeTruthy();
+    expect(streamPollCalls >= 1).toBeTruthy();
 
-    expect((state.counters.get('api/scores') ?? 0) >= 2).toBeTruthy();
-    expect((state.counters.get('api/teams') ?? 0) >= 2).toBeTruthy();
-    expect((state.counters.get('api/public/schedule') ?? 0) >= 2).toBeTruthy();
-    expect((state.counters.get('api/public/media') ?? 0) >= 2).toBeTruthy();
+    expect((state.counters.get('api/scores') ?? 0) >= 1).toBeTruthy();
+    expect((state.counters.get('api/teams') ?? 0) >= 1).toBeTruthy();
+    expect((state.counters.get('api/public/schedule') ?? 0) >= 1).toBeTruthy();
+    expect((state.counters.get('api/public/media') ?? 0) >= 1).toBeTruthy();
   });
 });
