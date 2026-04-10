@@ -204,54 +204,20 @@ test.describe('stream prelive validation', () => {
     await expect(page.getByText(/SESSION-BOUND/i)).toBeVisible();
 
     const proof = await collectMediaProof(page);
-    // In CI headless Chrome, external video may not fully load/play.
-    // Require at least 1 signal (video element exists and is error-free)
-    // rather than 4 (which requires full media pipeline).
-    expect(proof.signals.length).toBeGreaterThanOrEqual(1);
+    expect(proof.signals.length).toBeGreaterThanOrEqual(4);
   });
 
   test('[evidence:paywall] unauthenticated viewer remains gated', async ({ page }) => {
-    // Mock a live game so LiveStreamPlayer renders (without auth → paywall gate)
     await page.route('**/api/public/home**', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({
-          ok: true,
-          liveGames: [
-            {
-              id: GAME_ID,
-              status: 'live',
-              home_team_id: 'h1',
-              away_team_id: 'a1',
-              home_score: 0,
-              away_score: 0,
-              scheduled_at: new Date().toISOString(),
-              venue: 'Arena',
-              court: 'Court A',
-              league_code: 'SBBL',
-              home_team: { id: 'h1', name: 'Home' },
-              away_team: { id: 'a1', name: 'Away' },
-            },
-          ],
-          upcomingGames: [],
-          recentGames: [],
-        }),
+        body: JSON.stringify({ ok: true, liveGames: [], upcomingGames: [], recentGames: [] }),
       });
-    });
-    await page.route('**/api/streams/status**', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ ok: true, isLive: true, title: 'Test', viewerCount: 1, gameId: GAME_ID }),
-      });
-    });
-    await page.route(`**/api/streams/${GAME_ID}/session`, async (route) => {
-      await route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ ok: false, error: 'unauthorized' }) });
     });
 
     await page.goto('/live', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByText(/Register to Watch/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/Register to Watch/i)).toBeVisible();
     await expect(page.locator('video')).toHaveCount(0);
   });
 
@@ -293,7 +259,7 @@ test.describe('stream prelive validation', () => {
 
     expect(reactionPayload.submit.ok).toBe(true);
     expect(reactionPayload.read.ok).toBe(true);
-    expect(reactionPayload.read.fire ?? 0).toBeGreaterThanOrEqual(0);
+    expect(reactionPayload.read.fire).toBeGreaterThanOrEqual(0);
   });
 
   test('[evidence:viewer-count] active viewer count reflects entitled session truth', async ({ page }) => {
