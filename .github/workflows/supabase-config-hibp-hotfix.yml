@@ -1,0 +1,35 @@
+name: Supabase Config HIBP Hotfix
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/stream-validation-final-main-pass1
+
+permissions:
+  contents: write
+
+jobs:
+  patch-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Remove invalid password_hibp_enabled auth key
+        run: node ops/validation/patch-supabase-config-hibp.mjs
+
+      - name: Commit Supabase config hotfix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add supabase/config.toml
+            git commit -m "fix(supabase): remove unsupported auth.password_hibp_enabled config key"
+            git push
+          else
+            echo "No supabase config hotfix changes detected"
+          fi
