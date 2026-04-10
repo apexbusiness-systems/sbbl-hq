@@ -233,7 +233,7 @@ async function handleOpsValidationRuns(req: Request, env: Env) {
 }
 
 export default {
-  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
 
     if (requiresMutationIdempotency(url.pathname, req.method) && !readIdempotencyKey(req)) {
@@ -274,18 +274,18 @@ export default {
     }
 
     if (req.method === 'POST' && /^\/api\/streams\/[^/]+\/access$/.test(url.pathname)) {
-      return baseWorker.fetch(rewriteRequest(correlatedReq, url.pathname.replace('/access', '/session')), env, ctx);
+      return baseWorker.fetch(rewriteRequest(correlatedReq, url.pathname.replace('/access', '/session')), env);
     }
 
     if (req.method === 'POST' && /^\/api\/streams\/[^/]+\/resume$/.test(url.pathname)) {
-      return baseWorker.fetch(rewriteRequest(correlatedReq, url.pathname.replace('/resume', '/session')), env, ctx);
+      return baseWorker.fetch(rewriteRequest(correlatedReq, url.pathname.replace('/resume', '/session')), env);
     }
 
     if (req.method === 'POST' && /^\/api\/streams\/[^/]+\/reactions$/.test(url.pathname)) {
-      return baseWorker.fetch(rewriteRequest(correlatedReq, url.pathname.replace('/reactions', '/react')), env, ctx);
+      return baseWorker.fetch(rewriteRequest(correlatedReq, url.pathname.replace('/reactions', '/react')), env);
     }
 
-    const response = await baseWorker.fetch(correlatedReq, env, ctx);
+    const response = await baseWorker.fetch(correlatedReq, env);
 
     if (
       /^\/api\/streams\/[^/]+\/(session|access|resume|revoke|expire|purchase)$/.test(url.pathname) ||
