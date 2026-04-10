@@ -11,15 +11,15 @@ let _initPromise: Promise<void> | null = null;
 let _clientConfig: SupabaseConfig | null = null;
 let _reportedConfigMismatch = false;
 
-function isServiceRoleKey(key: string): boolean {
-  // CODEX: guard browser builds from ever booting with privileged server credentials.
-  return key.startsWith('sb_secret_') || /service[_-]?role/i.test(key);
+function hasBrowserServiceRoleLeak(): boolean {
+  // CODEX: detect explicit service-role env exposure in browser context without heuristically parsing publishable JWTs.
+  return Boolean((import.meta.env.VITE_SUPABASE_SERVICE_ROLE_KEY as string | undefined)?.trim());
 }
 
 function buildClient(url: string, key: string): SupabaseClient {
-  if (import.meta.env.DEV && typeof window !== 'undefined' && isServiceRoleKey(key)) {
-    // CODEX: fail closed in local/dev browser if a service-role key leaks into client config.
-    console.error('[supabase] SERVICE_ROLE_KEY detected in browser config. Aborting client initialization.');
+  if (import.meta.env.DEV && typeof window !== 'undefined' && hasBrowserServiceRoleLeak()) {
+    // CODEX: fail closed when SERVICE_ROLE_KEY variable is present in browser env, preventing privileged key misuse.
+    console.error('[supabase] SERVICE_ROLE_KEY env detected in browser config. Aborting client initialization.');
     throw new Error('supabase_service_role_key_detected_in_browser');
   }
 
