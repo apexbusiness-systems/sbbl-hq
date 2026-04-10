@@ -4267,14 +4267,14 @@ async function handleIngestPresign(ctx: HandlerCtx) {
   const supabaseUrl = ctx.env.SUPABASE_URL;
   const serviceKey = ctx.env.SUPABASE_SERVICE_ROLE_KEY;
   const res = await fetch(
-    `${supabaseUrl}/storage/v1/object/sign/upload/media-ingest/${objectPath}`,
+    `${supabaseUrl}/storage/v1/object/upload/sign/media-ingest/${objectPath}`,
     {
       method: "POST",
       headers: {
         authorization: `Bearer ${serviceKey}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ expiresIn: 3600 }),
     }
   );
 
@@ -4284,7 +4284,9 @@ async function handleIngestPresign(ctx: HandlerCtx) {
   }
 
   const { token, url } = await res.json() as { token: string; url: string };
-  return json({ ok: true, signedUrl: url, token, objectPath });
+  // Supabase returns a relative path — build the full upload URL.
+  const signedUrl = url.startsWith("http") ? url : `${supabaseUrl}/storage/v1${url}`;
+  return json({ ok: true, signedUrl, token, objectPath });
 }
 
 /**
