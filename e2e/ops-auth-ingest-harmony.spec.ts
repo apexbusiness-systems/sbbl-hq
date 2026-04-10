@@ -12,6 +12,11 @@ type MediaAsset = {
   date: string;
 };
 
+type UploadDimensions = {
+  width: number;
+  height: number;
+};
+
 type RegisterOptions = {
   bootstrap401Once?: boolean;
 };
@@ -20,6 +25,49 @@ const PNG_1X1_BASE64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Z0fQAAAAASUVORK5CYII=';
 const PNG_1X1 = Buffer.from(PNG_1X1_BASE64, 'base64');
 const THUMBNAIL_DATA_URL = `data:image/png;base64,${PNG_1X1_BASE64}`;
+
+function parseJpegDimensions(bytes: Buffer): UploadDimensions | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+
+  let offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+
+    const marker = bytes[offset + 1];
+
+    if (
+      marker === 0xd8 ||
+      marker === 0xd9 ||
+      marker === 0x01 ||
+      (marker >= 0xd0 && marker <= 0xd7)
+    ) {
+      offset += 2;
+      continue;
+    }
+
+    const segmentSize = bytes.readUInt16BE(offset + 2);
+    if (segmentSize < 2 || offset + 2 + segmentSize > bytes.length) return null;
+
+    const isStartOfFrame =
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf);
+
+    if (isStartOfFrame) {
+      const height = bytes.readUInt16BE(offset + 5);
+      const width = bytes.readUInt16BE(offset + 7);
+      return { width, height };
+    }
+
+    offset += 2 + segmentSize;
+  }
+
+  return null;
+}
 
 function asRecord(value: JsonValue | undefined): Record<string, JsonValue> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -62,6 +110,7 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
   const approveRequests: Array<{ jobId: string; idempotency: string | null }> = [];
   const rejectRequests: Array<{ jobId: string; idempotency: string | null }> = [];
   const mediaFeed: MediaAsset[] = [];
+  const potgUploadDimensions: UploadDimensions[] = [];
   const submitPayloadByJobId = new Map<string, Record<string, JsonValue>>();
 
   let bootstrapCalls = 0;
@@ -162,6 +211,13 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
 
   await page.route('https://upload.test/**', async (route) => {
     expect(route.request().method()).toBe('PUT');
+
+    const uploadBody = route.request().postDataBuffer();
+    if (uploadBody) {
+      const dimensions = parseJpegDimensions(uploadBody);
+      if (dimensions) potgUploadDimensions.push(dimensions);
+    }
+
     await route.fulfill({ status: 200, body: '' });
   });
 
@@ -243,7 +299,7 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
     });
   });
 
-  return { presignRequests, submitRequests, approveRequests, rejectRequests, mediaFeed };
+  return { presignRequests, submitRequests, approveRequests, rejectRequests, mediaFeed, potgUploadDimensions };
 }
 
 test.describe('ops auth + ingest harmony gate', () => {
@@ -267,7 +323,11 @@ test.describe('ops auth + ingest harmony gate', () => {
     await page.getByRole('tab', { name: 'POTG Parser' }).click();
 
     const potgInput = page.locator('div:has-text("Drop POTG graphic or click to upload") input[type="file"]');
-    await potgInput.setInputFiles({ name: 'potg.png', mimeType: 'image/png', buffer: PNG_1X1 });
+    await potgInput.setInputFiles({
+      name: '1a6b9a95-405b-471f-abaf-faf66ece4646.jpg',
+      mimeType: 'image/png',
+      buffer: PNG_1X1,
+    });
 
     await expect(page.getByText('Data extracted — review below')).toBeVisible();
     await page.getByRole('button', { name: 'Submit to Data Pipeline' }).click();
@@ -295,5 +355,9 @@ test.describe('ops auth + ingest harmony gate', () => {
     expect(captures.presignRequests.every((request) => Boolean(request.idempotency))).toBeTruthy();
     expect(captures.approveRequests.every((request) => Boolean(request.idempotency))).toBeTruthy();
     expect(captures.mediaFeed.some((asset) => asset.id === 'media-job-potg-001')).toBeTruthy();
+
+    expect(
+      captures.potgUploadDimensions.some((dimensions) => dimensions.width === 560 && dimensions.height === 747),
+    ).toBeTruthy();
   });
 });
