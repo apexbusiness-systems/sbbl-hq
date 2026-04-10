@@ -3,6 +3,13 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import OpsPage, { assertOpsAccess, isSessionFresh, shouldRetryOpsQuery } from '@/pages/Ops';
 
+type MockAuthState = {
+  loading: boolean;
+  session: { access_token: string; user: { id: string; email: string }; expires_at?: number } | null;
+  user: { id: string; email: string } | null;
+  roles: string[];
+};
+
 const {
   fetchOpsBootstrap,
   fetchImportHistory,
@@ -15,7 +22,7 @@ const {
     session: { access_token: 'token', user: { id: 'u1', email: 'admin@test.com' } },
     user: { id: 'u1', email: 'admin@test.com' },
     roles: ['super_admin'],
-  },
+  } as MockAuthState,
 }));
 
 vi.mock('@/hooks/use-auth', () => ({
