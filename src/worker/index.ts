@@ -4351,7 +4351,12 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
 
   const pubStatus = body.publishStatus === "published" ? "published" : "draft";
   const meta = body.meta ?? {};
-  const publicUrl = body.publicUrl ?? "";
+  const rawPublicUrl = body.publicUrl ?? "";
+  // Build full storage URL — objectPath is relative (e.g. "potg/abc.jpg"),
+  // the media bucket is public, so we construct the CDN-accessible URL.
+  const publicUrl = rawPublicUrl.startsWith("http")
+    ? rawPublicUrl
+    : `${ctx.env.SUPABASE_URL}/storage/v1/object/public/media/${rawPublicUrl}`;
 
   // ── Step 1: Create ingest_job (state=uploaded) ──────────────────────────
   const baseJobInsert = {
