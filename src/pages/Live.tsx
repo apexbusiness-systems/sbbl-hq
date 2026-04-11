@@ -28,7 +28,7 @@ import {
 import { toast } from 'sonner';
 import type { Game, PlayerProfile } from '@/types';
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 const LEAGUE_IDS = ['sbbl', 'wbl', 'tgifbl'];
 
 function mapHomeGameToUi(row: Record<string, unknown>): Game {
@@ -51,7 +51,7 @@ function mapHomeGameToUi(row: Record<string, unknown>): Game {
   };
 }
 
-// ── Admin Stream Overlay ──────────────────────────────────────────────────
+// ── Admin Stream Overlay ──────────────────────────────────────────────────────
 // Single source of truth for stream management. Renders as a gear-icon
 // dropdown overlay on the video wrapper — no duplicate controls anywhere.
 // Visible only to super_admin.
@@ -60,6 +60,7 @@ function AdminStreamOverlay({
   streamTitle, setStreamTitle,
   viewerCount,
   customStreamUrl, setCustomStreamUrl,
+  gameId,
 }: {
   isLive: boolean;
   setIsLive: (v: boolean) => void;
@@ -68,6 +69,7 @@ function AdminStreamOverlay({
   viewerCount: number;
   customStreamUrl: string;
   setCustomStreamUrl: (v: string) => void;
+  gameId: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -83,7 +85,7 @@ function AdminStreamOverlay({
       // stream state is unchanged. Admin sees the error and can retry
       // the toggle without re-entering the URL.
       try {
-        await setStreamLive(nextLive, token);
+        await setStreamLive(nextLive, token, gameId);
       } catch (liveErr) {
         toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
         setSaving(false);
@@ -196,7 +198,7 @@ function AdminStreamOverlay({
   );
 }
 
-// ── Main Live Page ─────────────────────────────────────────────────────────
+// ── Main Live Page ────────────────────────────────────────────────────────────
 const LivePage = () => {
   const { hasPremiumPlayerAccess } = useApp();
   const { addToBag } = useBag();
@@ -256,7 +258,18 @@ const LivePage = () => {
         const liveRows = (home.data?.liveGames ?? []) as Array<Record<string, unknown>>;
         const upcomingRows = (home.data?.upcomingGames ?? []) as Array<Record<string, unknown>>;
         const selected = liveRows[0] ?? upcomingRows[0] ?? null;
-        if (active && selected) setLiveGame(mapHomeGameToUi(selected));
+
+        if (active) {
+          if (selected) {
+            const mappedGame = mapHomeGameToUi(selected);
+            setLiveGame(mappedGame);
+            setActiveGameId(mappedGame.id);
+          } else {
+            setLiveGame(null);
+            setActiveGameId(null);
+          }
+        }
+
         if (isSuperAdmin) {
           // Admin needs full config — pass null so apiFetch uses getAuthToken()
           // which auto-refreshes expired JWTs. Never pass an explicit token from
@@ -266,6 +279,9 @@ const LivePage = () => {
             setIsStreamLive(res.config.isLive);
             setStreamTitle(res.config.title);
             setCustomStreamUrl(res.config.collectionId || ''); // collectionId stores the stream URL
+            if (typeof res.config.gameId === 'string' && res.config.gameId) {
+              setActiveGameId(res.config.gameId);
+            }
           }
         } else {
           // Public poller
@@ -291,7 +307,7 @@ const LivePage = () => {
   const [comments, setComments] = useState<Array<{ id: string; user: string; text: string }>>([]);
   const [chatInput, setChatInput] = useState('');
 
-  // ── Real reactions (persisted + Realtime-broadcast) ──────────────────────
+  // ── Real reactions (persisted + Realtime-broadcast) ─────────────────────────
   const [reactions, setReactions] = useState({ fire: 0, heart: 0, clap: 0 });
 
   // Fetch initial counts whenever the active game is known
@@ -523,6 +539,7 @@ const LivePage = () => {
                   viewerCount={viewerCount}
                   customStreamUrl={customStreamUrl}
                   setCustomStreamUrl={setCustomStreamUrl}
+                  gameId={liveGame?.id ?? activeGameId}
                 />
               )}
 

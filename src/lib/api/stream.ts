@@ -19,7 +19,7 @@
 import { apiFetch } from '@/lib/api/client';
 import { createIdempotencyKey, IDEMPOTENCY_HEADER } from '@/lib/api/idempotency';
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface StreamConfig {
   /** Stream URL (historically named collectionId for Switcher Studio; now repurposed as a direct stream/embed URL). */
@@ -28,6 +28,7 @@ export interface StreamConfig {
   source: 'main' | 'backup' | 'test';
   isLive: boolean;
   viewerCount: number;
+  gameId?: string | null;
   updatedAt?: string;
 }
 
@@ -100,7 +101,7 @@ export interface UserAccessLookup {
   ppvEntitlements: Array<{ gameId: string; grantedAt: string; grantedBy: string; method: string }>;
 }
 
-// ── Public Endpoints ─────────────────────────────────────────────────────────
+// ── Public Endpoints ──────────────────────────────────────────────────────────
 
 /** Poll current stream status — no auth required */
 export async function fetchPublicStreamStatus(gameId?: string) {
@@ -172,7 +173,7 @@ export async function postStreamComment(gameId: string, message: string, token: 
   );
 }
 
-// ── Admin Config ─────────────────────────────────────────────────────────────
+// ── Admin Config ──────────────────────────────────────────────────────────────
 
 /** Fetch full stream config — requires league_admin or higher */
 export async function fetchAdminStreamConfig(token: string | null) {
@@ -192,19 +193,23 @@ export async function updateStreamConfig(
 }
 
 /** Go live / end broadcast — requires super_admin */
-export async function setStreamLive(isLive: boolean, token: string | null) {
+export async function setStreamLive(
+  isLive: boolean,
+  token: string | null,
+  gameId?: string | null,
+) {
   return apiFetch<{ ok: boolean; isLive: boolean; startedAt?: string; endedAt?: string }>(
     '/ops/streams/status',
     {
       method: 'POST',
       headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-stream-live-${isLive}`) },
-      body: JSON.stringify({ isLive }),
+      body: JSON.stringify({ isLive, gameId: gameId ?? null }),
     },
     token,
   );
 }
 
-// ── Session History ──────────────────────────────────────────────────────────
+// ── Session History ───────────────────────────────────────────────────────────
 
 /** Fetch recent broadcast sessions — requires league_admin */
 export async function fetchStreamSessions(token: string | null) {
@@ -215,14 +220,14 @@ export async function fetchStreamSessions(token: string | null) {
   );
 }
 
-// ── Revenue ──────────────────────────────────────────────────────────────────
+// ── Revenue ───────────────────────────────────────────────────────────────────
 
 /** Fetch PPV revenue snapshot — requires league_admin */
 export async function fetchStreamRevenue(token: string | null) {
   return apiFetch<{ ok: boolean } & RevenueSnapshot>('/ops/revenue', {}, token);
 }
 
-// ── Access Override ──────────────────────────────────────────────────────────
+// ── Access Override ───────────────────────────────────────────────────────────
 
 /** Look up a user's stream access status by email — requires super_admin */
 export async function lookupUserAccess(email: string, token: string | null) {
@@ -249,7 +254,7 @@ export async function submitAccessOverride(
   );
 }
 
-// ── Review Queue ─────────────────────────────────────────────────────────────
+// ── Review Queue ──────────────────────────────────────────────────────────────
 
 /** Fetch ops review queue — requires league_admin */
 export async function fetchReviewQueue(token: string | null) {
