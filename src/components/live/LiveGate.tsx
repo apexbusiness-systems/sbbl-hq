@@ -6,25 +6,25 @@ import { type AccessState, type LiveConfig } from '@/hooks/useLiveAccess';
 
 // ─── BRAND TOKENS ──────────────────────────────────────────────────────────
 const S = {
-  overlay:   'absolute inset-0 z-20 flex flex-col items-center justify-center',
+  overlay:   'absolute inset-0 z-20 flex flex-col items-center justify-center overflow-y-auto',
   bg:        'bg-black/80 backdrop-blur-sm',
-  card:      'flex flex-col items-center gap-4 px-6 py-8 rounded-xl max-w-xs w-full mx-4',
+  card:      'flex flex-col items-center gap-2 sm:gap-4 px-4 py-3 sm:px-6 sm:py-8 rounded-xl max-w-xs w-full mx-4 my-auto',
   cardBg:    'bg-[#111111] border border-[#1A1A1A]',
-  badge:     'text-xs font-semibold tracking-[0.2em] uppercase',
+  badge:     'text-[10px] sm:text-xs font-semibold tracking-[0.2em] uppercase',
   badgeLive: 'text-[#E63946]',
   badgeOff:  'text-[#8A8A8A]',
-  headline:  'text-[#F5F5F0] font-bold text-xl text-center leading-snug',
-  sub:       'text-[#8A8A8A] text-sm text-center',
-  price:     'text-[#C9A84C] font-bold text-2xl',
+  headline:  'text-[#F5F5F0] font-bold text-base sm:text-xl text-center leading-snug',
+  sub:       'text-[#8A8A8A] text-xs sm:text-sm text-center hidden sm:block',
+  price:     'text-[#C9A84C] font-bold text-xl sm:text-2xl',
   btn:       [
-    'w-full py-3 rounded-lg font-bold text-sm tracking-wide',
+    'w-full py-2 sm:py-3 rounded-lg font-bold text-xs sm:text-sm tracking-wide',
     'bg-[#C9A84C] text-[#0A0A0A]',
     'hover:bg-[#E8C76A] active:scale-[0.98]',
     'transition-all duration-150',
     'disabled:opacity-50 disabled:cursor-not-allowed',
   ].join(' '),
   btnGhost:  [
-    'w-full py-3 rounded-lg font-bold text-sm tracking-wide',
+    'w-full py-2 sm:py-3 rounded-lg font-bold text-xs sm:text-sm tracking-wide',
     'border border-[#C9A84C] text-[#C9A84C]',
     'hover:bg-[#C9A84C]/10 active:scale-[0.98]',
     'transition-all duration-150',
