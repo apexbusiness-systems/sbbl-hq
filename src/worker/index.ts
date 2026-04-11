@@ -43,8 +43,8 @@ type HeartbeatEntry = {
 };
 const heartbeatQueue: HeartbeatEntry[] = [];
 let heartbeatFlushTimer: ReturnType<typeof setTimeout> | null = null;
-const HEARTBEAT_FLUSH_INTERVAL_MS = 30_000;
-const HEARTBEAT_QUEUE_MAX = 5_000; // OOM guard — drop oldest if queue exceeds this
+const HEARTBEAT_FLUSH_INTERVAL_MS = 5_000; // Flush every 5 seconds instead of 30 to keep batch sizes small (approx ~4000 for 20k users)
+const HEARTBEAT_QUEUE_MAX = 10_000; // Expanded to handle up to 40k+ concurrents safely over 5s
 const HEARTBEAT_MAX_RETRIES = 3;    // Stop retrying after 3 consecutive failures
 let heartbeatConsecutiveFailures = 0;
 
