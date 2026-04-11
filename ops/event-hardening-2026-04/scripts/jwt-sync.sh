@@ -63,11 +63,11 @@ echo "      Cloud JWT differs from self-hosted. Syncing..."
 
 # ── Push JWT_SECRET to cloud ───────────────────────────────────────────────────
 echo "[3/4] Pushing JWT_SECRET to Supabase Cloud..."
-PATCH_RESULT=$(curl -sf -X PATCH \
+curl -sf -X PATCH \
   -H "Authorization: Bearer $MGMT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"jwt_secret\": \"$JWT_SECRET\"}" \
-  "https://api.supabase.com/v1/projects/$PROJECT_REF/config/auth") || {
+  "https://api.supabase.com/v1/projects/$PROJECT_REF/config/auth" >/dev/null || {
   echo "ERROR: Failed to PATCH cloud JWT secret."
   exit 1
 }

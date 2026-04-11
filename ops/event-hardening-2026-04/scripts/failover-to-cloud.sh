@@ -82,8 +82,9 @@ else
 fi
 
 # ── Test cloud endpoint ───────────────────────────────────────────────────────
-HEALTH=$(curl -sf "https://api.sbbl-hq.icu/auth/v1/health" \
-  -o /dev/null -w "%{http_code}" 2>/dev/null || echo "000")
+HEALTH=$(curl -s "https://api.sbbl-hq.icu/auth/v1/health" \
+  -o /dev/null -w "%{http_code}" 2>/dev/null || true)
+HEALTH="${HEALTH:-000}"
 echo "      Cloud auth health: HTTP $HEALTH $([ "$HEALTH" = "200" ] && echo "✓" || echo "✗")"
 
 echo ""

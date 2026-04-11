@@ -65,8 +65,9 @@ else
   HEALTH_URL="${SELFHOST_DIRECT_URL}${SELFHOST_HEALTH_PATH}"
 fi
 
-HEALTH_STATUS=$(curl -sf "$HEALTH_URL" -o /dev/null -w "%{http_code}" \
-  --max-time 5 2>/dev/null || echo "000")
+HEALTH_STATUS=$(curl -s "$HEALTH_URL" -o /dev/null -w "%{http_code}" \
+  --max-time 5 2>/dev/null || true)
+HEALTH_STATUS="${HEALTH_STATUS:-000}"
 
 if [[ "$HEALTH_STATUS" != "200" ]]; then
   echo "ERROR: Self-hosted health check returned HTTP $HEALTH_STATUS."

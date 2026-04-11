@@ -96,7 +96,8 @@ for endpoint in \
   label=$(echo "$endpoint" | cut -d'|' -f1)
   url=$(echo "$endpoint" | cut -d'|' -f2)
   expected=$(echo "$endpoint" | cut -d'|' -f3)
-  actual=$(curl -sf "$url" -o /dev/null -w "%{http_code}" --max-time 5 2>/dev/null || echo "000")
+  actual=$(curl -s "$url" -o /dev/null -w "%{http_code}" --max-time 5 2>/dev/null || true)
+  actual="${actual:-000}"
   status=$([ "$actual" = "$expected" ] && echo "✓" || echo "✗ (got $actual)")
   echo "      $label: HTTP $actual $status"
 done

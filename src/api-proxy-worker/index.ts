@@ -4,6 +4,11 @@
  * State:  Cloudflare KV namespace SBBL_BACKEND_STATE
  */
 
+// CF Workers fetch handler always receives Request with IncomingRequestCfProperties.
+// Using a type alias keeps helper-function signatures aligned with what the
+// runtime actually delivers, avoiding workers-types' bare `Request` mismatch.
+type CFRequest = Request<unknown, IncomingRequestCfProperties>;
+
 export interface Env {
   SBBL_BACKEND_STATE: KVNamespace;
   SELFHOST_ORIGIN_URL: string;   // http://[EC2_IP]:8000
@@ -109,7 +114,7 @@ function buildUpstreamUrl(originUrl: string, incomingRequest: Request): string {
 
 async function forwardRequest(
   targetBaseUrl: string,
-  request: Request,
+  request: CFRequest,
   anonKey: string,
   timeoutMs: number
 ): Promise<Response> {
@@ -159,7 +164,7 @@ function addCorsHeaders(response: Response): Response {
 // ── Manual override endpoint ──────────────────────────────────────────────────
 
 async function handleFailoverOverride(
-  request: Request,
+  request: CFRequest,
   env: Env
 ): Promise<Response> {
   // Validate secret
@@ -217,8 +222,8 @@ async function handleStatus(env: Env): Promise<Response> {
 
 // ── Main fetch handler ────────────────────────────────────────────────────────
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+const handler: ExportedHandler<Env> = {
+  async fetch(request, env, ctx): Promise<Response> {
     const url = new URL(request.url);
 
     // CORS preflight
@@ -243,8 +248,8 @@ export default {
     const fallbackUrl = isUsingSelfhost ? env.CLOUD_URL : null; // cloud never auto-falls back to selfhost
     const fallbackKey = isUsingSelfhost ? env.CLOUD_ANON_KEY : null;
 
-    // Clone request body for potential retry
-    const requestClone = request.clone();
+    // Clone request body for potential retry (clone returns bare Request, cast back)
+    const requestClone = request.clone() as CFRequest;
 
     // ── Attempt primary ──
     try {
@@ -322,7 +327,7 @@ export default {
   },
 
   // Scheduled health check — runs every 60 seconds via CF Cron Trigger
-  async scheduled(event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+  async scheduled(_event, env, _ctx): Promise<void> {
     const state = await getState(env.SBBL_BACKEND_STATE);
 
     // Only auto-recover selfhost if it's been down (active=cloud)
@@ -349,3 +354,5 @@ export default {
     }
   },
 };
+
+export default handler;

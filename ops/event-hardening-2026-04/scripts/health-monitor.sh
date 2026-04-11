@@ -22,7 +22,6 @@ if [[ -z "${FAILOVER_SECRET:-}" ]]; then
 fi
 
 consecutive_failures=0
-current_backend="unknown"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  SBBL-HQ Health Monitor"
@@ -33,9 +32,9 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 check_health() {
   local url="$1"
   local code
-  code=$(curl -sf "$url" -o /dev/null -w "%{http_code}" \
-    --max-time "$TIMEOUT" 2>/dev/null || echo "000")
-  echo "$code"
+  code=$(curl -s "$url" -o /dev/null -w "%{http_code}" \
+    --max-time "$TIMEOUT" 2>/dev/null || true)
+  echo "${code:-000}"
 }
 
 while true; do
