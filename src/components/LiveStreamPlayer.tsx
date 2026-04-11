@@ -198,7 +198,6 @@ export function LiveStreamPlayer({
   // ── StreamForge QoE telemetry (observational — never mutates player) ──────
   const sessionSeed = useMemo(
     () => (userId ? `${userId}-${getOrCreateDeviceToken()}` : getOrCreateDeviceToken()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [userId],
   );
   const sf = useStreamForge({

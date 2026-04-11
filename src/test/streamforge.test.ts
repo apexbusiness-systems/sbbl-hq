@@ -231,7 +231,7 @@ describe('applyQoeEvent', () => {
   });
 
   it('does not add playbackMs if not yet played', () => {
-    let s = applyQoeEvent(base(), { kind: 'heartbeat', ts: 5000 });
+    const s = applyQoeEvent(base(), { kind: 'heartbeat', ts: 5000 });
     expect(s.playbackMs).toBe(0);
   });
 
@@ -243,7 +243,7 @@ describe('applyQoeEvent', () => {
   });
 
   it('stores bufferAheadMs from heartbeat', () => {
-    let s = applyQoeEvent(base(), { kind: 'heartbeat', ts: 100, bufferAheadMs: 4000 });
+    const s = applyQoeEvent(base(), { kind: 'heartbeat', ts: 100, bufferAheadMs: 4000 });
     expect(s.lastBufferAheadMs).toBe(4000);
   });
 
