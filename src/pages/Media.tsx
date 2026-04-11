@@ -8,10 +8,13 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 import { Play, Share2, Upload, Eye, Clock, Check, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '@/hooks/use-auth';
+import { MediaLayoutSectionEditor } from '@/features/media-layout/components/MediaLayoutSectionEditor';
 
 const statusColors = { draft: 'text-muted-foreground', ready: 'text-warning', published: 'text-success' };
 
 const MediaPage = () => {
+  const { loading: authLoading, roles } = useAuth();
   const { activeLeague, setActiveLeague } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
   const [typeFilter, setTypeFilter] = useState<'all' | 'highlight' | 'clip' | 'poster' | 'photo'>('all');
@@ -174,6 +177,10 @@ const MediaPage = () => {
             </button>
           ))}
         </div>
+
+        {!authLoading && roles.includes('super_admin') && allMedia.length > 0 && (
+          <MediaLayoutSectionEditor assets={allMedia.filter((item) => item.type === 'photo' || item.type === 'poster')} />
+        )}
 
         {mediaQuery.isLoading && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 items-start" aria-live="polite" aria-busy="true">

@@ -3787,6 +3787,7 @@ function mapPublicMediaRows(rows: PublicMediaRow[], coercePhotoToPoster = false)
     const mappedType = coercePhotoToPoster && rawType === "photo" ? "poster" : rawType;
     return {
       id: String(r.id),
+      mediaAssetId: String((r.media_assets as Record<string, unknown> | null)?.id ?? ""),
       title: String(r.title ?? ""),
       type: mappedType,
       thumbnail: String(
@@ -3799,6 +3800,23 @@ function mapPublicMediaRows(rows: PublicMediaRow[], coercePhotoToPoster = false)
       ),
     };
   });
+}
+
+async function getSectionLayoutOrder(admin: SupabaseClient, sectionSlug: string) {
+  const { data, error } = await admin.rpc("get_media_layout", { p_section_slug: sectionSlug });
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as Array<{ media_asset_id: string | null; sort_index: number | null }>;
+  return rows
+    .filter((row) => row.media_asset_id)
+    .sort((a, b) => (a.sort_index ?? Number.MAX_SAFE_INTEGER) - (b.sort_index ?? Number.MAX_SAFE_INTEGER))
+    .map((row) => String(row.media_asset_id));
+}
+
+function applyMediaLayoutOrder<T extends { mediaAssetId?: string }>(items: T[], orderedAssetIds: string[], capacity = 9) {
+  const orderMap = new Map(orderedAssetIds.map((assetId, index) => [assetId, index]));
+  return [...items]
+    .sort((a, b) => (orderMap.get(a.mediaAssetId ?? "") ?? Number.MAX_SAFE_INTEGER) - (orderMap.get(b.mediaAssetId ?? "") ?? Number.MAX_SAFE_INTEGER))
+    .slice(0, capacity);
 }
 
 async function fetchPublicMediaRows(
@@ -3865,8 +3883,10 @@ async function handlePublicMedia({ req, admin }: HandlerCtx) {
 
   const rows = (data ?? []) as unknown as PublicMediaRow[];
   const mapped = mapPublicMediaRows(rows);
+  const orderedAssetIds = await getSectionLayoutOrder(admin, "media-page-main").catch(() => []);
+  const ordered = applyMediaLayoutOrder(mapped, orderedAssetIds, 9);
 
-  return json({ ok: true, data: mapped }, 200, {
+  return json({ ok: true, data: ordered }, 200, {
     "Cache-Control": "public, s-maxage=300, max-age=120",
   });
 }
@@ -3893,6 +3913,90 @@ async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
   return json({ ok: true, data: mapped }, 200, {
     "Cache-Control": "public, s-maxage=300, max-age=120",
   });
+}
+
+async function getMediaLayout(ctx: HandlerCtx) {
+  await requireSuperAdminSession(ctx.req, ctx.admin);
+  const sectionSlug = ctx.params.sectionSlug;
+  const { data, error } = await ctx.admin.rpc("get_media_layout", { p_section_slug: sectionSlug });
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as Array<{
+    section_id: string;
+    section_slug: string;
+    section_title: string;
+    section_capacity: number;
+    section_updated_at: string;
+    media_asset_id: string | null;
+    sort_index: number | null;
+  }>;
+  if (!rows.length) return json({ ok: false, error: "section_not_found" }, 404);
+  return json({
+    ok: true,
+    data: {
+      section: {
+        id: rows[0].section_id,
+        slug: rows[0].section_slug,
+        title: rows[0].section_title,
+        capacity: rows[0].section_capacity,
+        updatedAt: rows[0].section_updated_at,
+      },
+      items: rows.filter((row) => row.media_asset_id).map((row) => ({
+        mediaAssetId: String(row.media_asset_id),
+        sortIndex: Number(row.sort_index ?? 0),
+      })),
+    },
+  });
+}
+
+async function saveMediaLayout(ctx: HandlerCtx) {
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const sectionSlug = ctx.params.sectionSlug;
+  const body = (await ctx.req.json().catch(() => null)) as {
+    orderedMediaAssetIds?: string[];
+    idempotencyKey?: string;
+    expectedSectionUpdatedAt?: string;
+  } | null;
+  if (!body?.idempotencyKey || !Array.isArray(body.orderedMediaAssetIds)) {
+    return json({ ok: false, error: "invalid_request" }, 400);
+  }
+  const payloadHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({
+    sectionSlug,
+    orderedMediaAssetIds: body.orderedMediaAssetIds,
+  }))).then((buf) => Array.from(new Uint8Array(buf)).map((byte) => byte.toString(16).padStart(2, "0")).join(""));
+
+  const { error } = await ctx.admin.rpc("save_media_layout_order", {
+    p_section_slug: sectionSlug,
+    p_ordered_media_asset_ids: body.orderedMediaAssetIds,
+    p_idempotency_key: body.idempotencyKey,
+    p_payload_hash: payloadHash,
+    p_actor_user_id: userId,
+    p_expected_section_updated_at: body.expectedSectionUpdatedAt ?? null,
+  });
+  if (error) throw new Error(error.message);
+  return getMediaLayout(ctx);
+}
+
+async function resetMediaLayoutOrder(ctx: HandlerCtx) {
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const sectionSlug = ctx.params.sectionSlug;
+  const body = (await ctx.req.json().catch(() => null)) as {
+    idempotencyKey?: string;
+    expectedSectionUpdatedAt?: string;
+  } | null;
+  if (!body?.idempotencyKey) return json({ ok: false, error: "invalid_request" }, 400);
+  const payloadHash = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify({
+    sectionSlug,
+    action: "reset",
+  }))).then((buf) => Array.from(new Uint8Array(buf)).map((byte) => byte.toString(16).padStart(2, "0")).join(""));
+  const { error } = await ctx.admin.rpc("reset_media_layout", {
+    p_section_slug: sectionSlug,
+    p_idempotency_key: body.idempotencyKey,
+    p_payload_hash: payloadHash,
+    p_actor_user_id: userId,
+    p_expected_section_updated_at: body.expectedSectionUpdatedAt ?? null,
+  });
+  if (error) throw new Error(error.message);
+  return getMediaLayout(ctx);
 }
 
 async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
@@ -4226,6 +4330,9 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/ops/event/parse", handler: handleParseEventImage },
   { method: "POST", path: "/ops/potg/parse", handler: handleParsePotgImage },
   { method: "POST", path: "/ops/potg/submit", handler: handleSubmitPotg },
+  { method: "GET", path: "/ops/media-layout/:sectionSlug", handler: getMediaLayout },
+  { method: "POST", path: "/ops/media-layout/:sectionSlug/save", handler: saveMediaLayout },
+  { method: "POST", path: "/ops/media-layout/:sectionSlug/reset", handler: resetMediaLayoutOrder },
   { method: "GET", path: "/api/public-config", handler: handlePublicConfig },
   { method: "GET", path: "/api/public/home", handler: handlePublicHome },
   { method: "GET", path: "/api/public/schedule", handler: handlePublicSchedule },
