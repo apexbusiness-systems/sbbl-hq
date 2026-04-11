@@ -288,6 +288,7 @@ export function LiveStreamPlayer({
             <ReactPlayer
               url={playbackUrl}
               playing={true}
+              muted={true}
               controls={true}
               width="100%"
               height="100%"
@@ -300,14 +301,15 @@ export function LiveStreamPlayer({
               config={{
                 twitch: {
                   options: {
-                    parent: ['sbbl-hq.icu', 'www.sbbl-hq.icu', 'localhost']
+                    parent: ['sbbl-hq.icu', 'www.sbbl-hq.icu', 'localhost'],
+                    muted: true,
                   }
                 },
                 youtube: {
-                  playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1 }
+                  playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1, mute: 1 }
                 },
                 facebook: {
-                  appId: '',
+                  appId: import.meta.env.VITE_FACEBOOK_APP_ID || '',
                   version: 'v18.0',
                   playerId: 'sbbl-fb-player',
                 }
