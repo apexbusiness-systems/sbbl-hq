@@ -103,8 +103,17 @@ export default defineConfig(({ mode }) => {
             /^\/storage\//,
             /^\/functions\//,
             /^\/assets\//,
+            /^\/api\//,
           ],
           runtimeCaching: [
+            // API calls must always bypass SW cache layers to avoid offline fallback poisoning.
+            {
+              urlPattern: ({ url }: { url: URL }) => url.pathname.startsWith('/api/'),
+              handler: 'NetworkOnly' as const,
+              options: {
+                cacheName: 'api-network-only',
+              },
+            },
             // App shell navigations: Stale-While-Revalidate
             {
               urlPattern: ({ request }) => request.mode === 'navigate',

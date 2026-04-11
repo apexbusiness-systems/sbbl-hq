@@ -40,6 +40,7 @@ const serverEnvSchema = z.object({
   OMNIHUB_VERIFY_KEY: optionalServerSecret,
   OPTIONAL_SOCIAL_API_KEYS: optionalServerString,
   OPTIONAL_TURNSTILE_SECRET_KEY: optionalServerString,
+  BROADCAST_STREAM_URL: optionalServerString,
 });
 
 export type ClientEnv = z.infer<typeof clientEnvSchema>;

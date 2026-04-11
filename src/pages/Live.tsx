@@ -31,6 +31,26 @@ import type { Game, PlayerProfile } from '@/types';
 // ── Helpers ───────────────────────────────────────────────────────────────
 const LEAGUE_IDS = ['sbbl', 'wbl', 'tgifbl'];
 
+interface BroadcastSession {
+  active: boolean;
+  stream_url: string | null;
+  platform?: 'facebook' | 'youtube' | 'custom';
+  title?: string;
+  status?: string;
+}
+
+const fetchBroadcastSession = async (): Promise<BroadcastSession> => {
+  try {
+    const res = await fetch('/api/streams/broadcast/session', {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) return { active: false, stream_url: null };
+    return await res.json() as BroadcastSession;
+  } catch {
+    return { active: false, stream_url: null };
+  }
+};
+
 function mapHomeGameToUi(row: Record<string, unknown>): Game {
   const homeTeam = (row.home_team as Record<string, unknown> | null) ?? {};
   const awayTeam = (row.away_team as Record<string, unknown> | null) ?? {};
@@ -269,10 +289,22 @@ const LivePage = () => {
           }
         } else {
           // Public poller
+          const session = await fetchBroadcastSession();
+          if (active) {
+            setIsStreamLive(Boolean(session.active));
+            // Keep offline-safe fallback title when broadcast endpoint omits one.
+            setStreamTitle(typeof session.title === 'string' ? session.title : 'Live Game Broadcast');
+          }
+
           const res = await fetchPublicStreamStatus();
           if (active && res?.ok) {
-            setIsStreamLive(Boolean(res.isLive));
-            setStreamTitle(typeof res.title === 'string' ? res.title : 'Live Game Broadcast');
+            // Stream is live if either source reports active.
+            setIsStreamLive(Boolean(session.active || res.isLive));
+            setStreamTitle(
+              typeof session.title === 'string'
+                ? session.title
+                : (typeof res.title === 'string' ? res.title : 'Live Game Broadcast'),
+            );
             setViewerCount(typeof res.viewerCount === 'number' && res.viewerCount >= 0 ? res.viewerCount : 0);
             if (typeof res.gameId === 'string' && res.gameId) setActiveGameId(res.gameId);
           }
