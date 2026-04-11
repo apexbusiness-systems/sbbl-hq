@@ -98,6 +98,7 @@ export default defineConfig(({ mode }) => {
           navigateFallback: '/offline',
           // Only apply the fallback to app routes — never to API, auth, or assets.
           navigateFallbackDenylist: [
+            /^\/api\//,
             /^\/rest\/v1\//,
             /^\/auth\//,
             /^\/storage\//,

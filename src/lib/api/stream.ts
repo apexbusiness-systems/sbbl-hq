@@ -192,13 +192,20 @@ export async function updateStreamConfig(
 }
 
 /** Go live / end broadcast — requires super_admin */
-export async function setStreamLive(isLive: boolean, token: string | null) {
+export async function setStreamLive(
+  isLive: boolean,
+  token: string | null,
+  options?: { gameId?: string | null; preserveGameId?: boolean },
+) {
+  const payload: Record<string, unknown> = { isLive };
+  if (typeof options?.gameId === 'string') payload.gameId = options.gameId;
+  if (options?.preserveGameId) payload.preserveGameId = true;
   return apiFetch<{ ok: boolean; isLive: boolean; startedAt?: string; endedAt?: string }>(
     '/ops/streams/status',
     {
       method: 'POST',
       headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-stream-live-${isLive}`) },
-      body: JSON.stringify({ isLive }),
+      body: JSON.stringify(payload),
     },
     token,
   );
