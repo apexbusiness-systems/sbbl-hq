@@ -42,10 +42,10 @@ import type { AppRole } from '@/lib/auth/roles';
 function AccessCodeRedeem({
   variant = 'dark',
   onRedeemed,
-}: {
+}: Readonly<{
   variant?: 'dark' | 'light';
   onRedeemed?: () => void;
-}) {
+}>) {
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
@@ -57,8 +57,8 @@ function AccessCodeRedeem({
     try {
       await redeemAccessCode(
         trimmed,
-        { captchaToken: await resolveToken() },
         null,
+        { captchaToken: await resolveToken() },
       );
       toast.success('Access granted — loading stream…');
       if (onRedeemed) {
@@ -154,10 +154,10 @@ function normalizeFacebookUrl(url: string): string {
 const DEVICE_TOKEN_KEY = 'sbbl:stream-device-token:v1';
 
 function getOrCreateDeviceToken(): string {
-  const existing = window.localStorage.getItem(DEVICE_TOKEN_KEY);
+  const existing = globalThis.localStorage.getItem(DEVICE_TOKEN_KEY);
   if (existing && existing.length >= 16) return existing;
   const generated = crypto.randomUUID();
-  window.localStorage.setItem(DEVICE_TOKEN_KEY, generated);
+  globalThis.localStorage.setItem(DEVICE_TOKEN_KEY, generated);
   return generated;
 }
 
@@ -176,7 +176,7 @@ export function LiveStreamPlayer({
   roles,
   hasPremiumPlayerAccess,
   isStreamLive,
-}: LiveStreamPlayerProps) {
+}: Readonly<LiveStreamPlayerProps>) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
   const [accessChecked, setAccessChecked] = useState(false);
@@ -244,7 +244,7 @@ export function LiveStreamPlayer({
   useEffect(() => {
     if (!hasAccess || !userId) return;
     let active = true;
-    let heartbeatId: number | null = null;
+    let heartbeatId: ReturnType<typeof globalThis.setInterval> | null = null;
     let sessionIdForCleanup: string | null = null;
     let consecutiveFailures = 0;
     setPlaybackLoading(true);
@@ -278,7 +278,7 @@ export function LiveStreamPlayer({
             }, msUntilCap);
           }
         }
-        heartbeatId = window.setInterval(() => {
+        heartbeatId = globalThis.setInterval(() => {
           void apiFetch(`/api/streams/${game.id}/session/heartbeat`, {
             method: 'POST',
             body: JSON.stringify({ sessionId: res.session.id }),
@@ -615,14 +615,14 @@ export function LiveStreamPlayer({
                 {
                   method: 'POST',
                   body: JSON.stringify({
-                    successUrl: `${window.location.origin}/live?access=1`,
-                    cancelUrl: `${window.location.origin}/live`,
+                    successUrl: `${globalThis.location.origin}/live?access=1`,
+                    cancelUrl: `${globalThis.location.origin}/live`,
                     captchaToken: await resolveToken(),
                   }),
                 },
                 null,
               );
-              if (res.url) window.location.href = res.url;
+              if (res.url) globalThis.location.href = res.url;
             } catch {
               toast.error('Could not start checkout. Please try again.');
             } finally {
