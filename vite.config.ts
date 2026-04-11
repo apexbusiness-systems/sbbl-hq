@@ -102,9 +102,16 @@ export default defineConfig(({ mode }) => {
             /^\/auth\//,
             /^\/storage\//,
             /^\/functions\//,
+            /^\/api\//,
             /^\/assets\//,
           ],
           runtimeCaching: [
+            // API requests must bypass Workbox caches so live/session calls
+            // never get routed through offline fallbacks or stale cache entries.
+            {
+              urlPattern: ({ url }) => url.pathname.startsWith('/api/'),
+              handler: 'NetworkOnly',
+            },
             // App shell navigations: Stale-While-Revalidate
             {
               urlPattern: ({ request }) => request.mode === 'navigate',
@@ -268,7 +275,7 @@ export default defineConfig(({ mode }) => {
               return "charts-vendor";
             }
 
-            // ── Media / WebRTC (Live page only) ──────────────────────────────
+            // ── Media / WebRTC (Live page only) ─────────────────────────────
             // NOTE: react-player calls React.lazy() at module init time.
             // It MUST NOT be separated from React — left to default chunking
             // so Rollup resolves the React dependency correctly.
@@ -296,7 +303,7 @@ export default defineConfig(({ mode }) => {
               return "ui-vendor";
             }
 
-            // ── Utilities ────────────────────────────────────────────────────
+            // ── Utilities ───────────────────────────────────────────────────
             if (
               id.includes("/node_modules/date-fns/") ||
               id.includes("/node_modules/zod/") ||
@@ -305,7 +312,7 @@ export default defineConfig(({ mode }) => {
               return "utils-vendor";
             }
 
-            // ── Forms ────────────────────────────────────────────────────────
+            // ── Forms ───────────────────────────────────────────────────────
             if (
               id.includes("/node_modules/react-hook-form/") ||
               id.includes("/node_modules/@hookform/")
