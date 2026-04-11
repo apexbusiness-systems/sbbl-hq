@@ -49,17 +49,40 @@ const MediaPage = () => {
     staleTime: 60_000,
   });
 
+  const posterProjectionQuery = useQuery({
+    queryKey: ['public-media-posters'],
+    queryFn: () => apiFetch<{ ok: boolean; data: MediaAsset[] }>('/api/public/media/posters'),
+    retry: 1,
+    staleTime: 60_000,
+    enabled: typeFilter === 'poster',
+  });
+
   // No fallback data — surface the real state. Fail loud, never fake.
   const allMedia = useMemo<MediaAsset[]>(() => {
     const apiData = mediaQuery.data?.data;
     return Array.isArray(apiData) ? apiData : [];
   }, [mediaQuery.data]);
 
-  const filtered = allMedia.filter(m => {
-    const leagueMatch = leagueFilter === 'all' || m.leagueId === leagueFilter;
-    const typeMatch = typeFilter === 'all' || m.type === typeFilter;
-    return leagueMatch && typeMatch;
-  });
+  const posterProjection = useMemo<MediaAsset[]>(() => {
+    const projected = posterProjectionQuery.data?.data;
+    return Array.isArray(projected) ? projected : [];
+  }, [posterProjectionQuery.data]);
+
+  const filtered = useMemo(() => {
+    const baseList = typeFilter === 'poster'
+      ? [...allMedia, ...posterProjection]
+      : allMedia;
+
+    const dedupedById = baseList.filter((item, idx, arr) =>
+      arr.findIndex(candidate => candidate.id === item.id) === idx,
+    );
+
+    return dedupedById.filter(m => {
+      const leagueMatch = leagueFilter === 'all' || m.leagueId === leagueFilter;
+      const typeMatch = typeFilter === 'all' || m.type === typeFilter;
+      return leagueMatch && typeMatch;
+    });
+  }, [allMedia, posterProjection, leagueFilter, typeFilter]);
 
   const shareAsset = shareModal ? allMedia.find(m => m.id === shareModal) : null;
   const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;

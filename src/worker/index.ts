@@ -3659,6 +3659,67 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
   return json({ ok: true, url: session.url, sessionId: session.id });
 }
 
+
+
+type PublicMediaRow = Record<string, unknown>;
+
+function mapPublicMediaRows(rows: PublicMediaRow[], coercePhotoToPoster = false) {
+  return rows.map((r) => {
+    const payload = (r.render_payload ?? {}) as Record<string, unknown>;
+    const asset = (r.media_assets as Record<string, unknown> | null) ?? {};
+    const assetMeta = (asset.metadata ?? {}) as Record<string, unknown>;
+    const leagueRow = (r.leagues as { code?: string } | null);
+    const code = (leagueRow?.code ?? "").toLowerCase();
+    const leagueCode = code === "wbl" ? "wbl"
+      : code === "tgifbl" ? "tgifbl"
+      : code === "sbbl" ? "sbbl"
+      : "sbbl";
+    const createdAt = String(asset.created_at ?? r.sort_at ?? "");
+    const rawType = String(payload.type ?? assetMeta.type ?? "poster");
+    const mappedType = coercePhotoToPoster && rawType === "photo" ? "poster" : rawType;
+    return {
+      id: String(r.id),
+      title: String(r.title ?? ""),
+      type: mappedType,
+      thumbnail: String(
+        payload.thumbnail ?? assetMeta.thumbnail ?? assetMeta.image_url ?? ""
+      ),
+      leagueId: leagueCode,
+      status: "published",
+      date: String(
+        payload.date ?? assetMeta.date ?? createdAt.split("T")[0] ?? ""
+      ),
+    };
+  });
+}
+
+async function fetchPublicMediaRows(
+  admin: HandlerCtx["admin"],
+  req: Request,
+  includeTypes?: string[],
+) {
+  const url = new URL(req.url);
+  const leagueId = url.searchParams.get("leagueId");
+  let query = admin
+    .from("media_publications")
+    .select(
+      "id,surface,title,subtitle,status,sort_at,render_payload,league_id," +
+      "media_assets!inner(id,metadata,created_at)," +
+      "leagues:leagues!league_id(code)"
+    )
+    .eq("status", "published")
+    .order("sort_at", { ascending: false })
+    .limit(50);
+
+  if (leagueId) query = query.eq("league_id", leagueId);
+  if (includeTypes && includeTypes.length > 0) {
+    query = query.in("render_payload->>type", includeTypes);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return (data ?? []) as unknown as PublicMediaRow[];
+}
 async function handlePublicProducts({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get("leagueId");
@@ -3689,37 +3750,23 @@ async function handlePublicMedia({ req, admin }: HandlerCtx) {
     .eq("status", "published")
     .order("sort_at", { ascending: false })
     .limit(50);
-  if (leagueId) query = query.eq("league_id", leagueId);
 
+  if (leagueId) query = query.eq("league_id", leagueId);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
-  const mapped = rows.map((r) => {
-    const payload = (r.render_payload ?? {}) as Record<string, unknown>;
-    const asset = (r.media_assets as Record<string, unknown> | null) ?? {};
-    const assetMeta = (asset.metadata ?? {}) as Record<string, unknown>;
-    const leagueRow = (r.leagues as { code?: string } | null);
-    const code = (leagueRow?.code ?? "").toLowerCase();
-    const leagueCode = code === "wbl" ? "wbl"
-      : code === "tgifbl" ? "tgifbl"
-      : code === "sbbl" ? "sbbl"
-      : "sbbl";
-    const createdAt = String(asset.created_at ?? r.sort_at ?? "");
-    return {
-      id: String(r.id),
-      title: String(r.title ?? ""),
-      type: String(payload.type ?? assetMeta.type ?? "poster"),
-      thumbnail: String(
-        payload.thumbnail ?? assetMeta.thumbnail ?? assetMeta.image_url ?? ""
-      ),
-      leagueId: leagueCode,
-      status: "published",
-      date: String(
-        payload.date ?? assetMeta.date ?? createdAt.split("T")[0] ?? ""
-      ),
-    };
+  const rows = (data ?? []) as unknown as PublicMediaRow[];
+  const mapped = mapPublicMediaRows(rows);
+
+  return json({ ok: true, data: mapped }, 200, {
+    "Cache-Control": "public, s-maxage=300, max-age=120",
   });
+}
+
+async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
+  // Poster tab projection: include native posters and photo assets rendered as posters.
+  const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
+  const mapped = mapPublicMediaRows(rows, true);
 
   return json({ ok: true, data: mapped }, 200, {
     "Cache-Control": "public, s-maxage=300, max-age=120",
@@ -4014,6 +4061,7 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     handler: handlePublicProducts,
   },
   { method: "GET", path: "/api/public/media", handler: handlePublicMedia },
+  { method: "GET", path: "/api/public/media/posters", handler: handlePublicPosterMedia },
   {
     method: "POST",
     path: "/api/player/checkout",
