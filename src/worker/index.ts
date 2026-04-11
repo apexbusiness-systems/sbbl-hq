@@ -6,6 +6,12 @@ import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
 import { signSyncPacket, type SyncPacket } from "@/lib/sync-packets";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
+  mergeBeaconIntoAggregate,
+  parseBeaconPayload,
+  toHealthReport,
+  type AggregatedHealth,
+} from "@/lib/stream/streamforge";
+import {
   handlePublicConfig as _handlePublicConfig,
   handlePublicHome as _handlePublicHome,
   handlePublicSchedule as _handlePublicSchedule,
@@ -2886,6 +2892,121 @@ async function handleStreamReact(ctx: HandlerCtx) {
   return json({ ok: true, gameId: pathGameId, type: reactionType });
 }
 
+// ── STREAM QoE TELEMETRY ─────────────────────────────────────────────────────
+//
+// Proprietary StreamForge edge-aggregated broadcast health layer.
+//
+// Architecture
+// ────────────
+//  POST /api/streams/:gameId/qoe        — ingest a single client beacon
+//  GET  /api/streams/:gameId/qoe/health — read the rolling health report
+//
+// Both endpoints are public (no auth required) because:
+//  a) sendBeacon cannot set Authorization headers
+//  b) health data carries no PII (session id hashes only)
+//
+// Aggregation uses Cloudflare Cache API (zero cost, no new infra). Each
+// colo maintains an independent aggregate; for our sub-200-viewer target
+// this is an accurate per-region signal. Extend to Durable Objects only
+// when global exact aggregation is a hard requirement.
+
+const QOE_CACHE_TTL_S = 30;
+
+function qoeCacheUrl(gameId: string): Request {
+  return new Request(
+    `https://sbbl-hq.icu/__cache/qoe/${encodeURIComponent(gameId)}`,
+  );
+}
+
+/**
+ * POST /api/streams/:gameId/qoe
+ * Accept a StreamForge QoE beacon from a viewer. Validates, rate-limits,
+ * and merges into the per-colo rolling aggregate. Returns 204 on success.
+ *
+ * Rate limit: 10 beacons / 60 s per IP — blocks floods without touching DB.
+ */
+async function handleStreamQoeBeacon(ctx: HandlerCtx): Promise<Response> {
+  const gameId = ctx.params.gameId ?? null;
+  if (!gameId || gameId.length > 64) {
+    return json({ ok: false, error: "invalid_game_id" }, 400);
+  }
+
+  const clientIp = getClientIP(ctx.req);
+  if (!enforceInMemoryRateLimit(`qoe:${clientIp}`, 10, 60_000)) {
+    return new Response(null, { status: 429 });
+  }
+
+  const rawBody = await ctx.req.json().catch(() => null);
+  const beacon = parseBeaconPayload(rawBody);
+  if (!beacon) {
+    return json({ ok: false, error: "invalid_payload" }, 400);
+  }
+  // Prevent a client from poisoning a different game's aggregate.
+  if (beacon.gameId !== gameId) {
+    return json({ ok: false, error: "game_id_mismatch" }, 400);
+  }
+
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = qoeCacheUrl(gameId);
+
+  let existing: AggregatedHealth | null = null;
+  try {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) {
+      const data = await hit.json().catch(() => null);
+      if (data && typeof data === "object") existing = data as AggregatedHealth;
+    }
+  } catch {
+    /* cache miss — start fresh */
+  }
+
+  const updated = mergeBeaconIntoAggregate(existing, beacon);
+  const aggregateRes = new Response(JSON.stringify(updated), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "Cache-Control": `public, max-age=${QOE_CACHE_TTL_S}`,
+    },
+  });
+  cfCaches.default.put(cacheKey, aggregateRes).catch(() => {});
+
+  return new Response(null, { status: 204 });
+}
+
+/**
+ * GET /api/streams/:gameId/qoe/health
+ * Return a human-readable HealthReport from the current rolling aggregate.
+ * Public, cached 30 s. Returns { ok: true, report: null } if no beacons yet.
+ */
+async function handleStreamQoeHealth(ctx: HandlerCtx): Promise<Response> {
+  const gameId = ctx.params.gameId ?? null;
+  if (!gameId || gameId.length > 64) {
+    return json({ ok: false, error: "invalid_game_id" }, 400);
+  }
+
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = qoeCacheUrl(gameId);
+
+  let report = null;
+  try {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) {
+      const agg = await hit.json().catch(() => null);
+      if (agg && typeof agg === "object") {
+        report = toHealthReport(agg as AggregatedHealth);
+      }
+    }
+  } catch {
+    /* cache miss */
+  }
+
+  return json(
+    { ok: true, gameId, report },
+    200,
+    { "Cache-Control": `public, max-age=${QOE_CACHE_TTL_S}` },
+  );
+}
+
 // ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
 
 async function handleStreamAccess({ req, admin }: HandlerCtx) {
@@ -4256,17 +4377,16 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     path: "/api/streams/:gameId/react",
     handler: handleStreamReact,
   },
-  // ── StreamForge QoE ingest (no auth — anonymous telemetry) ────────────
+  // ── StreamForge QoE telemetry routes ─────────────────────────────────────
   {
     method: "POST",
     path: "/api/streams/:gameId/qoe",
-    handler: handleQoeIngest,
+    handler: handleStreamQoeBeacon,
   },
-  // ── StreamForge QoE health report (ops — super_admin only) ────────────
   {
     method: "GET",
-    path: "/api/streams/:gameId/qoe",
-    handler: handleQoeHealthReport,
+    path: "/api/streams/:gameId/qoe/health",
+    handler: handleStreamQoeHealth,
   },
   {
     method: "GET",
