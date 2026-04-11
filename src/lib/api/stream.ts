@@ -226,8 +226,8 @@ export interface CompCode {
  */
 export async function generateCompCode(
   gameId: string,
-  options: { note?: string; expiresInHours?: number } = {},
   token: string | null,
+  options: { note?: string; expiresInHours?: number } = {},
 ) {
   return apiFetch<{ ok: boolean; code: string; gameId: string; expiresAt: string; note?: string | null; createdAt: string }>(
     '/ops/streams/comp-code',
@@ -259,8 +259,8 @@ export async function listCompCodes(token: string | null) {
  */
 export async function redeemAccessCode(
   code: string,
-  options: { captchaToken?: string } = {},
   token: string | null,
+  options: { captchaToken?: string } = {},
 ) {
   return apiFetch<{ ok: boolean; granted: boolean; idempotent?: boolean }>(
     '/api/invite/redeem',

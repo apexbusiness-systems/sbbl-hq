@@ -89,8 +89,8 @@ function AdminStreamOverlay({
       const expiresInHours = Number.isFinite(hours) && hours > 0 ? Math.min(168, hours) : 24;
       const res = await generateCompCode(
         gameId,
-        { note: compNote.trim() || undefined, expiresInHours },
         null,
+        { note: compNote.trim() || undefined, expiresInHours },
       );
       if (res.ok) {
         setCompCode(res.code);
