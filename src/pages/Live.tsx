@@ -177,10 +177,12 @@ function AdminStreamOverlay({
               />
             </div>
 
-            {/* Go Live / End Stream */}
+            {/* Go Live / End Stream — super admin can toggle live at any time,
+                even without a URL configured yet. The player handles the
+                "no URL configured" state gracefully. */}
             <button
               onClick={handleGoLive}
-              disabled={saving || (!isLive && !customStreamUrl.trim())}
+              disabled={saving}
               className={`w-full py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded transition-colors disabled:opacity-40 ${
                 isLive
                   ? 'bg-red-600 text-white hover:bg-red-500'
@@ -238,6 +240,12 @@ const LivePage = () => {
 
   const { user, session, roles } = useAuth();
   const isSuperAdmin = roles.includes('super_admin');
+  // Any privileged role (roster player, paid fan, or super admin) gets the
+  // camera-only broadcast fallback when the admin has flipped the stream live
+  // but no real live game row exists yet. Non-privileged fans still need a
+  // real game + PPV entitlement.
+  const hasPrivilegedBroadcastAccess =
+    roles.includes('player') || roles.includes('paid_fan') || isSuperAdmin;
   const [liveGame, setLiveGame] = useState<Game | null>(null);
 
   // Admin stream state — fetched from backend (single source of truth)
@@ -345,8 +353,10 @@ const LivePage = () => {
   }, [activeGameId, user?.id, session]);
 
   const fallbackBroadcastGame = useMemo<Game | null>(() => {
-    // Camera-only live mode has no real game row; use "broadcast" alias routes for super_admin playback.
-    if (!isSuperAdmin || !isStreamLive || liveGame) return null;
+    // Camera-only live mode has no real game row; use "broadcast" alias routes.
+    // Accessible to any privileged role (player, paid_fan, super_admin). Regular
+    // fans still see "No Active Broadcast" and must wait for a real game + PPV.
+    if (!hasPrivilegedBroadcastAccess || !isStreamLive || liveGame) return null;
     return {
       id: 'broadcast',
       leagueId: 'sbbl',
@@ -360,7 +370,7 @@ const LivePage = () => {
       score: { home: 0, away: 0 },
       ppvPrice: 0,
     };
-  }, [isSuperAdmin, isStreamLive, liveGame]);
+  }, [hasPrivilegedBroadcastAccess, isStreamLive, liveGame]);
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 

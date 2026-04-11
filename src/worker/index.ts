@@ -2805,6 +2805,7 @@ async function createOrRefreshPlaybackSession(
   gameId: string | null,
   userId: string,
   sessionKey: string,
+  options: { skipDisplace?: boolean } = {},
 ) {
   const nowIso = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 70_000).toISOString();
@@ -2814,14 +2815,17 @@ async function createOrRefreshPlaybackSession(
   // One-device enforcement: terminate any existing active session for this
   // user + game before creating the new one.  The displaced device's next
   // heartbeat will return session_not_found → circuit breaker → "Connection
-  // lost" banner.  This is intentional — only one active session per viewer.
-  await ctx.admin
-    .from("stream_access_sessions")
-    .update({ status: "displaced", expires_at: nowIso, updated_by: userId })
-    .eq("user_id", userId)
-    .eq("game_id", gameId)
-    .eq("status", "active")
-    .neq("idempotency_key", sessionKey);
+  // lost" banner.  Super admin bypasses this — they may monitor the stream
+  // from multiple devices simultaneously (ops console + personal device).
+  if (!options.skipDisplace) {
+    await ctx.admin
+      .from("stream_access_sessions")
+      .update({ status: "displaced", expires_at: nowIso, updated_by: userId })
+      .eq("user_id", userId)
+      .eq("game_id", gameId)
+      .eq("status", "active")
+      .neq("idempotency_key", sessionKey);
+  }
 
   // Atomic upsert — eliminates the TOCTOU race where two rapid requests
   // both miss the SELECT and create duplicate sessions. The unique constraint
@@ -2865,11 +2869,49 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   }
 
   const roles = await getUserRolesFromDB(userId, ctx.admin);
+  const isSuperAdmin = roles.includes("super_admin");
+
+  // ── Super admin fast-path ──────────────────────────────────────────────
+  // No access checks, no PPV, no "stream_not_configured" 503, no one-device
+  // displacement. Super admin can always start a playback session from any
+  // device at any time regardless of whether a URL is set or a game exists.
+  // If collection_id is empty, the client receives an empty url string and
+  // surfaces its own "configure URL" UX instead of a hard backend failure.
+  if (isSuperAdmin) {
+    const cfg = await getOrCreateStreamConfig(ctx.admin);
+    const playbackUrl = String(cfg.collection_id ?? "").trim();
+    const session = await createOrRefreshPlaybackSession(
+      ctx,
+      gameId,
+      userId,
+      body.sessionKey,
+      { skipDisplace: true },
+    );
+    return json({
+      ok: true,
+      playback: {
+        type: "url",
+        url: playbackUrl,
+        expiresAt: session.expiresAt,
+        maxExpiresAt: session.maxExpiresAt,
+        heartbeatIntervalSec: 25,
+      },
+      session: {
+        id: session.id,
+        gameId: gameId ?? null,
+        maxExpiresAt: session.maxExpiresAt,
+      },
+    });
+  }
+
   const hasPrivilegedRole = roles.some(
-    (role) => role === "player" || role === "paid_fan" || role === "super_admin",
+    (role) => role === "player" || role === "paid_fan",
   );
-  const hasSuperAdminRole = roles.includes("super_admin");
-  let hasAccess = gameId ? hasPrivilegedRole : hasSuperAdminRole;
+  // Camera-only broadcast alias (gameId=null) is accessible to any privileged
+  // role — roster players and paid fans (season pass). PPV is game-specific
+  // and does not apply when there is no game. Regular fans are expected to
+  // purchase PPV for a specific game instead.
+  let hasAccess = hasPrivilegedRole;
   if (!hasAccess && gameId) {
     const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
       p_game_id: gameId,
@@ -2918,6 +2960,32 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
 
   const now = new Date().toISOString();
+  const roles = await getUserRolesFromDB(userId, ctx.admin);
+  const isSuperAdmin = roles.includes("super_admin");
+
+  // ── Super admin fast-path ──────────────────────────────────────────────
+  // Skip authoritative ACK gate, game-id match, and 6-hour cap guard. Super
+  // admin heartbeats are always accepted and queued for flush. They are not
+  // subject to displacement, expiry, or single-device enforcement.
+  if (isSuperAdmin) {
+    const rawExpiry = Date.now() + 70_000;
+    const expiresAt = new Date(rawExpiry).toISOString();
+    heartbeatQueue.push({
+      session_id: body.sessionId,
+      user_id: userId,
+      game_id: gameId,
+      expires_at: expiresAt,
+      now_ts: now,
+    });
+    if (!heartbeatFlushTimer) {
+      heartbeatFlushTimer = setTimeout(async () => {
+        heartbeatFlushTimer = null;
+        await flushHeartbeatQueue(ctx.env);
+      }, HEARTBEAT_FLUSH_INTERVAL_MS);
+    }
+    return json({ ok: true, sessionId: body.sessionId, expiresAt });
+  }
+
   // Authoritative ACK gate: confirm the session exists, belongs to the caller,
   // is scoped to the same game, and is still active before we acknowledge.
   const sessionRes = await ctx.admin

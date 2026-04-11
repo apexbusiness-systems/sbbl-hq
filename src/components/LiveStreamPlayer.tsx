@@ -202,7 +202,12 @@ export function LiveStreamPlayer({
             });
         }, hbMs);
       } catch {
-        if (active) toast.error('Unable to start secure playback session.');
+        // Silent for super admin — the worker super-admin fast-path should
+        // never fail, and if it does the admin will see it in dev-tools. For
+        // regular users, surface the generic error.
+        if (active && !isSuperAdmin) {
+          toast.error('Unable to start secure playback session.');
+        }
       } finally {
         if (active) setPlaybackLoading(false);
       }
@@ -323,8 +328,9 @@ export function LiveStreamPlayer({
           </div>
         )}
 
-        {/* Connection lost / displaced banner — circuit breaker triggered */}
-        {heartbeatFailures >= MAX_HEARTBEAT_FAILURES && (
+        {/* Connection lost / displaced banner — circuit breaker triggered.
+            Suppressed for super admin: they never get displaced or kicked. */}
+        {!isSuperAdmin && heartbeatFailures >= MAX_HEARTBEAT_FAILURES && (
           <div className="absolute inset-0 z-20 bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center text-center px-6 gap-4">
             <div className="w-14 h-14 rounded-full bg-red-500/15 flex items-center justify-center">
               <Lock className="w-7 h-7 text-red-400" />
@@ -344,8 +350,10 @@ export function LiveStreamPlayer({
           </div>
         )}
 
-        {/* Offline overlay — shown when admin hasn't started the stream */}
-        {isStreamLive === false && (
+        {/* Offline overlay — shown when admin hasn't started the stream.
+            Hidden for super admin so they can preview/test the player even
+            before flipping the stream live. */}
+        {isStreamLive === false && !isSuperAdmin && (
           <div className="absolute inset-0 bg-background/90 flex flex-col items-center justify-center text-center z-10">
             <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center mb-4">
               <Play className="w-8 h-8 text-muted-foreground" />
