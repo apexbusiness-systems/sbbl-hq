@@ -1,4 +1,5 @@
 import type { LeagueId } from '@/types';
+import { getLeagueSeasonLabel } from '@/lib/leagues';
 
 export type ScheduleGame = {
   time: string;
@@ -21,6 +22,9 @@ export type ScheduleDay = {
   }[];
 };
 
+const SBBL_SEASON = getLeagueSeasonLabel('sbbl');
+const TGIF_SEASON = getLeagueSeasonLabel('tgifbl');
+
 /**
  * Static schedule data — sourced from official league graphics.
  * Will be replaced by Supabase-backed API when schedule pipeline ships.
@@ -30,7 +34,7 @@ export const SCHEDULE_DATA: ScheduleDay[] = [
   {
     leagueId: 'sbbl',
     leagueCode: 'SBBL',
-    season: 'Season 1',
+    season: SBBL_SEASON,
     week: 1,
     date: '2026-04-02',
     venue: 'Crawford School',
@@ -48,7 +52,7 @@ export const SCHEDULE_DATA: ScheduleDay[] = [
   {
     leagueId: 'tgifbl',
     leagueCode: 'TGIFBL',
-    season: 'Season 1',
+    season: TGIF_SEASON,
     week: 5,
     date: '2026-03-27',
     venue: 'TAT Stadium',
