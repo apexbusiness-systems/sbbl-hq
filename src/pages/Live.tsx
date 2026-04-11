@@ -704,6 +704,9 @@ const LivePage = () => {
                   </div>
                   <p className="text-sm text-white/70 font-medium">No Active Broadcast</p>
                   <p className="text-xs text-white/40 mt-1">Check back when a game is scheduled or a stream goes live.</p>
+                  {!user?.id && (
+                    <p className="text-xs text-white/60 mt-3 font-medium">Register to Watch</p>
+                  )}
                 </div>
               )}
             </div>
