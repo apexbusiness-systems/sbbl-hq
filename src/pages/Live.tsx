@@ -6,6 +6,8 @@ import { useMemo } from 'react';
 import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { useLiveAccess } from '@/hooks/useLiveAccess';
+import { LiveGate } from '@/components/live/LiveGate';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
 import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
@@ -369,6 +371,7 @@ const LivePage = () => {
   }, [leaderboardsData]);
 
   const { user, session, roles } = useAuth();
+  const { access, config: liveAccessConfig } = useLiveAccess();
   const isSuperAdmin = roles.includes('super_admin');
   // Any privileged role (roster player, paid fan, or super admin) gets the
   // camera-only broadcast fallback when the admin has flipped the stream live
@@ -427,6 +430,14 @@ const LivePage = () => {
     const id = setInterval(fetchStatus, 15000);
     return () => { active = false; clearInterval(id); };
   }, [isSuperAdmin]);
+
+  // Clean up ?ppv=success from URL after Stripe redirect
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ppv') === 'success') {
+      window.history.replaceState({}, '', '/live');
+    }
+  }, []);
 
   const [comments, setComments] = useState<Array<{ id: string; user: string; text: string }>>([]);
   const [chatInput, setChatInput] = useState('');
@@ -721,6 +732,11 @@ const LivePage = () => {
                   Register to Watch
                 </div>
               )}
+              <LiveGate
+                access={access}
+                config={liveAccessConfig}
+                checkoutEndpoint={`/api/streams/${activeGameId ?? 'broadcast'}/purchase`}
+              />
             </div>
 
             {/* Actions + Chat */}

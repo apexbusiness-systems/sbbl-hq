@@ -6,6 +6,12 @@ import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
 import { signSyncPacket, type SyncPacket } from "@/lib/sync-packets";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
+  mergeBeaconIntoAggregate,
+  parseBeaconPayload,
+  toHealthReport,
+  type AggregatedHealth,
+} from "@/lib/stream/streamforge";
+import {
   handlePublicConfig as _handlePublicConfig,
   handlePublicHome as _handlePublicHome,
   handlePublicSchedule as _handlePublicSchedule,
@@ -2013,6 +2019,167 @@ async function handleOpsDeletePlayers(ctx: HandlerCtx) { return handleOpsDelete(
 async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete('products', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('league_events', ctx.req, ctx.admin, ctx.params); }
 
+// ── Media Editor (Admin) ──────────────────────────────────────────────────
+// Super-admin CRUD over media_publications rows (all statuses). Public reads
+// continue to filter on status='published' via handlePublicMedia; this admin
+// surface is the only way to edit title/status/league once a publication has
+// been projected from the ingest pipeline.
+
+const MEDIA_PUBLICATION_STATUSES = ['draft', 'scheduled', 'published', 'archived'] as const;
+type MediaPublicationStatus = typeof MEDIA_PUBLICATION_STATUSES[number];
+const isMediaPublicationStatus = (v: unknown): v is MediaPublicationStatus =>
+  typeof v === 'string' && (MEDIA_PUBLICATION_STATUSES as readonly string[]).includes(v);
+
+async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
+  requireSuperAdmin(req);
+  const url = new URL(req.url);
+  const statusFilter = url.searchParams.get('status');
+  const surfaceFilter = url.searchParams.get('surface');
+  const leagueFilter = url.searchParams.get('leagueId');
+  const limitParam = Number(url.searchParams.get('limit') ?? '100');
+  const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 100, 1), 200);
+
+  let query = admin
+    .from('media_publications')
+    .select(
+      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,league_id,render_payload,' +
+      'media_assets!inner(id,metadata,created_at),' +
+      'leagues:leagues!league_id(id,code,name)'
+    )
+    .order('sort_at', { ascending: false })
+    .limit(limit);
+
+  if (statusFilter && isMediaPublicationStatus(statusFilter)) {
+    query = query.eq('status', statusFilter);
+  }
+  if (surfaceFilter) query = query.eq('surface', surfaceFilter);
+  if (leagueFilter) query = query.eq('league_id', leagueFilter);
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((raw) => {
+    const asset = (raw.media_assets as Record<string, unknown> | null) ?? {};
+    const assetMeta = (asset.metadata as Record<string, unknown> | null) ?? {};
+    const payload = (raw.render_payload as Record<string, unknown> | null) ?? {};
+    const leagueRow = (raw.leagues as Record<string, unknown> | null) ?? {};
+    const thumbnail = String(
+      payload.thumbnail ?? payload.image_url ?? assetMeta.thumbnail ?? assetMeta.image_url ?? ''
+    );
+    const type = String(payload.type ?? assetMeta.type ?? 'poster');
+    return {
+      id: String(raw.id),
+      mediaAssetId: String(raw.media_asset_id ?? asset.id ?? ''),
+      surface: String(raw.surface ?? ''),
+      title: String(raw.title ?? ''),
+      subtitle: raw.subtitle == null ? null : String(raw.subtitle),
+      status: String(raw.status ?? ''),
+      publishedAt: raw.published_at == null ? null : String(raw.published_at),
+      scheduledAt: raw.scheduled_at == null ? null : String(raw.scheduled_at),
+      sortAt: raw.sort_at == null ? null : String(raw.sort_at),
+      leagueId: raw.league_id == null ? null : String(raw.league_id),
+      leagueCode: leagueRow.code == null ? null : String(leagueRow.code),
+      leagueName: leagueRow.name == null ? null : String(leagueRow.name),
+      type,
+      thumbnail,
+      createdAt: asset.created_at == null ? null : String(asset.created_at),
+    };
+  });
+
+  return json({ ok: true, data: rows });
+}
+
+async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireSuperAdmin(ctx.req);
+  const id = ctx.params.id;
+  if (!id) return json({ ok: false, error: 'missing_id' }, 400);
+
+  const body = (await ctx.req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body || Object.keys(body).length === 0) {
+    return json({ ok: false, error: 'empty_patch_body' }, 400);
+  }
+
+  const update: Record<string, unknown> = {};
+  if (typeof body.title === 'string' && body.title.trim().length > 0) {
+    update.title = body.title.trim();
+  }
+  if (body.subtitle === null) {
+    update.subtitle = null;
+  } else if (typeof body.subtitle === 'string') {
+    update.subtitle = body.subtitle;
+  }
+  if (body.status !== undefined) {
+    if (!isMediaPublicationStatus(body.status)) {
+      return json({ ok: false, error: `invalid_status (allowed: ${MEDIA_PUBLICATION_STATUSES.join(',')})` }, 400);
+    }
+    update.status = body.status;
+    // Keep published_at consistent with status transitions.
+    if (body.status === 'published') {
+      update.published_at = new Date().toISOString();
+    } else if (body.status === 'archived' || body.status === 'draft') {
+      update.published_at = null;
+    }
+  }
+  if (body.leagueId === null) {
+    update.league_id = null;
+  } else if (typeof body.leagueId === 'string' && body.leagueId.length > 0) {
+    update.league_id = body.leagueId;
+  }
+  if (typeof body.sortAt === 'string' && body.sortAt.length > 0) {
+    update.sort_at = body.sortAt;
+  }
+
+  if (Object.keys(update).length === 0) {
+    return json({ ok: false, error: 'no_editable_fields' }, 400);
+  }
+
+  const { data, error } = await ctx.admin
+    .from('media_publications')
+    .update(update)
+    .eq('id', id)
+    .select('id,title,subtitle,status,league_id,published_at,sort_at')
+    .single();
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_patch_media_publication',
+    ref_type: 'media_publications',
+    ref_id: id,
+    payload: update,
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, data });
+}
+
+async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireSuperAdmin(ctx.req);
+  const id = ctx.params.id;
+  if (!id) return json({ ok: false, error: 'missing_id' }, 400);
+
+  const { data, error } = await ctx.admin
+    .from('media_publications')
+    .update({ status: 'archived', published_at: null })
+    .eq('id', id)
+    .select('id,status')
+    .single();
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_archive_media_publication',
+    ref_type: 'media_publications',
+    ref_id: id,
+    payload: {},
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, data });
+}
+
 
 // handlePublicConfig — extracted to src/worker/routes/public.ts
 const handlePublicConfig = _handlePublicConfig;
@@ -2903,6 +3070,121 @@ async function handleStreamReact(ctx: HandlerCtx) {
   cfCaches.default.delete(new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${pathGameId}`)).catch(() => {});
 
   return json({ ok: true, gameId: pathGameId, type: reactionType });
+}
+
+// ── STREAM QoE TELEMETRY ─────────────────────────────────────────────────────
+//
+// Proprietary StreamForge edge-aggregated broadcast health layer.
+//
+// Architecture
+// ────────────
+//  POST /api/streams/:gameId/qoe        — ingest a single client beacon
+//  GET  /api/streams/:gameId/qoe/health — read the rolling health report
+//
+// Both endpoints are public (no auth required) because:
+//  a) sendBeacon cannot set Authorization headers
+//  b) health data carries no PII (session id hashes only)
+//
+// Aggregation uses Cloudflare Cache API (zero cost, no new infra). Each
+// colo maintains an independent aggregate; for our sub-200-viewer target
+// this is an accurate per-region signal. Extend to Durable Objects only
+// when global exact aggregation is a hard requirement.
+
+const QOE_CACHE_TTL_S = 30;
+
+function qoeCacheUrl(gameId: string): Request {
+  return new Request(
+    `https://sbbl-hq.icu/__cache/qoe/${encodeURIComponent(gameId)}`,
+  );
+}
+
+/**
+ * POST /api/streams/:gameId/qoe
+ * Accept a StreamForge QoE beacon from a viewer. Validates, rate-limits,
+ * and merges into the per-colo rolling aggregate. Returns 204 on success.
+ *
+ * Rate limit: 10 beacons / 60 s per IP — blocks floods without touching DB.
+ */
+async function handleStreamQoeBeacon(ctx: HandlerCtx): Promise<Response> {
+  const gameId = ctx.params.gameId ?? null;
+  if (!gameId || gameId.length > 64) {
+    return json({ ok: false, error: "invalid_game_id" }, 400);
+  }
+
+  const clientIp = getClientIP(ctx.req);
+  if (!enforceInMemoryRateLimit(`qoe:${clientIp}`, 10, 60_000)) {
+    return new Response(null, { status: 429 });
+  }
+
+  const rawBody = await ctx.req.json().catch(() => null);
+  const beacon = parseBeaconPayload(rawBody);
+  if (!beacon) {
+    return json({ ok: false, error: "invalid_payload" }, 400);
+  }
+  // Prevent a client from poisoning a different game's aggregate.
+  if (beacon.gameId !== gameId) {
+    return json({ ok: false, error: "game_id_mismatch" }, 400);
+  }
+
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = qoeCacheUrl(gameId);
+
+  let existing: AggregatedHealth | null = null;
+  try {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) {
+      const data = await hit.json().catch(() => null);
+      if (data && typeof data === "object") existing = data as AggregatedHealth;
+    }
+  } catch {
+    /* cache miss — start fresh */
+  }
+
+  const updated = mergeBeaconIntoAggregate(existing, beacon);
+  const aggregateRes = new Response(JSON.stringify(updated), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "Cache-Control": `public, max-age=${QOE_CACHE_TTL_S}`,
+    },
+  });
+  cfCaches.default.put(cacheKey, aggregateRes).catch(() => {});
+
+  return new Response(null, { status: 204 });
+}
+
+/**
+ * GET /api/streams/:gameId/qoe/health
+ * Return a human-readable HealthReport from the current rolling aggregate.
+ * Public, cached 30 s. Returns { ok: true, report: null } if no beacons yet.
+ */
+async function handleStreamQoeHealth(ctx: HandlerCtx): Promise<Response> {
+  const gameId = ctx.params.gameId ?? null;
+  if (!gameId || gameId.length > 64) {
+    return json({ ok: false, error: "invalid_game_id" }, 400);
+  }
+
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = qoeCacheUrl(gameId);
+
+  let report = null;
+  try {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) {
+      const agg = await hit.json().catch(() => null);
+      if (agg && typeof agg === "object") {
+        report = toHealthReport(agg as AggregatedHealth);
+      }
+    }
+  } catch {
+    /* cache miss */
+  }
+
+  return json(
+    { ok: true, gameId, report },
+    200,
+    { "Cache-Control": `public, max-age=${QOE_CACHE_TTL_S}` },
+  );
 }
 
 // ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
@@ -4277,17 +4559,16 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     path: "/api/streams/:gameId/react",
     handler: handleStreamReact,
   },
-  // ── StreamForge QoE ingest (no auth — anonymous telemetry) ────────────
+  // ── StreamForge QoE telemetry routes ─────────────────────────────────────
   {
     method: "POST",
     path: "/api/streams/:gameId/qoe",
-    handler: handleQoeIngest,
+    handler: handleStreamQoeBeacon,
   },
-  // ── StreamForge QoE health report (ops — super_admin only) ────────────
   {
     method: "GET",
-    path: "/api/streams/:gameId/qoe",
-    handler: handleQoeHealthReport,
+    path: "/api/streams/:gameId/qoe/health",
+    handler: handleStreamQoeHealth,
   },
   {
     method: "GET",
@@ -5124,6 +5405,9 @@ routes.push(
   { method: "GET",    path: "/ops/list/players",   handler: handleOpsListPlayers },
   { method: "GET",    path: "/ops/list/products",  handler: handleOpsListProducts },
   { method: "GET",    path: "/ops/list/events",    handler: handleOpsListEvents },
+  { method: "GET",    path: "/ops/list/media",              handler: handleOpsListMediaPublications },
+  { method: "PATCH",  path: "/ops/media/publications/:id",  handler: handleOpsPatchMediaPublications },
+  { method: "DELETE", path: "/ops/media/publications/:id",  handler: handleOpsDeleteMediaPublications },
 );
 
 // ── Scores handlers ────────────────────────────────────────────────────────
