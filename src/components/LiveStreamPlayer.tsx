@@ -15,7 +15,7 @@
  * Uses Switcher Studio's script-based embed player.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
@@ -23,6 +23,7 @@ import ReactPlayer from 'react-player';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
 import { useTurnstile } from '@/hooks/use-turnstile';
+import { useStreamForge } from '@/hooks/use-streamforge';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
 import type { Game } from '@/types';
@@ -193,6 +194,17 @@ export function LiveStreamPlayer({
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
+
+  // ── StreamForge QoE telemetry (observational — never mutates player) ──────
+  const sessionSeed = useMemo(
+    () => (userId ? `${userId}-${getOrCreateDeviceToken()}` : getOrCreateDeviceToken()),
+    [userId],
+  );
+  const sf = useStreamForge({
+    gameId: userId ? game.id : null,
+    playbackUrl: playbackUrl || null,
+    sessionSeed,
+  });
 
   // ── Role classification ──────────────────────────────────────────────────
   const isPlayer    = roles.includes('player');
@@ -397,12 +409,23 @@ export function LiveStreamPlayer({
               controls={true}
               width="100%"
               height="100%"
-              onReady={() => setPlayerReady(true)}
+              onReady={() => {
+                setPlayerReady(true);
+                sf.reportEvent('playing');
+                sf.recordSuccess();
+              }}
+              onPlay={() => sf.reportEvent('play')}
+              onBuffer={() => {
+                setPlayerReady(true);
+                sf.reportEvent('waiting');
+              }}
+              onBufferEnd={() => sf.reportEvent('playing')}
               onError={(e) => {
                 console.error('[ReactPlayer] Stream error:', e);
+                sf.reportEvent('error');
+                sf.recordFailure();
                 setPlayerError('The stream source could not be loaded. The URL may be invalid or the stream may have ended.');
               }}
-              onBuffer={() => setPlayerReady(true)}
               config={{
                 twitch: {
                   options: {
