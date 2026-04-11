@@ -4228,6 +4228,7 @@ export default Sentry.withSentry(
 
     const url = new URL(req.url);
     if (url.pathname === "/api/streams/broadcast/session") {
+      // Keep this route fail-open even during partial env misconfiguration.
       if (req.method === "OPTIONS") return addSecurityHeaders(await handleBroadcastSessionOptions());
       if (req.method === "GET") return addSecurityHeaders(await handleBroadcastSessionRequest(env));
     }
