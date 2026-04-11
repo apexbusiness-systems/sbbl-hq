@@ -217,16 +217,18 @@ const MediaPage = () => {
                 <div key={m.id} className="panel overflow-hidden group flex flex-col">
                   {/* ── Image cell: per-card adaptive ratio (portrait/landscape) ── */}
                   <div className="relative overflow-hidden bg-[#0a0a0a]" style={{ aspectRatio: resolveAspectRatio(m.id, m.type) }}>
-                    {/* Ambient blur fill — fills dead space for non-portrait content, adds depth for all */}
-                    <img
-                      src={m.thumbnail}
-                      alt=""
-                      aria-hidden
-                      loading="lazy"
-                      decoding="async"
-                      fetchPriority="low"
-                      className="absolute inset-0 w-full h-full object-cover scale-125 blur-3xl opacity-30 pointer-events-none select-none"
-                    />
+                    {/* Ambient blur fill (skip LCP card to reduce first-render paint cost) */}
+                    {!isLcpCandidate && (
+                      <img
+                        src={m.thumbnail}
+                        alt=""
+                        aria-hidden
+                        loading="lazy"
+                        decoding="async"
+                        fetchPriority="low"
+                        className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-25 pointer-events-none select-none"
+                      />
+                    )}
                     {/* Sharp primary image — cover+top for portrait, contain for landscape */}
                     <img
                       src={m.thumbnail}
