@@ -11,6 +11,10 @@ import {
   handlePublicSchedule as _handlePublicSchedule,
   handlePublicPotg as _handlePublicPotg,
 } from "./routes/public";
+import {
+  handleQoeIngest,
+  handleQoeHealthReport,
+} from "./routes/stream-qoe";
 
 type HandlerCtx = {
   req: Request;
@@ -4251,6 +4255,18 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/api/streams/:gameId/react",
     handler: handleStreamReact,
+  },
+  // ── StreamForge QoE ingest (no auth — anonymous telemetry) ────────────
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/qoe",
+    handler: handleQoeIngest,
+  },
+  // ── StreamForge QoE health report (ops — super_admin only) ────────────
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/qoe",
+    handler: handleQoeHealthReport,
   },
   {
     method: "GET",
