@@ -2,12 +2,29 @@
  * SBBL-HQ API Proxy Worker — Circuit Breaker + Active-Active Failover
  * Routes: api.sbbl-hq.icu → EC2 Self-Hosted (primary) | Supabase Cloud (fallback)
  * State:  Cloudflare KV namespace SBBL_BACKEND_STATE
+ *
+ * Type strategy: this file is excluded from the main app's tsconfig.app.json
+ * (it ships as a separate worker via src/api-proxy-worker/wrangler.toml).
+ * To keep it self-contained and avoid pulling @cloudflare/workers-types ambient
+ * declarations into the React app build, we declare the minimal CF runtime
+ * surface we touch as local structural types.
  */
 
-// CF Workers fetch handler always receives Request with IncomingRequestCfProperties.
-// Using a type alias keeps helper-function signatures aligned with what the
-// runtime actually delivers, avoiding workers-types' bare `Request` mismatch.
-type CFRequest = Request<unknown, IncomingRequestCfProperties>;
+// ── Minimal CF runtime surface (structural types) ────────────────────────────
+interface KVNamespace {
+  get(key: string, type: 'json'): Promise<unknown>;
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+interface ExecutionContext {
+  waitUntil(promise: Promise<unknown>): void;
+  passThroughOnException(): void;
+}
+interface ScheduledEvent {
+  scheduledTime: number;
+  cron: string;
+}
 
 export interface Env {
   SBBL_BACKEND_STATE: KVNamespace;
@@ -114,7 +131,7 @@ function buildUpstreamUrl(originUrl: string, incomingRequest: Request): string {
 
 async function forwardRequest(
   targetBaseUrl: string,
-  request: CFRequest,
+  request: Request,
   anonKey: string,
   timeoutMs: number
 ): Promise<Response> {
@@ -132,15 +149,19 @@ async function forwardRequest(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  // `duplex: 'half'` is required by undici (Node 18+) when forwarding a
+  // streaming request body. CF Workers ignores it. Cast to RequestInit so
+  // DOM-lib RequestInit (which lacks `duplex`) accepts the extra field.
+  const init = {
+    method: request.method,
+    headers,
+    body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+    signal: controller.signal,
+    duplex: 'half',
+  } as RequestInit;
+
   try {
-    const upstreamResp = await fetch(upstreamUrl, {
-      method: request.method,
-      headers,
-      body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
-      signal: controller.signal,
-      // @ts-ignore — CF-specific duplex option
-      duplex: 'half',
-    });
+    const upstreamResp = await fetch(upstreamUrl, init);
     clearTimeout(timer);
     return upstreamResp;
   } catch (err) {
@@ -164,7 +185,7 @@ function addCorsHeaders(response: Response): Response {
 // ── Manual override endpoint ──────────────────────────────────────────────────
 
 async function handleFailoverOverride(
-  request: CFRequest,
+  request: Request,
   env: Env
 ): Promise<Response> {
   // Validate secret
@@ -222,8 +243,8 @@ async function handleStatus(env: Env): Promise<Response> {
 
 // ── Main fetch handler ────────────────────────────────────────────────────────
 
-const handler: ExportedHandler<Env> = {
-  async fetch(request, env, ctx): Promise<Response> {
+const handler = {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // CORS preflight
@@ -248,8 +269,8 @@ const handler: ExportedHandler<Env> = {
     const fallbackUrl = isUsingSelfhost ? env.CLOUD_URL : null; // cloud never auto-falls back to selfhost
     const fallbackKey = isUsingSelfhost ? env.CLOUD_ANON_KEY : null;
 
-    // Clone request body for potential retry (clone returns bare Request, cast back)
-    const requestClone = request.clone() as CFRequest;
+    // Clone request body for potential retry
+    const requestClone = request.clone();
 
     // ── Attempt primary ──
     try {
@@ -327,7 +348,7 @@ const handler: ExportedHandler<Env> = {
   },
 
   // Scheduled health check — runs every 60 seconds via CF Cron Trigger
-  async scheduled(_event, env, _ctx): Promise<void> {
+  async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     const state = await getState(env.SBBL_BACKEND_STATE);
 
     // Only auto-recover selfhost if it's been down (active=cloud)
