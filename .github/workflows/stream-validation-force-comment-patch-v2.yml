@@ -20,7 +20,7 @@ jobs:
           node-version: 20
 
       - name: Apply safe prelive workflow verdict-comment patch
-        run: node ops/validation/apply-prelive-comment-patch-v2.mjs
+        run: node ops/validation/apply-prelive-comment-patch.mjs
 
       - name: Commit patched prelive workflow
         run: |
