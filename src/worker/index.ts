@@ -128,6 +128,26 @@ function enforceInMemoryRateLimit(
   return true;
 }
 
+async function enforceSharedRateLimit(
+  admin: SupabaseClient,
+  scope: string,
+  key: string,
+  limit: number,
+  windowMs: number,
+): Promise<boolean> {
+  const res = await admin.rpc("consume_stream_rate_limit", {
+    p_scope: scope,
+    p_key: key,
+    p_limit: limit,
+    p_window_seconds: Math.max(1, Math.floor(windowMs / 1000)),
+  });
+  if (res.error) {
+    // Safe fallback so a DB RPC issue does not fully disable abuse controls.
+    return enforceInMemoryRateLimit(`${scope}:${key}`, limit, windowMs);
+  }
+  return Boolean(res.data);
+}
+
 // SECURITY: roles are never read from client-supplied headers.
 // They are set exclusively by getSession() after JWT verification and
 // attached to the enriched internal request. This function is only called
@@ -629,6 +649,7 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   const body = (await ctx.req.json().catch(() => null)) as {
     isLive?: boolean;
     gameId?: string | null;
+    preserveGameId?: boolean;
   } | null;
   if (typeof body?.isLive !== "boolean")
     return json({ ok: false, error: "is_live_required" }, 400);
@@ -639,6 +660,24 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
     updated_by: session.userId,
   };
   if (typeof body.gameId === "string") patch.active_game_id = body.gameId;
+  if (!body.isLive && !body.preserveGameId) patch.active_game_id = null;
+  if (body.isLive) {
+    const effectiveGameId = typeof body.gameId === "string"
+      ? body.gameId
+      : String((await getOrCreateStreamConfig(ctx.admin)).active_game_id ?? "");
+    if (!effectiveGameId) {
+      return json({ ok: false, error: "active_game_required" }, 400);
+    }
+    const gameCheck = await ctx.admin
+      .from("games")
+      .select("id")
+      .eq("id", effectiveGameId)
+      .maybeSingle();
+    if (!gameCheck.data) {
+      return json({ ok: false, error: "active_game_not_found" }, 400);
+    }
+    patch.active_game_id = effectiveGameId;
+  }
   if (body.isLive) {
     patch.live_started_at = nowIso;
     patch.live_ended_at = null;
@@ -650,10 +689,11 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
     .upsert(patch, { onConflict: "id" });
   if (error) throw new Error(error.message);
 
-  if (typeof body.gameId === "string") {
+  if (typeof patch.active_game_id === "string") {
+    const gameId = String(patch.active_game_id);
     if (body.isLive) {
       await ctx.admin.from("stream_sessions").insert({
-        game_id: body.gameId,
+        game_id: gameId,
         status: "live",
         started_at: nowIso,
         current_viewers: 0,
@@ -662,11 +702,11 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
         updated_by: session.userId,
       });
     } else {
-      const activeViewers = await getActiveViewerCount(ctx.admin, body.gameId);
+      const activeViewers = await getActiveViewerCount(ctx.admin, gameId);
       const currentLive = await ctx.admin
         .from("stream_sessions")
         .select("id,peak_viewers")
-        .eq("game_id", body.gameId)
+        .eq("game_id", gameId)
         .eq("status", "live")
         .order("updated_at", { ascending: false })
         .limit(1)
@@ -688,7 +728,7 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
           .eq("id", (currentLive.data as Record<string, unknown>).id as string);
       } else {
         await ctx.admin.from("stream_sessions").insert({
-          game_id: body.gameId,
+          game_id: gameId,
           status: "ended",
           started_at: nowIso,
           ended_at: nowIso,
@@ -708,12 +748,34 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   const bustKey = new Request(streamCacheUrl(null));
   cfCachesLive.delete(bustKey).catch(() => { cfCachesLive.delete(bustKey).catch(() => {}); });
   // Also bust game-scoped key if a gameId was provided
-  if (typeof body.gameId === "string") {
-    const bustGameKey = new Request(streamCacheUrl(body.gameId));
+  if (typeof patch.active_game_id === "string") {
+    const bustGameKey = new Request(streamCacheUrl(String(patch.active_game_id)));
     cfCachesLive.delete(bustGameKey).catch(() => { cfCachesLive.delete(bustGameKey).catch(() => {}); });
   }
 
   return json({ ok: true, isLive: body.isLive, at: nowIso });
+}
+
+async function getActiveStreamGameId(admin: SupabaseClient): Promise<string | null> {
+  const cfg = await getOrCreateStreamConfig(admin);
+  const gameId = cfg.active_game_id as string | null;
+  return gameId && gameId.length > 0 ? gameId : null;
+}
+
+async function requireActivePlaybackSession(ctx: HandlerCtx, userId: string, gameId: string) {
+  const nowIso = new Date().toISOString();
+  const session = await ctx.admin
+    .from("stream_access_sessions")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("game_id", gameId)
+    .eq("status", "active")
+    .gt("expires_at", nowIso)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (session.error) throw new Error(session.error.message);
+  return Boolean(session.data);
 }
 
 async function handleStreamSessions({ req, admin }: HandlerCtx) {
@@ -2787,6 +2849,11 @@ async function handleStreamReact(ctx: HandlerCtx) {
   if (!reactionType || !['fire', 'heart', 'clap'].includes(reactionType)) {
     return json({ ok: false, error: 'invalid_reaction_type' }, 400);
   }
+  if (!(await enforceSharedRateLimit(ctx.admin, "stream_reaction_user", `${userId}:${pathGameId}`, 30, 30_000))) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
+  const hasSession = await requireActivePlaybackSession(ctx, userId, pathGameId);
+  if (!hasSession) return json({ ok: false, error: "active_session_required" }, 403);
 
   const { error } = await ctx.admin.from('stream_reactions').insert({
     game_id: pathGameId,
@@ -3087,11 +3154,13 @@ export async function handlePostComment(ctx: HandlerCtx) {
   const userId = requireAuth(ctx.req);
   const gameId = ctx.params.gameId;
   if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const hasSession = await requireActivePlaybackSession(ctx, userId, gameId);
+  if (!hasSession) return json({ ok: false, error: "active_session_required" }, 403);
   const ip = getClientIP(ctx.req);
-  if (!enforceInMemoryRateLimit(`chat:${userId}:${gameId}`, 10, 30_000)) {
+  if (!(await enforceSharedRateLimit(ctx.admin, "stream_chat_user", `${userId}:${gameId}`, 10, 30_000))) {
     return json({ ok: false, error: "rate_limited" }, 429);
   }
-  if (!enforceInMemoryRateLimit(`chat-ip:${ip}:${gameId}`, 20, 30_000)) {
+  if (!(await enforceSharedRateLimit(ctx.admin, "stream_chat_ip", `${ip}:${gameId}`, 20, 30_000))) {
     return json({ ok: false, error: "rate_limited" }, 429);
   }
   const body = (await ctx.req.json().catch(() => null)) as {
@@ -3123,6 +3192,31 @@ export async function handlePostComment(ctx: HandlerCtx) {
       userId: String(insert.data.user_id),
     },
   });
+}
+
+async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
+  const gameId = await getActiveStreamGameId(ctx.admin);
+  if (!gameId) return json({ ok: false, error: "active_game_required" }, 400);
+  return handlePlaybackSession({ ...ctx, params: { ...ctx.params, gameId } });
+}
+
+async function handleBroadcastHeartbeat(ctx: HandlerCtx) {
+  const gameId = await getActiveStreamGameId(ctx.admin);
+  if (!gameId) return json({ ok: false, error: "active_game_required" }, 400);
+  return handleStreamSessionHeartbeat({ ...ctx, params: { ...ctx.params, gameId } });
+}
+
+async function handleBroadcastSessionEnd(ctx: HandlerCtx) {
+  const gameId = await getActiveStreamGameId(ctx.admin);
+  if (!gameId) return json({ ok: false, error: "active_game_required" }, 400);
+  return handleStreamSessionEnd({ ...ctx, params: { ...ctx.params, gameId } });
+}
+
+async function handleStreamViewerCount(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const activeEntitledViewerCount = await getActiveViewerCount(ctx.admin, gameId);
+  return json({ ok: true, gameId, activeEntitledViewerCount });
 }
 
 function getSafeRedirectUrl(
@@ -3898,13 +3992,28 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "POST",
+    path: "/api/streams/broadcast/session",
+    handler: handleBroadcastPlaybackSession,
+  },
+  {
+    method: "POST",
     path: "/api/streams/:gameId/session/heartbeat",
     handler: handleStreamSessionHeartbeat,
   },
   {
     method: "POST",
+    path: "/api/streams/broadcast/session/heartbeat",
+    handler: handleBroadcastHeartbeat,
+  },
+  {
+    method: "POST",
     path: "/api/streams/:gameId/session/end",
     handler: handleStreamSessionEnd,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/broadcast/session/end",
+    handler: handleBroadcastSessionEnd,
   },
   {
     method: "GET",
@@ -4001,6 +4110,11 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "GET",
     path: "/api/streams/:gameId/reactions",
     handler: handleStreamReactions,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/viewer-count",
+    handler: handleStreamViewerCount,
   },
   {
     method: "POST",
