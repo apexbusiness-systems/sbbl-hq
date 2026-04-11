@@ -46,6 +46,11 @@ describe('ingest route registration', () => {
       expect(workerSrc).toMatch(new RegExp(`async function ${handler}`));
     }
   });
+
+  it('supports a dedicated video ingest kind', () => {
+    expect(workerSrc).toContain('"video"');
+    expect(opsSrc).toContain("type IngestKind = 'potg' | 'store' | 'event' | 'generic' | 'video'");
+  });
 });
 
 // ── 2. Public render contract ────────────────────────────────────────────────
@@ -310,16 +315,47 @@ describe('ingest state machine', () => {
   });
 });
 
+describe('video ingest guardrails', () => {
+  it('enforces caption length and video size cap in worker submit handler', () => {
+    const fnStart = workerSrc.indexOf('async function handleIngestSubmit');
+    const fnEnd = workerSrc.indexOf('\nasync function ', fnStart + 10);
+    const fnBody = workerSrc.slice(fnStart, fnEnd);
+    expect(fnBody).toContain('caption_too_long');
+    expect(fnBody).toContain('video_size_limit_exceeded');
+    expect(fnBody).toContain('invalid_video_mime_type');
+  });
+
+  it('maps video URL + caption into the public media contract', () => {
+    const fnStart = workerSrc.indexOf('function mapPublicMediaRows');
+    const fnEnd = workerSrc.indexOf('\nasync function ', fnStart + 10);
+    const fnBody = workerSrc.slice(fnStart, fnEnd);
+    expect(fnBody).toContain('videoUrl');
+    expect(fnBody).toContain('caption');
+  });
+
+  it('media page includes admin upload controls + caption clamp', () => {
+    expect(mediaSrc).toContain('Admin Video Upload');
+    expect(mediaSrc).toContain('max 140 chars');
+    expect(mediaSrc).toContain('ingestPresign(\'video\'');
+  });
+});
+
 // ── 9. Security boundaries ────────────────────────────────────────────────────
-describe('security: super_admin gating', () => {
-  it('all ingest handlers call requireSuperAdmin', () => {
-    for (const handler of [
-      'handleIngestPresign', 'handleIngestSubmit', 'handleIngestStatus',
-      'handleIngestApprove', 'handleIngestReject', 'handleIngestReplay',
-    ]) {
+describe('security: ingest role gating', () => {
+  it('presign/submit/status allow admin or super_admin', () => {
+    for (const handler of ['handleIngestPresign', 'handleIngestSubmit', 'handleIngestStatus']) {
       const fnStart = workerSrc.indexOf(`async function ${handler}`);
-      const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
-      const fnBody  = workerSrc.slice(fnStart, fnEnd);
+      const fnEnd = workerSrc.indexOf('\nasync function ', fnStart + 10);
+      const fnBody = workerSrc.slice(fnStart, fnEnd);
+      expect(fnBody).toContain('requireAdminSession');
+    }
+  });
+
+  it('approve/reject/replay remain super_admin gated', () => {
+    for (const handler of ['handleIngestApprove', 'handleIngestReject', 'handleIngestReplay']) {
+      const fnStart = workerSrc.indexOf(`async function ${handler}`);
+      const fnEnd = workerSrc.indexOf('\nasync function ', fnStart + 10);
+      const fnBody = workerSrc.slice(fnStart, fnEnd);
       expect(fnBody).toContain('requireSuperAdmin');
     }
   });
