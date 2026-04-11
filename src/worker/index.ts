@@ -661,23 +661,8 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   };
   if (typeof body.gameId === "string") patch.active_game_id = body.gameId;
   if (!body.isLive && !body.preserveGameId) patch.active_game_id = null;
-  if (body.isLive) {
-    const effectiveGameId = typeof body.gameId === "string"
-      ? body.gameId
-      : String((await getOrCreateStreamConfig(ctx.admin)).active_game_id ?? "");
-    if (!effectiveGameId) {
-      return json({ ok: false, error: "active_game_required" }, 400);
-    }
-    const gameCheck = await ctx.admin
-      .from("games")
-      .select("id")
-      .eq("id", effectiveGameId)
-      .maybeSingle();
-    if (!gameCheck.data) {
-      return json({ ok: false, error: "active_game_not_found" }, 400);
-    }
-    patch.active_game_id = effectiveGameId;
-  }
+  // Live status can be toggled independently from active game assignment.
+  // If a gameId is provided we persist it; otherwise we preserve current value.
   if (body.isLive) {
     patch.live_started_at = nowIso;
     patch.live_ended_at = null;

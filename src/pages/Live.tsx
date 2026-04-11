@@ -85,7 +85,7 @@ function AdminStreamOverlay({
       // stream state is unchanged. Admin sees the error and can retry
       // the toggle without re-entering the URL.
       try {
-        await setStreamLive(nextLive, token, nextLive ? { gameId: activeGameId } : { gameId: activeGameId, preserveGameId: true });
+        await setStreamLive(nextLive, token, activeGameId ? { gameId: activeGameId, preserveGameId: true } : { preserveGameId: true });
       } catch (liveErr) {
         toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
         setSaving(false);
