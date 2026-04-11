@@ -80,7 +80,7 @@ export function useLiveAccess() {
         .eq('user_id', user.id)
         .eq('status', 'active');
 
-      const hasActive = (entitlements ?? []).some(
+      const hasActive = Array.isArray(entitlements) && entitlements.some(
         (e: { expires_at: string | null }) =>
           !e.expires_at || new Date(e.expires_at) > new Date()
       );
