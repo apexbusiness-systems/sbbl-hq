@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SBBL-HQ — Self-Hosted Supabase Runbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root,[data-theme="dark"]{
+  --bg:#0f1117;--surface:#171b26;--surface2:#1e2230;--border:#2a2f3e;
+  --text:#e4e8f0;--muted:#8891a6;--faint:#3d4459;
+  --teal:#3ecfcf;--teal-dim:#1a8a8a;--teal-hi:rgba(62,207,207,.08);
+  --orange:#f97316;--green:#22c55e;--red:#ef4444;--gold:#f59e0b;
+  --blue:#60a5fa;--purple:#a78bfa;
+  --font-mono:'JetBrains Mono',monospace;
+  --font-ui:'Inter','Segoe UI',sans-serif;
+  --r:6px;--r2:10px;
+  --shadow:0 4px 24px rgba(0,0,0,.4);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:72px}
+body{font-family:var(--font-ui);background:var(--bg);color:var(--text);font-size:14px;line-height:1.6}
+a{color:var(--teal);text-decoration:none}a:hover{text-decoration:underline}
+
+/* ── Topbar ────────────────────────────────────────────── */
+.topbar{
+  position:sticky;top:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  background:rgba(15,17,23,.92);backdrop-filter:blur(12px);
+  border-bottom:1px solid var(--border);
+  padding:0 24px;height:60px;gap:16px;
+}
+.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:15px;letter-spacing:-.3px}
+.logo svg{flex-shrink:0}
+.badge{background:var(--teal-hi);color:var(--teal);border:1px solid var(--teal-dim);
+  border-radius:99px;font-size:11px;font-weight:600;padding:2px 9px;letter-spacing:.3px}
+.nav{display:flex;gap:4px}
+.nav a{color:var(--muted);font-size:13px;padding:6px 12px;border-radius:var(--r);transition:all .15s}
+.nav a:hover{color:var(--text);background:var(--surface2);text-decoration:none}
+.domain{font-family:var(--font-mono);font-size:12px;color:var(--teal);
+  background:var(--teal-hi);border:1px solid var(--teal-dim);
+  border-radius:var(--r);padding:4px 10px}
+
+/* ── Layout ────────────────────────────────────────────── */
+.page{max-width:1080px;margin:0 auto;padding:40px 24px 80px}
+h1{font-size:28px;font-weight:700;letter-spacing:-.5px;margin-bottom:6px}
+.subtitle{color:var(--muted);font-size:14px;margin-bottom:40px}
+h2{font-size:18px;font-weight:700;letter-spacing:-.3px;margin-bottom:16px;
+   display:flex;align-items:center;gap:10px}
+h2 .num{background:var(--teal);color:#000;border-radius:99px;
+  font-size:11px;font-weight:700;padding:2px 8px;min-width:24px;text-align:center}
+h3{font-size:13px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;
+   color:var(--muted);margin-bottom:10px}
+section{margin-bottom:56px}
+.divider{border:none;border-top:1px solid var(--border);margin:40px 0}
+
+/* ── Cards ─────────────────────────────────────────────── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r2);
+  padding:24px;margin-bottom:16px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+@media(max-width:768px){.grid2,.grid3{grid-template-columns:1fr}}
+
+/* ── Code blocks ───────────────────────────────────────── */
+pre{background:#0a0c10;border:1px solid var(--border);border-radius:var(--r2);
+  padding:20px;overflow-x:auto;position:relative;margin-bottom:16px}
+code{font-family:var(--font-mono);font-size:12.5px;line-height:1.7;color:#c9d1d9}
+.lang-tag{position:absolute;top:10px;right:12px;
+  font-family:var(--font-mono);font-size:10px;color:var(--faint);letter-spacing:.5px}
+.copy-btn{position:absolute;top:10px;right:48px;
+  background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);
+  color:var(--muted);font-size:11px;padding:3px 9px;cursor:pointer;transition:all .15s}
+.copy-btn:hover{color:var(--text);border-color:var(--teal)}
+.copy-btn.copied{color:var(--green);border-color:var(--green)}
+
+/* ── Steps ──────────────────────────────────────────────── */
+.steps{display:flex;flex-direction:column;gap:0}
+.step{display:flex;gap:16px;position:relative}
+.step::before{content:'';position:absolute;left:18px;top:36px;bottom:-4px;
+  width:2px;background:var(--border);z-index:0}
+.step:last-child::before{display:none}
+.step-dot{width:36px;height:36px;border-radius:50%;background:var(--surface2);
+  border:2px solid var(--border);display:flex;align-items:center;justify-content:center;
+  font-size:13px;font-weight:700;flex-shrink:0;z-index:1;color:var(--muted)}
+.step.done .step-dot{background:rgba(34,197,94,.15);border-color:var(--green);color:var(--green)}
+.step.active .step-dot{background:var(--teal-hi);border-color:var(--teal);color:var(--teal)}
+.step-body{flex:1;padding-bottom:28px}
+.step-body p{color:var(--muted);font-size:13px;margin-top:4px}
+
+/* ── Checklist ──────────────────────────────────────────── */
+.checklist{list-style:none;display:flex;flex-direction:column;gap:8px}
+.checklist li{display:flex;align-items:flex-start;gap:10px;font-size:13px;cursor:pointer;
+  padding:10px 14px;border-radius:var(--r);border:1px solid transparent;transition:all .15s}
+.checklist li:hover{background:var(--surface2);border-color:var(--border)}
+.checklist li.checked{color:var(--muted);text-decoration:line-through}
+.checklist li .cb{width:18px;height:18px;border-radius:4px;border:2px solid var(--border);
+  flex-shrink:0;display:flex;align-items:center;justify-content:center;
+  background:var(--surface2);margin-top:1px;transition:all .15s}
+.checklist li.checked .cb{background:var(--green);border-color:var(--green);color:#000}
+.checklist li.checked .cb::after{content:'✓';font-size:11px;font-weight:700}
+
+/* ── Env table ──────────────────────────────────────────── */
+.env-table{width:100%;border-collapse:collapse}
+.env-table th{text-align:left;font-size:11px;font-weight:600;letter-spacing:.5px;
+  text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--border);
+  padding:8px 12px}
+.env-table td{padding:10px 12px;border-bottom:1px solid rgba(42,47,62,.5);
+  font-size:13px;vertical-align:top}
+.env-table tr:last-child td{border-bottom:none}
+.env-key{font-family:var(--font-mono);font-size:12px;color:var(--teal)}
+.env-val{font-family:var(--font-mono);font-size:12px;color:var(--gold)}
+.env-val.secret{color:var(--red)}
+.tag{display:inline-block;font-size:10px;font-weight:600;padding:2px 7px;
+  border-radius:99px;letter-spacing:.3px}
+.tag.req{background:rgba(239,68,68,.12);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+.tag.auth{background:rgba(96,165,250,.1);color:var(--blue);border:1px solid rgba(96,165,250,.2)}
+.tag.done{background:rgba(34,197,94,.1);color:var(--green);border:1px solid rgba(34,197,94,.2)}
+
+/* ── Status row ─────────────────────────────────────────── */
+.status-row{display:flex;flex-wrap:wrap;gap:12px;margin-bottom:24px}
+.status-chip{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:500;
+  padding:6px 14px;border-radius:99px;background:var(--surface2);border:1px solid var(--border)}
+.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dot.green{background:var(--green);box-shadow:0 0 6px var(--green)}
+.dot.orange{background:var(--orange);box-shadow:0 0 6px var(--orange)}
+.dot.red{background:var(--red);box-shadow:0 0 6px var(--red)}
+.dot.grey{background:var(--faint)}
+
+/* ── Alert ──────────────────────────────────────────────── */
+.alert{display:flex;gap:12px;padding:14px 16px;border-radius:var(--r2);margin-bottom:16px;font-size:13px}
+.alert.warn{background:rgba(249,115,22,.08);border:1px solid rgba(249,115,22,.3);color:var(--orange)}
+.alert.info{background:rgba(62,207,207,.06);border:1px solid rgba(62,207,207,.25);color:var(--teal)}
+.alert.success{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.3);color:var(--green)}
+.alert-icon{font-size:16px;flex-shrink:0;margin-top:1px}
+
+/* ── Phase accordion ────────────────────────────────────── */
+.phase{border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;margin-bottom:12px}
+.phase-header{display:flex;align-items:center;justify-content:space-between;
+  padding:16px 20px;cursor:pointer;user-select:none;transition:background .15s}
+.phase-header:hover{background:var(--surface2)}
+.phase-title{display:flex;align-items:center;gap:12px;font-weight:600;font-size:14px}
+.phase-num{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:12px;font-weight:700}
+.phase-body{padding:0 20px 20px;display:none}
+.phase.open .phase-body{display:block}
+.phase.open .phase-header .arrow{transform:rotate(180deg)}
+.arrow{transition:transform .2s;color:var(--muted)}
+
+/* ── Service grid ───────────────────────────────────────── */
+.svc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px}
+.svc-card{background:var(--surface2);border:1px solid var(--border);border-radius:var(--r);
+  padding:14px 16px}
+.svc-name{font-weight:600;font-size:13px;margin-bottom:4px}
+.svc-desc{font-size:12px;color:var(--muted)}
+.svc-port{font-family:var(--font-mono);font-size:11px;color:var(--faint);margin-top:6px}
+</style>
+</head>
+<body>
+
+<!-- ── Topbar ─────────────────────────────────────────── -->
+<header class="topbar">
+  <div class="logo">
+    <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-label="SBBL-HQ Logo">
+      <rect width="32" height="32" rx="8" fill="#0f1117"/>
+      <path d="M8 8h6l4 8-4 8H8l4-8L8 8Z" fill="#3ecfcf"/>
+      <path d="M18 8h6l4 8-4 8h-6l4-8-4-8Z" fill="#1a8a8a" opacity=".7"/>
+    </svg>
+    SBBL-HQ
+    <span class="badge">SELF-HOSTED</span>
+  </div>
+  <nav class="nav">
+    <a href="#overview">Overview</a>
+    <a href="#phases">Phases</a>
+    <a href="#auth-config">Auth</a>
+    <a href="#commands">Commands</a>
+    <a href="#checklist">Checklist</a>
+  </nav>
+  <code class="domain">sbbl-hq.icu</code>
+</header>
+
+<!-- ── Page ───────────────────────────────────────────── -->
+<div class="page">
+
+  <h1>Self-Hosted Supabase Runbook</h1>
+  <p class="subtitle">Complete migration from Supabase Cloud → self-hosted at <strong>https://sbbl-hq.icu</strong> — auth flows, HTTPS, load validation.</p>
+
+  <!-- Status chips -->
+  <div class="status-row">
+    <div class="status-chip"><span class="dot orange"></span>Migration in progress</div>
+    <div class="status-chip"><span class="dot green"></span>Caddyfile ready</div>
+    <div class="status-chip"><span class="dot green"></span>.env generated</div>
+    <div class="status-chip"><span class="dot green"></span>Scripts bundled</div>
+    <div class="status-chip"><span class="dot grey"></span>Keys: pending generation</div>
+    <div class="status-chip"><span class="dot grey"></span>Auth data: pending migration</div>
+  </div>
+
+  <div class="alert info"><span class="alert-icon">ℹ️</span>
+    <div>All <code>REPLACE_WITH_*</code> values in <code>.env</code> must be filled in before running any <code>docker compose</code> commands. Run <code>scripts/01-generate-keys.sh</code> first to auto-populate ANON_KEY and SERVICE_ROLE_KEY.</div>
+  </div>
+
+  <!-- ── Section 1: Architecture ────────────────────── -->
+  <section id="overview">
+    <h2><span class="num">01</span> Stack Architecture @ sbbl-hq.icu</h2>
+
+    <div class="alert info"><span class="alert-icon">🔒</span>
+      <div>Caddy terminates TLS and auto-renews Let's Encrypt certificates. All internal traffic flows over HTTP inside the Docker network. No self-signed certs needed.</div>
+    </div>
+
+    <div class="card">
+      <h3>Service Map</h3>
+      <div class="svc-grid">
+        <div class="svc-card">
+          <div class="svc-name">🔒 Caddy</div>
+          <div class="svc-desc">TLS termination, reverse proxy, HTTP/3</div>
+          <div class="svc-port">:80  :443  :443/udp</div>
+        </div>
+        <div class="svc-card">
+          <div class="svc-name">🌐 Kong</div>
+          <div class="svc-desc">API gateway — routes /auth, /rest, /functions</div>
+          <div class="svc-port">internal :8000</div>
+        </div>
+        <div class="svc-card">
+          <div class="svc-name">🔑 GoTrue (Auth)</div>
+          <div class="svc-desc">Auth, OAuth, magic links, sessions</div>
+          <div class="svc-port">internal :9999</div>
+        </div>
+        <div class="svc-card">
+          <div class="svc-name">🗄️ PostgREST</div>
+          <div class="svc-desc">Auto-generated REST API from Postgres schema</div>
+          <div class="svc-port">internal :3000</div>
+        </div>
+        <div class="svc-card">
+          <div class="svc-name">⚡ Realtime</div>
+          <div class="svc-desc">WebSocket subscriptions (live stats, scores)</div>
+          <div class="svc-port">internal :4000</div>
+        </div>
+        <div class="svc-card">
+          <div class="svc-name">📦 Storage</div>
+          <div class="svc-desc">File uploads, headshots, media assets</div>
+          <div class="svc-port">internal :5000</div>
+        </div>
+        <div class="svc-card">
+          <div class="svc-name">🐘 Postgres 15</div>
+          <div class="svc-desc">Primary database with RLS, indexes, extensions</div>
+          <div class="svc-port">internal :5432</div>
+        </div>
+        <div class="svc-card">
+          <div class="svc-name">🎛️ Studio</div>
+          <div class="svc-desc">Dashboard UI (sbbl-hq.icu/)</div>
+          <div class="svc-port">internal :3000</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ── Section 2: Phases ────────────────────────────── -->
+  <section id="phases">
+    <h2><span class="num">02</span> Migration Phases</h2>
+
+    <!-- Phase 0 -->
+    <div class="phase open">
+      <div class="phase-header" onclick="togglePhase(this)">
+        <div class="phase-title">
+          <div class="phase-num" style="background:rgba(62,207,207,.15);color:var(--teal)">0</div>
+          Inventory Cloud Auth Configuration
+        </div>
+        <svg class="arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="phase-body">
+        <p style="color:var(--muted);margin-bottom:16px">Snapshot everything from Supabase Cloud before touching infra.</p>
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Export enabled providers (email, magic link, Google, GitHub, Apple)</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Export password policy — minimum length, complexity, HIBP toggle</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Export CAPTCHA settings (Turnstile site key + secret)</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Export email templates (confirm, invite, magic link, recovery)</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Note Auth Hooks (custom JWT claims, MFA hooks)</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Capture SMTP / Resend credentials</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Download a small anonymized auth.users subset for schema verification</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Phase 1 -->
+    <div class="phase">
+      <div class="phase-header" onclick="togglePhase(this)">
+        <div class="phase-title">
+          <div class="phase-num" style="background:rgba(96,165,250,.15);color:var(--blue)">1</div>
+          Clone Supabase Repo & Boot Stack
+        </div>
+        <svg class="arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="phase-body">
+        <pre><code id="phase1-cmd">git clone --depth 1 https://github.com/supabase/supabase
+cd supabase/docker
+
+# Copy the config files from this bundle into supabase/docker/
+cp /path/to/sbbl-hq-selfhost/.env .
+cp /path/to/sbbl-hq-selfhost/docker-compose.caddy.yml .
+cp /path/to/sbbl-hq-selfhost/volumes/proxy/caddy/Caddyfile volumes/proxy/caddy/
+
+# Generate JWT keys
+bash /path/to/sbbl-hq-selfhost/scripts/01-generate-keys.sh
+
+# Pull images and start
+docker compose pull
+docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose.caddy.yml up -d</code><button class="copy-btn" onclick="copyCode('phase1-cmd',this)">copy</button><span class="lang-tag">bash</span></pre>
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>All <code>REPLACE_WITH_*</code> values in .env filled in</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span><code>scripts/01-generate-keys.sh</code> run — ANON_KEY + SERVICE_ROLE_KEY in .env</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>DNS A record for sbbl-hq.icu → server public IP</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Ports 80 and 443 open in firewall</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>All containers healthy: <code>docker compose ps</code></li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>HTTPS cert issued: <code>curl -I https://sbbl-hq.icu/auth/v1/</code> → HTTP 401</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Phase 2 -->
+    <div class="phase">
+      <div class="phase-header" onclick="togglePhase(this)">
+        <div class="phase-title">
+          <div class="phase-num" style="background:rgba(167,139,250,.15);color:var(--purple)">2</div>
+          Mirror Auth Providers & Redirects
+        </div>
+        <svg class="arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="phase-body">
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Email + password: enabled in .env (default)</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Magic link: <code>GOTRUE_MAILER_TEMPLATES_MAGIC_LINK</code> URL updated</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Google OAuth: client ID + secret in .env; callback URL updated in Google Console to <code>https://sbbl-hq.icu/auth/v1/callback</code></li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>GitHub OAuth: client ID + secret in .env; callback URL updated in GitHub App</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Apple OAuth (if used): client ID + secret; callback registered</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span><code>GOTRUE_URI_ALLOW_LIST</code> includes all SBBL-HQ frontend origins</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Smoke test: manual signup + login + OAuth for each provider ✅</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Phase 3 -->
+    <div class="phase">
+      <div class="phase-header" onclick="togglePhase(this)">
+        <div class="phase-title">
+          <div class="phase-num" style="background:rgba(249,115,22,.15);color:var(--orange)">3</div>
+          Password Policy + HIBP + CAPTCHA
+        </div>
+        <svg class="arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="phase-body">
+        <div class="alert warn"><span class="alert-icon">⚠️</span>
+          <div>These three variables are critical. GoTrue must restart after changes: <code>docker compose restart auth</code></div>
+        </div>
+        <pre><code># In .env — already pre-configured for sbbl-hq.icu
+GOTRUE_PASSWORD_MIN_LENGTH=8
+GOTRUE_PASSWORD_REQUIRED_CHARACTERS=abcdefghijklmnopqrstuvwxyz:ABCDEFGHIJKLMNOPQRSTUVWXYZ:0123456789
+GOTRUE_PASSWORD_HIBP_ENABLED=true
+GOTRUE_SECURITY_CAPTCHA_ENABLED=true
+GOTRUE_SECURITY_CAPTCHA_PROVIDER=turnstile
+GOTRUE_SECURITY_CAPTCHA_SECRET=REPLACE_WITH_TURNSTILE_SECRET_KEY</code><span class="lang-tag">env</span></pre>
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Attempt signup with "password" → rejected 422 ✅</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Attempt signup with "12345678" → rejected 422 ✅</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Attempt signup with strong password, no CAPTCHA token → rejected 400 ✅</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Attempt signup with invalid CAPTCHA token → rejected 400 ✅</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Run full validation: <code>bash scripts/03-validate-auth.sh</code> → all green ✅</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Phase 4 -->
+    <div class="phase">
+      <div class="phase-header" onclick="togglePhase(this)">
+        <div class="phase-title">
+          <div class="phase-num" style="background:rgba(34,197,94,.15);color:var(--green)">4</div>
+          Migrate Auth Data + DB
+        </div>
+        <svg class="arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="phase-body">
+        <pre><code id="phase4-cmd">export CLOUD_DB_URL="postgres://postgres:[CLOUD_PW]@db.[REF].supabase.co:5432/postgres"
+export LOCAL_DB_URL="postgres://supabase_admin:[LOCAL_PW]@localhost:5432/postgres"
+
+# Migrate auth.* tables
+bash scripts/02-migrate-auth.sh
+
+# Migrate app schema + data (full project migration)
+# See: https://supabase.com/docs/guides/self-hosting/restore-from-platform
+supabase db dump --db-url "$CLOUD_DB_URL" -f full-dump.sql
+psql "$LOCAL_DB_URL" -f full-dump.sql</code><button class="copy-btn" onclick="copyCode('phase4-cmd',this)">copy</button><span class="lang-tag">bash</span></pre>
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>auth.users migrated — row counts match Cloud</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>auth.identities migrated</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>App schema (24 migration files) applied</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Existing user can log in to self-hosted instance</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>RLS policies verified — data isolation intact</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Phase 5 -->
+    <div class="phase">
+      <div class="phase-header" onclick="togglePhase(this)">
+        <div class="phase-title">
+          <div class="phase-num" style="background:rgba(245,158,11,.15);color:var(--gold)">5</div>
+          Load Test Auth Under Concurrency
+        </div>
+        <svg class="arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="phase-body">
+        <pre><code id="phase5-cmd"># Install k6: https://k6.io/docs/getting-started/installation/
+
+k6 run \
+  --env SUPABASE_URL=https://sbbl-hq.icu \
+  --env ANON_KEY=$(grep ^ANON_KEY .env | cut -d= -f2) \
+  tests/load-auth.js
+
+# SLO targets (all must pass):
+#   p50 login latency  < 200ms
+#   p95 login latency  < 600ms
+#   p99 login latency  < 1200ms
+#   error rate         < 1%</code><button class="copy-btn" onclick="copyCode('phase5-cmd',this)">copy</button><span class="lang-tag">bash</span></pre>
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>k6 installed on test machine</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>100 test-user accounts pre-created in staging</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Load test run: 5 000 VU peak, 3-minute hold</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>p95 latency &lt; 600ms ✅</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Error rate &lt; 1% ✅</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Postgres CPU &lt; 70% at peak</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>PgBouncer connection pool not exhausted</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- Phase 6 -->
+    <div class="phase">
+      <div class="phase-header" onclick="togglePhase(this)">
+        <div class="phase-title">
+          <div class="phase-num" style="background:rgba(62,207,207,.15);color:var(--teal)">6</div>
+          Cut Over & Update SBBL-HQ App
+        </div>
+        <svg class="arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+      </div>
+      <div class="phase-body">
+        <div class="alert warn"><span class="alert-icon">⚠️</span>
+          <div>Keep Supabase Cloud running in read-only mode for at least 72 hours after cutover as a fallback.</div>
+        </div>
+        <pre><code id="phase6-cmd"># In your SBBL-HQ Cloudflare Workers secrets:
+wrangler secret put SUPABASE_URL        # → https://sbbl-hq.icu
+wrangler secret put SUPABASE_ANON_KEY   # → new self-hosted anon key
+wrangler secret put SUPABASE_SERVICE_KEY # → new self-hosted service key
+
+# Update Cloudflare Pages environment variables:
+# Settings → Environment Variables → Update SUPABASE_URL etc.</code><button class="copy-btn" onclick="copyCode('phase6-cmd',this)">copy</button><span class="lang-tag">bash</span></pre>
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Cloudflare Workers secrets updated to self-hosted URLs + keys</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Cloudflare Pages env vars updated</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Turnstile site key still valid (same Cloudflare account → no change needed)</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Stripe webhooks pointing at self-hosted if using auth callbacks</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Full production smoke test: login, signup, OAuth, magic link ✅</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Cloud project kept alive 72h as rollback target</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ── Section 3: Auth Config Reference ─────────────── -->
+  <section id="auth-config">
+    <h2><span class="num">03</span> Auth Configuration Reference</h2>
+    <div class="card">
+      <table class="env-table">
+        <thead><tr><th>Variable</th><th>Value</th><th>Notes</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="env-key">SUPABASE_PUBLIC_URL</td><td class="env-val">https://sbbl-hq.icu</td><td>Frontend-facing base URL</td><td><span class="tag done">Set</span></td></tr>
+          <tr><td class="env-key">API_EXTERNAL_URL</td><td class="env-val">https://sbbl-hq.icu</td><td>Used in OAuth callback base</td><td><span class="tag done">Set</span></td></tr>
+          <tr><td class="env-key">SITE_URL</td><td class="env-val">https://sbbl-hq.icu</td><td>Auth redirect base</td><td><span class="tag done">Set</span></td></tr>
+          <tr><td class="env-key">GOTRUE_PASSWORD_MIN_LENGTH</td><td class="env-val">8</td><td>Minimum password length</td><td><span class="tag done">Set</span></td></tr>
+          <tr><td class="env-key">GOTRUE_PASSWORD_HIBP_ENABLED</td><td class="env-val">true</td><td>HaveIBeenPwned leaked password check</td><td><span class="tag done">Set</span></td></tr>
+          <tr><td class="env-key">GOTRUE_SECURITY_CAPTCHA_ENABLED</td><td class="env-val">true</td><td>Requires CAPTCHA token on signup/login</td><td><span class="tag done">Set</span></td></tr>
+          <tr><td class="env-key">GOTRUE_SECURITY_CAPTCHA_PROVIDER</td><td class="env-val">turnstile</td><td>Cloudflare Turnstile</td><td><span class="tag done">Set</span></td></tr>
+          <tr><td class="env-key">GOTRUE_SECURITY_CAPTCHA_SECRET</td><td class="env-val secret">REPLACE_WITH_TURNSTILE_SECRET_KEY</td><td>From Cloudflare Turnstile dashboard</td><td><span class="tag req">Required</span></td></tr>
+          <tr><td class="env-key">GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID</td><td class="env-val secret">REPLACE_WITH_GOOGLE_CLIENT_ID</td><td>Google Cloud Console</td><td><span class="tag req">Required</span></td></tr>
+          <tr><td class="env-key">GOTRUE_EXTERNAL_GITHUB_CLIENT_ID</td><td class="env-val secret">REPLACE_WITH_GITHUB_CLIENT_ID</td><td>GitHub OAuth App</td><td><span class="tag req">Required</span></td></tr>
+          <tr><td class="env-key">GOTRUE_SMTP_HOST</td><td class="env-val">smtp.resend.com</td><td>Matches existing Resend config</td><td><span class="tag auth">Auth</span></td></tr>
+          <tr><td class="env-key">GOTRUE_SMTP_PASS</td><td class="env-val secret">REPLACE_WITH_RESEND_API_KEY</td><td>Resend API key</td><td><span class="tag req">Required</span></td></tr>
+          <tr><td class="env-key">GOTRUE_REFRESH_TOKEN_ROTATION_ENABLED</td><td class="env-val">true</td><td>Security hardening</td><td><span class="tag done">Set</span></td></tr>
+          <tr><td class="env-key">GOTRUE_PASSWORD_REQUIRED_CHARACTERS</td><td class="env-val">lower:UPPER:digits</td><td>Complexity enforcement</td><td><span class="tag done">Set</span></td></tr>
+          <tr><td class="env-key">GOTRUE_URI_ALLOW_LIST</td><td class="env-val">https://sbbl-hq.icu/**</td><td>All allowed redirect origins</td><td><span class="tag done">Set</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ── Section 4: Quick Commands ────────────────────── -->
+  <section id="commands">
+    <h2><span class="num">04</span> Quick Commands</h2>
+    <div class="grid2">
+      <div>
+        <h3>Start / Stop</h3>
+        <pre><code id="cmd-start"># Full stack with Caddy TLS
+docker compose \
+  -f docker-compose.yml \
+  -f docker-compose.caddy.yml \
+  up -d
+
+# Stop all
+docker compose down
+
+# Restart auth only
+docker compose restart auth</code><button class="copy-btn" onclick="copyCode('cmd-start',this)">copy</button><span class="lang-tag">bash</span></pre>
+      </div>
+      <div>
+        <h3>Health Checks</h3>
+        <pre><code id="cmd-health"># All services status
+docker compose ps
+
+# Auth health
+curl -I https://sbbl-hq.icu/auth/v1/
+
+# DB connection
+docker compose exec db \
+  psql -U postgres -c "SELECT count(*) FROM auth.users;"
+
+# Caddy TLS logs
+docker logs supabase-caddy --tail 50</code><button class="copy-btn" onclick="copyCode('cmd-health',this)">copy</button><span class="lang-tag">bash</span></pre>
+      </div>
+      <div>
+        <h3>Auth Validation</h3>
+        <pre><code id="cmd-validate">export SUPABASE_URL=https://sbbl-hq.icu
+export ANON_KEY=$(grep ^ANON_KEY .env | cut -d= -f2)
+bash scripts/03-validate-auth.sh</code><button class="copy-btn" onclick="copyCode('cmd-validate',this)">copy</button><span class="lang-tag">bash</span></pre>
+      </div>
+      <div>
+        <h3>Backup Auth</h3>
+        <pre><code id="cmd-backup">pg_dump \
+  "postgres://supabase_admin:${POSTGRES_PASSWORD}@localhost:5432/postgres" \
+  --schema=auth \
+  --no-owner \
+  -f backups/auth-$(date +%Y%m%d).sql</code><button class="copy-btn" onclick="copyCode('cmd-backup',this)">copy</button><span class="lang-tag">bash</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ── Section 5: Pre-launch Checklist ──────────────── -->
+  <section id="checklist">
+    <h2><span class="num">05</span> Pre-Launch Checklist</h2>
+    <div class="grid2">
+      <div class="card">
+        <h3>Infrastructure</h3>
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Server: 8 vCPU / 32 GB RAM minimum for 50K users</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>DNS A record sbbl-hq.icu → server IP</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Ports 80 + 443 open (firewall + cloud security group)</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Caddy TLS cert issued (Let's Encrypt)</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Automated daily backups configured</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Monitoring / alerting on Postgres CPU + disk</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Auth Security</h3>
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>JWT_SECRET ≥ 56 chars, securely generated</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>ANON_KEY + SERVICE_ROLE_KEY regenerated (not Supabase Cloud keys)</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>HIBP leaked password protection ON</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Turnstile CAPTCHA ON for signup + login</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Refresh token rotation ON</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Rate limits configured (signup: 10/hr, email: 100/hr)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>App Integration</h3>
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>SUPABASE_URL updated to https://sbbl-hq.icu in all Workers secrets</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>ANON_KEY updated in Cloudflare Pages env</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>SERVICE_ROLE_KEY updated in Workers (server-side only)</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>OAuth callback URLs updated in Google / GitHub consoles</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Turnstile widget still uses same site key (no change needed)</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Load Validation</h3>
+        <ul class="checklist">
+          <li onclick="toggleCheck(this)"><span class="cb"></span>k6 load test: 5 000 VU peak sustained 3 min</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>p95 auth latency &lt; 600ms</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Error rate &lt; 1%</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Postgres connections ≤ 80% pool capacity</li>
+          <li onclick="toggleCheck(this)"><span class="cb"></span>Realtime WebSocket connections stable</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+</div><!-- /page -->
+
+<script>
+function togglePhase(header) {
+  const phase = header.closest('.phase');
+  phase.classList.toggle('open');
+}
+function toggleCheck(li) {
+  li.classList.toggle('checked');
+  const cb = li.querySelector('.cb');
+  if (li.classList.contains('checked')) {
+    cb.innerHTML = '';
+    cb.style.background = 'var(--green)';
+    cb.style.borderColor = 'var(--green)';
+    cb.innerHTML = '✓';
+  } else {
+    cb.innerHTML = '';
+    cb.style.background = '';
+    cb.style.borderColor = '';
+  }
+}
+function copyCode(id, btn) {
+  const code = document.getElementById(id);
+  if (!code) return;
+  const text = code.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btn.textContent = 'copied!';
+    btn.classList.add('copied');
+    setTimeout(() => { btn.textContent = 'copy'; btn.classList.remove('copied'); }, 2000);
+  });
+}
+</script>
+</body>
+</html>
