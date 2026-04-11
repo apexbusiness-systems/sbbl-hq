@@ -3878,11 +3878,10 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     path: "/api/streams/:gameId/access",
     handler: handleStreamAccess,
   },
-  {
-    method: "POST",
-    path: "/api/streams/:gameId/session",
-    handler: handlePlaybackSession,
-  },
+  // IMPORTANT: literal "broadcast" routes MUST come before the parameterized
+  // :gameId routes. The router does a linear first-match scan; if :gameId is
+  // registered first it captures "broadcast" as a gameId parameter, which then
+  // fails the DB upsert (invalid UUID → 500). Literal paths always beat params.
   {
     method: "POST",
     path: "/api/streams/broadcast/session",
@@ -3890,8 +3889,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "POST",
-    path: "/api/streams/:gameId/session/heartbeat",
-    handler: handleStreamSessionHeartbeat,
+    path: "/api/streams/:gameId/session",
+    handler: handlePlaybackSession,
   },
   {
     method: "POST",
@@ -3900,13 +3899,18 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "POST",
-    path: "/api/streams/:gameId/session/end",
-    handler: handleStreamSessionEnd,
+    path: "/api/streams/:gameId/session/heartbeat",
+    handler: handleStreamSessionHeartbeat,
   },
   {
     method: "POST",
     path: "/api/streams/broadcast/session/end",
     handler: handleBroadcastSessionEnd,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/session/end",
+    handler: handleStreamSessionEnd,
   },
   {
     method: "GET",
@@ -4088,16 +4092,16 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
-  // Facebook domains required for /live page embed (Switcher Studio → FB Live).
+  // Facebook + YouTube + Twitch domains required for /live page stream embeds.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net; " +
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://assets.twitch.tv; " +
     "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: blob: https:; " +
     "font-src 'self' data:; " +
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://www.youtube.com https://player.vimeo.com; " +
-    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
     "form-action 'self' https://checkout.stripe.com;"
