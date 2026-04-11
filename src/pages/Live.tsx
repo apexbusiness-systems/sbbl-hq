@@ -16,6 +16,7 @@ import {
   fetchAdminStreamConfig,
   fetchPublicStreamStatus,
   fetchStreamComments,
+  generateCompCode,
   postStreamComment,
   setStreamLive,
   updateStreamConfig,
@@ -23,7 +24,7 @@ import {
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
-  Radio, Eye, DollarSign, Settings, X,
+  Radio, Eye, DollarSign, Settings, X, Ticket, Copy,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Game, PlayerProfile } from '@/types';
@@ -60,6 +61,7 @@ function AdminStreamOverlay({
   streamTitle, setStreamTitle,
   viewerCount,
   customStreamUrl, setCustomStreamUrl,
+  activeGameId,
 }: {
   isLive: boolean;
   setIsLive: (v: boolean) => void;
@@ -68,9 +70,54 @@ function AdminStreamOverlay({
   viewerCount: number;
   customStreamUrl: string;
   setCustomStreamUrl: (v: string) => void;
+  activeGameId: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [compNote, setCompNote] = useState('');
+  const [compHours, setCompHours] = useState('24');
+  const [compGenerating, setCompGenerating] = useState(false);
+  const [compCode, setCompCode] = useState<string | null>(null);
+  const [compExpiresAt, setCompExpiresAt] = useState<string | null>(null);
+  const [compCopied, setCompCopied] = useState(false);
+
+  const handleGenerateCompCode = async () => {
+    const gameId = activeGameId ?? 'broadcast';
+    setCompGenerating(true);
+    try {
+      const hours = Number(compHours);
+      const expiresInHours = Number.isFinite(hours) && hours > 0 ? Math.min(168, hours) : 24;
+      const res = await generateCompCode(
+        gameId,
+        { note: compNote.trim() || undefined, expiresInHours },
+        null,
+      );
+      if (res.ok) {
+        setCompCode(res.code);
+        setCompExpiresAt(res.expiresAt);
+        toast.success('Comp access code generated');
+      }
+    } catch (err) {
+      toast.error(`Could not generate comp code: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setCompGenerating(false);
+    }
+  };
+
+  const handleCopyCompCode = async () => {
+    if (!compCode) return;
+    await navigator.clipboard.writeText(compCode);
+    setCompCopied(true);
+    setTimeout(() => setCompCopied(false), 2500);
+    toast.success('Comp code copied to clipboard');
+  };
+
+  const handleResetCompCode = () => {
+    setCompCode(null);
+    setCompExpiresAt(null);
+    setCompNote('');
+    setCompCopied(false);
+  };
 
   const handleGoLive = async () => {
     const nextLive = !isLive;
@@ -191,6 +238,89 @@ function AdminStreamOverlay({
             >
               {saving ? 'Saving…' : isLive ? 'End Stream' : 'Go Live'}
             </button>
+
+            {/* ── Comp Access Code Generator ──────────────────────────────
+                Super-admin-only widget. Generates an unlimited, single-use,
+                IP-locked access code. Redeemer gets the same 6-hour capped,
+                one-device-enforced session as a paid PPV purchase. */}
+            <div className="border-t border-white/10 pt-3 mt-1">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[9px] uppercase tracking-wider text-white/50 flex items-center gap-1.5">
+                  <Ticket className="w-3 h-3" /> Comp Access Code
+                </span>
+                {compCode && (
+                  <button
+                    onClick={handleResetCompCode}
+                    className="text-[9px] uppercase tracking-wider text-white/40 hover:text-white/70"
+                    title="Generate another"
+                  >
+                    New
+                  </button>
+                )}
+              </div>
+
+              {compCode ? (
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded px-3 py-2.5 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <code className="flex-1 font-mono text-[11px] text-amber-300 break-all leading-tight">
+                      {compCode}
+                    </code>
+                    <button
+                      onClick={handleCopyCompCode}
+                      className="p-1.5 rounded hover:bg-white/10 transition-colors shrink-0"
+                      title="Copy code"
+                      aria-label="Copy comp code"
+                    >
+                      {compCopied
+                        ? <Check className="w-3.5 h-3.5 text-green-400" />
+                        : <Copy className="w-3.5 h-3.5 text-white/70" />}
+                    </button>
+                  </div>
+                  {compExpiresAt && (
+                    <p className="text-[9px] text-white/50">
+                      Redeemable until {new Date(compExpiresAt).toLocaleString()} ·
+                      6h session cap · one-device · IP-locked
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={compNote}
+                    onChange={e => setCompNote(e.target.value)}
+                    maxLength={200}
+                    className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-amber-500/50 mb-2"
+                    placeholder="Note (optional) — e.g. 'Comped for J. Smith'"
+                  />
+                  <div className="flex gap-2 mb-2">
+                    <label className="text-[9px] uppercase tracking-wider text-white/40 flex items-center gap-1.5 flex-1">
+                      Expires in
+                      <input
+                        type="number"
+                        min={1}
+                        max={168}
+                        value={compHours}
+                        onChange={e => setCompHours(e.target.value)}
+                        className="flex-1 bg-white/10 border border-white/10 rounded px-2 py-1 text-xs text-white focus:outline-none focus:border-amber-500/50"
+                      />
+                      hrs
+                    </label>
+                  </div>
+                  <button
+                    onClick={handleGenerateCompCode}
+                    disabled={compGenerating}
+                    className="w-full py-2 font-display font-bold text-[11px] uppercase tracking-wider rounded bg-amber-500 text-black hover:bg-amber-400 transition-colors disabled:opacity-40 inline-flex items-center justify-center gap-1.5"
+                  >
+                    <Ticket className="w-3 h-3" />
+                    {compGenerating ? 'Generating…' : 'Generate Comp Code'}
+                  </button>
+                  <p className="text-[9px] text-white/40 mt-1.5 leading-relaxed">
+                    Single-use · IP-locked · 6h session · one-device
+                  </p>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -553,6 +683,7 @@ const LivePage = () => {
                     viewerCount={viewerCount}
                     customStreamUrl={customStreamUrl}
                     setCustomStreamUrl={setCustomStreamUrl}
+                    activeGameId={activeGameId}
                   />
                 )}
 
