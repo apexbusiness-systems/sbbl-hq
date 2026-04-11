@@ -3764,9 +3764,23 @@ async function handlePublicMedia({ req, admin }: HandlerCtx) {
 }
 
 async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
-  // Poster tab projection: include native posters and photo assets rendered as posters.
+  // Poster tab projection: include event/league-wide art and promote photo assets
+  // to poster cards without mutating source records.
   const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
-  const mapped = mapPublicMediaRows(rows, true);
+  const mapped = mapPublicMediaRows(rows, true).filter((row, index, list) => {
+    const raw = rows[index] ?? {};
+    const payload = (raw.render_payload ?? {}) as Record<string, unknown>;
+    const metadata = (((raw.media_assets as Record<string, unknown> | null) ?? {}).metadata ?? {}) as Record<string, unknown>;
+    const surface = String(raw.surface ?? payload.surface ?? metadata.surface ?? "");
+    const teamName = String(payload.team ?? metadata.team ?? "").trim();
+
+    // Exclude team-specific cards (e.g., POTG) — this route is for team-agnostic
+    // event imagery like 1v1/2v2 and league-wide graphics.
+    if (surface === "potg" || teamName.length > 0) return false;
+
+    // Idempotent response: ensure each id appears once even if source rows overlap.
+    return list.findIndex((candidate) => candidate.id === row.id) === index;
+  });
 
   return json({ ok: true, data: mapped }, 200, {
     "Cache-Control": "public, s-maxage=300, max-age=120",
