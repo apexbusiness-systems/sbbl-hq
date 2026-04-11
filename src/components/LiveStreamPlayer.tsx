@@ -15,7 +15,7 @@
  * Uses Switcher Studio's script-based embed player.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
@@ -24,6 +24,12 @@ import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
+import {
+  computeRetryDelayMs,
+  DEFAULT_STREAM_RETRY_POLICY,
+  detectNetworkTier,
+  isRecoverablePlaybackError,
+} from '@/lib/stream-reliability';
 import gameAction from '@/assets/game-action.svg';
 import type { Game } from '@/types';
 import type { AppRole } from '@/lib/auth/roles';
@@ -191,7 +197,11 @@ export function LiveStreamPlayer({
   const [playbackLoading, setPlaybackLoading] = useState(false);
   const [playerReady, setPlayerReady] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
+  const [playerRestartNonce, setPlayerRestartNonce] = useState(0);
+  const [recoveryAttempt, setRecoveryAttempt] = useState(0);
+  const [recoveryPending, setRecoveryPending] = useState(false);
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
+  const recoveryTimerRef = useRef<number | null>(null);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
 
   // ── Role classification ──────────────────────────────────────────────────
@@ -325,6 +335,27 @@ export function LiveStreamPlayer({
     };
   }, [hasAccess, userId, game.id, isSuperAdmin]);
 
+  useEffect(() => {
+    if (!hasAccess) return;
+    const onOnline = () => {
+      if (!playerError) return;
+      setPlayerError(null);
+      setRecoveryPending(false);
+      setRecoveryAttempt(0);
+      setPlayerRestartNonce(prev => prev + 1);
+      toast.success('Network restored — reconnecting stream…');
+    };
+    window.addEventListener('online', onOnline);
+    return () => window.removeEventListener('online', onOnline);
+  }, [hasAccess, playerError]);
+
+  useEffect(() => {
+    return () => {
+      // Prevent stale timer callbacks from mutating unmounted player state.
+      if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current);
+    };
+  }, []);
+
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
     return (
@@ -377,7 +408,13 @@ export function LiveStreamPlayer({
             <p className="text-sm text-white/80 font-medium mb-1">Stream Unavailable</p>
             <p className="text-xs text-white/50 mb-4">{playerError}</p>
             <button
-              onClick={() => { setPlayerError(null); setPlayerReady(false); }}
+              onClick={() => {
+                setPlayerError(null);
+                setPlayerReady(false);
+                setRecoveryPending(false);
+                setRecoveryAttempt(0);
+                setPlayerRestartNonce(prev => prev + 1);
+              }}
               className="px-4 py-2 text-xs font-display font-bold uppercase tracking-wider bg-amber-500 text-black rounded hover:bg-amber-400 transition-colors"
             >
               Retry
@@ -391,16 +428,43 @@ export function LiveStreamPlayer({
               </div>
             )}
             <ReactPlayer
+              key={playerRestartNonce}
               url={playbackUrl}
               playing={true}
               muted={true}
               controls={true}
               width="100%"
               height="100%"
-              onReady={() => setPlayerReady(true)}
+              onReady={() => {
+                setPlayerReady(true);
+                setRecoveryAttempt(0);
+                setRecoveryPending(false);
+              }}
               onError={(e) => {
                 console.error('[ReactPlayer] Stream error:', e);
-                setPlayerError('The stream source could not be loaded. The URL may be invalid or the stream may have ended.');
+                const reason = e instanceof Error
+                  ? e.message
+                  : typeof e === 'string'
+                    ? e
+                    : 'unknown_playback_error';
+                const errorMessage = `The stream source could not be loaded (${reason}).`;
+                setPlayerError(errorMessage);
+                if (recoveryPending) return;
+                if (!isRecoverablePlaybackError(errorMessage)) return;
+                if (recoveryAttempt >= DEFAULT_STREAM_RETRY_POLICY.maxAttempts) return;
+
+                const connection = (navigator as Navigator & { connection?: { downlink?: number; effectiveType?: string; saveData?: boolean } }).connection;
+                const networkTier = detectNetworkTier(connection ?? null);
+                const delay = computeRetryDelayMs(recoveryAttempt + 1);
+                const tierDelay = networkTier === 'constrained' ? Math.round(delay * 1.5) : delay;
+                setRecoveryPending(true);
+                if (recoveryTimerRef.current) window.clearTimeout(recoveryTimerRef.current);
+                recoveryTimerRef.current = window.setTimeout(() => {
+                  setPlayerError(null);
+                  setRecoveryPending(false);
+                  setRecoveryAttempt(prev => prev + 1);
+                  setPlayerRestartNonce(prev => prev + 1);
+                }, tierDelay);
               }}
               onBuffer={() => setPlayerReady(true)}
               config={{
