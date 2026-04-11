@@ -1912,33 +1912,26 @@ const handlePublicSchedule = _handlePublicSchedule;
 const handlePublicPotg = _handlePublicPotg;
 
 // Ops List handlers
-function requireSuperAdmin(req: Request) {
-  const userId = requireAuth(req);
-  const roles = req.headers.get('x-sbbl-roles-verified')?.split(',') ?? [];
-  if (!roles.includes('super_admin')) throw new Error('forbidden');
-  return userId;
-}
-
 async function handleOpsListTeams({ req, admin }: HandlerCtx) {
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const { data, error } = await admin.from('teams').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
 async function handleOpsListPlayers({ req, admin }: HandlerCtx) {
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const { data, error } = await admin.from('players').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
 async function handleOpsListProducts({ req, admin }: HandlerCtx) {
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const { data, error } = await admin.from('products').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
 async function handleOpsListEvents({ req, admin }: HandlerCtx) {
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const { data, error } = await admin.from('league_events').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
@@ -1947,7 +1940,7 @@ async function handleOpsListEvents({ req, admin }: HandlerCtx) {
 // Ops Edit (Patch) handlers
 async function handleOpsPatch(table: string, req: Request, admin: import("@supabase/supabase-js").SupabaseClient, params: Record<string, string>) {
   await ensureMutation(req, { req, admin, params } as unknown as HandlerCtx);
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const id = params.id;
   if (!id) throw new Error('Missing ID');
   const body = await req.json().catch(() => null);
@@ -1976,7 +1969,7 @@ async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch(
 // Ops Delete (Archive) handlers
 async function handleOpsDelete(table: string, req: Request, admin: import("@supabase/supabase-js").SupabaseClient, params: Record<string, string>) {
   await ensureMutation(req, { req, admin, params } as unknown as HandlerCtx);
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const id = params.id;
   if (!id) throw new Error('Missing ID');
 
@@ -2012,7 +2005,7 @@ const isMediaPublicationStatus = (v: unknown): v is MediaPublicationStatus =>
   typeof v === 'string' && (MEDIA_PUBLICATION_STATUSES as readonly string[]).includes(v);
 
 async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const url = new URL(req.url);
   const statusFilter = url.searchParams.get('status');
   const surfaceFilter = url.searchParams.get('surface');
@@ -2072,7 +2065,7 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
 
 async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const id = ctx.params.id;
   if (!id) return json({ ok: false, error: 'missing_id' }, 400);
 
@@ -2137,7 +2130,7 @@ async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
 
 async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const id = ctx.params.id;
   if (!id) return json({ ok: false, error: 'missing_id' }, 400);
 
@@ -5243,7 +5236,7 @@ async function handleOpsDeleteSchedules(ctx: HandlerCtx) {
  */
 async function handleOpsBatchProducts(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const body = await ctx.req.json().catch(() => null) as { items?: Array<{ title?: string; price?: string | number; leagueId?: string }> } | null;
   const items = body?.items ?? [];
   if (!Array.isArray(items) || items.length === 0) {
@@ -5276,7 +5269,7 @@ async function handleOpsBatchProducts(ctx: HandlerCtx) {
 // surface that needs to push an already-uploaded image into the public render layer.
 async function handleOpsMediaPublish(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  requireSuperAdmin(ctx.req);
+  await requireSuperAdminSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     title?: string;
