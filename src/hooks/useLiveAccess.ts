@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { hasRole, type AppRole } from '@/lib/auth/roles';
 
 const DEVICE_KEY = 'sbbl_stream_device';
 
@@ -64,8 +65,9 @@ export function useLiveAccess() {
         .eq('user_id', user.id);
 
       const roles = (roleRows ?? []).map((r: { role: string }) => r.role);
-      const isFreeRole =
-        roles.includes('player') || roles.includes('team_manager');
+      // Any role with hierarchy ≥ player (coach, team_manager, media_operator,
+      // store_operator, league_admin, super_admin) bypasses the paywall entirely.
+      const isFreeRole = hasRole(roles as AppRole[], 'player');
 
       if (isFreeRole) {
         localStorage.setItem(DEVICE_KEY, user.id);
