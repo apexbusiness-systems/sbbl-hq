@@ -16,6 +16,11 @@
 ## Stream Gates
 - Ingest evidence present
 - Playback media proof present
+- Source test executed in Ops for selected `gameId`
+- Source verdict is not `invalid`
+- Unsupported Facebook URLs (including `profile.php?id=`) rejected
+- Public source warning acknowledged (soft paywall only)
+- Go Live mutation includes `gameId` and idempotency key
 - Paywall proof present
 - One-device proof present
 - Resume proof present

@@ -18,6 +18,10 @@ This document defines the gating dimensions emitted by `validate:prelive`.
 | Admin Viewer Counter Proof | integration evidence tag | active entitled sessions are deduped |
 | Comment Rate Limit Proof | unit+integration | over-limit rejected deterministically |
 | Interaction Layer Stability Proof | e2e + perf | interaction abuse does not collapse playback |
+| Source Validator Contract Proof | unit + integration | output model fields present and deterministic per URL class |
+| Facebook Deterministic URL Proof | unit + integration | slug `/live` rewrite accepted; `profile.php?id=` rejected |
+| Live Toggle Game Binding Proof | integration | `isLive=true` rejected without `gameId` |
+| Public Upstream Risk Proof | unit + ops UI check | `visibilityClass=public` surfaces soft-paywall warning |
 
 ## Final Verdict
 - `VERIFIED`: every check is `VERIFIED`

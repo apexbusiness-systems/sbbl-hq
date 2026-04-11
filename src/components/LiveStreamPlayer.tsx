@@ -60,6 +60,8 @@ interface LiveStreamPlayerProps {
   isStreamLive?: boolean;
 }
 
+type ViewerState = 'locked' | 'purchased' | 'active' | 'expired' | 'offline' | 'source_invalid' | 'source_test_failed';
+
 export function LiveStreamPlayer({
   game,
   userId,
@@ -85,6 +87,7 @@ export function LiveStreamPlayer({
   const [playerReady, setPlayerReady] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
+  const [viewerState, setViewerState] = useState<ViewerState>('locked');
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
 
   // ── Role classification ──────────────────────────────────────────────────
@@ -95,6 +98,11 @@ export function LiveStreamPlayer({
   const hasRoleAccess = isPlayer || isPaidFan || isSuperAdmin;
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
   const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
+
+  useEffect(() => {
+    if (!hasAccess) setViewerState(ppvEntitled || inviteGranted ? 'purchased' : 'locked');
+    else setViewerState('active');
+  }, [hasAccess, ppvEntitled, inviteGranted]);
 
   // ── Fetch stream entitlement (skip if role already grants access) ─────────
   // Pass null instead of explicit token — apiFetch auto-fetches a fresh JWT
@@ -141,6 +149,7 @@ export function LiveStreamPlayer({
         }, null);
         if (!active) return;
         setPlaybackUrl(normalizeFacebookUrl(res.playback.url));
+        setViewerState('active');
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
 
@@ -190,7 +199,12 @@ export function LiveStreamPlayer({
               }
             });
         }, hbMs);
-      } catch {
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '';
+        if (active && msg.includes('offline')) setViewerState('offline');
+        else if (active && msg.includes('source_invalid')) setViewerState('source_invalid');
+        else if (active && msg.includes('source_test_failed')) setViewerState('source_test_failed');
+        else if (active && msg.includes('expired')) setViewerState('expired');
         if (active) toast.error('Unable to start secure playback session.');
       } finally {
         if (active) setPlaybackLoading(false);
@@ -253,6 +267,12 @@ export function LiveStreamPlayer({
           <div className="absolute inset-0 flex items-center justify-center bg-black">
             <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
           </div>
+        ) : viewerState === 'offline' ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-black text-sm text-white/70">Broadcast is offline.</div>
+        ) : viewerState === 'source_invalid' ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-black text-sm text-white/70">Stream source is invalid.</div>
+        ) : viewerState === 'source_test_failed' ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-black text-sm text-white/70">Stream source test failed.</div>
         ) : playerError ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6">
             <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mb-3">

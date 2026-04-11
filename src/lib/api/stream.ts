@@ -29,6 +29,13 @@ export interface StreamConfig {
   isLive: boolean;
   viewerCount: number;
   updatedAt?: string;
+  gameId?: string | null;
+  sourceType?: string | null;
+  sourceStatus?: 'untested' | 'valid' | 'valid_with_warning' | 'invalid';
+  riskLevel?: 'low' | 'medium' | 'high';
+  visibilityClass?: 'private_or_gated' | 'public' | 'unknown';
+  validationMessage?: string | null;
+  lastValidatedAt?: string | null;
 }
 
 export interface StreamPlaybackSession {
@@ -192,13 +199,37 @@ export async function updateStreamConfig(
 }
 
 /** Go live / end broadcast — requires super_admin */
-export async function setStreamLive(isLive: boolean, token: string | null) {
+export async function setStreamLive(isLive: boolean, gameId: string | null, token: string | null) {
   return apiFetch<{ ok: boolean; isLive: boolean; startedAt?: string; endedAt?: string }>(
     '/ops/streams/status',
     {
       method: 'POST',
       headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-stream-live-${isLive}`) },
-      body: JSON.stringify({ isLive }),
+      body: JSON.stringify({ isLive, gameId }),
+    },
+    token,
+  );
+}
+
+export async function testStreamSource(gameId: string, collectionId: string, token: string | null) {
+  return apiFetch<{
+    ok: boolean;
+    validation: {
+      ok: boolean;
+      normalizedUrl: string;
+      sourceType: string;
+      sourceStatus: 'untested' | 'valid' | 'valid_with_warning' | 'invalid';
+      riskLevel: 'low' | 'medium' | 'high';
+      visibilityClass: 'private_or_gated' | 'public' | 'unknown';
+      validationMessage: string;
+      blockingReason: string | null;
+    };
+  }>(
+    `/api/streams/${encodeURIComponent(gameId)}/test-source`,
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-stream-test-${gameId}`) },
+      body: JSON.stringify({ collectionId }),
     },
     token,
   );

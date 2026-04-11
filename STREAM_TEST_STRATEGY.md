@@ -12,9 +12,19 @@ Provide deterministic pre-live validation for ingest, playback, paywall, one-dev
 - Sliding-window comment/reaction throttling
 - Viewer counter dedupe behavior
 
+1b. Unit (`src/test/stream/source-validator.unit.test.ts`)
+- URL classification for HLS/MP4/YouTube/Twitch/Facebook
+- Facebook normalization (`facebook.com/<slug>` → `/live`)
+- Facebook rejection (`profile.php?id=...`)
+- Public-source soft-paywall warning surfacing
+
 2. Integration (`src/test/stream/rate-limit.int.test.ts`)
 - Resume behavior does not inflate active viewer count
 - Burst abuse is blocked deterministically
+
+2b. Integration (`src/test/worker-stream-hardening.test.ts`)
+- `/ops/streams/status` rejects `isLive=true` when `gameId` is missing
+- `/api/streams/:gameId/test-source` returns deterministic invalid verdict for unsupported Facebook profile URLs
 
 3. E2E (`e2e/stream-validation.spec.ts`)
 - Entitled playback validates media proof signals (no text-only pass)

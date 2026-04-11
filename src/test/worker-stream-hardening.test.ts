@@ -5,6 +5,9 @@ import {
   handlePlaybackSession,
   handleStreamSessionHeartbeat,
   handlePostComment,
+  handleSetStreamStatus,
+  handleTestStreamSource,
+  handleUpdateStreamConfig,
 } from '@/worker/index';
 
 type Row = Record<string, unknown>;
@@ -136,7 +139,7 @@ describe('stream hardening worker handlers', () => {
       admin: createAdmin(state),
     } as any);
     const body = await res.json() as Record<string, unknown>;
-    expect(body.viewerCount).toBe(1);
+    expect(body.viewerCount).toBe(0);
     expect(body.collectionId).toBeUndefined();
   });
 
@@ -145,7 +148,7 @@ describe('stream hardening worker handlers', () => {
       api_idempotency_keys: [],
       user_role_assignments: [],
       games: [{ id: 'game-1', status: 'live' }],
-      stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true, source_status: 'valid' }],
       stream_access_sessions: [],
     } as Record<string, Row[]>;
 
@@ -224,7 +227,7 @@ describe('stream hardening worker handlers', () => {
       api_idempotency_keys: [],
       user_role_assignments: [],
       games: [{ id: 'game-1', status: 'live' }],
-      stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true, source_status: 'valid' }],
       stream_access_sessions: [{
         id: 'old-sess',
         game_id: 'game-1',
@@ -280,5 +283,96 @@ describe('stream hardening worker handlers', () => {
       admin: createAdmin(state),
     } as any);
     expect(valid.status).toBe(200);
+  });
+
+  it('blocks live transition when gameId is missing', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [{ user_id: 'admin-1', role: 'super_admin' }],
+      stream_admin_config: [{ id: true, source_status: 'valid' }],
+    } as Record<string, Row[]>;
+
+    const res = await handleSetStreamStatus({
+      req: new Request('https://local/ops/streams/status', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'idem-live-12345', 'x-sbbl-user-id-verified': 'admin-1' },
+        body: JSON.stringify({ isLive: true }),
+      }),
+      params: {},
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'game_id_required_for_live' });
+  });
+
+  it('blocks live transition when source has not been tested', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [{ user_id: 'admin-1', role: 'super_admin' }],
+      stream_admin_config: [{ id: true, source_status: 'untested' }],
+    } as Record<string, Row[]>;
+    const res = await handleSetStreamStatus({
+      req: new Request('https://local/ops/streams/status', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'idem-live-22345', 'x-sbbl-user-id-verified': 'admin-1' },
+        body: JSON.stringify({ isLive: true, gameId: 'game-1' }),
+      }),
+      params: {},
+      env,
+      admin: createAdmin(state),
+    } as any);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'source_test_required' });
+  });
+
+  it('rejects facebook profile.php?id source URL', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [{ user_id: 'admin-1', role: 'super_admin' }],
+    } as Record<string, Row[]>;
+    const res = await handleTestStreamSource({
+      req: new Request('https://local/api/streams/game-1/test-source', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'idem-test-src-12345', 'x-sbbl-user-id-verified': 'admin-1' },
+        body: JSON.stringify({ collectionId: 'https://facebook.com/profile.php?id=123' }),
+      }),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      validation: { ok: false, blockingReason: 'facebook_profile_id_unsupported' },
+    });
+  });
+
+  it('config save persists normalized facebook metadata', async () => {
+    (globalThis as unknown as { caches: { default: { delete: () => Promise<boolean> } } }).caches = {
+      default: { delete: async () => true },
+    };
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [{ user_id: 'admin-1', role: 'super_admin' }],
+      stream_admin_config: [{ id: true }],
+      audit_logs: [],
+    } as Record<string, Row[]>;
+    const res = await handleUpdateStreamConfig({
+      req: new Request('https://local/ops/streams/config', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'idem-cfg-123456', 'x-sbbl-user-id-verified': 'admin-1' },
+        body: JSON.stringify({ collectionId: 'https://facebook.com/SBBLhq?fbclid=abc', title: 'Finals' }),
+      }),
+      params: {},
+      env,
+      admin: createAdmin(state),
+    } as any);
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, any>;
+    expect(body.config.collectionId).toBe('https://facebook.com/SBBLhq/live');
+    expect(body.config.sourceStatus).toBe('valid_with_warning');
   });
 });

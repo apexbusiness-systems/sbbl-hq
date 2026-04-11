@@ -18,12 +18,13 @@ import {
   fetchStreamComments,
   postStreamComment,
   setStreamLive,
+  testStreamSource,
   updateStreamConfig,
 } from '@/lib/api/stream';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
-  Radio, Eye, DollarSign, Settings, X,
+  Radio, Eye, DollarSign, Settings, X, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Game, PlayerProfile } from '@/types';
@@ -60,6 +61,14 @@ function AdminStreamOverlay({
   streamTitle, setStreamTitle,
   viewerCount,
   customStreamUrl, setCustomStreamUrl,
+  activeGameId,
+  sourceStatus,
+  sourceType,
+  riskLevel,
+  validationMessage,
+  normalizedUrl,
+  visibilityClass,
+  setValidationModel,
 }: {
   isLive: boolean;
   setIsLive: (v: boolean) => void;
@@ -68,12 +77,63 @@ function AdminStreamOverlay({
   viewerCount: number;
   customStreamUrl: string;
   setCustomStreamUrl: (v: string) => void;
+  activeGameId: string | null;
+  sourceStatus: 'untested' | 'valid' | 'valid_with_warning' | 'invalid';
+  sourceType: string;
+  riskLevel: 'low' | 'medium' | 'high';
+  validationMessage: string;
+  normalizedUrl: string;
+  visibilityClass: 'private_or_gated' | 'public' | 'unknown';
+  setValidationModel: (next: {
+    sourceStatus: 'untested' | 'valid' | 'valid_with_warning' | 'invalid';
+    sourceType: string;
+    riskLevel: 'low' | 'medium' | 'high';
+    validationMessage: string;
+    normalizedUrl: string;
+    visibilityClass: 'private_or_gated' | 'public' | 'unknown';
+  }) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+
+  const canGoLive = Boolean(activeGameId) && (sourceStatus === 'valid' || sourceStatus === 'valid_with_warning') && customStreamUrl.trim().length > 0;
+
+  const handleTestSource = async () => {
+    if (!activeGameId) {
+      toast.error('Select a game before testing stream source.');
+      return;
+    }
+    setTesting(true);
+    try {
+      const token = await getAuthToken();
+      const res = await testStreamSource(activeGameId, customStreamUrl, token);
+      setValidationModel({
+        sourceStatus: res.validation.sourceStatus,
+        sourceType: res.validation.sourceType,
+        riskLevel: res.validation.riskLevel,
+        validationMessage: res.validation.validationMessage,
+        normalizedUrl: res.validation.normalizedUrl,
+        visibilityClass: res.validation.visibilityClass,
+      });
+      toast.success(res.validation.ok ? 'Stream source passed test.' : 'Stream source failed test.');
+    } catch (err) {
+      toast.error(`Source test failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const handleGoLive = async () => {
     const nextLive = !isLive;
+    if (nextLive && !activeGameId) {
+      toast.error('Select a game before going live.');
+      return;
+    }
+    if (nextLive && !(sourceStatus === 'valid' || sourceStatus === 'valid_with_warning')) {
+      toast.error('Source must be tested and valid before going live.');
+      return;
+    }
     setSaving(true);
     try {
       const token = await getAuthToken();
@@ -83,7 +143,7 @@ function AdminStreamOverlay({
       // stream state is unchanged. Admin sees the error and can retry
       // the toggle without re-entering the URL.
       try {
-        await setStreamLive(nextLive, token);
+        await setStreamLive(nextLive, activeGameId, token);
       } catch (liveErr) {
         toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
         setSaving(false);
@@ -160,9 +220,34 @@ function AdminStreamOverlay({
                 type="text"
                 value={customStreamUrl}
                 onChange={e => setCustomStreamUrl(e.target.value)}
+                onInput={() => setValidationModel({
+                  sourceStatus: 'untested',
+                  sourceType: 'unknown',
+                  riskLevel: 'medium',
+                  validationMessage: 'Source changed. Re-run Test Stream Source.',
+                  normalizedUrl: '',
+                  visibilityClass: 'unknown',
+                })}
                 className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50"
                 placeholder="YouTube, Twitch, or direct URL…"
               />
+            </div>
+            <button
+              onClick={handleTestSource}
+              disabled={testing || !customStreamUrl.trim() || !activeGameId}
+              className="w-full py-2 text-[11px] font-display font-bold uppercase tracking-wider rounded bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-40"
+            >
+              {testing ? 'Testing…' : 'Test Stream Source'}
+            </button>
+            <div className="text-[10px] text-white/70 space-y-1 rounded bg-white/5 p-2">
+              <p><span className="text-white/50">Source:</span> {sourceType || 'unknown'}</p>
+              <p><span className="text-white/50">Risk:</span> {riskLevel}</p>
+              <p><span className="text-white/50">Verdict:</span> {sourceStatus}</p>
+              <p><span className="text-white/50">Normalized:</span> {normalizedUrl || '—'}</p>
+              <p>{validationMessage}</p>
+              {visibilityClass === 'public' && (
+                <p className="text-amber-300 inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Public source = soft paywall only.</p>
+              )}
             </div>
 
             {/* Stream Title */}
@@ -180,7 +265,7 @@ function AdminStreamOverlay({
             {/* Go Live / End Stream */}
             <button
               onClick={handleGoLive}
-              disabled={saving || (!isLive && !customStreamUrl.trim())}
+              disabled={saving || (!isLive && !canGoLive)}
               className={`w-full py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded transition-colors disabled:opacity-40 ${
                 isLive
                   ? 'bg-red-600 text-white hover:bg-red-500'
@@ -246,6 +331,12 @@ const LivePage = () => {
   const [viewerCount, setViewerCount] = useState(0);
   const [customStreamUrl, setCustomStreamUrl] = useState('');
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
+  const [streamSourceStatus, setStreamSourceStatus] = useState<'untested' | 'valid' | 'valid_with_warning' | 'invalid'>('untested');
+  const [streamSourceType, setStreamSourceType] = useState('unknown');
+  const [streamRiskLevel, setStreamRiskLevel] = useState<'low' | 'medium' | 'high'>('medium');
+  const [streamValidationMessage, setStreamValidationMessage] = useState('Run Test Stream Source before Go Live.');
+  const [normalizedStreamUrl, setNormalizedStreamUrl] = useState('');
+  const [streamVisibilityClass, setStreamVisibilityClass] = useState<'private_or_gated' | 'public' | 'unknown'>('unknown');
 
   // Auto-sync stream status from backend
   useEffect(() => {
@@ -266,6 +357,13 @@ const LivePage = () => {
             setIsStreamLive(res.config.isLive);
             setStreamTitle(res.config.title);
             setCustomStreamUrl(res.config.collectionId || ''); // collectionId stores the stream URL
+            setActiveGameId(res.config.gameId ?? null);
+            setStreamSourceType(res.config.sourceType ?? 'unknown');
+            setStreamSourceStatus(res.config.sourceStatus ?? 'untested');
+            setStreamRiskLevel(res.config.riskLevel ?? 'medium');
+            setStreamVisibilityClass(res.config.visibilityClass ?? 'unknown');
+            setStreamValidationMessage(res.config.validationMessage ?? 'Run Test Stream Source before Go Live.');
+            setNormalizedStreamUrl(res.config.collectionId || '');
           }
         } else {
           // Public poller
@@ -523,6 +621,22 @@ const LivePage = () => {
                   viewerCount={viewerCount}
                   customStreamUrl={customStreamUrl}
                   setCustomStreamUrl={setCustomStreamUrl}
+                  activeGameId={liveGame?.id ?? activeGameId}
+                  sourceStatus={streamSourceStatus}
+                  sourceType={streamSourceType}
+                  riskLevel={streamRiskLevel}
+                  validationMessage={streamValidationMessage}
+                  normalizedUrl={normalizedStreamUrl}
+                  visibilityClass={streamVisibilityClass}
+                  setValidationModel={(next) => {
+                    setStreamSourceStatus(next.sourceStatus);
+                    setStreamSourceType(next.sourceType);
+                    setStreamRiskLevel(next.riskLevel);
+                    setStreamValidationMessage(next.validationMessage);
+                    setNormalizedStreamUrl(next.normalizedUrl);
+                    setStreamVisibilityClass(next.visibilityClass);
+                    if (next.normalizedUrl) setCustomStreamUrl(next.normalizedUrl);
+                  }}
                 />
               )}
 
@@ -530,32 +644,6 @@ const LivePage = () => {
                 <PlayerErrorBoundary>
                   <LiveStreamPlayer
                     game={liveGame}
-                    userId={user?.id ?? null}
-                    roles={roles}
-                    hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-                    isStreamLive={isStreamLive}
-                  />
-                </PlayerErrorBoundary>
-              ) : isStreamLive ? (
-                /* Stream is live but no game is scheduled — show stream anyway
-                   by creating a synthetic game shell. This prevents the "no game"
-                   state from blocking broadcast when admin goes live without a
-                   scheduled game. */
-                <PlayerErrorBoundary>
-                  <LiveStreamPlayer
-                    game={{
-                      id: activeGameId ?? 'broadcast',
-                      leagueId: 'sbbl',
-                      homeTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
-                      awayTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
-                      venue: 'SBBL HQ',
-                      court: 'Main Court',
-                      date: new Date().toISOString(),
-                      time: new Date().toISOString(),
-                      status: 'live',
-                      score: { home: 0, away: 0 },
-                      ppvPrice: 4.99,
-                    }}
                     userId={user?.id ?? null}
                     roles={roles}
                     hasPremiumPlayerAccess={hasPremiumPlayerAccess}

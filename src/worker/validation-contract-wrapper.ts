@@ -13,7 +13,8 @@ const VALIDATION_ROUTE_RE = [
 ];
 
 const MUTATION_IDEMPOTENCY_RE = [
-  /^\/api\/streams\/[^/]+\/(purchase|access|resume|revoke|expire|comments|reactions)$/,
+  /^\/api\/streams\/[^/]+\/(purchase|access|resume|revoke|expire|comments|reactions|test-source)$/,
+  /^\/ops\/streams\/(config|status)$/,
   /^\/ops\/validation-runs$/,
 ];
 

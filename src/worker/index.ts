@@ -4,6 +4,7 @@ import { safeServerEnv } from "@/lib/env";
 import { readIdempotencyKey } from "@/lib/api/idempotency";
 import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
 import { signSyncPacket, type SyncPacket } from "@/lib/sync-packets";
+import { validateStreamSource } from "@/lib/stream/source-validator";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   handlePublicConfig as _handlePublicConfig,
@@ -433,7 +434,7 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
   const existing = await admin
     .from("stream_admin_config")
     .select(
-      "collection_id,title,source,is_live,active_game_id,updated_at,live_started_at,live_ended_at",
+      "collection_id,title,source,is_live,active_game_id,source_type,source_status,risk_level,visibility_class,validation_message,last_validated_at,updated_at,live_started_at,live_ended_at",
     )
     .eq("id", true)
     .maybeSingle();
@@ -448,13 +449,38 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
       title: "SBBL Live Stream",
       source: "main",
       is_live: false,
+      source_status: "untested",
     })
     .select(
-      "collection_id,title,source,is_live,active_game_id,updated_at,live_started_at,live_ended_at",
+      "collection_id,title,source,is_live,active_game_id,source_type,source_status,risk_level,visibility_class,validation_message,last_validated_at,updated_at,live_started_at,live_ended_at",
     )
     .single();
   if (created.error) throw new Error(created.error.message);
   return created.data as Record<string, unknown>;
+}
+
+async function writeStreamAdminAudit(
+  ctx: HandlerCtx,
+  actorId: string,
+  action: string,
+  target: string,
+  previousSnapshot: Record<string, unknown> | null,
+  newSnapshot: Record<string, unknown> | null,
+) {
+  await ctx.admin.from("audit_logs").insert({
+    actor: actorId,
+    action,
+    ref_type: "stream_admin_config",
+    ref_id: "singleton",
+    outcome: "ok",
+    metadata: {
+      target,
+      previous_snapshot: previousSnapshot,
+      new_snapshot: newSnapshot,
+    },
+    request_id: ctx.req.headers.get("x-request-id") ?? crypto.randomUUID(),
+    occurred_at: new Date().toISOString(),
+  });
 }
 
 // Cache TTL for public stream status — 10 s keeps Supabase load flat
@@ -571,11 +597,17 @@ async function handleGetStreamConfig({ req, admin }: HandlerCtx) {
       viewerCount: 0,
       updatedAt: cfg.updated_at,
       gameId: cfg.active_game_id ?? null,
+      sourceType: cfg.source_type ?? null,
+      sourceStatus: cfg.source_status ?? "untested",
+      riskLevel: cfg.risk_level ?? null,
+      visibilityClass: cfg.visibility_class ?? "unknown",
+      validationMessage: cfg.validation_message ?? null,
+      lastValidatedAt: cfg.last_validated_at ?? null,
     },
   });
 }
 
-async function handleUpdateStreamConfig(ctx: HandlerCtx) {
+export async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireSuperAdminSession(ctx.req, ctx.admin);
   const body = (await ctx.req.json().catch(() => null)) as {
@@ -585,23 +617,40 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   } | null;
   if (!body) return json({ ok: false, error: "invalid_body" }, 400);
   const patch: Record<string, unknown> = {};
-  if (typeof body.collectionId === "string")
-    patch.collection_id = body.collectionId.trim();
+  if (typeof body.collectionId === "string") {
+    const validation = validateStreamSource(body.collectionId);
+    patch.collection_id = validation.normalizedUrl || body.collectionId.trim();
+    patch.source_type = validation.sourceType;
+    patch.source_status = validation.sourceStatus;
+    patch.risk_level = validation.riskLevel;
+    patch.visibility_class = validation.visibilityClass;
+    patch.validation_message = validation.validationMessage;
+    patch.last_validated_at = new Date().toISOString();
+  }
   if (typeof body.title === "string") patch.title = body.title.trim();
   if (typeof body.source === "string") patch.source = body.source;
   if (Object.keys(patch).length === 0)
     return json({ ok: false, error: "patch_required" }, 400);
 
   patch.updated_at = new Date().toISOString();
+  const previous = await getOrCreateStreamConfig(ctx.admin);
   const { data, error } = await ctx.admin
     .from("stream_admin_config")
     .upsert(
       { id: true, ...patch, updated_by: session.userId },
       { onConflict: "id" },
     )
-    .select("collection_id,title,source,is_live,updated_at")
+    .select("collection_id,title,source,is_live,active_game_id,source_type,source_status,risk_level,visibility_class,validation_message,last_validated_at,updated_at")
     .single();
   if (error) throw new Error(error.message);
+  await writeStreamAdminAudit(
+    ctx,
+    session.userId,
+    "stream_config_updated",
+    "ops/streams/config",
+    previous,
+    data as Record<string, unknown>,
+  );
 
   // Bust edge cache so next poll picks up new collectionId / title / source.
   // Retry once on failure — stale cache after Go Live is worse than a double-delete.
@@ -619,11 +668,18 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
       isLive: data.is_live,
       viewerCount: 0,
       updatedAt: data.updated_at,
+      gameId: data.active_game_id,
+      sourceType: data.source_type,
+      sourceStatus: data.source_status,
+      riskLevel: data.risk_level,
+      visibilityClass: data.visibility_class,
+      validationMessage: data.validation_message,
+      lastValidatedAt: data.last_validated_at,
     },
   });
 }
 
-async function handleSetStreamStatus(ctx: HandlerCtx) {
+export async function handleSetStreamStatus(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireSuperAdminSession(ctx.req, ctx.admin);
   const body = (await ctx.req.json().catch(() => null)) as {
@@ -632,6 +688,15 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   } | null;
   if (typeof body?.isLive !== "boolean")
     return json({ ok: false, error: "is_live_required" }, 400);
+  if (body.isLive && (!body.gameId || typeof body.gameId !== "string" || !body.gameId.trim())) {
+    return json({ ok: false, error: "game_id_required_for_live" }, 400);
+  }
+  const previous = await getOrCreateStreamConfig(ctx.admin);
+  if (body.isLive) {
+    const sourceStatus = String(previous.source_status ?? "untested");
+    if (sourceStatus === "invalid") return json({ ok: false, error: "source_invalid" }, 400);
+    if (sourceStatus === "untested") return json({ ok: false, error: "source_test_required" }, 400);
+  }
   const nowIso = new Date().toISOString();
   const patch: Record<string, unknown> = {
     id: true,
@@ -649,6 +714,14 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
     .from("stream_admin_config")
     .upsert(patch, { onConflict: "id" });
   if (error) throw new Error(error.message);
+  await writeStreamAdminAudit(
+    ctx,
+    session.userId,
+    body.isLive ? "stream_live_enabled" : "stream_live_disabled",
+    "ops/streams/status",
+    previous,
+    patch,
+  );
 
   if (typeof body.gameId === "string") {
     if (body.isLive) {
@@ -714,6 +787,25 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   }
 
   return json({ ok: true, isLive: body.isLive, at: nowIso });
+}
+
+export async function handleTestStreamSource(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const body = (await ctx.req.json().catch(() => null)) as { collectionId?: string } | null;
+  if (!body?.collectionId) return json({ ok: false, error: "collection_id_required" }, 400);
+  const validation = validateStreamSource(body.collectionId);
+  await writeStreamAdminAudit(
+    ctx,
+    session.userId,
+    "stream_source_tested",
+    `/api/streams/${gameId}/test-source`,
+    null,
+    { gameId, input: body.collectionId, validation },
+  );
+  return json({ ok: true, validation });
 }
 
 async function handleStreamSessions({ req, admin }: HandlerCtx) {
@@ -2915,9 +3007,18 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   if (!hasAccess) return json({ ok: false, error: "forbidden" }, 403);
 
   const cfg = await getOrCreateStreamConfig(ctx.admin);
+  if (!cfg.is_live) {
+    return json({ ok: false, error: "offline", viewerState: "offline" }, 409);
+  }
+  if (String(cfg.source_status ?? "untested") === "invalid") {
+    return json({ ok: false, error: "source_invalid", viewerState: "source_invalid" }, 409);
+  }
+  if (String(cfg.source_status ?? "untested") === "untested") {
+    return json({ ok: false, error: "source_test_failed", viewerState: "source_test_failed" }, 409);
+  }
   const playbackUrl = String(cfg.collection_id ?? "").trim();
   if (!playbackUrl) {
-    return json({ ok: false, error: "stream_not_configured" }, 503);
+    return json({ ok: false, error: "source_invalid", viewerState: "source_invalid" }, 503);
   }
   const session = await createOrRefreshPlaybackSession(
     ctx,
@@ -4006,6 +4107,11 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/api/streams/:gameId/react",
     handler: handleStreamReact,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/test-source",
+    handler: handleTestStreamSource,
   },
   {
     method: "GET",

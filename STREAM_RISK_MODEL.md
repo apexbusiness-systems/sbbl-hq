@@ -10,6 +10,8 @@
 6. Interaction abuse: comment/reaction storms destabilize playback.
 7. Viewer counter inflation: duplicate tab/reconnect counts not deduped.
 8. Secret leakage: artifacts/logs contain JWTs, tokens, raw URLs, unhashed IP.
+9. Ambiguous source URLs: generic Facebook/profile links accepted without deterministic target.
+10. Live-state drift: stream transitions live without a selected game.
 
 ## Defensive Controls
 - Server-side authorization for access/comments/reactions.
@@ -17,6 +19,8 @@
 - Short-lived signed playback artifact TTL.
 - Sliding-window abuse controls.
 - Audit logs for all sensitive actions.
+- Source validator contract (`ok`, `normalizedUrl`, `sourceType`, `sourceStatus`, `riskLevel`, `visibilityClass`, `validationMessage`, `blockingReason`) enforced before Go Live.
+- Public upstream warning surfaced to Ops (`visibilityClass=public` ⇒ soft paywall only).
 - Artifact redaction scans in `validate:prelive`.
 
 ## Validation Mapping
