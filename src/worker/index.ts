@@ -453,7 +453,7 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
   const existing = await admin
     .from("stream_admin_config")
     .select(
-      "collection_id,title,source,is_live,active_game_id,updated_at,live_started_at,live_ended_at",
+      "collection_id,title,source,is_live,updated_at,live_started_at,live_ended_at",
     )
     .eq("id", true)
     .maybeSingle();
@@ -470,7 +470,7 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
       is_live: false,
     })
     .select(
-      "collection_id,title,source,is_live,active_game_id,updated_at,live_started_at,live_ended_at",
+      "collection_id,title,source,is_live,updated_at,live_started_at,live_ended_at",
     )
     .single();
   if (created.error) throw new Error(created.error.message);
@@ -549,16 +549,14 @@ export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   // ── Cache miss — hit Supabase once, write back, serve ────────────────────
   const cfg = await getOrCreateStreamConfig(admin);
   let viewerCount = 0;
-  const activeGameId = gameId ?? (cfg.active_game_id as string | null) ?? null;
-  viewerCount = await getActiveViewerCount(admin, activeGameId);
-  await refreshLiveSessionMetrics(admin, activeGameId, viewerCount);
+  viewerCount = await getActiveViewerCount(admin, gameId);
+  await refreshLiveSessionMetrics(admin, gameId, viewerCount);
 
   const payload = {
     ok: true,
     isLive: Boolean(cfg.is_live),
     title: String(cfg.title ?? "SBBL Live Stream"),
     viewerCount,
-    gameId: activeGameId,
   };
 
   const response = new Response(JSON.stringify(payload), {
@@ -590,7 +588,6 @@ async function handleGetStreamConfig({ req, admin }: HandlerCtx) {
       isLive: Boolean(cfg.is_live),
       viewerCount: 0,
       updatedAt: cfg.updated_at,
-      gameId: cfg.active_game_id ?? null,
     },
   });
 }
@@ -648,8 +645,6 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   const session = await requireSuperAdminSession(ctx.req, ctx.admin);
   const body = (await ctx.req.json().catch(() => null)) as {
     isLive?: boolean;
-    gameId?: string | null;
-    preserveGameId?: boolean;
   } | null;
   if (typeof body?.isLive !== "boolean")
     return json({ ok: false, error: "is_live_required" }, 400);
@@ -659,10 +654,6 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
     is_live: body.isLive,
     updated_by: session.userId,
   };
-  if (typeof body.gameId === "string") patch.active_game_id = body.gameId;
-  if (!body.isLive && !body.preserveGameId) patch.active_game_id = null;
-  // Live status can be toggled independently from active game assignment.
-  // If a gameId is provided we persist it; otherwise we preserve current value.
   if (body.isLive) {
     patch.live_started_at = nowIso;
     patch.live_ended_at = null;
@@ -674,77 +665,13 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
     .upsert(patch, { onConflict: "id" });
   if (error) throw new Error(error.message);
 
-  if (typeof patch.active_game_id === "string") {
-    const gameId = String(patch.active_game_id);
-    if (body.isLive) {
-      await ctx.admin.from("stream_sessions").insert({
-        game_id: gameId,
-        status: "live",
-        started_at: nowIso,
-        current_viewers: 0,
-        peak_viewers: 0,
-        created_by: session.userId,
-        updated_by: session.userId,
-      });
-    } else {
-      const activeViewers = await getActiveViewerCount(ctx.admin, gameId);
-      const currentLive = await ctx.admin
-        .from("stream_sessions")
-        .select("id,peak_viewers")
-        .eq("game_id", gameId)
-        .eq("status", "live")
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (currentLive.data) {
-        const priorPeak = Number(
-          (currentLive.data as Record<string, unknown>).peak_viewers ?? 0,
-        );
-        await ctx.admin
-          .from("stream_sessions")
-          .update({
-            status: "ended",
-            ended_at: nowIso,
-            current_viewers: activeViewers,
-            peak_viewers: Math.max(priorPeak, activeViewers),
-            updated_at: nowIso,
-            updated_by: session.userId,
-          })
-          .eq("id", (currentLive.data as Record<string, unknown>).id as string);
-      } else {
-        await ctx.admin.from("stream_sessions").insert({
-          game_id: gameId,
-          status: "ended",
-          started_at: nowIso,
-          ended_at: nowIso,
-          current_viewers: activeViewers,
-          peak_viewers: activeViewers,
-          created_by: session.userId,
-          updated_by: session.userId,
-        });
-      }
-    }
-  }
-
   // Bust edge cache immediately so Go Live / End Broadcast is reflected
   // for all viewers on their next 15 s poll (not delayed by TTL).
   // Retry once on failure — stale "offline" after Go Live is a P0 UX issue.
   const cfCachesLive = (caches as unknown as { default: Cache }).default;
   const bustKey = new Request(streamCacheUrl(null));
   cfCachesLive.delete(bustKey).catch(() => { cfCachesLive.delete(bustKey).catch(() => {}); });
-  // Also bust game-scoped key if a gameId was provided
-  if (typeof patch.active_game_id === "string") {
-    const bustGameKey = new Request(streamCacheUrl(String(patch.active_game_id)));
-    cfCachesLive.delete(bustGameKey).catch(() => { cfCachesLive.delete(bustGameKey).catch(() => {}); });
-  }
-
   return json({ ok: true, isLive: body.isLive, at: nowIso });
-}
-
-async function getActiveStreamGameId(admin: SupabaseClient): Promise<string | null> {
-  const cfg = await getOrCreateStreamConfig(admin);
-  const gameId = cfg.active_game_id as string | null;
-  return gameId && gameId.length > 0 ? gameId : null;
 }
 
 async function requireActivePlaybackSession(ctx: HandlerCtx, userId: string, gameId: string) {
@@ -2788,10 +2715,7 @@ async function handleStreamReactions({ req, admin }: HandlerCtx) {
     ? pathGameId
     : url.searchParams.get('gameId') ?? null;
 
-  // Resolve 'current' to the active game from stream config
-  const resolvedGameId = gameId === 'current' || !gameId
-    ? await getOrCreateStreamConfig(admin).then(c => c.active_game_id as string | null).catch(() => null)
-    : gameId;
+  const resolvedGameId = gameId === 'current' ? null : gameId;
 
   const cacheKey = new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${resolvedGameId ?? 'null'}`);
   const cfCaches = caches as unknown as { default: Cache };
@@ -2878,7 +2802,7 @@ const SESSION_MAX_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours hard cap
 
 async function createOrRefreshPlaybackSession(
   ctx: HandlerCtx,
-  gameId: string,
+  gameId: string | null,
   userId: string,
   sessionKey: string,
 ) {
@@ -2932,31 +2856,21 @@ async function createOrRefreshPlaybackSession(
 export async function handlePlaybackSession(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
-  const gameId = ctx.params.gameId;
+  const gameId = ctx.params.gameId ?? null;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionKey?: string;
   } | null;
-  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
   if (!body?.sessionKey || body.sessionKey.length < 8) {
     return json({ ok: false, error: "session_key_required" }, 400);
-  }
-
-  // Validate game exists — reject phantom session creation for non-existent games
-  const gameCheck = await ctx.admin
-    .from("games")
-    .select("id")
-    .eq("id", gameId)
-    .maybeSingle();
-  if (!gameCheck.data) {
-    return json({ ok: false, error: "game_not_found" }, 404);
   }
 
   const roles = await getUserRolesFromDB(userId, ctx.admin);
   const hasPrivilegedRole = roles.some(
     (role) => role === "player" || role === "paid_fan" || role === "super_admin",
   );
-  let hasAccess = hasPrivilegedRole;
-  if (!hasAccess) {
+  const hasSuperAdminRole = roles.includes("super_admin");
+  let hasAccess = gameId ? hasPrivilegedRole : hasSuperAdminRole;
+  if (!hasAccess && gameId) {
     const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
       p_game_id: gameId,
       p_user_id: userId,
@@ -2988,7 +2902,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     },
     session: {
       id: session.id,
-      gameId,
+      gameId: gameId ?? null,
       maxExpiresAt: session.maxExpiresAt,
     },
   });
@@ -2997,7 +2911,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
 export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
-  const gameId = ctx.params.gameId;
+  const gameId = ctx.params.gameId ?? null;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionId?: string;
   } | null;
@@ -3065,7 +2979,7 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
 async function handleStreamSessionEnd(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
-  const gameId = ctx.params.gameId;
+  const gameId = ctx.params.gameId ?? null;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionId?: string;
   } | null;
@@ -3180,21 +3094,15 @@ export async function handlePostComment(ctx: HandlerCtx) {
 }
 
 async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
-  const gameId = await getActiveStreamGameId(ctx.admin);
-  if (!gameId) return json({ ok: false, error: "active_game_required" }, 400);
-  return handlePlaybackSession({ ...ctx, params: { ...ctx.params, gameId } });
+  return handlePlaybackSession({ ...ctx, params: { ...ctx.params, gameId: null } });
 }
 
 async function handleBroadcastHeartbeat(ctx: HandlerCtx) {
-  const gameId = await getActiveStreamGameId(ctx.admin);
-  if (!gameId) return json({ ok: false, error: "active_game_required" }, 400);
-  return handleStreamSessionHeartbeat({ ...ctx, params: { ...ctx.params, gameId } });
+  return handleStreamSessionHeartbeat({ ...ctx, params: { ...ctx.params, gameId: null } });
 }
 
 async function handleBroadcastSessionEnd(ctx: HandlerCtx) {
-  const gameId = await getActiveStreamGameId(ctx.admin);
-  if (!gameId) return json({ ok: false, error: "active_game_required" }, 400);
-  return handleStreamSessionEnd({ ...ctx, params: { ...ctx.params, gameId } });
+  return handleStreamSessionEnd({ ...ctx, params: { ...ctx.params, gameId: null } });
 }
 
 async function handleStreamViewerCount(ctx: HandlerCtx) {

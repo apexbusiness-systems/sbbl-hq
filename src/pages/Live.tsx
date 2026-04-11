@@ -60,7 +60,6 @@ function AdminStreamOverlay({
   streamTitle, setStreamTitle,
   viewerCount,
   customStreamUrl, setCustomStreamUrl,
-  activeGameId,
 }: {
   isLive: boolean;
   setIsLive: (v: boolean) => void;
@@ -69,7 +68,6 @@ function AdminStreamOverlay({
   viewerCount: number;
   customStreamUrl: string;
   setCustomStreamUrl: (v: string) => void;
-  activeGameId: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -85,7 +83,7 @@ function AdminStreamOverlay({
       // stream state is unchanged. Admin sees the error and can retry
       // the toggle without re-entering the URL.
       try {
-        await setStreamLive(nextLive, token, activeGameId ? { gameId: activeGameId, preserveGameId: true } : { preserveGameId: true });
+        await setStreamLive(nextLive, token);
       } catch (liveErr) {
         toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
         setSaving(false);
@@ -182,14 +180,14 @@ function AdminStreamOverlay({
             {/* Go Live / End Stream */}
             <button
               onClick={handleGoLive}
-              disabled={saving || (!isLive && (!customStreamUrl.trim() || !activeGameId))}
+              disabled={saving || (!isLive && !customStreamUrl.trim())}
               className={`w-full py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded transition-colors disabled:opacity-40 ${
                 isLive
                   ? 'bg-red-600 text-white hover:bg-red-500'
                   : 'bg-green-600 text-white hover:bg-green-500'
               }`}
             >
-              {saving ? 'Saving…' : isLive ? 'End Stream' : !activeGameId ? 'Set Active Game First' : 'Go Live'}
+              {saving ? 'Saving…' : isLive ? 'End Stream' : 'Go Live'}
             </button>
           </div>
         </div>
@@ -279,7 +277,6 @@ const LivePage = () => {
             setIsStreamLive(Boolean(res.isLive));
             setStreamTitle(typeof res.title === 'string' ? res.title : 'Live Game Broadcast');
             setViewerCount(typeof res.viewerCount === 'number' && res.viewerCount >= 0 ? res.viewerCount : 0);
-            if (typeof res.gameId === 'string' && res.gameId) setActiveGameId(res.gameId);
           }
         }
       } catch {
@@ -520,15 +517,14 @@ const LivePage = () => {
             <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
               {/* Admin stream overlay — inside the video wrapper, super_admin only */}
               {isSuperAdmin && (
-                <AdminStreamOverlay
-                  isLive={isStreamLive}
-                  setIsLive={setIsStreamLive}
-                  streamTitle={streamTitle}
-                  setStreamTitle={setStreamTitle}
+                  <AdminStreamOverlay
+                    isLive={isStreamLive}
+                    setIsLive={setIsStreamLive}
+                    streamTitle={streamTitle}
+                    setStreamTitle={setStreamTitle}
                     viewerCount={viewerCount}
                     customStreamUrl={customStreamUrl}
                     setCustomStreamUrl={setCustomStreamUrl}
-                    activeGameId={activeGameId}
                   />
                 )}
 

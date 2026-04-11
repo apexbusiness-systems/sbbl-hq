@@ -105,7 +105,7 @@ export interface UserAccessLookup {
 /** Poll current stream status — no auth required */
 export async function fetchPublicStreamStatus(gameId?: string) {
   const qs = gameId ? `?gameId=${encodeURIComponent(gameId)}` : '';
-  return apiFetch<{ ok: boolean; isLive: boolean; title: string; viewerCount: number; collectionId: string; gameId?: string }>(
+  return apiFetch<{ ok: boolean; isLive: boolean; title: string; viewerCount: number; collectionId: string }>(
     `/api/streams/status${qs}`,
   );
 }
@@ -195,17 +195,13 @@ export async function updateStreamConfig(
 export async function setStreamLive(
   isLive: boolean,
   token: string | null,
-  options?: { gameId?: string | null; preserveGameId?: boolean },
 ) {
-  const payload: Record<string, unknown> = { isLive };
-  if (typeof options?.gameId === 'string') payload.gameId = options.gameId;
-  if (options?.preserveGameId) payload.preserveGameId = true;
   return apiFetch<{ ok: boolean; isLive: boolean; startedAt?: string; endedAt?: string }>(
     '/ops/streams/status',
     {
       method: 'POST',
       headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-stream-live-${isLive}`) },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ isLive }),
     },
     token,
   );
