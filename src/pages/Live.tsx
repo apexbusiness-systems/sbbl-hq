@@ -343,6 +343,24 @@ const LivePage = () => {
       // non-critical — optimistic update already applied
     }
   }, [activeGameId, user?.id, session]);
+
+  const fallbackBroadcastGame = useMemo<Game | null>(() => {
+    // Camera-only live mode has no real game row; use "broadcast" alias routes for super_admin playback.
+    if (!isSuperAdmin || !isStreamLive || liveGame) return null;
+    return {
+      id: 'broadcast',
+      leagueId: 'sbbl',
+      homeTeam: { id: 'broadcast-home', name: 'SBBL', leagueId: 'sbbl', division: 'N/A', record: { wins: 0, losses: 0 } },
+      awayTeam: { id: 'broadcast-away', name: 'Live', leagueId: 'sbbl', division: 'N/A', record: { wins: 0, losses: 0 } },
+      venue: 'SBBL HQ',
+      court: 'Main Feed',
+      date: new Date().toISOString(),
+      time: new Date().toISOString(),
+      status: 'live',
+      score: { home: 0, away: 0 },
+      ppvPrice: 0,
+    };
+  }, [isSuperAdmin, isStreamLive, liveGame]);
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -528,10 +546,10 @@ const LivePage = () => {
                   />
                 )}
 
-              {liveGame ? (
+              {(liveGame || fallbackBroadcastGame) ? (
                 <PlayerErrorBoundary>
                   <LiveStreamPlayer
-                    game={liveGame}
+                    game={(liveGame ?? fallbackBroadcastGame)!}
                     userId={user?.id ?? null}
                     roles={roles}
                     hasPremiumPlayerAccess={hasPremiumPlayerAccess}
