@@ -60,6 +60,7 @@ function AdminStreamOverlay({
   streamTitle, setStreamTitle,
   viewerCount,
   customStreamUrl, setCustomStreamUrl,
+  activeGameId,
 }: {
   isLive: boolean;
   setIsLive: (v: boolean) => void;
@@ -68,6 +69,7 @@ function AdminStreamOverlay({
   viewerCount: number;
   customStreamUrl: string;
   setCustomStreamUrl: (v: string) => void;
+  activeGameId: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -83,7 +85,7 @@ function AdminStreamOverlay({
       // stream state is unchanged. Admin sees the error and can retry
       // the toggle without re-entering the URL.
       try {
-        await setStreamLive(nextLive, token);
+        await setStreamLive(nextLive, token, nextLive ? { gameId: activeGameId } : { gameId: activeGameId, preserveGameId: true });
       } catch (liveErr) {
         toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
         setSaving(false);
@@ -180,14 +182,14 @@ function AdminStreamOverlay({
             {/* Go Live / End Stream */}
             <button
               onClick={handleGoLive}
-              disabled={saving || (!isLive && !customStreamUrl.trim())}
+              disabled={saving || (!isLive && (!customStreamUrl.trim() || !activeGameId))}
               className={`w-full py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded transition-colors disabled:opacity-40 ${
                 isLive
                   ? 'bg-red-600 text-white hover:bg-red-500'
                   : 'bg-green-600 text-white hover:bg-green-500'
               }`}
             >
-              {saving ? 'Saving…' : isLive ? 'End Stream' : 'Go Live'}
+              {saving ? 'Saving…' : isLive ? 'End Stream' : !activeGameId ? 'Set Active Game First' : 'Go Live'}
             </button>
           </div>
         </div>
@@ -256,7 +258,10 @@ const LivePage = () => {
         const liveRows = (home.data?.liveGames ?? []) as Array<Record<string, unknown>>;
         const upcomingRows = (home.data?.upcomingGames ?? []) as Array<Record<string, unknown>>;
         const selected = liveRows[0] ?? upcomingRows[0] ?? null;
-        if (active && selected) setLiveGame(mapHomeGameToUi(selected));
+        if (active && selected) {
+          setLiveGame(mapHomeGameToUi(selected));
+          setActiveGameId(String(selected.id));
+        }
         if (isSuperAdmin) {
           // Admin needs full config — pass null so apiFetch uses getAuthToken()
           // which auto-refreshes expired JWTs. Never pass an explicit token from
@@ -520,42 +525,17 @@ const LivePage = () => {
                   setIsLive={setIsStreamLive}
                   streamTitle={streamTitle}
                   setStreamTitle={setStreamTitle}
-                  viewerCount={viewerCount}
-                  customStreamUrl={customStreamUrl}
-                  setCustomStreamUrl={setCustomStreamUrl}
-                />
-              )}
+                    viewerCount={viewerCount}
+                    customStreamUrl={customStreamUrl}
+                    setCustomStreamUrl={setCustomStreamUrl}
+                    activeGameId={activeGameId}
+                  />
+                )}
 
               {liveGame ? (
                 <PlayerErrorBoundary>
                   <LiveStreamPlayer
                     game={liveGame}
-                    userId={user?.id ?? null}
-                    roles={roles}
-                    hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-                    isStreamLive={isStreamLive}
-                  />
-                </PlayerErrorBoundary>
-              ) : isStreamLive ? (
-                /* Stream is live but no game is scheduled — show stream anyway
-                   by creating a synthetic game shell. This prevents the "no game"
-                   state from blocking broadcast when admin goes live without a
-                   scheduled game. */
-                <PlayerErrorBoundary>
-                  <LiveStreamPlayer
-                    game={{
-                      id: activeGameId ?? 'broadcast',
-                      leagueId: 'sbbl',
-                      homeTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
-                      awayTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
-                      venue: 'SBBL HQ',
-                      court: 'Main Court',
-                      date: new Date().toISOString(),
-                      time: new Date().toISOString(),
-                      status: 'live',
-                      score: { home: 0, away: 0 },
-                      ppvPrice: 4.99,
-                    }}
                     userId={user?.id ?? null}
                     roles={roles}
                     hasPremiumPlayerAccess={hasPremiumPlayerAccess}

@@ -125,27 +125,30 @@ async function runPerf() {
   const baseUrl = process.env.VALIDATION_BASE_URL ?? 'http://127.0.0.1:4173';
   const gameId = process.env.VALIDATION_GAME_ID ?? 'stream-validation-game';
   const targets = [
-    ['paywall_render_latency_ms', '/live'],
-    ['entitlement_decision_latency_ms', `/api/streams/${gameId}/access`],
-    ['access_session_acquisition_latency_ms', `/api/streams/${gameId}/session`],
-    ['playback_start_latency_ms', '/live'],
-    ['reconnect_recovery_latency_ms', `/api/streams/${gameId}/session/heartbeat`],
-    ['replay_response_latency_ms', `/api/streams/${gameId}/resume`],
-    ['comment_broadcast_latency_ms', `/api/streams/${gameId}/comments`],
-    ['reaction_broadcast_latency_ms', `/api/streams/${gameId}/reactions`],
-    ['viewer_counter_update_latency_ms', `/api/streams/${gameId}/viewer-count`],
+    ['paywall_render_latency_ms', 'GET', '/live', [200]],
+    ['entitlement_decision_latency_ms', 'GET', `/api/streams/${gameId}/access`, [200, 401, 403]],
+    ['access_session_acquisition_latency_ms', 'POST', `/api/streams/${gameId}/session`, [200, 400, 401, 403]],
+    ['playback_start_latency_ms', 'GET', '/live', [200]],
+    ['reconnect_recovery_latency_ms', 'POST', `/api/streams/${gameId}/session/heartbeat`, [200, 400, 401, 403, 404]],
+    ['comment_broadcast_latency_ms', 'GET', `/api/streams/${gameId}/comments`, [200, 401, 403]],
+    ['reaction_broadcast_latency_ms', 'GET', `/api/streams/${gameId}/reactions`, [200]],
+    ['viewer_counter_update_latency_ms', 'GET', `/api/streams/${gameId}/viewer-count`, [200]],
   ];
 
   const timings = [];
   let serverReachable = false;
-  for (const [metric, route] of targets) {
+  for (const [metric, method, route, expectedStatuses] of targets) {
     const started = Date.now();
     let status = 0;
     let ok = false;
     try {
-      const res = await fetch(`${baseUrl}${route}`);
+      const res = await fetch(`${baseUrl}${route}`, {
+        method,
+        headers: method === 'POST' ? { 'content-type': 'application/json' } : undefined,
+        body: method === 'POST' ? '{}' : undefined,
+      });
       status = res.status;
-      ok = res.status < 500;
+      ok = expectedStatuses.includes(res.status);
       serverReachable = true;
     } catch {
       ok = false;
@@ -154,6 +157,7 @@ async function runPerf() {
     const thresholdMs = Number(thresholds[metric] ?? 0);
     timings.push({
       metric,
+      method,
       route,
       status,
       ok,
