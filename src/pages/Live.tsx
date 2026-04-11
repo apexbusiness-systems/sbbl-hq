@@ -28,7 +28,7 @@ import {
 import { toast } from 'sonner';
 import type { Game, PlayerProfile } from '@/types';
 
-// ── Helpers ───────────────────────────────────────────────────────────────
+// -- Helpers ----------------------------------------------------------------
 const LEAGUE_IDS = ['sbbl', 'wbl', 'tgifbl'];
 
 function mapHomeGameToUi(row: Record<string, unknown>): Game {
@@ -51,15 +51,32 @@ function mapHomeGameToUi(row: Record<string, unknown>): Game {
   };
 }
 
-// ── Admin Stream Overlay ──────────────────────────────────────────────────
+function createSyntheticLiveGame(gameId: string): Game {
+  return {
+    id: gameId,
+    leagueId: 'sbbl',
+    homeTeam: { id: 'tbd-home', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
+    awayTeam: { id: 'tbd-away', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
+    venue: 'SBBL HQ',
+    court: 'Main Court',
+    date: new Date().toISOString(),
+    time: new Date().toISOString(),
+    status: 'live',
+    score: { home: 0, away: 0 },
+    ppvPrice: 4.99,
+  };
+}
+
+// -- Admin Stream Overlay ---------------------------------------------------
 // Single source of truth for stream management. Renders as a gear-icon
-// dropdown overlay on the video wrapper — no duplicate controls anywhere.
+// dropdown overlay on the video wrapper -- no duplicate controls anywhere.
 // Visible only to super_admin.
 function AdminStreamOverlay({
   isLive, setIsLive,
   streamTitle, setStreamTitle,
   viewerCount,
   customStreamUrl, setCustomStreamUrl,
+  gameId,
 }: {
   isLive: boolean;
   setIsLive: (v: boolean) => void;
@@ -68,6 +85,7 @@ function AdminStreamOverlay({
   viewerCount: number;
   customStreamUrl: string;
   setCustomStreamUrl: (v: string) => void;
+  gameId: string | null;
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -79,11 +97,11 @@ function AdminStreamOverlay({
       const token = await getAuthToken();
       // Step 1: Save config (URL + title)
       await updateStreamConfig({ collectionId: customStreamUrl, title: streamTitle }, token);
-      // Step 2: Toggle live status — if this fails, config is saved but
+      // Step 2: Toggle live status -- if this fails, config is saved but
       // stream state is unchanged. Admin sees the error and can retry
       // the toggle without re-entering the URL.
       try {
-        await setStreamLive(nextLive, token);
+        await setStreamLive(nextLive, token, gameId);
       } catch (liveErr) {
         toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
         setSaving(false);
@@ -101,7 +119,6 @@ function AdminStreamOverlay({
 
   return (
     <>
-      {/* Gear button — always visible in top-left of video wrapper */}
       <button
         onClick={() => setOpen(o => !o)}
         className="absolute top-3 left-3 z-30 w-9 h-9 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center hover:bg-black/80 transition-colors group"
@@ -110,7 +127,6 @@ function AdminStreamOverlay({
         <Settings className={`w-4.5 h-4.5 text-white/80 group-hover:text-white transition-transform ${open ? 'rotate-90' : ''}`} />
       </button>
 
-      {/* Live badge — top-right */}
       <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
         <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider backdrop-blur-sm ${
           isLive ? 'bg-red-600/90 text-white' : 'bg-black/60 text-white/70'
@@ -125,10 +141,8 @@ function AdminStreamOverlay({
         )}
       </div>
 
-      {/* Dropdown panel */}
       {open && (
         <div className="absolute top-14 left-3 z-30 w-80 max-w-[calc(100%-24px)] bg-black/90 backdrop-blur-md border border-white/10 rounded-lg shadow-2xl overflow-hidden animate-fade-in">
-          {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
             <span className="font-display font-bold text-xs uppercase tracking-wider text-white/90">Broadcast Controls</span>
             <button onClick={() => setOpen(false)} className="text-white/50 hover:text-white">
@@ -137,7 +151,6 @@ function AdminStreamOverlay({
           </div>
 
           <div className="p-4 space-y-3">
-            {/* Stats row */}
             <div className="grid grid-cols-3 gap-2">
               <div className="text-center p-1.5 bg-white/5 rounded">
                 <Radio className={`w-3 h-3 mx-auto mb-0.5 ${isLive ? 'text-red-400' : 'text-white/40'}`} />
@@ -153,7 +166,6 @@ function AdminStreamOverlay({
               </div>
             </div>
 
-            {/* Stream URL */}
             <div>
               <label className="text-[9px] uppercase tracking-wider text-white/50 block mb-1">Stream URL</label>
               <input
@@ -161,11 +173,10 @@ function AdminStreamOverlay({
                 value={customStreamUrl}
                 onChange={e => setCustomStreamUrl(e.target.value)}
                 className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50"
-                placeholder="YouTube, Twitch, or direct URL…"
+                placeholder="YouTube, Twitch, or direct URL..."
               />
             </div>
 
-            {/* Stream Title */}
             <div>
               <label className="text-[9px] uppercase tracking-wider text-white/50 block mb-1">Broadcast Title</label>
               <input
@@ -177,7 +188,6 @@ function AdminStreamOverlay({
               />
             </div>
 
-            {/* Go Live / End Stream */}
             <button
               onClick={handleGoLive}
               disabled={saving || (!isLive && !customStreamUrl.trim())}
@@ -187,7 +197,7 @@ function AdminStreamOverlay({
                   : 'bg-green-600 text-white hover:bg-green-500'
               }`}
             >
-              {saving ? 'Saving…' : isLive ? 'End Stream' : 'Go Live'}
+              {saving ? 'Saving...' : isLive ? 'End Stream' : 'Go Live'}
             </button>
           </div>
         </div>
@@ -196,21 +206,19 @@ function AdminStreamOverlay({
   );
 }
 
-// ── Main Live Page ─────────────────────────────────────────────────────────
+// -- Main Live Page ---------------------------------------------------------
 const LivePage = () => {
   const { hasPremiumPlayerAccess } = useApp();
   const { addToBag } = useBag();
 
-  // --- Top Performers Carousel Logic ---
   /* eslint-disable @typescript-eslint/no-explicit-any */
 
   const [activeLeagueIdx, setActiveLeagueIdx] = useState(0);
-  // leagueIds is moved outside to avoid dependency array issues
 
   useEffect(() => {
     const interval = setInterval(() => {
       setActiveLeagueIdx((prev) => (prev + 1) % LEAGUE_IDS.length);
-    }, 60000); // 60 seconds
+    }, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -221,15 +229,14 @@ const LivePage = () => {
       const { data } = await supabase.rpc('get_leaderboards', { p_filters: { league: LEAGUE_IDS[activeLeagueIdx] } });
       return data?.leaders || [];
     },
-    staleTime: 1000 * 60 * 5, // 5 min
+    staleTime: 1000 * 60 * 5,
   });
 
   const topPerformers = useMemo(() => {
-    // leaderboardsData is already sorted by points descending from the RPC.
     return leaderboardsData.slice(0, 3).map((p: any) => ({
       id: p.id,
       name: p.name,
-      avatar: p.avatar, // the RPC does not currently return avatar_url, but we map what we have or let fallback handle it
+      avatar: p.avatar,
       position: p.position || 'N/A',
       pts: p.pts || 0,
       league_id: p.league_id,
@@ -240,14 +247,12 @@ const LivePage = () => {
   const isSuperAdmin = roles.includes('super_admin');
   const [liveGame, setLiveGame] = useState<Game | null>(null);
 
-  // Admin stream state — fetched from backend (single source of truth)
   const [isStreamLive, setIsStreamLive] = useState(false);
   const [streamTitle, setStreamTitle] = useState('Live Game Broadcast');
   const [viewerCount, setViewerCount] = useState(0);
   const [customStreamUrl, setCustomStreamUrl] = useState('');
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
 
-  // Auto-sync stream status from backend
   useEffect(() => {
     let active = true;
     const fetchStatus = async () => {
@@ -256,25 +261,31 @@ const LivePage = () => {
         const liveRows = (home.data?.liveGames ?? []) as Array<Record<string, unknown>>;
         const upcomingRows = (home.data?.upcomingGames ?? []) as Array<Record<string, unknown>>;
         const selected = liveRows[0] ?? upcomingRows[0] ?? null;
-        if (active && selected) setLiveGame(mapHomeGameToUi(selected));
+
+        if (active) {
+          if (selected) {
+            // Home feed drives display context only; worker status/config owns live binding.
+            setLiveGame(mapHomeGameToUi(selected));
+          } else {
+            setLiveGame(null);
+          }
+        }
+
         if (isSuperAdmin) {
-          // Admin needs full config — pass null so apiFetch uses getAuthToken()
-          // which auto-refreshes expired JWTs. Never pass an explicit token from
-          // a React closure here; it goes stale and causes endless 401 loops.
           const res = await fetchAdminStreamConfig(null);
           if (active && res?.config) {
             setIsStreamLive(res.config.isLive);
             setStreamTitle(res.config.title);
-            setCustomStreamUrl(res.config.collectionId || ''); // collectionId stores the stream URL
+            setCustomStreamUrl(res.config.collectionId || '');
+            setActiveGameId(typeof res.config.gameId === 'string' && res.config.gameId ? res.config.gameId : null);
           }
         } else {
-          // Public poller
           const res = await fetchPublicStreamStatus();
           if (active && res?.ok) {
             setIsStreamLive(Boolean(res.isLive));
             setStreamTitle(typeof res.title === 'string' ? res.title : 'Live Game Broadcast');
             setViewerCount(typeof res.viewerCount === 'number' && res.viewerCount >= 0 ? res.viewerCount : 0);
-            if (typeof res.gameId === 'string' && res.gameId) setActiveGameId(res.gameId);
+            setActiveGameId(typeof res.gameId === 'string' && res.gameId ? res.gameId : null);
           }
         }
       } catch {
@@ -283,18 +294,23 @@ const LivePage = () => {
     };
 
     void fetchStatus();
-    // Poll every 15 seconds for viewers
     const id = setInterval(fetchStatus, 15000);
     return () => { active = false; clearInterval(id); };
   }, [isSuperAdmin]);
 
+  // When live, the worker-side bound gameId is authoritative; never synthesize "broadcast".
+  const playbackGame = useMemo(() => {
+    if (!isStreamLive) return liveGame;
+    if (!activeGameId) return null;
+    if (liveGame?.id === activeGameId) return liveGame;
+    return createSyntheticLiveGame(activeGameId);
+  }, [activeGameId, isStreamLive, liveGame]);
+
   const [comments, setComments] = useState<Array<{ id: string; user: string; text: string }>>([]);
   const [chatInput, setChatInput] = useState('');
 
-  // ── Real reactions (persisted + Realtime-broadcast) ──────────────────────
   const [reactions, setReactions] = useState({ fire: 0, heart: 0, clap: 0 });
 
-  // Fetch initial counts whenever the active game is known
   useEffect(() => {
     if (!activeGameId) return;
     void apiFetch<{ ok: boolean; fire: number; heart: number; clap: number }>(
@@ -304,7 +320,6 @@ const LivePage = () => {
     }).catch(() => {});
   }, [activeGameId]);
 
-  // Subscribe to Supabase Realtime — broadcast every new reaction to all viewers
   useEffect(() => {
     if (!activeGameId) return;
     const client = getSupabaseClient();
@@ -328,9 +343,7 @@ const LivePage = () => {
   }, [activeGameId]);
 
   const postReaction = useCallback(async (type: 'fire' | 'heart' | 'clap') => {
-    // Optimistic update immediately
     setReactions(r => ({ ...r, [type]: r[type] + 1 }));
-    // Persist to DB (auth required; silently skip if not signed in)
     if (!user?.id || !activeGameId || !session) return;
     try {
       await apiFetch(`/api/streams/${activeGameId}/react`, {
@@ -338,7 +351,7 @@ const LivePage = () => {
         body: JSON.stringify({ type }),
       });
     } catch {
-      // non-critical — optimistic update already applied
+      // non-critical -- optimistic update already applied
     }
   }, [activeGameId, user?.id, session]);
   const [clipSaved, setClipSaved] = useState(false);
@@ -381,7 +394,7 @@ const LivePage = () => {
   const handleShare = async () => {
     if (!liveGame) return;
     const shareData = {
-      title: `${liveGame.homeTeam.name} vs ${liveGame.awayTeam.name} — Live on SBBL HQ`,
+      title: `${liveGame.homeTeam.name} vs ${liveGame.awayTeam.name} -- Live on SBBL HQ`,
       text: `Watch the game live: ${liveGame.score?.home}–${liveGame.score?.away} in Q4`,
       url: window.location.href,
     };
@@ -424,7 +437,6 @@ const LivePage = () => {
 
   const sidebar = (
     <div className="space-y-4">
-      {/* Featured Merch Carousel */}
       {featuredProducts.length > 0 && (
         <div className="panel overflow-hidden">
           <div className="relative aspect-square overflow-hidden bg-secondary">
@@ -475,13 +487,12 @@ const LivePage = () => {
               className="mt-3 w-full gold-bg py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded-sm inline-flex items-center justify-center gap-2"
             >
               <ShoppingBag className="w-3.5 h-3.5" />
-              {carouselProduct.price > 0 ? `Add to Bag — $${carouselProduct.price.toLocaleString()}` : 'Claim Reward'}
+              {carouselProduct.price > 0 ? `Add to Bag -- $${carouselProduct.price.toLocaleString()}` : 'Claim Reward'}
             </button>
           </div>
         </div>
       )}
 
-      {/* Top Performers */}
       <div className="panel p-4">
         <h3 className="font-display font-bold text-sm mb-3">Top Performers</h3>
         {topPerformers.length > 0 ? topPerformers.map((p: PlayerProfile | any) => (
@@ -508,12 +519,8 @@ const LivePage = () => {
       <div className="lg:container lg:py-4">
         <div className="lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
 
-          {/* LEFT: broadcast area + actions + chat */}
           <div className="lg:col-span-2 flex flex-col">
-
-            {/* Broadcast Area — admin overlay + access-gate player */}
             <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
-              {/* Admin stream overlay — inside the video wrapper, super_admin only */}
               {isSuperAdmin && (
                 <AdminStreamOverlay
                   isLive={isStreamLive}
@@ -523,13 +530,14 @@ const LivePage = () => {
                   viewerCount={viewerCount}
                   customStreamUrl={customStreamUrl}
                   setCustomStreamUrl={setCustomStreamUrl}
+                  gameId={liveGame?.id ?? activeGameId}
                 />
               )}
 
-              {liveGame ? (
+              {playbackGame ? (
                 <PlayerErrorBoundary>
                   <LiveStreamPlayer
-                    game={liveGame}
+                    game={playbackGame}
                     userId={user?.id ?? null}
                     roles={roles}
                     hasPremiumPlayerAccess={hasPremiumPlayerAccess}
@@ -537,31 +545,23 @@ const LivePage = () => {
                   />
                 </PlayerErrorBoundary>
               ) : isStreamLive ? (
-                /* Stream is live but no game is scheduled — show stream anyway
-                   by creating a synthetic game shell. This prevents the "no game"
-                   state from blocking broadcast when admin goes live without a
-                   scheduled game. */
-                <PlayerErrorBoundary>
-                  <LiveStreamPlayer
-                    game={{
-                      id: activeGameId ?? 'broadcast',
-                      leagueId: 'sbbl',
-                      homeTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
-                      awayTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
-                      venue: 'SBBL HQ',
-                      court: 'Main Court',
-                      date: new Date().toISOString(),
-                      time: new Date().toISOString(),
-                      status: 'live',
-                      score: { home: 0, away: 0 },
-                      ppvPrice: 4.99,
-                    }}
-                    userId={user?.id ?? null}
-                    roles={roles}
-                    hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-                    isStreamLive={isStreamLive}
-                  />
-                </PlayerErrorBoundary>
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
+                  <div className="w-14 h-14 rounded-full bg-secondary/50 flex items-center justify-center mb-3">
+                    <Radio className="w-6 h-6 text-primary animate-pulse" />
+                  </div>
+                  <p className="text-sm text-white/70 font-medium">Broadcast Live, Game Binding Pending</p>
+                  <p className="text-xs text-white/40 mt-1 max-w-xs">
+                    In-app playback will unlock once this broadcast is linked to a scheduled game session.
+                  </p>
+                  <a
+                    href="https://www.facebook.com/SBBLhq/live"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-[#1877F2] text-white text-xs font-bold uppercase tracking-wider rounded-sm hover:bg-[#166FE5] transition-colors"
+                  >
+                    Watch on Facebook
+                  </a>
+                </div>
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
                   <div className="w-14 h-14 rounded-full bg-secondary/50 flex items-center justify-center mb-3">
@@ -573,9 +573,7 @@ const LivePage = () => {
               )}
             </div>
 
-            {/* Actions + Chat */}
             <div className="container lg:px-0 py-4 space-y-4">
-              {/* Reaction bar */}
               <div className="flex items-center gap-3 flex-wrap">
                 <button onClick={() => postReaction('fire')} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   🔥 <span className="stat-numeral">{reactions.fire}</span>
@@ -598,7 +596,6 @@ const LivePage = () => {
                 </button>
               </div>
 
-              {/* Live Chat */}
               <div className="panel">
                 <div className="p-4 border-b border-border flex items-center gap-2">
                   <MessageSquare className="w-4 h-4 text-muted-foreground" />
@@ -632,20 +629,16 @@ const LivePage = () => {
                 </div>
               </div>
 
-              {/* Mobile-only sidebar */}
               <div className="lg:hidden">{sidebar}</div>
             </div>
           </div>
 
-          {/* RIGHT: sticky sidebar */}
           <div className="hidden lg:block sticky top-[73px]">
             {sidebar}
           </div>
-
         </div>
       </div>
 
-      {/* CASL nudge — one-time per session, bottom-right, easy dismiss */}
       <CASLNudge roles={roles} />
     </div>
   );
