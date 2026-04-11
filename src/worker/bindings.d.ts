@@ -13,6 +13,5 @@ interface Env {
   OPTIONAL_TURNSTILE_SECRET_KEY?: string;
   GROQ_API_KEY?: string;
   ENABLE_STREAM_VALIDATION?: string;
-  BROADCAST_STREAM_URL?: string;
   ASSETS: { fetch: (req: Request) => Promise<Response> };
 }

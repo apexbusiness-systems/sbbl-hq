@@ -31,26 +31,6 @@ import type { Game, PlayerProfile } from '@/types';
 // ── Helpers ───────────────────────────────────────────────────────────────
 const LEAGUE_IDS = ['sbbl', 'wbl', 'tgifbl'];
 
-interface BroadcastSession {
-  active: boolean;
-  stream_url: string | null;
-  platform?: 'facebook' | 'youtube' | 'custom';
-  title?: string;
-  status?: string;
-}
-
-const fetchBroadcastSession = async (): Promise<BroadcastSession> => {
-  try {
-    const res = await fetch('/api/streams/broadcast/session', {
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return { active: false, stream_url: null };
-    return await res.json() as BroadcastSession;
-  } catch {
-    return { active: false, stream_url: null };
-  }
-};
-
 function mapHomeGameToUi(row: Record<string, unknown>): Game {
   const homeTeam = (row.home_team as Record<string, unknown> | null) ?? {};
   const awayTeam = (row.away_team as Record<string, unknown> | null) ?? {};
@@ -289,22 +269,10 @@ const LivePage = () => {
           }
         } else {
           // Public poller
-          const session = await fetchBroadcastSession();
-          if (active) {
-            setIsStreamLive(Boolean(session.active));
-            // Keep offline-safe fallback title when broadcast endpoint omits one.
-            setStreamTitle(typeof session.title === 'string' ? session.title : 'Live Game Broadcast');
-          }
-
           const res = await fetchPublicStreamStatus();
           if (active && res?.ok) {
-            // Stream is live if either source reports active.
-            setIsStreamLive(Boolean(session.active || res.isLive));
-            setStreamTitle(
-              typeof session.title === 'string'
-                ? session.title
-                : (typeof res.title === 'string' ? res.title : 'Live Game Broadcast'),
-            );
+            setIsStreamLive(Boolean(res.isLive));
+            setStreamTitle(typeof res.title === 'string' ? res.title : 'Live Game Broadcast');
             setViewerCount(typeof res.viewerCount === 'number' && res.viewerCount >= 0 ? res.viewerCount : 0);
             if (typeof res.gameId === 'string' && res.gameId) setActiveGameId(res.gameId);
           }
@@ -568,15 +536,13 @@ const LivePage = () => {
                     isStreamLive={isStreamLive}
                   />
                 </PlayerErrorBoundary>
-              ) : isStreamLive ? (
-                /* Stream is live but no game is scheduled — show stream anyway
-                   by creating a synthetic game shell. This prevents the "no game"
-                   state from blocking broadcast when admin goes live without a
-                   scheduled game. */
+              ) : isStreamLive && activeGameId ? (
+                /* Use a real activeGameId only — synthetic IDs trigger guaranteed 404s
+                   on /api/streams/:gameId/session access checks and playback sessions. */
                 <PlayerErrorBoundary>
                   <LiveStreamPlayer
                     game={{
-                      id: activeGameId ?? 'broadcast',
+                      id: activeGameId,
                       leagueId: 'sbbl',
                       homeTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
                       awayTeam: { id: 'tbd', name: 'TBD', leagueId: 'sbbl', division: '', record: { wins: 0, losses: 0 } },
@@ -600,7 +566,7 @@ const LivePage = () => {
                     <Radio className="w-6 h-6 text-muted-foreground" />
                   </div>
                   <p className="text-sm text-white/70 font-medium">No Active Broadcast</p>
-                  <p className="text-xs text-white/40 mt-1">Check back when a game is scheduled or a stream goes live.</p>
+                  <p className="text-xs text-white/40 mt-1">A live feed will appear once a real game session is bound.</p>
                 </div>
               )}
             </div>

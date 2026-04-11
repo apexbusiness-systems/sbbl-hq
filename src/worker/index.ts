@@ -2733,86 +2733,6 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
 
 const REACTIONS_CACHE_TTL_S = 5;
 
-
-async function handleBroadcastSessionOptions() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    },
-  });
-}
-
-async function handleBroadcastSessionRequest(
-  env: Env,
-  admin?: SupabaseClient,
-) {
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": "*",
-    "Content-Type": "application/json",
-  };
-
-  try {
-    const fallbackUrl = env.BROADCAST_STREAM_URL ?? null;
-    const canQuerySupabase =
-      Boolean(env.SUPABASE_URL) && Boolean(env.SUPABASE_SERVICE_ROLE_KEY);
-
-    if (!canQuerySupabase) {
-      return new Response(
-        JSON.stringify({
-          active: Boolean(fallbackUrl),
-          stream_url: fallbackUrl,
-          platform: "facebook",
-        }),
-        { status: 200, headers: corsHeaders },
-      );
-    }
-
-    const db = admin ?? getAdminClient(env);
-    const { data: session, error } = await db
-      .from("broadcast_sessions")
-      .select("id, stream_url, platform, status, started_at, title")
-      .eq("status", "live")
-      .order("started_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) throw error;
-
-    if (!session) {
-      return new Response(
-        JSON.stringify({
-          active: Boolean(fallbackUrl),
-          stream_url: fallbackUrl,
-          platform: "facebook",
-        }),
-        { status: 200, headers: corsHeaders },
-      );
-    }
-
-    return new Response(
-      JSON.stringify({ active: true, ...session }),
-      { status: 200, headers: corsHeaders },
-    );
-  } catch {
-    return new Response(
-      JSON.stringify({
-        active: false,
-        stream_url: null,
-        error: "session_lookup_failed",
-      }),
-      { status: 200, headers: corsHeaders },
-    );
-  }
-}
-
-async function handleBroadcastSession({ env, admin }: HandlerCtx) {
-  return handleBroadcastSessionRequest(env, admin);
-}
-
-
 async function handleStreamReactions({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   // Support /api/streams/:gameId/reactions and /api/streams/reactions?gameId=...
@@ -4074,16 +3994,6 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "GET",
-    path: "/api/streams/broadcast/session",
-    handler: handleBroadcastSession,
-  },
-  {
-    method: "OPTIONS",
-    path: "/api/streams/broadcast/session",
-    handler: () => handleBroadcastSessionOptions(),
-  },
-  {
-    method: "GET",
     path: "/api/streams/reactions",
     handler: handleStreamReactions,
   },
@@ -4227,17 +4137,8 @@ export default Sentry.withSentry(
         const parsed = safeServerEnv(env as unknown as Record<string, unknown>);
 
     const url = new URL(req.url);
-    if (url.pathname === "/api/streams/broadcast/session") {
-      // Keep this route fail-open even during partial env misconfiguration.
-      if (req.method === "OPTIONS") return addSecurityHeaders(await handleBroadcastSessionOptions());
-      if (req.method === "GET") return addSecurityHeaders(await handleBroadcastSessionRequest(env));
-    }
-    const isBroadcastSessionRoute =
-      url.pathname === "/api/streams/broadcast/session";
-
     if (
       !parsed.ok &&
-      !isBroadcastSessionRoute &&
       (url.pathname.startsWith("/api") ||
         url.pathname.startsWith("/auth") ||
         url.pathname.startsWith("/ops") ||
@@ -4265,7 +4166,7 @@ export default Sentry.withSentry(
     // query in EVERY route handler will fail with "Invalid API key".
     // We validate the key format before creating the client.
     if (!env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY.length < 20) {
-      if (!isBroadcastSessionRoute && (url.pathname.startsWith("/api") || url.pathname.startsWith("/ops") || url.pathname.startsWith("/auth"))) {
+      if (url.pathname.startsWith("/api") || url.pathname.startsWith("/ops") || url.pathname.startsWith("/auth")) {
         return addSecurityHeaders(json({
           ok: false,
           error: "supabase_service_key_missing",
