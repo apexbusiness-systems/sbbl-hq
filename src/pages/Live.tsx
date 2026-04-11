@@ -182,14 +182,14 @@ function AdminStreamOverlay({
             {/* Go Live / End Stream */}
             <button
               onClick={handleGoLive}
-              disabled={saving || (!isLive && !customStreamUrl.trim())}
+              disabled={saving || (!isLive && (!customStreamUrl.trim() || !activeGameId))}
               className={`w-full py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded transition-colors disabled:opacity-40 ${
                 isLive
                   ? 'bg-red-600 text-white hover:bg-red-500'
                   : 'bg-green-600 text-white hover:bg-green-500'
               }`}
             >
-              {saving ? 'Saving…' : isLive ? 'End Stream' : 'Go Live'}
+              {saving ? 'Saving…' : isLive ? 'End Stream' : !activeGameId ? 'Set Active Game First' : 'Go Live'}
             </button>
           </div>
         </div>
