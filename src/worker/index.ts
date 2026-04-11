@@ -2579,6 +2579,101 @@ async function handleInviteGenerate(ctx: HandlerCtx) {
 }
 
 /**
+ * POST /ops/streams/comp-code
+ * Super-admin only. Generates a complimentary access code that grants the
+ * redeemer a free playback session with the same rules as a PPV purchase:
+ *   - IP-locked on first use
+ *   - Non-transferable
+ *   - 6-hour playback session cap
+ *   - One-device enforcement
+ *
+ * Unlike the regular invite generator, super admin can create UNLIMITED codes
+ * per game (the partial unique index only applies to is_comp = false rows).
+ *
+ * Body:
+ *   { gameId: string, note?: string, expiresInHours?: number }
+ *
+ * Response:
+ *   { ok: true, code: string, gameId: string, expiresAt: string, note?: string }
+ */
+async function handleSuperAdminCompCode(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    gameId?: string;
+    note?: string;
+    expiresInHours?: number;
+  } | null;
+  const gameId = body?.gameId?.trim();
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+
+  // Clamp expiry window to [1, 168] hours (1 hour to 7 days). Default 24h
+  // matches the regular invite system. This is the REDEMPTION window — once
+  // redeemed, the playback session is still hard-capped at 6 hours by
+  // createOrRefreshPlaybackSession.
+  const rawHours = Number(body?.expiresInHours);
+  const hours = Number.isFinite(rawHours) && rawHours > 0
+    ? Math.min(168, Math.max(1, rawHours))
+    : 24;
+  const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+
+  const note = typeof body?.note === "string" ? body.note.trim().slice(0, 200) : null;
+
+  const { data: invite, error: insertErr } = await ctx.admin
+    .from("ppv_invites")
+    .insert({
+      game_id: gameId,
+      generated_by: session.userId,
+      is_comp: true,
+      expires_at: expiresAt,
+      note,
+    })
+    .select("id,game_id,expires_at,note,created_at")
+    .single();
+
+  if (insertErr) throw new Error(insertErr.message);
+
+  return json({
+    ok: true,
+    code: (invite as { id: string }).id,
+    gameId: (invite as { game_id: string }).game_id,
+    expiresAt: (invite as { expires_at: string }).expires_at,
+    note: (invite as { note: string | null }).note,
+    createdAt: (invite as { created_at: string }).created_at,
+  });
+}
+
+/**
+ * GET /ops/streams/comp-code
+ * Super-admin only. Lists recent comp codes for ops tracking + reprinting.
+ * Returns the 50 most recently generated codes that are still unused or
+ * within their expiry window.
+ */
+async function handleSuperAdminCompCodeList(ctx: HandlerCtx) {
+  await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { data, error } = await ctx.admin
+    .from("ppv_invites")
+    .select("id,game_id,used_by,used_at,expires_at,note,created_at")
+    .eq("is_comp", true)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw new Error(error.message);
+  return json({
+    ok: true,
+    codes: (data ?? []).map((row: Record<string, unknown>) => ({
+      code: String(row.id),
+      gameId: String(row.game_id),
+      usedBy: row.used_by ? String(row.used_by) : null,
+      usedAt: row.used_at ? String(row.used_at) : null,
+      expiresAt: String(row.expires_at),
+      note: row.note ? String(row.note) : null,
+      createdAt: String(row.created_at),
+    })),
+  });
+}
+
+/**
  * POST /api/invite/redeem
  * Auth required.  User must be a registered fan (any authenticated user qualifies).
  * Validates: exists → not expired → not already used by someone else.
@@ -2603,22 +2698,31 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
     return json({ ok: false, error: "captcha_failed" }, 403);
   }
   const code = body?.code?.trim();
-  const gameId = body?.gameId?.trim();
-  if (!code || !gameId)
-    return json({ ok: false, error: "code_and_game_id_required" }, 400);
+  const suppliedGameId = body?.gameId?.trim();
+  if (!code) return json({ ok: false, error: "code_required" }, 400);
 
-  // Fetch invite record
+  // Fetch invite record by code only. If the caller also supplied a gameId,
+  // we'll enforce it matches after the row is loaded. Looking the code up by
+  // id alone lets comp-code redemption work without the viewer needing to
+  // know the game_id associated with their token.
   const { data: row, error: fetchErr } = await ctx.admin
     .from("ppv_invites")
     .select(
-      "id, game_id, generated_by, used_by, ip_address, used_at, expires_at",
+      "id, game_id, generated_by, used_by, ip_address, used_at, expires_at, is_comp",
     )
     .eq("id", code)
-    .eq("game_id", gameId)
     .maybeSingle();
 
   if (fetchErr || !row)
     return json({ ok: false, error: "invalid_invite" }, 404);
+
+  // If the caller supplied a gameId, it must match the code's game_id.
+  // (Legacy in-player redemption still sends gameId to preserve the existing
+  // contract; the new standalone widget omits it.)
+  if (suppliedGameId && String((row as { game_id: string }).game_id) !== suppliedGameId) {
+    return json({ ok: false, error: "invalid_invite" }, 404);
+  }
+  const gameId = String((row as { game_id: string }).game_id);
 
   const inv = row as {
     id: string;
@@ -4102,6 +4206,16 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     handler: handleSetStreamStatus,
   },
   {
+    method: "POST",
+    path: "/ops/streams/comp-code",
+    handler: handleSuperAdminCompCode,
+  },
+  {
+    method: "GET",
+    path: "/ops/streams/comp-code",
+    handler: handleSuperAdminCompCodeList,
+  },
+  {
     method: "GET",
     path: "/ops/streams/sessions",
     handler: handleStreamSessions,
@@ -4163,13 +4277,13 @@ function addSecurityHeaders(res: Response): Response {
   // Facebook + YouTube + Twitch domains required for /live page stream embeds.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://assets.twitch.tv; " +
-    "style-src 'self' 'unsafe-inline'; " +
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://assets.twitch.tv; " +
+    "style-src 'self' 'unsafe-inline' https://*.facebook.com; " +
     "img-src 'self' data: blob: https:; " +
-    "font-src 'self' data:; " +
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
-    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
+    "font-src 'self' data: https://*.facebook.com https://*.fbcdn.net; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://*.facebook.com https://*.facebook.net https://graph.facebook.com https://*.fbcdn.net wss://*.facebook.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.facebook.com https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
     "form-action 'self' https://checkout.stripe.com;"
