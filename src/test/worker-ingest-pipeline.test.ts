@@ -323,6 +323,7 @@ describe('video ingest guardrails', () => {
     expect(fnBody).toContain('caption_too_long');
     expect(fnBody).toContain('video_size_limit_exceeded');
     expect(fnBody).toContain('invalid_video_mime_type');
+    expect(fnBody).toContain('resolveUploadedAssetMetadata');
   });
 
   it('maps video URL + caption into the public media contract', () => {
@@ -342,12 +343,12 @@ describe('video ingest guardrails', () => {
 
 // ── 9. Security boundaries ────────────────────────────────────────────────────
 describe('security: ingest role gating', () => {
-  it('presign/submit/status allow admin or super_admin', () => {
+  it('presign/submit/status require media-upload role gate', () => {
     for (const handler of ['handleIngestPresign', 'handleIngestSubmit', 'handleIngestStatus']) {
       const fnStart = workerSrc.indexOf(`async function ${handler}`);
       const fnEnd = workerSrc.indexOf('\nasync function ', fnStart + 10);
       const fnBody = workerSrc.slice(fnStart, fnEnd);
-      expect(fnBody).toContain('requireAdminSession');
+      expect(fnBody).toContain('requireMediaUploadSession');
     }
   });
 

@@ -55,6 +55,10 @@ const MediaPage = () => {
     }
   }, [activeLeague, paramLeague, isValidParam]);
 
+  useEffect(() => {
+    setVideoLeague(activeLeague);
+  }, [activeLeague]);
+
   const mediaQuery = useQuery({
     queryKey: ['public-media'],
     queryFn: () => apiFetch<{ ok: boolean; data: MediaAsset[] }>('/api/public/media'),
@@ -279,6 +283,9 @@ const MediaPage = () => {
                 placeholder="Caption (max 140 chars)"
                 className="min-h-[84px] rounded-sm border border-border bg-background px-3 py-2 text-sm md:col-span-2"
               />
+              <p className="text-[11px] text-muted-foreground md:col-span-2">
+                {videoCaption.length}/140
+              </p>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground uppercase tracking-wider">Section</span>
                 {(['clip', 'highlight'] as const).map(section => (

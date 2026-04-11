@@ -1476,6 +1476,25 @@ async function requireAdminSession(req: Request, admin: SupabaseClient) {
   return { userId, roles };
 }
 
+async function requireMediaUploadSession(req: Request, admin: SupabaseClient) {
+  const session = await requireAdminSession(req, admin);
+  if (!session.roles.some((role) => role === "league_admin" || role === "super_admin")) {
+    throw new Error("forbidden");
+  }
+  return session;
+}
+
+async function resolveUploadedAssetMetadata(publicUrl: string) {
+  const head = await fetch(publicUrl, { method: "HEAD" });
+  if (!head.ok) throw new Error("upload_metadata_unavailable");
+  const contentLength = Number(head.headers.get("content-length") ?? 0);
+  const contentType = String(head.headers.get("content-type") ?? "").toLowerCase();
+  if (!Number.isFinite(contentLength) || contentLength <= 0) {
+    throw new Error("upload_size_unverifiable");
+  }
+  return { contentLength, contentType };
+}
+
 async function writeImportJob(
   admin: SupabaseClient,
   job: {
@@ -4528,7 +4547,7 @@ export default Sentry.withSentry(
  */
 async function handleIngestPresign(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  await requireAdminSession(ctx.req, ctx.admin);
+  await requireMediaUploadSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     kind?: string;
@@ -4592,7 +4611,7 @@ async function handleIngestPresign(ctx: HandlerCtx) {
  */
 async function handleIngestSubmit(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireMediaUploadSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     kind?: string;
@@ -4659,6 +4678,17 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
   const publicUrl = rawPublicUrl.startsWith("http")
     ? rawPublicUrl
     : `${ctx.env.SUPABASE_URL}/storage/v1/object/public/media/${rawPublicUrl}`;
+
+  if (body.kind === "video") {
+    const uploadedMeta = await resolveUploadedAssetMetadata(publicUrl);
+    if (uploadedMeta.contentLength > 50 * 1024 * 1024) {
+      return json({ ok: false, error: "video_size_limit_exceeded" }, 400);
+    }
+    const acceptedTypes = ["video/mp4", "video/webm", "video/quicktime"];
+    if (!acceptedTypes.some((type) => uploadedMeta.contentType.includes(type))) {
+      return json({ ok: false, error: "invalid_video_mime_type" }, 400);
+    }
+  }
 
   // ── Step 1: Create ingest_job (state=uploaded) ──────────────────────────
   const baseJobInsert = {
@@ -4777,7 +4807,7 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
  * Returns current state of an ingest job.
  */
 async function handleIngestStatus(ctx: HandlerCtx) {
-  await requireAdminSession(ctx.req, ctx.admin);
+  await requireMediaUploadSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
