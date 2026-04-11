@@ -1,0 +1,30 @@
+name = "sbbl-api-proxy"
+main = "index.ts"
+compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Routes this worker to the api subdomain only
+[[routes]]
+pattern = "api.sbbl-hq.icu/*"
+zone_name = "sbbl-hq.icu"
+
+# KV namespace for circuit breaker state
+[[kv_namespaces]]
+binding = "SBBL_BACKEND_STATE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+# Create the KV namespace with:
+# wrangler kv:namespace create SBBL_BACKEND_STATE
+# Then paste the id above.
+
+# Secrets (set via wrangler secret put — never in wrangler.toml):
+# SELFHOST_ORIGIN_URL   = http://[EC2_PUBLIC_IP]:8000
+# CLOUD_URL             = https://ezanilxygnpucwkwpsoc.supabase.co
+# CLOUD_ANON_KEY        = [cloud anon key]
+# SELFHOST_ANON_KEY     = [selfhost anon key - same value as ANON_KEY in .env]
+# FAILOVER_SECRET       = [random 32-char secret for manual override endpoint]
+
+[vars]
+FAILURE_THRESHOLD = "3"
+FAILURE_WINDOW_MS = "30000"
+UPSTREAM_TIMEOUT_MS = "5000"
+ENVIRONMENT = "production"

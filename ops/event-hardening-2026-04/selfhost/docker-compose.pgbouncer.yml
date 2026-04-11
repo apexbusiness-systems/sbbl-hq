@@ -12,7 +12,7 @@ services:
       DATABASE_URL: postgres://supabase_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
       POOL_MODE: transaction
       MAX_CLIENT_CONN: "5000"
-      DEFAULT_POOL_SIZE: "50"
+      DEFAULT_POOL_SIZE: "100"
       RESERVE_POOL_SIZE: "25"
       RESERVE_POOL_TIMEOUT: "3"
       MAX_DB_CONNECTIONS: "200"
