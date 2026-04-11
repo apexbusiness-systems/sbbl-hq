@@ -207,6 +207,74 @@ export async function setStreamLive(
   );
 }
 
+// ── Super Admin Comp Codes ───────────────────────────────────────────────────
+
+export interface CompCode {
+  code: string;
+  gameId: string;
+  usedBy?: string | null;
+  usedAt?: string | null;
+  expiresAt: string;
+  note?: string | null;
+  createdAt: string;
+}
+
+/**
+ * Generate a super-admin complimentary access code. Unlimited per game.
+ * Redeemer gets a free playback session with the same rules as PPV
+ * (IP-locked, one-device, 6-hour session cap).
+ */
+export async function generateCompCode(
+  gameId: string,
+  options: { note?: string; expiresInHours?: number } = {},
+  token: string | null,
+) {
+  return apiFetch<{ ok: boolean; code: string; gameId: string; expiresAt: string; note?: string | null; createdAt: string }>(
+    '/ops/streams/comp-code',
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-comp-code-${gameId}-${Date.now()}`) },
+      body: JSON.stringify({
+        gameId,
+        note: options.note ?? null,
+        expiresInHours: options.expiresInHours ?? 24,
+      }),
+    },
+    token,
+  );
+}
+
+/** List recent comp codes for ops tracking (50 most recent). */
+export async function listCompCodes(token: string | null) {
+  return apiFetch<{ ok: boolean; codes: CompCode[] }>(
+    '/ops/streams/comp-code',
+    {},
+    token,
+  );
+}
+
+/**
+ * Redeem an access code (comp code or regular invite). Only the code is
+ * required — the server derives the gameId from the code lookup.
+ */
+export async function redeemAccessCode(
+  code: string,
+  options: { captchaToken?: string } = {},
+  token: string | null,
+) {
+  return apiFetch<{ ok: boolean; granted: boolean; idempotent?: boolean }>(
+    '/api/invite/redeem',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        code: code.trim(),
+        captchaToken: options.captchaToken,
+      }),
+    },
+    token,
+  );
+}
+
 // ── Session History ──────────────────────────────────────────────────────────
 
 /** Fetch recent broadcast sessions — requires league_admin */

@@ -21,11 +21,110 @@ import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import ReactPlayer from 'react-player';
 import { apiFetch } from '@/lib/api/client';
+import { redeemAccessCode } from '@/lib/api/stream';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
 import type { Game } from '@/types';
 import type { AppRole } from '@/lib/auth/roles';
+
+/**
+ * AccessCodeRedeem
+ * Standalone token input for any viewer. Accepts a comp code or invite UUID,
+ * derives the gameId server-side, and calls window.location.reload() on
+ * success so the player re-fetches entitlement and starts playback.
+ *
+ * Rendered in multiple gates (unregistered prompt, loading state, preview
+ * paywall) so anyone who has a token can redeem it regardless of the player's
+ * current state — no forced navigation required.
+ */
+function AccessCodeRedeem({
+  variant = 'dark',
+  onRedeemed,
+}: {
+  variant?: 'dark' | 'light';
+  onRedeemed?: () => void;
+}) {
+  const [code, setCode] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const { containerRef: turnstileRef, resolveToken } = useTurnstile();
+
+  const handleRedeem = async () => {
+    const trimmed = code.trim();
+    if (!trimmed || submitting) return;
+    setSubmitting(true);
+    try {
+      await redeemAccessCode(
+        trimmed,
+        { captchaToken: await resolveToken() },
+        null,
+      );
+      toast.success('Access granted — loading stream…');
+      if (onRedeemed) {
+        onRedeemed();
+      } else {
+        setTimeout(() => window.location.reload(), 400);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg === 'ip_mismatch' || msg === 'non_transferable') {
+        toast.error('This code cannot be used from your device or location.');
+      } else if (msg === 'expired') {
+        toast.error('This access code has expired.');
+      } else if (msg === 'invalid_invite') {
+        toast.error('Access code not found. Check for typos.');
+      } else if (msg === 'cannot_redeem_own_invite') {
+        toast.error('You cannot redeem a code you generated.');
+      } else if (msg === 'rate_limited') {
+        toast.error('Too many attempts. Please wait a minute.');
+      } else {
+        toast.error('Could not redeem access code. Please try again.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const isDark = variant === 'dark';
+
+  return (
+    <div className="w-full max-w-xs flex flex-col items-center gap-2">
+      <div ref={turnstileRef} className="sr-only" aria-hidden="true" />
+      <p className={`text-xs ${isDark ? 'text-white/70' : 'text-muted-foreground'}`}>
+        Have an access code?
+      </p>
+      <div className="flex gap-2 w-full">
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void handleRedeem(); }}
+          placeholder="Paste your code…"
+          maxLength={64}
+          disabled={submitting}
+          className={`flex-1 px-3 py-2 text-xs rounded-sm border focus:outline-none font-mono ${
+            isDark
+              ? 'bg-white/10 border-white/15 text-white placeholder-white/40 focus:border-amber-500/60'
+              : 'bg-secondary border-border text-foreground placeholder-muted-foreground focus:border-amber-500/50'
+          } disabled:opacity-50`}
+          aria-label="Access code"
+        />
+        <button
+          type="button"
+          disabled={!code.trim() || submitting}
+          onClick={() => void handleRedeem()}
+          className="px-3 py-2 text-xs bg-amber-500 text-black rounded-sm font-bold uppercase tracking-wider hover:bg-amber-400 disabled:opacity-40 inline-flex items-center gap-1.5 shrink-0"
+        >
+          <KeyRound className="w-3.5 h-3.5" />
+          {submitting ? '…' : 'Redeem'}
+        </button>
+      </div>
+      <p className={`text-[10px] leading-relaxed text-center ${isDark ? 'text-white/40' : 'text-muted-foreground'}`}>
+        Codes are IP-locked, single-use, and expire after first view.
+      </p>
+    </div>
+  );
+}
 
 const PPV_PRICE_CAD = 4.99;
 const ALBERTA_GST = 0.05;
@@ -87,8 +186,6 @@ export function LiveStreamPlayer({
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
 
-  const [inviteInput, setInviteInput] = useState('');
-  const [redeemingInvite, setRedeemingInvite] = useState(false);
 
   const [playbackUrl, setPlaybackUrl] = useState('');
   const [playbackLoading, setPlaybackLoading] = useState(false);
@@ -231,12 +328,12 @@ export function LiveStreamPlayer({
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center bg-background px-6 text-center">
-        <Lock className="w-12 h-12 text-muted-foreground mb-4" />
-        <h2 className="font-display text-2xl font-bold mb-2">Register to Watch</h2>
-        <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-          Create a free SBBL HQ account to access live streams. Guests can enter
-          an invite code after registering.
+      <div className="absolute inset-0 flex flex-col items-center justify-center bg-background px-6 text-center gap-4 overflow-y-auto py-6">
+        <Lock className="w-12 h-12 text-muted-foreground" />
+        <h2 className="font-display text-2xl font-bold">Register to Watch</h2>
+        <p className="text-sm text-muted-foreground max-w-xs">
+          Create a free SBBL HQ account to access live streams. You'll be able
+          to enter an access code right after signing in.
         </p>
         <Link
           to="/register?redirect=/live"
@@ -244,9 +341,9 @@ export function LiveStreamPlayer({
         >
           Create Free Account
         </Link>
-        <p className="mt-4 text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Already registered?{' '}
-          <Link to="/login" className="text-amber-500 hover:underline">
+          <Link to="/login?redirect=/live" className="text-amber-500 hover:underline">
             Sign in
           </Link>
         </p>
@@ -522,71 +619,17 @@ export function LiveStreamPlayer({
           <hr className="flex-1 border-border" />
         </div>
 
-        {/* Invite code redemption */}
-        <div className="flex flex-col items-center gap-2 w-full max-w-xs">
-          <p className="text-xs text-muted-foreground">Have an invite code?</p>
-          <div className="flex gap-2 w-full">
-            <input
-              type="text"
-              value={inviteInput}
-              onChange={e => setInviteInput(e.target.value.trim())}
-              onKeyDown={e => { if (e.key === 'Enter' && inviteInput && !redeemingInvite) void handleRedeem(); }}
-              placeholder="Paste invite code…"
-              maxLength={36}
-              className="flex-1 bg-secondary px-3 py-2 text-xs rounded-sm border border-border focus:outline-none focus:border-amber-500/50 font-mono"
-              aria-label="Invite code"
-            />
-            <button
-              disabled={!inviteInput || redeemingInvite}
-              onClick={() => void handleRedeem()}
-              className="px-3 py-2 text-xs bg-secondary border border-border rounded-sm hover:border-amber-500/50 transition-colors disabled:opacity-40 inline-flex items-center gap-1.5 shrink-0"
-            >
-              <KeyRound className="w-3.5 h-3.5" />
-              {redeemingInvite ? '…' : 'Redeem'}
-            </button>
-          </div>
-        </div>
-
-        <p className="text-[10px] text-muted-foreground max-w-xs leading-relaxed">
-          Session access only. Invite codes are IP-locked, single-use, and expire in 24&nbsp;hours.
-        </p>
+        {/* Access code redemption — works with comp codes and regular invites.
+            The server derives the gameId from the code, so viewers don't need
+            to know anything beyond the token itself. */}
+        <AccessCodeRedeem
+          variant="light"
+          onRedeemed={() => {
+            setInviteGranted(true);
+            setTimeout(() => window.location.reload(), 400);
+          }}
+        />
       </div>
     </div>
   );
-
-  // ── Invite redemption handler (hoisted for key-down + button reuse) ────────
-  async function handleRedeem() {
-    setRedeemingInvite(true);
-    try {
-      await apiFetch<{ granted: boolean }>(
-        '/api/invite/redeem',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            code: inviteInput,
-            gameId: game.id,
-            captchaToken: await resolveToken(),
-          }),
-        },
-        null,
-      );
-      setInviteGranted(true);
-      toast.success('Invite accepted — enjoy the game!');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg === 'ip_mismatch' || msg === 'non_transferable') {
-        toast.error('This invite cannot be used from your device or location.');
-      } else if (msg === 'expired') {
-        toast.error('This invite code has expired (24-hour window).');
-      } else if (msg === 'invalid_invite') {
-        toast.error('Invite code not found. Check for typos.');
-      } else if (msg === 'cannot_redeem_own_invite') {
-        toast.error('You cannot redeem an invite you generated.');
-      } else {
-        toast.error('Could not redeem invite. Please try again.');
-      }
-    } finally {
-      setRedeemingInvite(false);
-    }
-  }
 }
