@@ -1,0 +1,59 @@
+# SBBL-HQ Caddyfile — auto HTTPS via Let's Encrypt
+# Caddy docs: https://caddyserver.com/docs/
+
+sbbl-hq.icu {
+    # ── Kong (main API gateway) ───────────────────────────
+    # All traffic except realtime and storage goes through Kong
+    reverse_proxy /auth/*     kong:8000
+    reverse_proxy /rest/*     kong:8000
+    reverse_proxy /functions/* kong:8000
+    reverse_proxy /graphql/*  kong:8000
+
+    # ── Realtime — WebSocket pass-through ─────────────────
+    reverse_proxy /realtime/* realtime:4000 {
+        header_up Upgrade {http.request.header.Upgrade}
+        header_up Connection {http.request.header.Connection}
+        header_up Host {http.request.host}
+        header_up X-Real-IP {http.request.remote.host}
+        header_up X-Forwarded-For {http.request.remote.host}
+        header_up X-Forwarded-Proto https
+    }
+
+    # ── Storage — direct to storage service ───────────────
+    reverse_proxy /storage/* storage:5000 {
+        header_up Host {http.request.host}
+        header_up X-Forwarded-For {http.request.remote.host}
+        header_up X-Forwarded-Proto https
+    }
+
+    # ── Dashboard (Studio) ────────────────────────────────
+    reverse_proxy /   studio:3000
+
+    # ── Global security headers ───────────────────────────
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+    }
+
+    # ── Compression ───────────────────────────────────────
+    encode gzip zstd
+
+    # ── Access log ────────────────────────────────────────
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 100mb
+            roll_keep 5
+        }
+        format json
+    }
+}
+
+# HTTP → HTTPS redirect (Caddy handles this automatically,
+# but explicit for clarity)
+http://sbbl-hq.icu {
+    redir https://sbbl-hq.icu{uri} permanent
+}
