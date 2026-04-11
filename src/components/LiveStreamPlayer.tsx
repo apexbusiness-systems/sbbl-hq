@@ -199,6 +199,9 @@ export function LiveStreamPlayer({
   const isPaidFan   = roles.includes('paid_fan');
   const isSuperAdmin = roles.includes('super_admin');
 
+  // Detect Facebook stream URLs so we can lock down the embed for non-admins
+  const isFacebookStream = /facebook\.com|fb\.watch/i.test(playbackUrl);
+
   const hasRoleAccess = isPlayer || isPaidFan || isSuperAdmin;
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
   const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
@@ -320,7 +323,7 @@ export function LiveStreamPlayer({
         }, null).catch(() => {});
       }
     };
-  }, [hasAccess, userId, game.id]);
+  }, [hasAccess, userId, game.id, isSuperAdmin]);
 
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
@@ -418,6 +421,17 @@ export function LiveStreamPlayer({
               }}
               style={{ position: 'absolute', top: 0, left: 0 }}
             />
+            {/* Block Facebook UI navigation for non-super-admin viewers.
+                The video autoplays via playing={true} so they can still watch;
+                this overlay only prevents clicking into Facebook's feed/related
+                videos. Super admins get the full embed for monitoring purposes. */}
+            {isFacebookStream && !isSuperAdmin && (
+              <div
+                className="absolute inset-0 z-10"
+                aria-hidden="true"
+                style={{ pointerEvents: 'all', background: 'transparent', cursor: 'default' }}
+              />
+            )}
           </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3">
