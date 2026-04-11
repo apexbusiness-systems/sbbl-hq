@@ -178,7 +178,7 @@ describe('Stream Chaos Battery', () => {
     await expect(apiFetch('/ops/streams/config', {}, 'dead-token')).rejects.toThrow('reauth_required');
     expect(mockFetch).toHaveBeenCalledTimes(1); // No retry attempted
     expect(mockRefreshSession).toHaveBeenCalledTimes(1);
-    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(mockSignOut).toHaveBeenCalledWith({ scope: 'local' });
   });
 
   it('CHAOS-6: concurrent calls from two tabs both get fresh tokens', async () => {

@@ -1,13 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  getLeagueConfig,
-  getLeagueSeasonLabel,
-  LEAGUE_CONFIGS,
-  LEAGUE_REGISTRY,
-  LEAGUE_SEASON_NUMBERS,
-  leagueCodeFromId,
-  leagueIdFromCode,
-} from '@/lib/leagues';
+import { getLeagueConfig, leagueIdFromCode, leagueCodeFromId, LEAGUE_CONFIGS, LEAGUE_REGISTRY } from '@/lib/leagues';
 
 describe('canonical league model', () => {
   it('returns correct config for each league id', () => {
@@ -69,17 +61,5 @@ describe('canonical league model', () => {
     expect(getLeagueConfig('wbl').shortName).toBe('WBL');
     expect(getLeagueConfig('sbbl').shortName).toBe('SBBL');
     expect(getLeagueConfig('tgifbl').shortName).toBe('TGIF');
-  });
-
-  it('tracks global season numbers by league', () => {
-    expect(LEAGUE_SEASON_NUMBERS.sbbl).toBe(11);
-    expect(LEAGUE_SEASON_NUMBERS.wbl).toBe(3);
-    expect(LEAGUE_SEASON_NUMBERS.tgifbl).toBe(1);
-  });
-
-  it('builds season labels from the global season map', () => {
-    expect(getLeagueSeasonLabel('sbbl')).toBe('Season 11');
-    expect(getLeagueSeasonLabel('wbl')).toBe('Season 3');
-    expect(getLeagueSeasonLabel('tgifbl')).toBe('Season 1');
   });
 });

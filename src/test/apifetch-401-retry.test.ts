@@ -129,7 +129,7 @@ describe('apiFetch 401 retry guard', () => {
 
     await expect(apiFetch('/test', {}, 'stale-token')).rejects.toThrow('reauth_required');
     expect(mockFetch).toHaveBeenCalledTimes(2);
-    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(mockSignOut).toHaveBeenCalledWith({ scope: 'local' });
   });
 
   it('fails closed with reauth_required when refresh fails', async () => {
@@ -144,7 +144,7 @@ describe('apiFetch 401 retry guard', () => {
 
     await expect(apiFetch('/test', {}, 'stale-token')).rejects.toThrow('reauth_required');
     expect(mockFetch).toHaveBeenCalledTimes(1);
-    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(mockSignOut).toHaveBeenCalledWith({ scope: 'local' });
   });
 
   it('succeeds without retry when token is valid', async () => {

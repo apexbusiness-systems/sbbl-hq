@@ -73,21 +73,6 @@ const LeaderboardsPage = () => {
   }, [leagueFilter, activeCategory, players]);
   const visible = hasPremiumPlayerAccess ? filtered : filtered.slice(0, 3);
 
-  // ⚡ Bolt Performance Optimization: Replace O(N*M) nested loop with O(1) hash map lookup
-  // Pre-computing a dictionary for team names prevents expensive `.find()`
-  // array traversals on every player row render.
-  const teamMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const t of teams) {
-      map[t.id] = t.name;
-    }
-    return map;
-  }, []);
-
-  const activeCategoryLabel = useMemo(() => {
-    return categories.find(c => c.key === activeCategory)?.label;
-  }, [activeCategory]);
-
   const rankIcon = (i: number) => {
     if (i === 0) return <Crown className="w-4 h-4 text-primary" />;
     if (i === 1) return <Medal className="w-4 h-4 text-wbl" />;

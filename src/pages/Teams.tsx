@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchTeams, type TeamCard } from '@/lib/api/teams';
 import { useApp } from '@/contexts/AppContext';
-import { LEAGUE_REGISTRY, getLeagueConfig, getLeagueSeasonLabel } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
 import { Users, Trophy, Briefcase, Activity } from 'lucide-react';
@@ -60,7 +60,7 @@ const TeamsPage = () => {
           name: t.name,
           league_code: t.leagueId.toUpperCase(),
           league_name: mockLeagues.find(l => l.id === t.leagueId)?.name ?? t.leagueId.toUpperCase(),
-          season_name: getLeagueSeasonLabel(t.leagueId),
+          season_name: 'Season 11',
           division_name: t.division,
           roster_count: 0,
           players: [],

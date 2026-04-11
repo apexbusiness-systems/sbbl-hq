@@ -145,6 +145,6 @@ describe('ops chaos battery', () => {
 
     expect(settled).toHaveLength(8);
     expect(settled.every((entry) => entry.status === 'rejected')).toBeTruthy();
-    expect(mockSignOut).not.toHaveBeenCalled();
+    expect(mockSignOut).toHaveBeenCalledTimes(8);
   });
 });

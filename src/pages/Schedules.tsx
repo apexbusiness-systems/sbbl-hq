@@ -1,5 +1,5 @@
 import { useApp } from '@/contexts/AppContext';
-import { LEAGUE_REGISTRY, getLeagueConfig, getLeagueSeasonLabel } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
 import { SCHEDULE_DATA, type ScheduleDay } from '@/data/schedules';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
@@ -61,12 +61,9 @@ const SchedulesPage = () => {
     const groupedLive = liveSchedules.reduce((acc: Record<string, any>, curr: any) => {
       const key = `${curr.league_id}-${curr.start_time.split('T')[0]}`;
       if (!acc[key]) {
-        const leagueId = LEAGUE_REGISTRY.some((l) => l.id === curr.league_id)
-          ? (curr.league_id as LeagueId)
-          : 'sbbl';
         acc[key] = {
-          leagueId,
-          season: getLeagueSeasonLabel(leagueId),
+          leagueId: curr.league_id,
+          season: 'Current Season',
           week: '1',
           date: curr.start_time.split('T')[0],
           venue: curr.venue || 'TBA',

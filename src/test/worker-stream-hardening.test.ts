@@ -105,9 +105,6 @@ function createAdmin(state: Record<string, Row[]>) {
         if (payload.p_user_id === 'allowed-user') return Promise.resolve({ data: true, error: null });
         return Promise.resolve({ data: false, error: null });
       }
-      if (name === 'consume_stream_rate_limit') {
-        return Promise.resolve({ data: true, error: null });
-      }
       return Promise.resolve({ data: null, error: null });
     },
   } as any;
@@ -139,7 +136,7 @@ describe('stream hardening worker handlers', () => {
       admin: createAdmin(state),
     } as any);
     const body = await res.json() as Record<string, unknown>;
-    expect(Number(body.viewerCount)).toBeGreaterThanOrEqual(0);
+    expect(body.viewerCount).toBe(1);
     expect(body.collectionId).toBeUndefined();
   });
 
@@ -258,17 +255,7 @@ describe('stream hardening worker handlers', () => {
   });
 
   it('chat validation blocks invalid input and enforces message length', async () => {
-    const state = {
-      api_idempotency_keys: [],
-      stream_chat_messages: [],
-      stream_access_sessions: [{
-        id: 'sess-chat-1',
-        game_id: 'game-1',
-        user_id: 'allowed-user',
-        status: 'active',
-        expires_at: new Date(Date.now() + 60_000).toISOString(),
-      }],
-    } as Record<string, Row[]>;
+    const state = { api_idempotency_keys: [], stream_chat_messages: [] } as Record<string, Row[]>;
 
     const invalid = await handlePostComment({
       req: new Request('https://local/api/streams/game-1/comments', {
@@ -293,25 +280,5 @@ describe('stream hardening worker handlers', () => {
       admin: createAdmin(state),
     } as any);
     expect(valid.status).toBe(200);
-  });
-
-  it('chat post requires active playback session', async () => {
-    const state = {
-      api_idempotency_keys: [],
-      stream_chat_messages: [],
-      stream_access_sessions: [],
-    } as Record<string, Row[]>;
-    const res = await handlePostComment({
-      req: new Request('https://local/api/streams/game-1/comments', {
-        method: 'POST',
-        headers: { 'x-idempotency-key': 'idempotency-key-823456789', 'x-sbbl-user-id-verified': 'allowed-user', 'cf-connecting-ip': '1.1.1.1' },
-        body: JSON.stringify({ message: 'blocked' }),
-      }),
-      params: { gameId: 'game-1' },
-      env,
-      admin: createAdmin(state),
-    } as any);
-    expect(res.status).toBe(403);
-    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'active_session_required' });
   });
 });

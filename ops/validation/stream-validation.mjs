@@ -104,10 +104,7 @@ function extractEvidence(playwrightJson) {
     for (const child of suite.suites ?? []) stack.push(child);
     for (const spec of suite.specs ?? []) {
       const title = String(spec.title ?? '').toLowerCase();
-      const passed = (spec.tests ?? []).some((test) =>
-        test.status === 'expected' || test.status === 'passed' ||
-        (test.results ?? []).some((r) => r.status === 'passed'),
-      );
+      const passed = (spec.tests ?? []).some((test) => test.status === 'passed');
       if (!passed) continue;
       if (title.includes('[evidence:playback]')) evidence.playback = true;
       if (title.includes('[evidence:paywall]')) evidence.paywall = true;
@@ -125,31 +122,26 @@ async function runPerf() {
   const baseUrl = process.env.VALIDATION_BASE_URL ?? 'http://127.0.0.1:4173';
   const gameId = process.env.VALIDATION_GAME_ID ?? 'stream-validation-game';
   const targets = [
-    ['paywall_render_latency_ms', 'GET', '/live', [200]],
-    ['entitlement_decision_latency_ms', 'GET', `/api/streams/${gameId}/access`, [200, 401, 403]],
-    ['access_session_acquisition_latency_ms', 'POST', `/api/streams/${gameId}/session`, [200, 400, 401, 403]],
-    ['playback_start_latency_ms', 'GET', '/live', [200]],
-    ['reconnect_recovery_latency_ms', 'POST', `/api/streams/${gameId}/session/heartbeat`, [200, 400, 401, 403, 404]],
-    ['comment_broadcast_latency_ms', 'GET', `/api/streams/${gameId}/comments`, [200, 401, 403]],
-    ['reaction_broadcast_latency_ms', 'GET', `/api/streams/${gameId}/reactions`, [200]],
-    ['viewer_counter_update_latency_ms', 'GET', `/api/streams/${gameId}/viewer-count`, [200]],
+    ['paywall_render_latency_ms', '/live'],
+    ['entitlement_decision_latency_ms', `/api/streams/${gameId}/access`],
+    ['access_session_acquisition_latency_ms', `/api/streams/${gameId}/session`],
+    ['playback_start_latency_ms', '/live'],
+    ['reconnect_recovery_latency_ms', `/api/streams/${gameId}/session/heartbeat`],
+    ['replay_response_latency_ms', `/api/streams/${gameId}/resume`],
+    ['comment_broadcast_latency_ms', `/api/streams/${gameId}/comments`],
+    ['reaction_broadcast_latency_ms', `/api/streams/${gameId}/reactions`],
+    ['viewer_counter_update_latency_ms', `/api/streams/${gameId}/viewer-count`],
   ];
 
   const timings = [];
-  let serverReachable = false;
-  for (const [metric, method, route, expectedStatuses] of targets) {
+  for (const [metric, route] of targets) {
     const started = Date.now();
     let status = 0;
     let ok = false;
     try {
-      const res = await fetch(`${baseUrl}${route}`, {
-        method,
-        headers: method === 'POST' ? { 'content-type': 'application/json' } : undefined,
-        body: method === 'POST' ? '{}' : undefined,
-      });
+      const res = await fetch(`${baseUrl}${route}`);
       status = res.status;
-      ok = expectedStatuses.includes(res.status);
-      serverReachable = true;
+      ok = res.status < 500;
     } catch {
       ok = false;
     }
@@ -157,7 +149,6 @@ async function runPerf() {
     const thresholdMs = Number(thresholds[metric] ?? 0);
     timings.push({
       metric,
-      method,
       route,
       status,
       ok,
@@ -167,17 +158,10 @@ async function runPerf() {
     });
   }
 
-  // When no server is reachable (e.g. the Playwright dev server already shut
-  // down), treat perf as not-applicable rather than hard-failing the gate.
-  const perfOk = serverReachable
-    ? timings.every((row) => row.ok && row.within_threshold)
-    : true;
-
   return {
     started_at: nowIso(),
     finished_at: nowIso(),
-    ok: perfOk,
-    server_reachable: serverReachable,
+    ok: timings.every((row) => row.ok && row.within_threshold),
     timings,
   };
 }
