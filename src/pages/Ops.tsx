@@ -2,20 +2,22 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { parseCsv } from '@/lib/parseCsv';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy } from 'lucide-react';
+import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy, Image as ImageIcon, Save, Trash2 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
 import {
   fetchOpsBootstrap, fetchImportHistory, submitCsvImport,
   parseEventImage, parsePotgImage, manualOpsAction,
   ingestPresign, ingestSubmit, ingestApprove, ingestReject,
+  fetchOpsMediaList, patchOpsMediaPublication, deleteOpsMediaPublication,
+  type MediaPublicationStatus, type OpsMediaPublication,
 } from '@/lib/api/ops';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
 import { fetchScores, submitScoreManual, submitScoresCsvImport, parseScoreboardImage } from '@/lib/api/scores';
 import type { ScoreCategory } from '@/types';
 
-type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'history';
+type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'media' | 'history';
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'overview',  label: 'Overview'       },
@@ -26,6 +28,7 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'events',    label: 'Events'         },
   { id: 'store',     label: 'Store Media'    },
   { id: 'potg',      label: 'POTG Parser'    },
+  { id: 'media',     label: 'Media Library'  },
   { id: 'history',   label: 'Import History' },
 ];
 
@@ -128,6 +131,19 @@ const OpsPage = () => {
   };
   const [scoresForm, setScoresForm] = useState(defaultScoreForm);
   const [ingestJob, setIngestJob] = useState<{ jobId: string; state: string } | null>(null);
+
+  // ── Media Library state ────────────────────────────────────────────────
+  // Draft edits are held in a keyed map so inline changes per row don't
+  // force a refetch until the operator clicks Save.
+  const [mediaStatusFilter, setMediaStatusFilter] = useState<MediaPublicationStatus | 'all'>('all');
+  const [mediaSurfaceFilter, setMediaSurfaceFilter] = useState<string>('all');
+  const [mediaLeagueFilter, setMediaLeagueFilter] = useState<string>('all');
+  const [mediaEdits, setMediaEdits] = useState<Record<string, {
+    title: string;
+    status: MediaPublicationStatus;
+    leagueId: string;
+  }>>({});
+  const [mediaEditingId, setMediaEditingId] = useState<string | null>(null);
 
   const updateStoreBatchItem = (i: number, field: string, value: string) =>
     setStoreBatchItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
@@ -454,6 +470,93 @@ const OpsPage = () => {
     },
   });
 
+  // ── Media Library queries/mutations ────────────────────────────────────
+  const mediaListQuery = useQuery({
+    queryKey: ['ops-media-list', mediaStatusFilter, mediaSurfaceFilter, mediaLeagueFilter],
+    queryFn: () => fetchOpsMediaList({
+      status: mediaStatusFilter,
+      surface: mediaSurfaceFilter === 'all' ? undefined : mediaSurfaceFilter,
+      leagueId: mediaLeagueFilter === 'all' ? undefined : mediaLeagueFilter,
+    }),
+    enabled: canRunOps && activeTab === 'media',
+    retry: shouldRetryOpsQuery,
+    staleTime: 15_000,
+  });
+
+  const mediaPublications = useMemo<OpsMediaPublication[]>(
+    () => mediaListQuery.data?.data ?? [],
+    [mediaListQuery.data?.data],
+  );
+
+  const mediaPatchMutation = useMutation({
+    mutationFn: async ({ id, payload }: { id: string; payload: Parameters<typeof patchOpsMediaPublication>[1] }) => {
+      ensureOpsAccess();
+      return patchOpsMediaPublication(id, payload);
+    },
+    onSuccess: async (_data, variables) => {
+      setMediaEditingId((current) => (current === variables.id ? null : current));
+      setMediaEdits((prev) => {
+        if (!(variables.id in prev)) return prev;
+        const next = { ...prev };
+        delete next[variables.id];
+        return next;
+      });
+      await queryClient.invalidateQueries({ queryKey: ['ops-media-list'] });
+      await queryClient.invalidateQueries({ queryKey: ['public-media'] });
+      await queryClient.invalidateQueries({ queryKey: ['public-media-posters'] });
+    },
+  });
+
+  const mediaDeleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      ensureOpsAccess();
+      return deleteOpsMediaPublication(id);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['ops-media-list'] });
+      await queryClient.invalidateQueries({ queryKey: ['public-media'] });
+      await queryClient.invalidateQueries({ queryKey: ['public-media-posters'] });
+    },
+  });
+
+  const beginMediaEdit = (pub: OpsMediaPublication) => {
+    setMediaEditingId(pub.id);
+    setMediaEdits((prev) => ({
+      ...prev,
+      [pub.id]: {
+        title: pub.title,
+        status: (pub.status as MediaPublicationStatus) ?? 'draft',
+        leagueId: pub.leagueId ?? '',
+      },
+    }));
+  };
+
+  const cancelMediaEdit = (id: string) => {
+    setMediaEditingId((current) => (current === id ? null : current));
+    setMediaEdits((prev) => {
+      if (!(id in prev)) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  const saveMediaEdit = (pub: OpsMediaPublication) => {
+    const draft = mediaEdits[pub.id];
+    if (!draft) return;
+    const payload: Parameters<typeof patchOpsMediaPublication>[1] = {};
+    if (draft.title.trim() && draft.title.trim() !== pub.title) payload.title = draft.title.trim();
+    if (draft.status !== pub.status) payload.status = draft.status;
+    if ((draft.leagueId || null) !== (pub.leagueId ?? null)) {
+      payload.leagueId = draft.leagueId ? draft.leagueId : null;
+    }
+    if (Object.keys(payload).length === 0) {
+      cancelMediaEdit(pub.id);
+      return;
+    }
+    mediaPatchMutation.mutate({ id: pub.id, payload });
+  };
+
 
   const handleEventImageUpload = async (file: File) => {
     ensureOpsAccess();
@@ -534,6 +637,9 @@ const OpsPage = () => {
         potgMutation.error,
         storeMutation.error,
         eventMediaMutation.error,
+        mediaListQuery.error,
+        mediaPatchMutation.error,
+        mediaDeleteMutation.error,
       ].some((error) => isOpsAuthError(error)),
     [
       bootstrapQuery.error,
@@ -541,6 +647,9 @@ const OpsPage = () => {
       potgMutation.error,
       storeMutation.error,
       eventMediaMutation.error,
+      mediaListQuery.error,
+      mediaPatchMutation.error,
+      mediaDeleteMutation.error,
     ],
   );
 
@@ -1462,6 +1571,247 @@ const OpsPage = () => {
                 </a>
               )}
             </div>
+          )}
+        </div>
+      </TabsContent>
+
+      <TabsContent value="media">
+        <div className="panel p-4 max-w-6xl space-y-4">
+          <div className="flex items-center gap-2">
+            <ImageIcon className="w-5 h-5 text-primary" />
+            <div>
+              <h2 className="font-display text-xl">Media Library</h2>
+              <p className="text-xs text-muted-foreground">
+                Edit, republish, or archive any media publication — across all surfaces, statuses, and leagues.
+                Public <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">/media</code> only shows published rows.
+              </p>
+            </div>
+          </div>
+
+          {/* ── Filters ─────────────────────────────────────── */}
+          <div className="flex flex-wrap gap-4 items-end border border-border rounded-sm p-3 bg-secondary/30">
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Status</label>
+              <select
+                className="bg-secondary border border-border rounded-sm px-2 py-1.5 text-xs"
+                value={mediaStatusFilter}
+                onChange={e => setMediaStatusFilter(e.target.value as MediaPublicationStatus | 'all')}
+              >
+                <option value="all">All statuses</option>
+                <option value="published">Published</option>
+                <option value="draft">Draft</option>
+                <option value="scheduled">Scheduled</option>
+                <option value="archived">Archived</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Surface</label>
+              <select
+                className="bg-secondary border border-border rounded-sm px-2 py-1.5 text-xs"
+                value={mediaSurfaceFilter}
+                onChange={e => setMediaSurfaceFilter(e.target.value)}
+              >
+                <option value="all">All surfaces</option>
+                <option value="media_feed">Media Feed</option>
+                <option value="store">Store</option>
+                <option value="potg">POTG</option>
+                <option value="event">Event</option>
+                <option value="score">Score</option>
+                <option value="feature">Feature</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">League (UUID)</label>
+              <input
+                placeholder="Any league"
+                className="bg-secondary border border-border rounded-sm px-2 py-1.5 text-xs w-56"
+                value={mediaLeagueFilter === 'all' ? '' : mediaLeagueFilter}
+                onChange={e => setMediaLeagueFilter(e.target.value ? e.target.value : 'all')}
+              />
+            </div>
+            <button
+              type="button"
+              className="text-xs border border-border rounded-sm px-3 py-1.5 hover:bg-secondary transition-colors"
+              onClick={() => {
+                setMediaStatusFilter('all');
+                setMediaSurfaceFilter('all');
+                setMediaLeagueFilter('all');
+              }}
+            >
+              Reset
+            </button>
+            <div className="ml-auto text-[10px] text-muted-foreground">
+              {mediaListQuery.isFetching ? 'Refreshing…' : `${mediaPublications.length} rows`}
+            </div>
+          </div>
+
+          {/* ── Status messaging ────────────────────────────── */}
+          {mediaListQuery.isLoading && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading media publications…
+            </div>
+          )}
+          {mediaListQuery.isError && (
+            <p className="text-xs text-destructive">
+              Failed to load media: {(mediaListQuery.error as Error)?.message ?? 'unknown error'}
+            </p>
+          )}
+          {mediaListQuery.isSuccess && mediaPublications.length === 0 && (
+            <p className="text-xs text-muted-foreground">No publications match these filters.</p>
+          )}
+
+          {/* ── Publication rows ────────────────────────────── */}
+          <div className="space-y-2">
+            {mediaPublications.map((pub) => {
+              const isEditing = mediaEditingId === pub.id;
+              const draft = mediaEdits[pub.id];
+              const patching = mediaPatchMutation.isPending && mediaPatchMutation.variables?.id === pub.id;
+              const deleting = mediaDeleteMutation.isPending && mediaDeleteMutation.variables === pub.id;
+              return (
+                <div key={pub.id} className="border border-border rounded-sm bg-card overflow-hidden">
+                  <div className="flex items-start gap-3 p-3">
+                    <div className="flex-shrink-0 w-20 h-20 bg-secondary rounded-sm overflow-hidden border border-border/50">
+                      {pub.thumbnail ? (
+                        <img
+                          src={pub.thumbnail}
+                          alt=""
+                          className="w-full h-full object-cover"
+                          loading="lazy"
+                          decoding="async"
+                          onError={e => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                          <ImageIcon className="w-5 h-5" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      {isEditing && draft ? (
+                        <input
+                          className="w-full bg-secondary border border-border rounded-sm px-2 py-1.5 text-sm font-medium"
+                          value={draft.title}
+                          onChange={e => setMediaEdits(prev => ({ ...prev, [pub.id]: { ...prev[pub.id], title: e.target.value } }))}
+                          placeholder="Publication title"
+                        />
+                      ) : (
+                        <p className="font-medium text-sm truncate">{pub.title || <span className="text-muted-foreground">(untitled)</span>}</p>
+                      )}
+                      <div className="flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+                        <span className="uppercase tracking-wider font-semibold px-1.5 py-0.5 bg-secondary rounded-sm">{pub.surface}</span>
+                        <span className="uppercase tracking-wider">{pub.type}</span>
+                        {pub.leagueCode && (
+                          <span className="uppercase tracking-wider">{pub.leagueCode}</span>
+                        )}
+                        {pub.sortAt && <span>{new Date(pub.sortAt).toLocaleString()}</span>}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground font-mono truncate">id: {pub.id}</p>
+                    </div>
+                    <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                      {isEditing && draft ? (
+                        <>
+                          <select
+                            className="bg-secondary border border-border rounded-sm px-2 py-1 text-xs"
+                            value={draft.status}
+                            onChange={e => setMediaEdits(prev => ({
+                              ...prev,
+                              [pub.id]: { ...prev[pub.id], status: e.target.value as MediaPublicationStatus },
+                            }))}
+                          >
+                            <option value="draft">Draft</option>
+                            <option value="scheduled">Scheduled</option>
+                            <option value="published">Published</option>
+                            <option value="archived">Archived</option>
+                          </select>
+                          <input
+                            placeholder="League UUID (blank = none)"
+                            className="bg-secondary border border-border rounded-sm px-2 py-1 text-xs w-48"
+                            value={draft.leagueId}
+                            onChange={e => setMediaEdits(prev => ({
+                              ...prev,
+                              [pub.id]: { ...prev[pub.id], leagueId: e.target.value },
+                            }))}
+                          />
+                        </>
+                      ) : (
+                        <span
+                          className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded-sm ${
+                            pub.status === 'published' ? 'bg-success/15 text-success'
+                            : pub.status === 'draft' ? 'bg-secondary text-muted-foreground'
+                            : pub.status === 'scheduled' ? 'bg-warning/15 text-warning'
+                            : 'bg-destructive/15 text-destructive'
+                          }`}
+                        >
+                          {pub.status}
+                        </span>
+                      )}
+                      <div className="flex gap-2">
+                        {isEditing ? (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => saveMediaEdit(pub)}
+                              disabled={patching}
+                              className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded-sm bg-primary text-primary-foreground disabled:opacity-60"
+                            >
+                              {patching ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => cancelMediaEdit(pub.id)}
+                              disabled={patching}
+                              className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded-sm border border-border text-muted-foreground hover:text-foreground disabled:opacity-60"
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => beginMediaEdit(pub)}
+                              className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded-sm border border-border text-foreground hover:bg-secondary"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              disabled={deleting || pub.status === 'archived'}
+                              onClick={() => {
+                                if (pub.status === 'archived') return;
+                                if (!globalThis.confirm(`Archive "${pub.title}"? It will disappear from public /media.`)) return;
+                                mediaDeleteMutation.mutate(pub.id);
+                              }}
+                              className="flex items-center gap-1 px-2 py-1 text-[10px] font-semibold uppercase tracking-wider rounded-sm border border-destructive/30 text-destructive hover:bg-destructive/10 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              {deleting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />}
+                              Archive
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  {mediaPatchMutation.isError && mediaPatchMutation.variables?.id === pub.id && (
+                    <p className="px-3 pb-2 text-[10px] text-destructive">
+                      {(mediaPatchMutation.error as Error).message}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {mediaPatchMutation.isError && !mediaEditingId && (
+            <p className="text-xs text-destructive">
+              Last edit failed: {(mediaPatchMutation.error as Error).message}
+            </p>
+          )}
+          {mediaDeleteMutation.isError && (
+            <p className="text-xs text-destructive">
+              Archive failed: {(mediaDeleteMutation.error as Error).message}
+            </p>
           )}
         </div>
       </TabsContent>
