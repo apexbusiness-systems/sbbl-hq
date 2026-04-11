@@ -1,4 +1,5 @@
 import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
+import { Navigate } from 'react-router-dom';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useApp } from '@/contexts/AppContext';
 import { useQuery } from '@tanstack/react-query';
@@ -370,7 +371,7 @@ const LivePage = () => {
     }));
   }, [leaderboardsData]);
 
-  const { user, session, roles } = useAuth();
+  const { user, session, roles, needsOnboarding, loading: authLoading } = useAuth();
   const { access, config: liveAccessConfig } = useLiveAccess();
   const isSuperAdmin = roles.includes('super_admin');
   // Any privileged role (roster player, paid fan, or super admin) gets the
@@ -548,6 +549,13 @@ const LivePage = () => {
       clearInterval(id);
     };
   }, [liveGame?.id]);
+
+  // All hooks above this line. Early returns must come after all hooks.
+  // Fan who registered but hasn't completed onboarding must finish it before
+  // reaching the PPV paywall.
+  if (!authLoading && needsOnboarding) {
+    return <Navigate to="/onboarding?redirect=/live" replace />;
+  }
 
   const handleShare = async () => {
     if (!liveGame) return;
