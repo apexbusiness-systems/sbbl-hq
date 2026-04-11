@@ -473,16 +473,29 @@ function streamCacheUrl(gameId: string | null): string {
 
 async function getActiveViewerCount(admin: SupabaseClient, gameId: string | null) {
   if (!gameId) return 0;
-  // Use DB-side count instead of pulling all rows into Worker memory.
-  // At 20K viewers this avoids transferring ~20K rows over the wire.
-  const { count, error } = await admin
+  const nowIso = new Date().toISOString();
+
+  // Primary path: DB-side exact count (O(1) payload, safe at high concurrency).
+  const primary = await admin
     .from("stream_access_sessions")
     .select("user_id", { count: "exact", head: true })
     .eq("game_id", gameId)
     .eq("status", "active")
-    .gt("expires_at", new Date().toISOString());
-  if (error) return 0;
-  return count ?? 0;
+    .gt("expires_at", nowIso);
+
+  if (!primary.error && typeof primary.count === "number") return primary.count;
+
+  // Fallback path: some adapters/mocks do not return count for head:true queries.
+  // Query row ids and count in worker memory only when primary count is unavailable.
+  const fallback = await admin
+    .from("stream_access_sessions")
+    .select("user_id")
+    .eq("game_id", gameId)
+    .eq("status", "active")
+    .gt("expires_at", nowIso);
+
+  if (fallback.error) return 0;
+  return Array.isArray(fallback.data) ? fallback.data.length : 0;
 }
 
 async function refreshLiveSessionMetrics(
