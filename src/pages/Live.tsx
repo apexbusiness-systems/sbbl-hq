@@ -372,11 +372,6 @@ const LivePage = () => {
   }, [leaderboardsData]);
 
   const { user, session, roles, needsOnboarding, loading: authLoading } = useAuth();
-  // Fan who registered but hasn't completed onboarding must finish it before
-  // reaching the PPV paywall — redirect them back to /onboarding.
-  if (!authLoading && needsOnboarding) {
-    return <Navigate to="/onboarding?redirect=/live" replace />;
-  }
   const { access, config: liveAccessConfig } = useLiveAccess();
   const isSuperAdmin = roles.includes('super_admin');
   // Any privileged role (roster player, paid fan, or super admin) gets the
@@ -554,6 +549,13 @@ const LivePage = () => {
       clearInterval(id);
     };
   }, [liveGame?.id]);
+
+  // All hooks above this line. Early returns must come after all hooks.
+  // Fan who registered but hasn't completed onboarding must finish it before
+  // reaching the PPV paywall.
+  if (!authLoading && needsOnboarding) {
+    return <Navigate to="/onboarding?redirect=/live" replace />;
+  }
 
   const handleShare = async () => {
     if (!liveGame) return;
