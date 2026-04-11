@@ -89,11 +89,11 @@ const LeaderboardsPage = () => {
       acc[t.id] = t.name;
       return acc;
     }, {});
-  }, [teams]);
+  }, []);
 
   const activeCategoryLabel = useMemo(() => {
     return categories.find(c => c.key === activeCategory)?.label || '';
-  }, [activeCategory, categories]);
+  }, [activeCategory]);
 
   return (
     <div className="min-h-screen">
