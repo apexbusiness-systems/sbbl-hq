@@ -17,6 +17,10 @@ import {
   handlePublicSchedule as _handlePublicSchedule,
   handlePublicPotg as _handlePublicPotg,
 } from "./routes/public";
+import {
+  handleQoeIngest,
+  handleQoeHealthReport,
+} from "./routes/stream-qoe";
 
 type HandlerCtx = {
   req: Request;
