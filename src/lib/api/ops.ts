@@ -223,7 +223,7 @@ export async function publishMedia(payload: {
 
 // ── Canonical ingest API ──────────────────────────────────────────────────
 
-export type IngestKind = 'potg' | 'store' | 'event' | 'generic';
+export type IngestKind = 'potg' | 'store' | 'event' | 'generic' | 'video';
 
 export type IngestJob = {
   id: string;

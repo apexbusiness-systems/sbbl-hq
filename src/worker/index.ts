@@ -1476,6 +1476,25 @@ async function requireAdminSession(req: Request, admin: SupabaseClient) {
   return { userId, roles };
 }
 
+async function requireMediaUploadSession(req: Request, admin: SupabaseClient) {
+  const session = await requireAdminSession(req, admin);
+  if (!session.roles.some((role) => role === "league_admin" || role === "super_admin")) {
+    throw new Error("forbidden");
+  }
+  return session;
+}
+
+async function resolveUploadedAssetMetadata(publicUrl: string) {
+  const head = await fetch(publicUrl, { method: "HEAD" });
+  if (!head.ok) throw new Error("upload_metadata_unavailable");
+  const contentLength = Number(head.headers.get("content-length") ?? 0);
+  const contentType = String(head.headers.get("content-type") ?? "").toLowerCase();
+  if (!Number.isFinite(contentLength) || contentLength <= 0) {
+    throw new Error("upload_size_unverifiable");
+  }
+  return { contentLength, contentType };
+}
+
 async function writeImportJob(
   admin: SupabaseClient,
   job: {
@@ -3784,10 +3803,12 @@ function mapPublicMediaRows(rows: PublicMediaRow[], coercePhotoToPoster = false)
     return {
       id: String(r.id),
       title: String(r.title ?? ""),
+      caption: String(payload.caption ?? assetMeta.caption ?? "").slice(0, 140),
       type: mappedType,
       thumbnail: String(
         payload.thumbnail ?? assetMeta.thumbnail ?? assetMeta.image_url ?? ""
       ),
+      videoUrl: String(payload.video_url ?? assetMeta.video_url ?? "").trim() || undefined,
       leagueId: leagueCode,
       status: "published",
       date: String(
@@ -4526,7 +4547,7 @@ export default Sentry.withSentry(
  */
 async function handleIngestPresign(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  await requireSuperAdminSession(ctx.req, ctx.admin);
+  await requireMediaUploadSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     kind?: string;
@@ -4535,7 +4556,7 @@ async function handleIngestPresign(ctx: HandlerCtx) {
 
   const kind = body?.kind;
   const filename = body?.filename;
-  if (!kind || !["potg", "store", "event", "generic"].includes(kind)) {
+  if (!kind || !["potg", "store", "event", "generic", "video"].includes(kind)) {
     return json({ ok: false, error: "invalid_kind" }, 400);
   }
   if (!filename || typeof filename !== "string") {
@@ -4590,7 +4611,7 @@ async function handleIngestPresign(ctx: HandlerCtx) {
  */
 async function handleIngestSubmit(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireMediaUploadSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     kind?: string;
@@ -4606,8 +4627,25 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
   if (!body?.kind || !body?.objectPath || !body?.title) {
     return json({ ok: false, error: "missing_required_fields" }, 400);
   }
-  if (!["potg", "store", "event", "generic"].includes(body.kind)) {
+  if (!["potg", "store", "event", "generic", "video"].includes(body.kind)) {
     return json({ ok: false, error: "invalid_kind" }, 400);
+  }
+
+  const caption = String(body.meta?.caption ?? "").trim();
+  if (caption.length > 140) {
+    return json({ ok: false, error: "caption_too_long" }, 400);
+  }
+
+  if (body.kind === "video") {
+    const sizeBytes = Number(body.meta?.sizeBytes ?? 0);
+    const mimeType = String(body.meta?.mimeType ?? "");
+    const allowedMimeTypes = new Set(["video/mp4", "video/webm", "video/quicktime"]);
+    if (!Number.isFinite(sizeBytes) || sizeBytes <= 0 || sizeBytes > 50 * 1024 * 1024) {
+      return json({ ok: false, error: "video_size_limit_exceeded" }, 400);
+    }
+    if (!allowedMimeTypes.has(mimeType)) {
+      return json({ ok: false, error: "invalid_video_mime_type" }, 400);
+    }
   }
 
   const idempotencyKey = body.idempotencyKey ?? readIdempotencyKey(ctx.req.headers) ?? null;
@@ -4641,6 +4679,17 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     ? rawPublicUrl
     : `${ctx.env.SUPABASE_URL}/storage/v1/object/public/media/${rawPublicUrl}`;
 
+  if (body.kind === "video") {
+    const uploadedMeta = await resolveUploadedAssetMetadata(publicUrl);
+    if (uploadedMeta.contentLength > 50 * 1024 * 1024) {
+      return json({ ok: false, error: "video_size_limit_exceeded" }, 400);
+    }
+    const acceptedTypes = ["video/mp4", "video/webm", "video/quicktime"];
+    if (!acceptedTypes.some((type) => uploadedMeta.contentType.includes(type))) {
+      return json({ ok: false, error: "invalid_video_mime_type" }, 400);
+    }
+  }
+
   // ── Step 1: Create ingest_job (state=uploaded) ──────────────────────────
   const baseJobInsert = {
     submitted_by: userId,
@@ -4672,16 +4721,22 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
   const surface: string = body.kind === "potg" ? "potg"
     : body.kind === "store" ? "store"
     : body.kind === "event" ? "event"
+    : body.kind === "video" ? "media_video"
     : "media_feed";
 
   await ctx.admin.from("ingest_jobs").update({ state: "classified" }).eq("id", jobId);
   await ctx.admin.from("ingest_jobs").update({ state: "validated" }).eq("id", jobId);
 
   // ── Step 3: Write media_asset (state=written) ───────────────────────────
+  const assetType = body.kind === "video"
+    ? (meta.type === "highlight" || meta.type === "clip" ? meta.type : "clip")
+    : "poster";
   const assetMeta = {
-    type: "poster",
+    type: assetType,
     thumbnail: publicUrl,
     image_url: publicUrl,
+    video_url: body.kind === "video" ? publicUrl : undefined,
+    caption,
     date: (meta.date as string | undefined) ?? new Date().toISOString().split("T")[0],
     ...meta,
   };
@@ -4752,7 +4807,7 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
  * Returns current state of an ingest job.
  */
 async function handleIngestStatus(ctx: HandlerCtx) {
-  await requireSuperAdminSession(ctx.req, ctx.admin);
+  await requireMediaUploadSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
