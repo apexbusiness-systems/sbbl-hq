@@ -20,20 +20,21 @@ export async function handlePublicConfig({ env }: HandlerCtx) {
 export async function handlePublicSchedule({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get("leagueId");
-  let q = admin.from("schedules").select("*").eq("status", "published");
+  let q = admin.from("schedule_slots").select("*").eq("status", "upcoming");
   if (leagueId) {
     q = q.eq("league_id", leagueId);
   }
-  const { data, error } = await q.order("start_time", { ascending: true });
+  const { data, error } = await q.order("starts_at", { ascending: true });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
 
 export async function handlePublicPotg({ admin }: HandlerCtx) {
   const { data, error } = await admin
-    .from("potg_records")
-    .select("*")
-    .eq("status", "approved")
+    .from("media_publications")
+    .select("id,title,surface,league_id,status,render_payload,published_at,created_at")
+    .eq("surface", "potg")
+    .eq("status", "published")
     .order("created_at", { ascending: false })
     .limit(20);
   if (error) throw new Error(error.message);

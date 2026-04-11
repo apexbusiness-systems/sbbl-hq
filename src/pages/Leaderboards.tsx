@@ -97,6 +97,19 @@ const LeaderboardsPage = () => {
 
   const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
 
+  // ⚡ Bolt Performance Optimization: Replace O(N) lookup loops with O(1) dictionary lookups
+  // This prevents expensive `.find()` array traversals on every rendered item in the leaderboard.
+  const teamMap = useMemo(() => {
+    return teams.reduce<Record<string, string>>((acc, t) => {
+      acc[t.id] = t.name;
+      return acc;
+    }, {});
+  }, []);
+
+  const activeCategoryLabel = useMemo(() => {
+    return categories.find(c => c.key === activeCategory)?.label || '';
+  }, [activeCategory]);
+
   return (
     <div className="min-h-screen">
       <div className="container py-8 md:py-12">

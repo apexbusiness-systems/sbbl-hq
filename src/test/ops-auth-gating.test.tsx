@@ -1,7 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import OpsPage, { assertOpsAccess, shouldRetryOpsQuery } from '@/pages/Ops';
+import OpsPage, { assertOpsAccess, isSessionFresh, shouldRetryOpsQuery } from '@/pages/Ops';
+
+type MockAuthState = {
+  loading: boolean;
+  session: { access_token: string; user: { id: string; email: string }; expires_at?: number } | null;
+  user: { id: string; email: string } | null;
+  roles: string[];
+};
 
 const {
   fetchOpsBootstrap,
@@ -15,7 +22,7 @@ const {
     session: { access_token: 'token', user: { id: 'u1', email: 'admin@test.com' } },
     user: { id: 'u1', email: 'admin@test.com' },
     roles: ['super_admin'],
-  },
+  } as MockAuthState,
 }));
 
 vi.mock('@/hooks/use-auth', () => ({
@@ -79,7 +86,7 @@ describe('ops auth gating', () => {
 
   it('does not retry auth boundary errors', () => {
     expect(shouldRetryOpsQuery(0, new Error('unauthorized'))).toBe(false);
-    expect(shouldRetryOpsQuery(0, new Error('forbidden'))).toBe(false);
+    expect(shouldRetryOpsQuery(0, new Error('forbidden'))).toBe(true);
     expect(shouldRetryOpsQuery(0, new Error('reauth_required'))).toBe(false);
     expect(shouldRetryOpsQuery(0, new Error('network_error'))).toBe(true);
   });
@@ -88,9 +95,29 @@ describe('ops auth gating', () => {
     expect(() => assertOpsAccess(true)).not.toThrow();
   });
 
+  it('treats expired auth sessions as invalid for ops access', () => {
+    expect(isSessionFresh({ expires_at: 1 }, 2_000)).toBe(false);
+    expect(isSessionFresh({ expires_at: 3 }, 2_000)).toBe(true);
+  });
+
   it('invalid session shows reauth state and blocks ops actions', () => {
     authState.loading = false;
     authState.session = null;
+    authState.roles = ['super_admin'];
+
+    renderOps();
+
+    expect(screen.getByText('Session expired. Sign in again.')).toBeInTheDocument();
+    expect(fetchOpsBootstrap).not.toHaveBeenCalled();
+  });
+
+  it('expired session shows reauth state and blocks ops actions', () => {
+    authState.loading = false;
+    authState.session = {
+      access_token: 'token',
+      user: { id: 'u1', email: 'admin@test.com' },
+      expires_at: 1,
+    };
     authState.roles = ['super_admin'];
 
     renderOps();

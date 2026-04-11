@@ -76,7 +76,7 @@ async function verifySession(req: Request, env: Env): Promise<JwtSession | null>
   if (!env.SUPABASE_URL) return null;
 
   if (!jwks) {
-    jwks = createRemoteJWKSet(new URL('/auth/v1/jwks', env.SUPABASE_URL));
+    jwks = createRemoteJWKSet(new URL('/auth/v1/.well-known/jwks.json', env.SUPABASE_URL));
   }
 
   try {

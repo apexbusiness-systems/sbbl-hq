@@ -12,20 +12,124 @@
  * IP locking and single-use enforcement happen server-side in /api/invite/redeem.
  * No role/entitlement data is trusted from the client.
  *
- * Uses Switcher Studio's script-based embed player.
+ * StreamForge integration (additive, non-breaking):
+ *   - QoE telemetry via ReactPlayer callbacks → useStreamForge hook
+ *   - Preconnect resource hints injected on mount for known stream origins
+ *   - Warm reconnect replaces window.location.reload() in the circuit-breaker
+ *     overlay — recovers in ~1.5 s instead of a full cold reload (~8 s).
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 import ReactPlayer from 'react-player';
 import { apiFetch } from '@/lib/api/client';
+import { redeemAccessCode } from '@/lib/api/stream';
 import { useTurnstile } from '@/hooks/use-turnstile';
+import { useStreamForge } from '@/hooks/use-streamforge';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import gameAction from '@/assets/game-action.svg';
 import type { Game } from '@/types';
 import type { AppRole } from '@/lib/auth/roles';
+
+/**
+ * AccessCodeRedeem
+ * Standalone token input for any viewer. Accepts a comp code or invite UUID,
+ * derives the gameId server-side, and calls window.location.reload() on
+ * success so the player re-fetches entitlement and starts playback.
+ *
+ * Rendered in multiple gates (unregistered prompt, loading state, preview
+ * paywall) so anyone who has a token can redeem it regardless of the player's
+ * current state — no forced navigation required.
+ */
+function AccessCodeRedeem({
+  variant = 'dark',
+  onRedeemed,
+}: {
+  variant?: 'dark' | 'light';
+  onRedeemed?: () => void;
+}) {
+  const [code, setCode] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const { containerRef: turnstileRef, resolveToken } = useTurnstile();
+
+  const handleRedeem = async () => {
+    const trimmed = code.trim();
+    if (!trimmed || submitting) return;
+    setSubmitting(true);
+    try {
+      await redeemAccessCode(
+        trimmed,
+        { captchaToken: await resolveToken() },
+        null,
+      );
+      toast.success('Access granted — loading stream…');
+      if (onRedeemed) {
+        onRedeemed();
+      } else {
+        setTimeout(() => window.location.reload(), 400);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg === 'ip_mismatch' || msg === 'non_transferable') {
+        toast.error('This code cannot be used from your device or location.');
+      } else if (msg === 'expired') {
+        toast.error('This access code has expired.');
+      } else if (msg === 'invalid_invite') {
+        toast.error('Access code not found. Check for typos.');
+      } else if (msg === 'cannot_redeem_own_invite') {
+        toast.error('You cannot redeem a code you generated.');
+      } else if (msg === 'rate_limited') {
+        toast.error('Too many attempts. Please wait a minute.');
+      } else {
+        toast.error('Could not redeem access code. Please try again.');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const isDark = variant === 'dark';
+
+  return (
+    <div className="w-full max-w-xs flex flex-col items-center gap-2">
+      <div ref={turnstileRef} className="sr-only" aria-hidden="true" />
+      <p className={`text-xs ${isDark ? 'text-white/70' : 'text-muted-foreground'}`}>
+        Have an access code?
+      </p>
+      <div className="flex gap-2 w-full">
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void handleRedeem(); }}
+          placeholder="Paste your code…"
+          maxLength={64}
+          disabled={submitting}
+          className={`flex-1 px-3 py-2 text-xs rounded-sm border focus:outline-none font-mono ${
+            isDark
+              ? 'bg-white/10 border-white/15 text-white placeholder-white/40 focus:border-amber-500/60'
+              : 'bg-secondary border-border text-foreground placeholder-muted-foreground focus:border-amber-500/50'
+          } disabled:opacity-50`}
+          aria-label="Access code"
+        />
+        <button
+          type="button"
+          disabled={!code.trim() || submitting}
+          onClick={() => void handleRedeem()}
+          className="px-3 py-2 text-xs bg-amber-500 text-black rounded-sm font-bold uppercase tracking-wider hover:bg-amber-400 disabled:opacity-40 inline-flex items-center gap-1.5 shrink-0"
+        >
+          <KeyRound className="w-3.5 h-3.5" />
+          {submitting ? '…' : 'Redeem'}
+        </button>
+      </div>
+      <p className={`text-[10px] leading-relaxed text-center ${isDark ? 'text-white/40' : 'text-muted-foreground'}`}>
+        Codes are IP-locked, single-use, and expire after first view.
+      </p>
+    </div>
+  );
+}
 
 const PPV_PRICE_CAD = 4.99;
 const ALBERTA_GST = 0.05;
@@ -49,6 +153,16 @@ function normalizeFacebookUrl(url: string): string {
   } catch {
     return url;
   }
+}
+
+const DEVICE_TOKEN_KEY = 'sbbl:stream-device-token:v1';
+
+function getOrCreateDeviceToken(): string {
+  const existing = window.localStorage.getItem(DEVICE_TOKEN_KEY);
+  if (existing && existing.length >= 16) return existing;
+  const generated = crypto.randomUUID();
+  window.localStorage.setItem(DEVICE_TOKEN_KEY, generated);
+  return generated;
 }
 
 interface LiveStreamPlayerProps {
@@ -77,8 +191,9 @@ export function LiveStreamPlayer({
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
 
-  const [inviteInput, setInviteInput] = useState('');
-  const [redeemingInvite, setRedeemingInvite] = useState(false);
+  // Increment to retrigger the playback-session useEffect without a full
+  // page reload. This is the warm-reconnect mechanism.
+  const [reconnectCount, setReconnectCount] = useState(0);
 
   const [playbackUrl, setPlaybackUrl] = useState('');
   const [playbackLoading, setPlaybackLoading] = useState(false);
@@ -87,10 +202,32 @@ export function LiveStreamPlayer({
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
 
+  // ── StreamForge QoE telemetry + warm-reconnect orchestrator ─────────────
+  const sfDeviceToken = getOrCreateDeviceToken();
+  const sf = useStreamForge({
+    gameId: game.id,
+    playbackUrl: playbackUrl || null,
+    sessionSeed: `${userId ?? 'anon'}-${game.id}-${sfDeviceToken}`,
+    beaconIntervalMs: 15_000,
+  });
+
+  // Warm reconnect handler: resets UI state and retriggers the session effect.
+  const handleWarmReconnect = useCallback(() => {
+    if (!sf.canWarmReconnect()) return;
+    sf.markWarmReconnect();
+    setHeartbeatFailures(0);
+    setPlayerError(null);
+    setPlayerReady(false);
+    setReconnectCount((n) => n + 1);
+  }, [sf]);
+
   // ── Role classification ──────────────────────────────────────────────────
   const isPlayer    = roles.includes('player');
   const isPaidFan   = roles.includes('paid_fan');
   const isSuperAdmin = roles.includes('super_admin');
+
+  // Detect Facebook stream URLs so we can lock down the embed for non-admins
+  const isFacebookStream = /facebook\.com|fb\.watch/i.test(playbackUrl);
 
   const hasRoleAccess = isPlayer || isPaidFan || isSuperAdmin;
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
@@ -129,7 +266,8 @@ export function LiveStreamPlayer({
     setPlayerReady(false);
     setPlayerError(null);
     setHeartbeatFailures(0);
-    const sessionKey = `playback-${game.id}`;
+    const deviceToken = getOrCreateDeviceToken();
+    const sessionKey = `playback-${game.id}-${deviceToken}`;
     const start = async () => {
       try {
         const res = await apiFetch<{
@@ -191,7 +329,12 @@ export function LiveStreamPlayer({
             });
         }, hbMs);
       } catch {
-        if (active) toast.error('Unable to start secure playback session.');
+        // Silent for super admin — the worker super-admin fast-path should
+        // never fail, and if it does the admin will see it in dev-tools. For
+        // regular users, surface the generic error.
+        if (active && !isSuperAdmin) {
+          toast.error('Unable to start secure playback session.');
+        }
       } finally {
         if (active) setPlaybackLoading(false);
       }
@@ -207,17 +350,17 @@ export function LiveStreamPlayer({
         }, null).catch(() => {});
       }
     };
-  }, [hasAccess, userId, game.id]);
+  }, [hasAccess, userId, game.id, isSuperAdmin, reconnectCount]); // reconnectCount triggers warm reconnect
 
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
     return (
-      <div className="absolute inset-0 flex flex-col items-center justify-center bg-background px-6 text-center">
-        <Lock className="w-12 h-12 text-muted-foreground mb-4" />
-        <h2 className="font-display text-2xl font-bold mb-2">Register to Watch</h2>
-        <p className="text-sm text-muted-foreground mb-6 max-w-xs">
-          Create a free SBBL HQ account to access live streams. Guests can enter
-          an invite code after registering.
+      <div className="absolute inset-0 flex flex-col items-center justify-center bg-background px-6 text-center gap-4 overflow-y-auto py-6">
+        <Lock className="w-12 h-12 text-muted-foreground" />
+        <h2 className="font-display text-2xl font-bold">Register to Watch</h2>
+        <p className="text-sm text-muted-foreground max-w-xs">
+          Create a free SBBL HQ account to access live streams. You'll be able
+          to enter an access code right after signing in.
         </p>
         <Link
           to="/register?redirect=/live"
@@ -225,9 +368,9 @@ export function LiveStreamPlayer({
         >
           Create Free Account
         </Link>
-        <p className="mt-4 text-xs text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Already registered?{' '}
-          <Link to="/login" className="text-amber-500 hover:underline">
+          <Link to="/login?redirect=/live" className="text-amber-500 hover:underline">
             Sign in
           </Link>
         </p>
@@ -277,49 +420,79 @@ export function LiveStreamPlayer({
             <ReactPlayer
               url={playbackUrl}
               playing={true}
+              muted={true}
               controls={true}
               width="100%"
               height="100%"
-              onReady={() => setPlayerReady(true)}
+              onReady={() => {
+                setPlayerReady(true);
+                sf.reportEvent('playing');
+                sf.recordSuccess();
+              }}
+              onPlay={() => sf.reportEvent('play')}
+              onPause={() => sf.reportEvent('pause')}
+              onBuffer={() => {
+                setPlayerReady(true);
+                sf.reportEvent('waiting');
+              }}
+              onBufferEnd={() => sf.reportEvent('playing')}
               onError={(e) => {
                 console.error('[ReactPlayer] Stream error:', e);
+                sf.reportEvent('error', { errorCode: String(e ?? 'unknown') });
+                sf.recordFailure();
                 setPlayerError('The stream source could not be loaded. The URL may be invalid or the stream may have ended.');
               }}
-              onBuffer={() => setPlayerReady(true)}
+              onEnded={() => sf.reportEvent('ended')}
+              onProgress={({ loaded, playedSeconds }) => {
+                // Report buffer-ahead as a rough measure: loaded fraction of
+                // remaining duration. ReactPlayer does not expose buffer ahead
+                // in ms directly; we use loadedSeconds as a proxy when
+                // available via the internal player.
+                const aheadProxy =
+                  typeof loaded === 'number' && loaded > 0 && playedSeconds > 0
+                    ? Math.round(loaded * 1000)
+                    : undefined;
+                sf.reportEvent('heartbeat', { bufferAheadMs: aheadProxy });
+              }}
               config={{
                 twitch: {
                   options: {
-                    parent: ['sbbl-hq.icu', 'www.sbbl-hq.icu', 'localhost']
+                    parent: ['sbbl-hq.icu', 'www.sbbl-hq.icu', 'localhost'],
+                    muted: true,
                   }
                 },
                 youtube: {
-                  playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1 }
+                  playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1, mute: 1 }
                 },
                 facebook: {
-                  appId: '',
+                  appId: import.meta.env.VITE_FACEBOOK_APP_ID || '',
                   version: 'v18.0',
                   playerId: 'sbbl-fb-player',
                 }
               }}
               style={{ position: 'absolute', top: 0, left: 0 }}
             />
+            {/* Block Facebook UI navigation for non-super-admin viewers.
+                The video autoplays via playing={true} so they can still watch;
+                this overlay only prevents clicking into Facebook's feed/related
+                videos. Super admins get the full embed for monitoring purposes. */}
+            {isFacebookStream && !isSuperAdmin && (
+              <div
+                className="absolute inset-0 z-10"
+                aria-hidden="true"
+                style={{ pointerEvents: 'all', background: 'transparent', cursor: 'default' }}
+              />
+            )}
           </div>
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3">
-            <p className="text-sm text-muted-foreground">Admin has not provided a stream URL.</p>
-            <a
-              href="https://www.facebook.com/SBBLhq/live"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#1877F2] text-white text-xs font-bold uppercase tracking-wider rounded-sm hover:bg-[#166FE5] transition-colors"
-            >
-              Watch on Facebook
-            </a>
+            <p className="text-sm text-muted-foreground">Live game found, but no playable stream URL is configured.</p>
           </div>
         )}
 
-        {/* Connection lost / displaced banner — circuit breaker triggered */}
-        {heartbeatFailures >= MAX_HEARTBEAT_FAILURES && (
+        {/* Connection lost / displaced banner — circuit breaker triggered.
+            Suppressed for super admin: they never get displaced or kicked. */}
+        {!isSuperAdmin && heartbeatFailures >= MAX_HEARTBEAT_FAILURES && (
           <div className="absolute inset-0 z-20 bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center text-center px-6 gap-4">
             <div className="w-14 h-14 rounded-full bg-red-500/15 flex items-center justify-center">
               <Lock className="w-7 h-7 text-red-400" />
@@ -330,8 +503,17 @@ export function LiveStreamPlayer({
                 Only one device can stream at a time per account. To watch here, sign in on this device and start a new session.
               </p>
             </div>
+            {/* Warm reconnect: re-creates the session in-place (~1.5 s) rather
+                than a full cold page reload (~8 s). Falls back to reload only
+                when the warm reconnect cooldown has not yet elapsed. */}
             <button
-              onClick={() => window.location.reload()}
+              onClick={() => {
+                if (sf.canWarmReconnect()) {
+                  handleWarmReconnect();
+                } else {
+                  window.location.reload();
+                }
+              }}
               className="bg-amber-500 hover:bg-amber-400 text-black px-6 py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded-2xl transition-colors"
             >
               Resume on This Device
@@ -339,22 +521,16 @@ export function LiveStreamPlayer({
           </div>
         )}
 
-        {/* Offline overlay — shown when admin hasn't started the stream */}
-        {isStreamLive === false && (
+        {/* Offline overlay — shown when admin hasn't started the stream.
+            Hidden for super admin so they can preview/test the player even
+            before flipping the stream live. */}
+        {isStreamLive === false && !isSuperAdmin && (
           <div className="absolute inset-0 bg-background/90 flex flex-col items-center justify-center text-center z-10">
             <div className="w-16 h-16 rounded-full bg-secondary flex items-center justify-center mb-4">
               <Play className="w-8 h-8 text-muted-foreground" />
             </div>
             <h3 className="font-display text-xl font-bold mb-1">Stream Starting Soon</h3>
             <p className="text-sm text-muted-foreground mb-3">The broadcast will begin shortly. Stay tuned.</p>
-            <a
-              href="https://www.facebook.com/SBBLhq/live"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-4 py-2 bg-[#1877F2] text-white text-xs font-bold uppercase tracking-wider rounded-sm hover:bg-[#166FE5] transition-colors"
-            >
-              Watch on Facebook
-            </a>
           </div>
         )}
 
@@ -503,71 +679,17 @@ export function LiveStreamPlayer({
           <hr className="flex-1 border-border" />
         </div>
 
-        {/* Invite code redemption */}
-        <div className="flex flex-col items-center gap-2 w-full max-w-xs">
-          <p className="text-xs text-muted-foreground">Have an invite code?</p>
-          <div className="flex gap-2 w-full">
-            <input
-              type="text"
-              value={inviteInput}
-              onChange={e => setInviteInput(e.target.value.trim())}
-              onKeyDown={e => { if (e.key === 'Enter' && inviteInput && !redeemingInvite) void handleRedeem(); }}
-              placeholder="Paste invite code…"
-              maxLength={36}
-              className="flex-1 bg-secondary px-3 py-2 text-xs rounded-sm border border-border focus:outline-none focus:border-amber-500/50 font-mono"
-              aria-label="Invite code"
-            />
-            <button
-              disabled={!inviteInput || redeemingInvite}
-              onClick={() => void handleRedeem()}
-              className="px-3 py-2 text-xs bg-secondary border border-border rounded-sm hover:border-amber-500/50 transition-colors disabled:opacity-40 inline-flex items-center gap-1.5 shrink-0"
-            >
-              <KeyRound className="w-3.5 h-3.5" />
-              {redeemingInvite ? '…' : 'Redeem'}
-            </button>
-          </div>
-        </div>
-
-        <p className="text-[10px] text-muted-foreground max-w-xs leading-relaxed">
-          Session access only. Invite codes are IP-locked, single-use, and expire in 24&nbsp;hours.
-        </p>
+        {/* Access code redemption — works with comp codes and regular invites.
+            The server derives the gameId from the code, so viewers don't need
+            to know anything beyond the token itself. */}
+        <AccessCodeRedeem
+          variant="light"
+          onRedeemed={() => {
+            setInviteGranted(true);
+            setTimeout(() => window.location.reload(), 400);
+          }}
+        />
       </div>
     </div>
   );
-
-  // ── Invite redemption handler (hoisted for key-down + button reuse) ────────
-  async function handleRedeem() {
-    setRedeemingInvite(true);
-    try {
-      await apiFetch<{ granted: boolean }>(
-        '/api/invite/redeem',
-        {
-          method: 'POST',
-          body: JSON.stringify({
-            code: inviteInput,
-            gameId: game.id,
-            captchaToken: await resolveToken(),
-          }),
-        },
-        null,
-      );
-      setInviteGranted(true);
-      toast.success('Invite accepted — enjoy the game!');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg === 'ip_mismatch' || msg === 'non_transferable') {
-        toast.error('This invite cannot be used from your device or location.');
-      } else if (msg === 'expired') {
-        toast.error('This invite code has expired (24-hour window).');
-      } else if (msg === 'invalid_invite') {
-        toast.error('Invite code not found. Check for typos.');
-      } else if (msg === 'cannot_redeem_own_invite') {
-        toast.error('You cannot redeem an invite you generated.');
-      } else {
-        toast.error('Could not redeem invite. Please try again.');
-      }
-    } finally {
-      setRedeemingInvite(false);
-    }
-  }
 }

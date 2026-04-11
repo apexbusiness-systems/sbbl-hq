@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, type SyntheticEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
@@ -17,6 +17,7 @@ const MediaPage = () => {
   const [typeFilter, setTypeFilter] = useState<'all' | 'highlight' | 'clip' | 'poster' | 'photo'>('all');
   const [shareModal, setShareModal] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [assetOrientation, setAssetOrientation] = useState<Record<string, 'portrait' | 'landscape'>>({});
 
   // League filter — URL param sync, default to active league
   const paramLeague = searchParams.get('league');
@@ -49,20 +50,57 @@ const MediaPage = () => {
     staleTime: 60_000,
   });
 
+  const posterProjectionQuery = useQuery({
+    queryKey: ['public-media-posters'],
+    queryFn: () => apiFetch<{ ok: boolean; data: MediaAsset[] }>('/api/public/media/posters'),
+    retry: 1,
+    staleTime: 60_000,
+    enabled: typeFilter === 'poster',
+  });
+
   // No fallback data — surface the real state. Fail loud, never fake.
   const allMedia = useMemo<MediaAsset[]>(() => {
     const apiData = mediaQuery.data?.data;
     return Array.isArray(apiData) ? apiData : [];
   }, [mediaQuery.data]);
 
-  const filtered = allMedia.filter(m => {
-    const leagueMatch = leagueFilter === 'all' || m.leagueId === leagueFilter;
-    const typeMatch = typeFilter === 'all' || m.type === typeFilter;
-    return leagueMatch && typeMatch;
-  });
+  const posterProjection = useMemo<MediaAsset[]>(() => {
+    const projected = posterProjectionQuery.data?.data;
+    return Array.isArray(projected) ? projected : [];
+  }, [posterProjectionQuery.data]);
 
-  const shareAsset = shareModal ? allMedia.find(m => m.id === shareModal) : null;
+  const filtered = useMemo(() => {
+    const baseList = typeFilter === 'poster'
+      ? [...allMedia, ...posterProjection]
+      : allMedia;
+
+    const dedupedById = baseList.filter((item, idx, arr) =>
+      arr.findIndex(candidate => candidate.id === item.id) === idx,
+    );
+
+    return dedupedById.filter(m => {
+      const leagueMatch = leagueFilter === 'all' || m.leagueId === leagueFilter;
+      const typeMatch = typeFilter === 'all' || m.type === typeFilter;
+      return leagueMatch && typeMatch;
+    });
+  }, [allMedia, posterProjection, leagueFilter, typeFilter]);
+
+  const shareAsset = shareModal ? [...allMedia, ...posterProjection].find(m => m.id === shareModal) : null;
   const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
+
+  const resolveAspectRatio = (id: string, mediaType: MediaAsset['type']) => {
+    const orientation = assetOrientation[id];
+    if (orientation === 'landscape') return '4 / 3';
+    if (orientation === 'portrait') return '3 / 4';
+    return mediaType === 'highlight' || mediaType === 'clip' ? '16 / 9' : '3 / 4';
+  };
+
+  const handleAssetLoad = (id: string, event: SyntheticEvent<HTMLImageElement>) => {
+    const img = event.currentTarget;
+    if (!img.naturalWidth || !img.naturalHeight) return;
+    const orientation = img.naturalWidth >= img.naturalHeight ? 'landscape' : 'portrait';
+    setAssetOrientation(prev => (prev[id] === orientation ? prev : { ...prev, [id]: orientation }));
+  };
 
   const handleCopyLink = async () => {
     const url = `${globalThis.location.origin}/media#${shareModal}`;
@@ -167,19 +205,18 @@ const MediaPage = () => {
             </p>
           </div>
         ) : (
-          // Grid: columns sized for landscape (wide) content; rows sized for portrait
-          // (tall) content via unified aspect-[3/4] cells. Every card fits
-          // its natural dimensions — poster/photo fills cover-top, video/clip
-          // is contained and framed by an ambient blurred version of itself.
+          // Grid cards use per-asset orientation so each container adapts to its own
+          // uploaded ratio without forcing neighbors to inherit that geometry.
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5 items-start">
             {filtered.map((m, index) => {
-              const isPortrait = m.type === 'poster' || m.type === 'photo';
+              const orientation = assetOrientation[m.id];
+              const isLandscape = orientation === 'landscape';
               const isPlayable = m.type === 'highlight' || m.type === 'clip';
               const isLcpCandidate = index === 0;
               return (
                 <div key={m.id} className="panel overflow-hidden group flex flex-col">
-                  {/* ── Image cell: always 3/4 tall, adapts internally ── */}
-                  <div className="relative overflow-hidden bg-[#0a0a0a]" style={{ aspectRatio: '3/4' }}>
+                  {/* ── Image cell: per-card adaptive ratio (portrait/landscape) ── */}
+                  <div className="relative overflow-hidden bg-[#0a0a0a]" style={{ aspectRatio: resolveAspectRatio(m.id, m.type) }}>
                     {/* Ambient blur fill — fills dead space for non-portrait content, adds depth for all */}
                     <img
                       src={m.thumbnail}
@@ -194,11 +231,12 @@ const MediaPage = () => {
                     <img
                       src={m.thumbnail}
                       alt={m.title}
+                      onLoad={(event) => handleAssetLoad(m.id, event)}
                       loading={isLcpCandidate ? 'eager' : 'lazy'}
                       decoding="async"
                       fetchPriority={isLcpCandidate ? 'high' : 'auto'}
                       className={`absolute inset-0 w-full h-full transition-transform duration-500 group-hover:scale-105 ${
-                        isPortrait ? 'object-cover object-top' : 'object-contain'
+                        isLandscape ? 'object-contain' : 'object-cover object-top'
                       }`}
                     />
                     {/* Bottom gradient scrim for legibility */}

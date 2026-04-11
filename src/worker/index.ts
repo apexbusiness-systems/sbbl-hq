@@ -6,11 +6,21 @@ import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
 import { signSyncPacket, type SyncPacket } from "@/lib/sync-packets";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
+  mergeBeaconIntoAggregate,
+  parseBeaconPayload,
+  toHealthReport,
+  type AggregatedHealth,
+} from "@/lib/stream/streamforge";
+import {
   handlePublicConfig as _handlePublicConfig,
   handlePublicHome as _handlePublicHome,
   handlePublicSchedule as _handlePublicSchedule,
   handlePublicPotg as _handlePublicPotg,
 } from "./routes/public";
+import {
+  handleQoeIngest,
+  handleQoeHealthReport,
+} from "./routes/stream-qoe";
 
 type HandlerCtx = {
   req: Request;
@@ -44,18 +54,37 @@ type HeartbeatEntry = {
 const heartbeatQueue: HeartbeatEntry[] = [];
 let heartbeatFlushTimer: ReturnType<typeof setTimeout> | null = null;
 const HEARTBEAT_FLUSH_INTERVAL_MS = 30_000;
+const HEARTBEAT_QUEUE_MAX = 5_000; // OOM guard — drop oldest if queue exceeds this
+const HEARTBEAT_MAX_RETRIES = 3;    // Stop retrying after 3 consecutive failures
+let heartbeatConsecutiveFailures = 0;
 
 async function flushHeartbeatQueue(env: Env): Promise<void> {
   if (heartbeatQueue.length === 0) return;
+
+  // OOM guard: if queue grew past cap (sustained DB failure), drop oldest
+  if (heartbeatQueue.length > HEARTBEAT_QUEUE_MAX) {
+    const dropped = heartbeatQueue.length - HEARTBEAT_QUEUE_MAX;
+    heartbeatQueue.splice(0, dropped);
+    console.warn(`[heartbeat-flush] Dropped ${dropped} oldest entries (queue exceeded ${HEARTBEAT_QUEUE_MAX})`);
+  }
+
   const batch = heartbeatQueue.splice(0, heartbeatQueue.length);
   const admin = getAdminClient(env);
   const { error } = await admin.rpc("batch_heartbeat_upsert", {
     p_heartbeats: JSON.stringify(batch),
   });
   if (error) {
-    // On failure, push entries back so the next flush retries them
-    heartbeatQueue.unshift(...batch);
-    console.error("[heartbeat-flush] batch_heartbeat_upsert failed:", error.message);
+    heartbeatConsecutiveFailures += 1;
+    if (heartbeatConsecutiveFailures <= HEARTBEAT_MAX_RETRIES) {
+      // Retry: push entries back for next flush
+      heartbeatQueue.unshift(...batch);
+      console.error(`[heartbeat-flush] batch_heartbeat_upsert failed (attempt ${heartbeatConsecutiveFailures}/${HEARTBEAT_MAX_RETRIES}):`, error.message);
+    } else {
+      // Drop the batch — DB is persistently down, don't OOM the worker
+      console.error(`[heartbeat-flush] Dropping ${batch.length} heartbeats after ${HEARTBEAT_MAX_RETRIES} consecutive failures:`, error.message);
+    }
+  } else {
+    heartbeatConsecutiveFailures = 0; // Reset on success
   }
 }
 
@@ -107,6 +136,26 @@ function enforceInMemoryRateLimit(
   recent.push(now);
   transientRateLimits.set(key, recent);
   return true;
+}
+
+async function enforceSharedRateLimit(
+  admin: SupabaseClient,
+  scope: string,
+  key: string,
+  limit: number,
+  windowMs: number,
+): Promise<boolean> {
+  const res = await admin.rpc("consume_stream_rate_limit", {
+    p_scope: scope,
+    p_key: key,
+    p_limit: limit,
+    p_window_seconds: Math.max(1, Math.floor(windowMs / 1000)),
+  });
+  if (res.error) {
+    // Safe fallback so a DB RPC issue does not fully disable abuse controls.
+    return enforceInMemoryRateLimit(`${scope}:${key}`, limit, windowMs);
+  }
+  return Boolean(res.data);
 }
 
 // SECURITY: roles are never read from client-supplied headers.
@@ -414,7 +463,7 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
   const existing = await admin
     .from("stream_admin_config")
     .select(
-      "collection_id,title,source,is_live,active_game_id,updated_at,live_started_at,live_ended_at",
+      "collection_id,title,source,is_live,updated_at,live_started_at,live_ended_at",
     )
     .eq("id", true)
     .maybeSingle();
@@ -431,7 +480,7 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
       is_live: false,
     })
     .select(
-      "collection_id,title,source,is_live,active_game_id,updated_at,live_started_at,live_ended_at",
+      "collection_id,title,source,is_live,updated_at,live_started_at,live_ended_at",
     )
     .single();
   if (created.error) throw new Error(created.error.message);
@@ -454,14 +503,16 @@ function streamCacheUrl(gameId: string | null): string {
 
 async function getActiveViewerCount(admin: SupabaseClient, gameId: string | null) {
   if (!gameId) return 0;
-  const activeSessions = await admin
+  // Use DB-side count instead of pulling all rows into Worker memory.
+  // At 20K viewers this avoids transferring ~20K rows over the wire.
+  const { count, error } = await admin
     .from("stream_access_sessions")
-    .select("user_id")
+    .select("user_id", { count: "exact", head: true })
     .eq("game_id", gameId)
     .eq("status", "active")
     .gt("expires_at", new Date().toISOString());
-  if (activeSessions.error) return 0;
-  return new Set((activeSessions.data ?? []).map((row: Record<string, unknown>) => String(row.user_id))).size;
+  if (error) return 0;
+  return count ?? 0;
 }
 
 async function refreshLiveSessionMetrics(
@@ -508,16 +559,14 @@ export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   // ── Cache miss — hit Supabase once, write back, serve ────────────────────
   const cfg = await getOrCreateStreamConfig(admin);
   let viewerCount = 0;
-  const activeGameId = gameId ?? (cfg.active_game_id as string | null) ?? null;
-  viewerCount = await getActiveViewerCount(admin, activeGameId);
-  await refreshLiveSessionMetrics(admin, activeGameId, viewerCount);
+  viewerCount = await getActiveViewerCount(admin, gameId);
+  await refreshLiveSessionMetrics(admin, gameId, viewerCount);
 
   const payload = {
     ok: true,
     isLive: Boolean(cfg.is_live),
     title: String(cfg.title ?? "SBBL Live Stream"),
     viewerCount,
-    gameId: activeGameId,
   };
 
   const response = new Response(JSON.stringify(payload), {
@@ -549,7 +598,6 @@ async function handleGetStreamConfig({ req, admin }: HandlerCtx) {
       isLive: Boolean(cfg.is_live),
       viewerCount: 0,
       updatedAt: cfg.updated_at,
-      gameId: cfg.active_game_id ?? null,
     },
   });
 }
@@ -607,7 +655,6 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   const session = await requireSuperAdminSession(ctx.req, ctx.admin);
   const body = (await ctx.req.json().catch(() => null)) as {
     isLive?: boolean;
-    gameId?: string | null;
   } | null;
   if (typeof body?.isLive !== "boolean")
     return json({ ok: false, error: "is_live_required" }, 400);
@@ -617,7 +664,6 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
     is_live: body.isLive,
     updated_by: session.userId,
   };
-  if (typeof body.gameId === "string") patch.active_game_id = body.gameId;
   if (body.isLive) {
     patch.live_started_at = nowIso;
     patch.live_ended_at = null;
@@ -629,70 +675,29 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
     .upsert(patch, { onConflict: "id" });
   if (error) throw new Error(error.message);
 
-  if (typeof body.gameId === "string") {
-    if (body.isLive) {
-      await ctx.admin.from("stream_sessions").insert({
-        game_id: body.gameId,
-        status: "live",
-        started_at: nowIso,
-        current_viewers: 0,
-        peak_viewers: 0,
-        created_by: session.userId,
-        updated_by: session.userId,
-      });
-    } else {
-      const activeViewers = await getActiveViewerCount(ctx.admin, body.gameId);
-      const currentLive = await ctx.admin
-        .from("stream_sessions")
-        .select("id,peak_viewers")
-        .eq("game_id", body.gameId)
-        .eq("status", "live")
-        .order("updated_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      if (currentLive.data) {
-        const priorPeak = Number(
-          (currentLive.data as Record<string, unknown>).peak_viewers ?? 0,
-        );
-        await ctx.admin
-          .from("stream_sessions")
-          .update({
-            status: "ended",
-            ended_at: nowIso,
-            current_viewers: activeViewers,
-            peak_viewers: Math.max(priorPeak, activeViewers),
-            updated_at: nowIso,
-            updated_by: session.userId,
-          })
-          .eq("id", (currentLive.data as Record<string, unknown>).id as string);
-      } else {
-        await ctx.admin.from("stream_sessions").insert({
-          game_id: body.gameId,
-          status: "ended",
-          started_at: nowIso,
-          ended_at: nowIso,
-          current_viewers: activeViewers,
-          peak_viewers: activeViewers,
-          created_by: session.userId,
-          updated_by: session.userId,
-        });
-      }
-    }
-  }
-
   // Bust edge cache immediately so Go Live / End Broadcast is reflected
   // for all viewers on their next 15 s poll (not delayed by TTL).
   // Retry once on failure — stale "offline" after Go Live is a P0 UX issue.
   const cfCachesLive = (caches as unknown as { default: Cache }).default;
   const bustKey = new Request(streamCacheUrl(null));
   cfCachesLive.delete(bustKey).catch(() => { cfCachesLive.delete(bustKey).catch(() => {}); });
-  // Also bust game-scoped key if a gameId was provided
-  if (typeof body.gameId === "string") {
-    const bustGameKey = new Request(streamCacheUrl(body.gameId));
-    cfCachesLive.delete(bustGameKey).catch(() => { cfCachesLive.delete(bustGameKey).catch(() => {}); });
-  }
-
   return json({ ok: true, isLive: body.isLive, at: nowIso });
+}
+
+async function requireActivePlaybackSession(ctx: HandlerCtx, userId: string, gameId: string) {
+  const nowIso = new Date().toISOString();
+  const session = await ctx.admin
+    .from("stream_access_sessions")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("game_id", gameId)
+    .eq("status", "active")
+    .gt("expires_at", nowIso)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (session.error) throw new Error(session.error.message);
+  return Boolean(session.data);
 }
 
 async function handleStreamSessions({ req, admin }: HandlerCtx) {
@@ -1934,7 +1939,7 @@ async function handleOpsListProducts({ req, admin }: HandlerCtx) {
 }
 async function handleOpsListEvents({ req, admin }: HandlerCtx) {
   requireSuperAdmin(req);
-  const { data, error } = await admin.from('events').select('*').order('created_at', { ascending: false });
+  const { data, error } = await admin.from('league_events').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
@@ -1965,8 +1970,8 @@ async function handleOpsPatch(table: string, req: Request, admin: import("@supab
 async function handleOpsPatchTeams(ctx: HandlerCtx) { return handleOpsPatch('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchPlayers(ctx: HandlerCtx) { return handleOpsPatch('players', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchProducts(ctx: HandlerCtx) { return handleOpsPatch('products', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsPatchEvents(ctx: HandlerCtx) { return handleOpsPatch('events', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch('schedules', ctx.req, ctx.admin, ctx.params); }
+async function handleOpsPatchEvents(ctx: HandlerCtx) { return handleOpsPatch('league_events', ctx.req, ctx.admin, ctx.params); }
+async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch('schedule_slots', ctx.req, ctx.admin, ctx.params); }
 
 // Ops Delete (Archive) handlers
 async function handleOpsDelete(table: string, req: Request, admin: import("@supabase/supabase-js").SupabaseClient, params: Record<string, string>) {
@@ -1993,7 +1998,168 @@ async function handleOpsDelete(table: string, req: Request, admin: import("@supa
 async function handleOpsDeleteTeams(ctx: HandlerCtx) { return handleOpsDelete('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeletePlayers(ctx: HandlerCtx) { return handleOpsDelete('players', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete('products', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('events', ctx.req, ctx.admin, ctx.params); }
+async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('league_events', ctx.req, ctx.admin, ctx.params); }
+
+// ── Media Editor (Admin) ──────────────────────────────────────────────────
+// Super-admin CRUD over media_publications rows (all statuses). Public reads
+// continue to filter on status='published' via handlePublicMedia; this admin
+// surface is the only way to edit title/status/league once a publication has
+// been projected from the ingest pipeline.
+
+const MEDIA_PUBLICATION_STATUSES = ['draft', 'scheduled', 'published', 'archived'] as const;
+type MediaPublicationStatus = typeof MEDIA_PUBLICATION_STATUSES[number];
+const isMediaPublicationStatus = (v: unknown): v is MediaPublicationStatus =>
+  typeof v === 'string' && (MEDIA_PUBLICATION_STATUSES as readonly string[]).includes(v);
+
+async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
+  requireSuperAdmin(req);
+  const url = new URL(req.url);
+  const statusFilter = url.searchParams.get('status');
+  const surfaceFilter = url.searchParams.get('surface');
+  const leagueFilter = url.searchParams.get('leagueId');
+  const limitParam = Number(url.searchParams.get('limit') ?? '100');
+  const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 100, 1), 200);
+
+  let query = admin
+    .from('media_publications')
+    .select(
+      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,league_id,render_payload,' +
+      'media_assets!inner(id,metadata,created_at),' +
+      'leagues:leagues!league_id(id,code,name)'
+    )
+    .order('sort_at', { ascending: false })
+    .limit(limit);
+
+  if (statusFilter && isMediaPublicationStatus(statusFilter)) {
+    query = query.eq('status', statusFilter);
+  }
+  if (surfaceFilter) query = query.eq('surface', surfaceFilter);
+  if (leagueFilter) query = query.eq('league_id', leagueFilter);
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((raw) => {
+    const asset = (raw.media_assets as Record<string, unknown> | null) ?? {};
+    const assetMeta = (asset.metadata as Record<string, unknown> | null) ?? {};
+    const payload = (raw.render_payload as Record<string, unknown> | null) ?? {};
+    const leagueRow = (raw.leagues as Record<string, unknown> | null) ?? {};
+    const thumbnail = String(
+      payload.thumbnail ?? payload.image_url ?? assetMeta.thumbnail ?? assetMeta.image_url ?? ''
+    );
+    const type = String(payload.type ?? assetMeta.type ?? 'poster');
+    return {
+      id: String(raw.id),
+      mediaAssetId: String(raw.media_asset_id ?? asset.id ?? ''),
+      surface: String(raw.surface ?? ''),
+      title: String(raw.title ?? ''),
+      subtitle: raw.subtitle == null ? null : String(raw.subtitle),
+      status: String(raw.status ?? ''),
+      publishedAt: raw.published_at == null ? null : String(raw.published_at),
+      scheduledAt: raw.scheduled_at == null ? null : String(raw.scheduled_at),
+      sortAt: raw.sort_at == null ? null : String(raw.sort_at),
+      leagueId: raw.league_id == null ? null : String(raw.league_id),
+      leagueCode: leagueRow.code == null ? null : String(leagueRow.code),
+      leagueName: leagueRow.name == null ? null : String(leagueRow.name),
+      type,
+      thumbnail,
+      createdAt: asset.created_at == null ? null : String(asset.created_at),
+    };
+  });
+
+  return json({ ok: true, data: rows });
+}
+
+async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireSuperAdmin(ctx.req);
+  const id = ctx.params.id;
+  if (!id) return json({ ok: false, error: 'missing_id' }, 400);
+
+  const body = (await ctx.req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body || Object.keys(body).length === 0) {
+    return json({ ok: false, error: 'empty_patch_body' }, 400);
+  }
+
+  const update: Record<string, unknown> = {};
+  if (typeof body.title === 'string' && body.title.trim().length > 0) {
+    update.title = body.title.trim();
+  }
+  if (body.subtitle === null) {
+    update.subtitle = null;
+  } else if (typeof body.subtitle === 'string') {
+    update.subtitle = body.subtitle;
+  }
+  if (body.status !== undefined) {
+    if (!isMediaPublicationStatus(body.status)) {
+      return json({ ok: false, error: `invalid_status (allowed: ${MEDIA_PUBLICATION_STATUSES.join(',')})` }, 400);
+    }
+    update.status = body.status;
+    // Keep published_at consistent with status transitions.
+    if (body.status === 'published') {
+      update.published_at = new Date().toISOString();
+    } else if (body.status === 'archived' || body.status === 'draft') {
+      update.published_at = null;
+    }
+  }
+  if (body.leagueId === null) {
+    update.league_id = null;
+  } else if (typeof body.leagueId === 'string' && body.leagueId.length > 0) {
+    update.league_id = body.leagueId;
+  }
+  if (typeof body.sortAt === 'string' && body.sortAt.length > 0) {
+    update.sort_at = body.sortAt;
+  }
+
+  if (Object.keys(update).length === 0) {
+    return json({ ok: false, error: 'no_editable_fields' }, 400);
+  }
+
+  const { data, error } = await ctx.admin
+    .from('media_publications')
+    .update(update)
+    .eq('id', id)
+    .select('id,title,subtitle,status,league_id,published_at,sort_at')
+    .single();
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_patch_media_publication',
+    ref_type: 'media_publications',
+    ref_id: id,
+    payload: update,
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, data });
+}
+
+async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireSuperAdmin(ctx.req);
+  const id = ctx.params.id;
+  if (!id) return json({ ok: false, error: 'missing_id' }, 400);
+
+  const { data, error } = await ctx.admin
+    .from('media_publications')
+    .update({ status: 'archived', published_at: null })
+    .eq('id', id)
+    .select('id,status')
+    .single();
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_archive_media_publication',
+    ref_type: 'media_publications',
+    ref_id: id,
+    payload: {},
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, data });
+}
 
 
 // handlePublicConfig — extracted to src/worker/routes/public.ts
@@ -2584,6 +2750,101 @@ async function handleInviteGenerate(ctx: HandlerCtx) {
 }
 
 /**
+ * POST /ops/streams/comp-code
+ * Super-admin only. Generates a complimentary access code that grants the
+ * redeemer a free playback session with the same rules as a PPV purchase:
+ *   - IP-locked on first use
+ *   - Non-transferable
+ *   - 6-hour playback session cap
+ *   - One-device enforcement
+ *
+ * Unlike the regular invite generator, super admin can create UNLIMITED codes
+ * per game (the partial unique index only applies to is_comp = false rows).
+ *
+ * Body:
+ *   { gameId: string, note?: string, expiresInHours?: number }
+ *
+ * Response:
+ *   { ok: true, code: string, gameId: string, expiresAt: string, note?: string }
+ */
+async function handleSuperAdminCompCode(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    gameId?: string;
+    note?: string;
+    expiresInHours?: number;
+  } | null;
+  const gameId = body?.gameId?.trim();
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+
+  // Clamp expiry window to [1, 168] hours (1 hour to 7 days). Default 24h
+  // matches the regular invite system. This is the REDEMPTION window — once
+  // redeemed, the playback session is still hard-capped at 6 hours by
+  // createOrRefreshPlaybackSession.
+  const rawHours = Number(body?.expiresInHours);
+  const hours = Number.isFinite(rawHours) && rawHours > 0
+    ? Math.min(168, Math.max(1, rawHours))
+    : 24;
+  const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
+
+  const note = typeof body?.note === "string" ? body.note.trim().slice(0, 200) : null;
+
+  const { data: invite, error: insertErr } = await ctx.admin
+    .from("ppv_invites")
+    .insert({
+      game_id: gameId,
+      generated_by: session.userId,
+      is_comp: true,
+      expires_at: expiresAt,
+      note,
+    })
+    .select("id,game_id,expires_at,note,created_at")
+    .single();
+
+  if (insertErr) throw new Error(insertErr.message);
+
+  return json({
+    ok: true,
+    code: (invite as { id: string }).id,
+    gameId: (invite as { game_id: string }).game_id,
+    expiresAt: (invite as { expires_at: string }).expires_at,
+    note: (invite as { note: string | null }).note,
+    createdAt: (invite as { created_at: string }).created_at,
+  });
+}
+
+/**
+ * GET /ops/streams/comp-code
+ * Super-admin only. Lists recent comp codes for ops tracking + reprinting.
+ * Returns the 50 most recently generated codes that are still unused or
+ * within their expiry window.
+ */
+async function handleSuperAdminCompCodeList(ctx: HandlerCtx) {
+  await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { data, error } = await ctx.admin
+    .from("ppv_invites")
+    .select("id,game_id,used_by,used_at,expires_at,note,created_at")
+    .eq("is_comp", true)
+    .order("created_at", { ascending: false })
+    .limit(50);
+  if (error) throw new Error(error.message);
+  return json({
+    ok: true,
+    codes: (data ?? []).map((row: Record<string, unknown>) => ({
+      code: String(row.id),
+      gameId: String(row.game_id),
+      usedBy: row.used_by ? String(row.used_by) : null,
+      usedAt: row.used_at ? String(row.used_at) : null,
+      expiresAt: String(row.expires_at),
+      note: row.note ? String(row.note) : null,
+      createdAt: String(row.created_at),
+    })),
+  });
+}
+
+/**
  * POST /api/invite/redeem
  * Auth required.  User must be a registered fan (any authenticated user qualifies).
  * Validates: exists → not expired → not already used by someone else.
@@ -2608,22 +2869,31 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
     return json({ ok: false, error: "captcha_failed" }, 403);
   }
   const code = body?.code?.trim();
-  const gameId = body?.gameId?.trim();
-  if (!code || !gameId)
-    return json({ ok: false, error: "code_and_game_id_required" }, 400);
+  const suppliedGameId = body?.gameId?.trim();
+  if (!code) return json({ ok: false, error: "code_required" }, 400);
 
-  // Fetch invite record
+  // Fetch invite record by code only. If the caller also supplied a gameId,
+  // we'll enforce it matches after the row is loaded. Looking the code up by
+  // id alone lets comp-code redemption work without the viewer needing to
+  // know the game_id associated with their token.
   const { data: row, error: fetchErr } = await ctx.admin
     .from("ppv_invites")
     .select(
-      "id, game_id, generated_by, used_by, ip_address, used_at, expires_at",
+      "id, game_id, generated_by, used_by, ip_address, used_at, expires_at, is_comp",
     )
     .eq("id", code)
-    .eq("game_id", gameId)
     .maybeSingle();
 
   if (fetchErr || !row)
     return json({ ok: false, error: "invalid_invite" }, 404);
+
+  // If the caller supplied a gameId, it must match the code's game_id.
+  // (Legacy in-player redemption still sends gameId to preserve the existing
+  // contract; the new standalone widget omits it.)
+  if (suppliedGameId && String((row as { game_id: string }).game_id) !== suppliedGameId) {
+    return json({ ok: false, error: "invalid_invite" }, 404);
+  }
+  const gameId = String((row as { game_id: string }).game_id);
 
   const inv = row as {
     id: string;
@@ -2720,10 +2990,7 @@ async function handleStreamReactions({ req, admin }: HandlerCtx) {
     ? pathGameId
     : url.searchParams.get('gameId') ?? null;
 
-  // Resolve 'current' to the active game from stream config
-  const resolvedGameId = gameId === 'current' || !gameId
-    ? await getOrCreateStreamConfig(admin).then(c => c.active_game_id as string | null).catch(() => null)
-    : gameId;
+  const resolvedGameId = gameId === 'current' ? null : gameId;
 
   const cacheKey = new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${resolvedGameId ?? 'null'}`);
   const cfCaches = caches as unknown as { default: Cache };
@@ -2766,6 +3033,11 @@ async function handleStreamReact(ctx: HandlerCtx) {
   if (!reactionType || !['fire', 'heart', 'clap'].includes(reactionType)) {
     return json({ ok: false, error: 'invalid_reaction_type' }, 400);
   }
+  if (!(await enforceSharedRateLimit(ctx.admin, "stream_reaction_user", `${userId}:${pathGameId}`, 30, 30_000))) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
+  const hasSession = await requireActivePlaybackSession(ctx, userId, pathGameId);
+  if (!hasSession) return json({ ok: false, error: "active_session_required" }, 403);
 
   const { error } = await ctx.admin.from('stream_reactions').insert({
     game_id: pathGameId,
@@ -2779,6 +3051,121 @@ async function handleStreamReact(ctx: HandlerCtx) {
   cfCaches.default.delete(new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${pathGameId}`)).catch(() => {});
 
   return json({ ok: true, gameId: pathGameId, type: reactionType });
+}
+
+// ── STREAM QoE TELEMETRY ─────────────────────────────────────────────────────
+//
+// Proprietary StreamForge edge-aggregated broadcast health layer.
+//
+// Architecture
+// ────────────
+//  POST /api/streams/:gameId/qoe        — ingest a single client beacon
+//  GET  /api/streams/:gameId/qoe/health — read the rolling health report
+//
+// Both endpoints are public (no auth required) because:
+//  a) sendBeacon cannot set Authorization headers
+//  b) health data carries no PII (session id hashes only)
+//
+// Aggregation uses Cloudflare Cache API (zero cost, no new infra). Each
+// colo maintains an independent aggregate; for our sub-200-viewer target
+// this is an accurate per-region signal. Extend to Durable Objects only
+// when global exact aggregation is a hard requirement.
+
+const QOE_CACHE_TTL_S = 30;
+
+function qoeCacheUrl(gameId: string): Request {
+  return new Request(
+    `https://sbbl-hq.icu/__cache/qoe/${encodeURIComponent(gameId)}`,
+  );
+}
+
+/**
+ * POST /api/streams/:gameId/qoe
+ * Accept a StreamForge QoE beacon from a viewer. Validates, rate-limits,
+ * and merges into the per-colo rolling aggregate. Returns 204 on success.
+ *
+ * Rate limit: 10 beacons / 60 s per IP — blocks floods without touching DB.
+ */
+async function handleStreamQoeBeacon(ctx: HandlerCtx): Promise<Response> {
+  const gameId = ctx.params.gameId ?? null;
+  if (!gameId || gameId.length > 64) {
+    return json({ ok: false, error: "invalid_game_id" }, 400);
+  }
+
+  const clientIp = getClientIP(ctx.req);
+  if (!enforceInMemoryRateLimit(`qoe:${clientIp}`, 10, 60_000)) {
+    return new Response(null, { status: 429 });
+  }
+
+  const rawBody = await ctx.req.json().catch(() => null);
+  const beacon = parseBeaconPayload(rawBody);
+  if (!beacon) {
+    return json({ ok: false, error: "invalid_payload" }, 400);
+  }
+  // Prevent a client from poisoning a different game's aggregate.
+  if (beacon.gameId !== gameId) {
+    return json({ ok: false, error: "game_id_mismatch" }, 400);
+  }
+
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = qoeCacheUrl(gameId);
+
+  let existing: AggregatedHealth | null = null;
+  try {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) {
+      const data = await hit.json().catch(() => null);
+      if (data && typeof data === "object") existing = data as AggregatedHealth;
+    }
+  } catch {
+    /* cache miss — start fresh */
+  }
+
+  const updated = mergeBeaconIntoAggregate(existing, beacon);
+  const aggregateRes = new Response(JSON.stringify(updated), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "Cache-Control": `public, max-age=${QOE_CACHE_TTL_S}`,
+    },
+  });
+  cfCaches.default.put(cacheKey, aggregateRes).catch(() => {});
+
+  return new Response(null, { status: 204 });
+}
+
+/**
+ * GET /api/streams/:gameId/qoe/health
+ * Return a human-readable HealthReport from the current rolling aggregate.
+ * Public, cached 30 s. Returns { ok: true, report: null } if no beacons yet.
+ */
+async function handleStreamQoeHealth(ctx: HandlerCtx): Promise<Response> {
+  const gameId = ctx.params.gameId ?? null;
+  if (!gameId || gameId.length > 64) {
+    return json({ ok: false, error: "invalid_game_id" }, 400);
+  }
+
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = qoeCacheUrl(gameId);
+
+  let report = null;
+  try {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) {
+      const agg = await hit.json().catch(() => null);
+      if (agg && typeof agg === "object") {
+        report = toHealthReport(agg as AggregatedHealth);
+      }
+    }
+  } catch {
+    /* cache miss */
+  }
+
+  return json(
+    { ok: true, gameId, report },
+    200,
+    { "Cache-Control": `public, max-age=${QOE_CACHE_TTL_S}` },
+  );
 }
 
 // ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
@@ -2805,9 +3192,10 @@ const SESSION_MAX_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours hard cap
 
 async function createOrRefreshPlaybackSession(
   ctx: HandlerCtx,
-  gameId: string,
+  gameId: string | null,
   userId: string,
   sessionKey: string,
+  options: { skipDisplace?: boolean } = {},
 ) {
   const nowIso = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 70_000).toISOString();
@@ -2817,14 +3205,17 @@ async function createOrRefreshPlaybackSession(
   // One-device enforcement: terminate any existing active session for this
   // user + game before creating the new one.  The displaced device's next
   // heartbeat will return session_not_found → circuit breaker → "Connection
-  // lost" banner.  This is intentional — only one active session per viewer.
-  await ctx.admin
-    .from("stream_access_sessions")
-    .update({ status: "displaced", expires_at: nowIso, updated_by: userId })
-    .eq("user_id", userId)
-    .eq("game_id", gameId)
-    .eq("status", "active")
-    .neq("idempotency_key", sessionKey);
+  // lost" banner.  Super admin bypasses this — they may monitor the stream
+  // from multiple devices simultaneously (ops console + personal device).
+  if (!options.skipDisplace) {
+    await ctx.admin
+      .from("stream_access_sessions")
+      .update({ status: "displaced", expires_at: nowIso, updated_by: userId })
+      .eq("user_id", userId)
+      .eq("game_id", gameId)
+      .eq("status", "active")
+      .neq("idempotency_key", sessionKey);
+  }
 
   // Atomic upsert — eliminates the TOCTOU race where two rapid requests
   // both miss the SELECT and create duplicate sessions. The unique constraint
@@ -2859,31 +3250,59 @@ async function createOrRefreshPlaybackSession(
 export async function handlePlaybackSession(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
-  const gameId = ctx.params.gameId;
+  const gameId = ctx.params.gameId ?? null;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionKey?: string;
   } | null;
-  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
   if (!body?.sessionKey || body.sessionKey.length < 8) {
     return json({ ok: false, error: "session_key_required" }, 400);
   }
 
-  // Validate game exists — reject phantom session creation for non-existent games
-  const gameCheck = await ctx.admin
-    .from("games")
-    .select("id")
-    .eq("id", gameId)
-    .maybeSingle();
-  if (!gameCheck.data) {
-    return json({ ok: false, error: "game_not_found" }, 404);
+  const roles = await getUserRolesFromDB(userId, ctx.admin);
+  const isSuperAdmin = roles.includes("super_admin");
+
+  // ── Super admin fast-path ──────────────────────────────────────────────
+  // No access checks, no PPV, no "stream_not_configured" 503, no one-device
+  // displacement. Super admin can always start a playback session from any
+  // device at any time regardless of whether a URL is set or a game exists.
+  // If collection_id is empty, the client receives an empty url string and
+  // surfaces its own "configure URL" UX instead of a hard backend failure.
+  if (isSuperAdmin) {
+    const cfg = await getOrCreateStreamConfig(ctx.admin);
+    const playbackUrl = String(cfg.collection_id ?? "").trim();
+    const session = await createOrRefreshPlaybackSession(
+      ctx,
+      gameId,
+      userId,
+      body.sessionKey,
+      { skipDisplace: true },
+    );
+    return json({
+      ok: true,
+      playback: {
+        type: "url",
+        url: playbackUrl,
+        expiresAt: session.expiresAt,
+        maxExpiresAt: session.maxExpiresAt,
+        heartbeatIntervalSec: 25,
+      },
+      session: {
+        id: session.id,
+        gameId: gameId ?? null,
+        maxExpiresAt: session.maxExpiresAt,
+      },
+    });
   }
 
-  const roles = await getUserRolesFromDB(userId, ctx.admin);
   const hasPrivilegedRole = roles.some(
-    (role) => role === "player" || role === "paid_fan" || role === "super_admin",
+    (role) => role === "player" || role === "paid_fan",
   );
+  // Camera-only broadcast alias (gameId=null) is accessible to any privileged
+  // role — roster players and paid fans (season pass). PPV is game-specific
+  // and does not apply when there is no game. Regular fans are expected to
+  // purchase PPV for a specific game instead.
   let hasAccess = hasPrivilegedRole;
-  if (!hasAccess) {
+  if (!hasAccess && gameId) {
     const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
       p_game_id: gameId,
       p_user_id: userId,
@@ -2915,7 +3334,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     },
     session: {
       id: session.id,
-      gameId,
+      gameId: gameId ?? null,
       maxExpiresAt: session.maxExpiresAt,
     },
   });
@@ -2924,13 +3343,39 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
 export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
-  const gameId = ctx.params.gameId;
+  const gameId = ctx.params.gameId ?? null;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionId?: string;
   } | null;
   if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
 
   const now = new Date().toISOString();
+  const roles = await getUserRolesFromDB(userId, ctx.admin);
+  const isSuperAdmin = roles.includes("super_admin");
+
+  // ── Super admin fast-path ──────────────────────────────────────────────
+  // Skip authoritative ACK gate, game-id match, and 6-hour cap guard. Super
+  // admin heartbeats are always accepted and queued for flush. They are not
+  // subject to displacement, expiry, or single-device enforcement.
+  if (isSuperAdmin) {
+    const rawExpiry = Date.now() + 70_000;
+    const expiresAt = new Date(rawExpiry).toISOString();
+    heartbeatQueue.push({
+      session_id: body.sessionId,
+      user_id: userId,
+      game_id: gameId,
+      expires_at: expiresAt,
+      now_ts: now,
+    });
+    if (!heartbeatFlushTimer) {
+      heartbeatFlushTimer = setTimeout(async () => {
+        heartbeatFlushTimer = null;
+        await flushHeartbeatQueue(ctx.env);
+      }, HEARTBEAT_FLUSH_INTERVAL_MS);
+    }
+    return json({ ok: true, sessionId: body.sessionId, expiresAt });
+  }
+
   // Authoritative ACK gate: confirm the session exists, belongs to the caller,
   // is scoped to the same game, and is still active before we acknowledge.
   const sessionRes = await ctx.admin
@@ -2992,7 +3437,7 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
 async function handleStreamSessionEnd(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
-  const gameId = ctx.params.gameId;
+  const gameId = ctx.params.gameId ?? null;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionId?: string;
   } | null;
@@ -3066,11 +3511,13 @@ export async function handlePostComment(ctx: HandlerCtx) {
   const userId = requireAuth(ctx.req);
   const gameId = ctx.params.gameId;
   if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const hasSession = await requireActivePlaybackSession(ctx, userId, gameId);
+  if (!hasSession) return json({ ok: false, error: "active_session_required" }, 403);
   const ip = getClientIP(ctx.req);
-  if (!enforceInMemoryRateLimit(`chat:${userId}:${gameId}`, 10, 30_000)) {
+  if (!(await enforceSharedRateLimit(ctx.admin, "stream_chat_user", `${userId}:${gameId}`, 10, 30_000))) {
     return json({ ok: false, error: "rate_limited" }, 429);
   }
-  if (!enforceInMemoryRateLimit(`chat-ip:${ip}:${gameId}`, 20, 30_000)) {
+  if (!(await enforceSharedRateLimit(ctx.admin, "stream_chat_ip", `${ip}:${gameId}`, 20, 30_000))) {
     return json({ ok: false, error: "rate_limited" }, 429);
   }
   const body = (await ctx.req.json().catch(() => null)) as {
@@ -3102,6 +3549,25 @@ export async function handlePostComment(ctx: HandlerCtx) {
       userId: String(insert.data.user_id),
     },
   });
+}
+
+async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
+  return handlePlaybackSession({ ...ctx, params: { ...ctx.params, gameId: null } });
+}
+
+async function handleBroadcastHeartbeat(ctx: HandlerCtx) {
+  return handleStreamSessionHeartbeat({ ...ctx, params: { ...ctx.params, gameId: null } });
+}
+
+async function handleBroadcastSessionEnd(ctx: HandlerCtx) {
+  return handleStreamSessionEnd({ ...ctx, params: { ...ctx.params, gameId: null } });
+}
+
+async function handleStreamViewerCount(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const activeEntitledViewerCount = await getActiveViewerCount(ctx.admin, gameId);
+  return json({ ok: true, gameId, activeEntitledViewerCount });
 }
 
 function getSafeRedirectUrl(
@@ -3583,6 +4049,67 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
   return json({ ok: true, url: session.url, sessionId: session.id });
 }
 
+
+
+type PublicMediaRow = Record<string, unknown>;
+
+function mapPublicMediaRows(rows: PublicMediaRow[], coercePhotoToPoster = false) {
+  return rows.map((r) => {
+    const payload = (r.render_payload ?? {}) as Record<string, unknown>;
+    const asset = (r.media_assets as Record<string, unknown> | null) ?? {};
+    const assetMeta = (asset.metadata ?? {}) as Record<string, unknown>;
+    const leagueRow = (r.leagues as { code?: string } | null);
+    const code = (leagueRow?.code ?? "").toLowerCase();
+    const leagueCode = code === "wbl" ? "wbl"
+      : code === "tgifbl" ? "tgifbl"
+      : code === "sbbl" ? "sbbl"
+      : "sbbl";
+    const createdAt = String(asset.created_at ?? r.sort_at ?? "");
+    const rawType = String(payload.type ?? assetMeta.type ?? "poster");
+    const mappedType = coercePhotoToPoster && rawType === "photo" ? "poster" : rawType;
+    return {
+      id: String(r.id),
+      title: String(r.title ?? ""),
+      type: mappedType,
+      thumbnail: String(
+        payload.thumbnail ?? assetMeta.thumbnail ?? assetMeta.image_url ?? ""
+      ),
+      leagueId: leagueCode,
+      status: "published",
+      date: String(
+        payload.date ?? assetMeta.date ?? createdAt.split("T")[0] ?? ""
+      ),
+    };
+  });
+}
+
+async function fetchPublicMediaRows(
+  admin: HandlerCtx["admin"],
+  req: Request,
+  includeTypes?: string[],
+) {
+  const url = new URL(req.url);
+  const leagueId = url.searchParams.get("leagueId");
+  let query = admin
+    .from("media_publications")
+    .select(
+      "id,surface,title,subtitle,status,sort_at,render_payload,league_id," +
+      "media_assets!inner(id,metadata,created_at)," +
+      "leagues:leagues!league_id(code)"
+    )
+    .eq("status", "published")
+    .order("sort_at", { ascending: false })
+    .limit(50);
+
+  if (leagueId) query = query.eq("league_id", leagueId);
+  if (includeTypes && includeTypes.length > 0) {
+    query = query.in("render_payload->>type", includeTypes);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+  return (data ?? []) as unknown as PublicMediaRow[];
+}
 async function handlePublicProducts({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get("leagueId");
@@ -3613,36 +4140,36 @@ async function handlePublicMedia({ req, admin }: HandlerCtx) {
     .eq("status", "published")
     .order("sort_at", { ascending: false })
     .limit(50);
-  if (leagueId) query = query.eq("league_id", leagueId);
 
+  if (leagueId) query = query.eq("league_id", leagueId);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
-  const mapped = rows.map((r) => {
-    const payload = (r.render_payload ?? {}) as Record<string, unknown>;
-    const asset = (r.media_assets as Record<string, unknown> | null) ?? {};
-    const assetMeta = (asset.metadata ?? {}) as Record<string, unknown>;
-    const leagueRow = (r.leagues as { code?: string } | null);
-    const code = (leagueRow?.code ?? "").toLowerCase();
-    const leagueCode = code === "wbl" ? "wbl"
-      : code === "tgifbl" ? "tgifbl"
-      : code === "sbbl" ? "sbbl"
-      : "sbbl";
-    const createdAt = String(asset.created_at ?? r.sort_at ?? "");
-    return {
-      id: String(r.id),
-      title: String(r.title ?? ""),
-      type: String(payload.type ?? assetMeta.type ?? "poster"),
-      thumbnail: String(
-        payload.thumbnail ?? assetMeta.thumbnail ?? assetMeta.image_url ?? ""
-      ),
-      leagueId: leagueCode,
-      status: "published",
-      date: String(
-        payload.date ?? assetMeta.date ?? createdAt.split("T")[0] ?? ""
-      ),
-    };
+  const rows = (data ?? []) as unknown as PublicMediaRow[];
+  const mapped = mapPublicMediaRows(rows);
+
+  return json({ ok: true, data: mapped }, 200, {
+    "Cache-Control": "public, s-maxage=300, max-age=120",
+  });
+}
+
+async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
+  // Poster tab projection: include event/league-wide art and promote photo assets
+  // to poster cards without mutating source records.
+  const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
+  const mapped = mapPublicMediaRows(rows, true).filter((row, index, list) => {
+    const raw = rows[index] ?? {};
+    const payload = (raw.render_payload ?? {}) as Record<string, unknown>;
+    const metadata = (((raw.media_assets as Record<string, unknown> | null) ?? {}).metadata ?? {}) as Record<string, unknown>;
+    const surface = String(raw.surface ?? payload.surface ?? metadata.surface ?? "");
+    const teamName = String(payload.team ?? metadata.team ?? "").trim();
+
+    // Exclude team-specific cards (e.g., POTG) — this route is for team-agnostic
+    // event imagery like 1v1/2v2 and league-wide graphics.
+    if (surface === "potg" || teamName.length > 0) return false;
+
+    // Idempotent response: ensure each id appears once even if source rows overlap.
+    return list.findIndex((candidate) => candidate.id === row.id) === index;
   });
 
   return json({ ok: true, data: mapped }, 200, {
@@ -3870,6 +4397,15 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     path: "/api/streams/:gameId/access",
     handler: handleStreamAccess,
   },
+  // IMPORTANT: literal "broadcast" routes MUST come before the parameterized
+  // :gameId routes. The router does a linear first-match scan; if :gameId is
+  // registered first it captures "broadcast" as a gameId parameter, which then
+  // fails the DB upsert (invalid UUID → 500). Literal paths always beat params.
+  {
+    method: "POST",
+    path: "/api/streams/broadcast/session",
+    handler: handleBroadcastPlaybackSession,
+  },
   {
     method: "POST",
     path: "/api/streams/:gameId/session",
@@ -3877,8 +4413,18 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "POST",
+    path: "/api/streams/broadcast/session/heartbeat",
+    handler: handleBroadcastHeartbeat,
+  },
+  {
+    method: "POST",
     path: "/api/streams/:gameId/session/heartbeat",
     handler: handleStreamSessionHeartbeat,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/broadcast/session/end",
+    handler: handleBroadcastSessionEnd,
   },
   {
     method: "POST",
@@ -3919,6 +4465,7 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     handler: handlePublicProducts,
   },
   { method: "GET", path: "/api/public/media", handler: handlePublicMedia },
+  { method: "GET", path: "/api/public/media/posters", handler: handlePublicPosterMedia },
   {
     method: "POST",
     path: "/api/player/checkout",
@@ -3982,9 +4529,25 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     handler: handleStreamReactions,
   },
   {
+    method: "GET",
+    path: "/api/streams/:gameId/viewer-count",
+    handler: handleStreamViewerCount,
+  },
+  {
     method: "POST",
     path: "/api/streams/:gameId/react",
     handler: handleStreamReact,
+  },
+  // ── StreamForge QoE telemetry routes ─────────────────────────────────────
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/qoe",
+    handler: handleStreamQoeBeacon,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/qoe/health",
+    handler: handleStreamQoeHealth,
   },
   {
     method: "GET",
@@ -4000,6 +4563,16 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/ops/streams/status",
     handler: handleSetStreamStatus,
+  },
+  {
+    method: "POST",
+    path: "/ops/streams/comp-code",
+    handler: handleSuperAdminCompCode,
+  },
+  {
+    method: "GET",
+    path: "/ops/streams/comp-code",
+    handler: handleSuperAdminCompCodeList,
   },
   {
     method: "GET",
@@ -4060,16 +4633,16 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
-  // Facebook domains required for /live page embed (Switcher Studio → FB Live).
+  // Facebook + YouTube + Twitch domains required for /live page stream embeds.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net; " +
-    "style-src 'self' 'unsafe-inline'; " +
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://assets.twitch.tv; " +
+    "style-src 'self' 'unsafe-inline' https://*.facebook.com; " +
     "img-src 'self' data: blob: https:; " +
-    "font-src 'self' data:; " +
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://www.youtube.com https://player.vimeo.com; " +
-    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net; " +
+    "font-src 'self' data: https://*.facebook.com https://*.fbcdn.net; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://*.facebook.com https://*.facebook.net https://graph.facebook.com https://*.fbcdn.net wss://*.facebook.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.facebook.com https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
     "form-action 'self' https://checkout.stripe.com;"
@@ -4082,11 +4655,18 @@ function addSecurityHeaders(res: Response): Response {
 const ipRateMap = new Map<string, { count: number; windowStart: number }>();
 const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX = 120; // 120 req/min per IP
+const IP_RATE_MAP_MAX = 50_000; // OOM guard — hard cap on tracked IPs
 
 function checkRateLimit(ip: string): boolean {
   const now = Date.now();
   const entry = ipRateMap.get(ip);
   if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    // OOM guard: if map exceeds cap, sweep expired entries first
+    if (ipRateMap.size >= IP_RATE_MAP_MAX) {
+      for (const [k, v] of ipRateMap.entries()) {
+        if (now - v.windowStart > RATE_LIMIT_WINDOW_MS) ipRateMap.delete(k);
+      }
+    }
     ipRateMap.set(ip, { count: 1, windowStart: now });
     return true;
   }
@@ -4238,12 +4818,12 @@ export default Sentry.withSentry(
 /**
  * POST /ops/ingest/presign
  * Body: { kind: 'potg'|'store'|'event'|'generic', filename: string }
- * Returns a Supabase Storage signed upload URL for the private media-ingest bucket.
+ * Returns a Supabase Storage signed upload URL for the private media bucket.
  * Frontend uploads the binary directly; then calls /ops/ingest/submit.
  */
 async function handleIngestPresign(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  requireSuperAdmin(ctx.req);
+  await requireSuperAdminSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     kind?: string;
@@ -4263,18 +4843,18 @@ async function handleIngestPresign(ctx: HandlerCtx) {
   const objectPath = `${kind}/${crypto.randomUUID()}.${ext}`;
 
   // Generate signed upload URL via Supabase Storage REST API.
-  // The media-ingest bucket is private — the signed URL is the only write path.
+  // The media bucket is private — the signed URL is the only write path.
   const supabaseUrl = ctx.env.SUPABASE_URL;
   const serviceKey = ctx.env.SUPABASE_SERVICE_ROLE_KEY;
   const res = await fetch(
-    `${supabaseUrl}/storage/v1/object/sign/upload/media-ingest/${objectPath}`,
+    `${supabaseUrl}/storage/v1/object/upload/sign/media/${objectPath}`,
     {
       method: "POST",
       headers: {
         authorization: `Bearer ${serviceKey}`,
         "content-type": "application/json",
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ expiresIn: 3600 }),
     }
   );
 
@@ -4284,7 +4864,9 @@ async function handleIngestPresign(ctx: HandlerCtx) {
   }
 
   const { token, url } = await res.json() as { token: string; url: string };
-  return json({ ok: true, signedUrl: url, token, objectPath });
+  // Supabase returns a relative path — build the full upload URL.
+  const signedUrl = url.startsWith("http") ? url : `${supabaseUrl}/storage/v1${url}`;
+  return json({ ok: true, signedUrl, token, objectPath });
 }
 
 /**
@@ -4305,7 +4887,7 @@ async function handleIngestPresign(ctx: HandlerCtx) {
  */
 async function handleIngestSubmit(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     kind?: string;
@@ -4349,21 +4931,36 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
 
   const pubStatus = body.publishStatus === "published" ? "published" : "draft";
   const meta = body.meta ?? {};
-  const publicUrl = body.publicUrl ?? "";
+  const rawPublicUrl = body.publicUrl ?? "";
+  // Build full storage URL — objectPath is relative (e.g. "potg/abc.jpg"),
+  // the media bucket is public, so we construct the CDN-accessible URL.
+  const publicUrl = rawPublicUrl.startsWith("http")
+    ? rawPublicUrl
+    : `${ctx.env.SUPABASE_URL}/storage/v1/object/public/media/${rawPublicUrl}`;
 
   // ── Step 1: Create ingest_job (state=uploaded) ──────────────────────────
-  const { data: job, error: jobErr } = await ctx.admin
+  const baseJobInsert = {
+    submitted_by: userId,
+    kind: body.kind,
+    state: "uploaded",
+    payload: { title: body.title, leagueId: body.leagueId ?? null, publicUrl, meta },
+    idempotency_key: idempotencyKey,
+  };
+  // Backward-compat: some environments still have object_path instead of asset_path.
+  let { data: job, error: jobErr } = await ctx.admin
     .from("ingest_jobs")
-    .insert({
-      submitted_by: userId,
-      kind: body.kind,
-      state: "uploaded",
-      asset_path: body.objectPath,
-      payload: { title: body.title, leagueId: body.leagueId ?? null, publicUrl, meta },
-      idempotency_key: idempotencyKey,
-    })
+    .insert({ ...baseJobInsert, asset_path: body.objectPath })
     .select("id")
     .single();
+  if (jobErr && /asset_path/i.test(jobErr.message)) {
+    const fallbackInsert = await ctx.admin
+      .from("ingest_jobs")
+      .insert({ ...baseJobInsert, object_path: body.objectPath })
+      .select("id")
+      .single();
+    job = fallbackInsert.data;
+    jobErr = fallbackInsert.error;
+  }
   if (jobErr) throw new Error(jobErr.message);
   const jobId = job.id;
 
@@ -4452,17 +5049,20 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
  * Returns current state of an ingest job.
  */
 async function handleIngestStatus(ctx: HandlerCtx) {
-  requireSuperAdmin(ctx.req);
+  await requireSuperAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
   const { data, error } = await ctx.admin
     .from("ingest_jobs")
-    .select("id,kind,state,confidence,asset_path,payload,parse_result,media_asset_id,publication_id,error_message,created_at,updated_at")
+    .select("*")
     .eq("id", jobId)
     .single();
   if (error || !data) return json({ ok: false, error: "not_found" }, 404);
-  return json({ ok: true, job: data });
+  const objectPath = typeof data.asset_path === "string"
+    ? data.asset_path
+    : (typeof data.object_path === "string" ? data.object_path : null);
+  return json({ ok: true, job: { ...data, asset_path: objectPath } });
 }
 
 /**
@@ -4472,7 +5072,7 @@ async function handleIngestStatus(ctx: HandlerCtx) {
  */
 async function handleIngestApprove(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
@@ -4518,7 +5118,7 @@ async function handleIngestApprove(ctx: HandlerCtx) {
  */
 async function handleIngestReject(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
@@ -4559,7 +5159,7 @@ async function handleIngestReject(ctx: HandlerCtx) {
  */
 async function handleIngestReplay(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
@@ -4590,12 +5190,15 @@ async function handleIngestReplay(ctx: HandlerCtx) {
 
   // Re-run the ingest pipeline with original payload.
   const payload = job.payload as Record<string, unknown>;
+  const replayObjectPath =
+    typeof job.asset_path === "string" ? job.asset_path
+      : (typeof job.object_path === "string" ? job.object_path : "");
   const replayReq = new Request(ctx.req.url, {
     method: "POST",
     headers: ctx.req.headers,
     body: JSON.stringify({
       kind: job.kind,
-      objectPath: job.asset_path,
+      objectPath: replayObjectPath,
       publicUrl: payload.publicUrl ?? "",
       title: payload.title ?? "",
       leagueId: payload.leagueId ?? null,
@@ -4631,7 +5234,7 @@ routes.push(
 //  schema drift on products and players tables. These dedicated handlers are correct.)
 // B2 — register PATCH / DELETE / LIST routes + missing schedule delete + products batch
 async function handleOpsDeleteSchedules(ctx: HandlerCtx) {
-  return handleOpsDelete('schedules', ctx.req, ctx.admin, ctx.params);
+  return handleOpsDelete('schedule_slots', ctx.req, ctx.admin, ctx.params);
 }
 
 /**
@@ -4747,6 +5350,9 @@ routes.push(
   { method: "GET",    path: "/ops/list/players",   handler: handleOpsListPlayers },
   { method: "GET",    path: "/ops/list/products",  handler: handleOpsListProducts },
   { method: "GET",    path: "/ops/list/events",    handler: handleOpsListEvents },
+  { method: "GET",    path: "/ops/list/media",              handler: handleOpsListMediaPublications },
+  { method: "PATCH",  path: "/ops/media/publications/:id",  handler: handleOpsPatchMediaPublications },
+  { method: "DELETE", path: "/ops/media/publications/:id",  handler: handleOpsDeleteMediaPublications },
 );
 
 // ── Scores handlers ────────────────────────────────────────────────────────
