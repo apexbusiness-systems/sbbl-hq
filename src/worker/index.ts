@@ -4163,13 +4163,13 @@ function addSecurityHeaders(res: Response): Response {
   // Facebook + YouTube + Twitch domains required for /live page stream embeds.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://assets.twitch.tv; " +
-    "style-src 'self' 'unsafe-inline'; " +
+    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://assets.twitch.tv; " +
+    "style-src 'self' 'unsafe-inline' https://*.facebook.com; " +
     "img-src 'self' data: blob: https:; " +
-    "font-src 'self' data:; " +
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
-    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
+    "font-src 'self' data: https://*.facebook.com https://*.fbcdn.net; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://*.facebook.com https://*.facebook.net https://graph.facebook.com https://*.fbcdn.net wss://*.facebook.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.facebook.com https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
     "form-action 'self' https://checkout.stripe.com;"
