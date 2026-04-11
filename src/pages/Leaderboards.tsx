@@ -82,6 +82,19 @@ const LeaderboardsPage = () => {
 
   const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
 
+  // ⚡ Bolt Performance Optimization: Replace O(N) lookup loops with O(1) dictionary lookups
+  // This prevents expensive `.find()` array traversals on every rendered item in the leaderboard.
+  const teamMap = useMemo(() => {
+    return teams.reduce<Record<string, string>>((acc, t) => {
+      acc[t.id] = t.name;
+      return acc;
+    }, {});
+  }, []);
+
+  const activeCategoryLabel = useMemo(() => {
+    return categories.find(c => c.key === activeCategory)?.label || '';
+  }, [activeCategory]);
+
   return (
     <div className="min-h-screen">
       <div className="container py-8 md:py-12">
@@ -142,7 +155,7 @@ const LeaderboardsPage = () => {
                   <p className="font-display font-bold text-sm">{p.name}</p>
                   <LeagueBadge leagueId={p.leagueId} />
                   <p className="stat-numeral text-3xl text-primary mt-2">{p.stats[activeCategory]}</p>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{categories.find(c => c.key === activeCategory)?.label}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{activeCategoryLabel}</p>
                 </div>
               ))}
             </div>
@@ -158,7 +171,7 @@ const LeaderboardsPage = () => {
                   <p className="text-sm font-medium">{p.name}</p>
                   <div className="flex items-center gap-2">
                     <LeagueBadge leagueId={p.leagueId} />
-                    <span className="text-[10px] text-muted-foreground">{p.position} · {teams.find(t => t.id === p.teamId)?.name}</span>
+                    <span className="text-[10px] text-muted-foreground">{p.position} · {teamMap[p.teamId]}</span>
                   </div>
                 </div>
                 <div className="text-right">

@@ -23,6 +23,7 @@ import ReactPlayer from 'react-player';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
 import { useTurnstile } from '@/hooks/use-turnstile';
+import { useStreamForge } from '@/hooks/use-streamforge';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import {
   computeRetryDelayMs,
@@ -203,6 +204,17 @@ export function LiveStreamPlayer({
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
   const recoveryTimerRef = useRef<number | null>(null);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
+
+  // ── StreamForge QoE telemetry (observational — never mutates player) ──────
+  const sessionSeed = useMemo(
+    () => (userId ? `${userId}-${getOrCreateDeviceToken()}` : getOrCreateDeviceToken()),
+    [userId],
+  );
+  const sf = useStreamForge({
+    gameId: userId ? game.id : null,
+    playbackUrl: playbackUrl || null,
+    sessionSeed,
+  });
 
   // ── Role classification ──────────────────────────────────────────────────
   const isPlayer    = roles.includes('player');
@@ -469,7 +481,6 @@ export function LiveStreamPlayer({
                   setPlayerRestartNonce(prev => prev + 1);
                 }, tierDelay);
               }}
-              onBuffer={() => setPlayerReady(true)}
               config={{
                 twitch: {
                   options: {
