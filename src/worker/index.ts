@@ -4635,15 +4635,21 @@ function addSecurityHeaders(res: Response): Response {
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
   // Facebook + YouTube + Twitch domains required for /live page stream embeds.
+  // facebook.com/plugins/video.php loads scripts and frames from *.fbcdn.net
+  // and staticxx.facebook.com — both must be allow-listed broadly across
+  // script-src, frame-src, and child-src for the Live embed to render.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://assets.twitch.tv; " +
-    "style-src 'self' 'unsafe-inline' https://*.facebook.com; " +
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://*.fbcdn.net https://assets.twitch.tv; " +
+    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://*.fbcdn.net https://assets.twitch.tv; " +
+    "style-src 'self' 'unsafe-inline' https://*.facebook.com https://*.fbcdn.net; " +
     "img-src 'self' data: blob: https:; " +
     "font-src 'self' data: https://*.facebook.com https://*.fbcdn.net; " +
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://*.facebook.com https://*.facebook.net https://graph.facebook.com https://*.fbcdn.net wss://*.facebook.com; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://*.facebook.net https://*.fbcdn.net https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "child-src https://*.facebook.com https://*.fbcdn.net https://*.facebook.net; " +
     "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.facebook.com https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
+    "worker-src 'self' blob:; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
     "form-action 'self' https://checkout.stripe.com;"
