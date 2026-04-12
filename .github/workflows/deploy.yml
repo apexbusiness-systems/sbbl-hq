@@ -101,6 +101,22 @@ jobs:
           TURNSTILE_SECRET_KEY: ${{ secrets.VITE_TURNSTILE_SECRET_KEY }}
 
       - name: Post-deploy health gate
-        if: false
         run: |
-          echo "Temporarily disabled"
+          for attempt in {1..12}; do
+            echo "Health check attempt $attempt..."
+
+            response=$(curl -s -A "sbbl-health-check" https://sbbl-hq.icu/ops/health || true)
+
+            echo "$response"
+
+            if echo "$response" | jq -e '.ok == true' > /dev/null 2>&1; then
+              echo "✅ Health check passed"
+              exit 0
+            fi
+
+            echo "❌ Health check failed, retrying..."
+            sleep 10
+          done
+
+          echo "🚨 Health check failed after retries"
+          exit 1
