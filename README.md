@@ -74,7 +74,7 @@ npm run cf:deploy           # production
 npm run cf:deploy:staging   # staging
 ```
 
-## Documentation
+## Docs
 
 All documentation lives in [`docs/`](docs/README.md). Key entry points:
 
