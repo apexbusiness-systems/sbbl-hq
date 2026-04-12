@@ -418,26 +418,41 @@ export function LiveStreamPlayer({
               </div>
             )}
             {isFacebookStream ? (
-              // Direct Facebook video plugin embed.
-              // Bypasses ReactPlayer's facebook plugin entirely so we don't need
-              // VITE_FACEBOOK_APP_ID. Works for any public FB Live broadcast.
-              // The href= param accepts the same URL the broadcaster shares.
-              <iframe
-                src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(playbackUrl)}&show_text=false&autoplay=true&mute=1&width=auto`}
-                title="Live Stream"
-                width="100%"
-                height="100%"
-                style={{ position: 'absolute', top: 0, left: 0, border: 0 }}
-                scrolling="no"
-                frameBorder={0}
-                allowFullScreen
-                allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
-                onLoad={() => {
-                  setPlayerReady(true);
-                  sf.reportEvent('playing');
-                  sf.recordSuccess();
-                }}
-              />
+              // Direct Facebook video plugin embed + always-visible "Watch on FB"
+              // fallback. The iframe works for public Pages and logged-in viewers;
+              // the fallback CTA covers personal-profile videos and viewers who
+              // can't see the embed (FB blocks plugin embeds for personal-profile
+              // Live broadcasts even when the video is technically "Public").
+              // Bypasses ReactPlayer's facebook plugin so we don't need
+              // VITE_FACEBOOK_APP_ID.
+              <>
+                <iframe
+                  src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(playbackUrl)}&show_text=false&autoplay=true&mute=1&width=auto`}
+                  title="Live Stream"
+                  width="100%"
+                  height="100%"
+                  style={{ position: 'absolute', top: 0, left: 0, border: 0 }}
+                  scrolling="no"
+                  frameBorder={0}
+                  allowFullScreen
+                  allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                  onLoad={() => {
+                    setPlayerReady(true);
+                    sf.reportEvent('playing');
+                    sf.recordSuccess();
+                  }}
+                />
+                <a
+                  href={playbackUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 bg-amber-500 hover:bg-amber-400 text-black px-6 py-3 rounded-full font-display font-bold uppercase tracking-wider text-xs shadow-2xl inline-flex items-center gap-2 whitespace-nowrap"
+                  onClick={() => sf.reportEvent('play')}
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  Watch Live on Facebook
+                </a>
+              </>
             ) : (
               <ReactPlayer
                 url={playbackUrl}
