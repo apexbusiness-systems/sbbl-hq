@@ -12,18 +12,13 @@
  * IP locking and single-use enforcement happen server-side in /api/invite/redeem.
  * No role/entitlement data is trusted from the client.
  *
- * StreamForge integration (additive, non-breaking):
- *   - QoE telemetry via ReactPlayer callbacks → useStreamForge hook
- *   - Preconnect resource hints injected on mount for known stream origins
- *   - Warm reconnect replaces window.location.reload() in the circuit-breaker
- *     overlay — recovers in ~1.5 s instead of a full cold reload (~8 s).
+ * Uses Switcher Studio's script-based embed player.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
-import ReactPlayer from 'react-player';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
 import { useTurnstile } from '@/hooks/use-turnstile';
@@ -46,10 +41,10 @@ import type { AppRole } from '@/lib/auth/roles';
 function AccessCodeRedeem({
   variant = 'dark',
   onRedeemed,
-}: {
+}: Readonly<{
   variant?: 'dark' | 'light';
   onRedeemed?: () => void;
-}) {
+}>) {
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
@@ -61,8 +56,8 @@ function AccessCodeRedeem({
     try {
       await redeemAccessCode(
         trimmed,
-        { captchaToken: await resolveToken() },
         null,
+        { captchaToken: await resolveToken() },
       );
       toast.success('Access granted — loading stream…');
       if (onRedeemed) {
@@ -131,37 +126,74 @@ function AccessCodeRedeem({
   );
 }
 
+/**
+ * SwitcherPlayer
+ * Renders the Switcher Studio embed via their script-based API.
+ * Script is injected once on mount and cleaned up on unmount.
+ * onReady fires after the embed script loads — no Facebook SDK,
+ * no env vars, no iframe hotfix required.
+ */
+function SwitcherPlayer({
+  onReady,
+  playerReady,
+}: Readonly<{
+  onReady: () => void;
+  playerReady: boolean;
+}>) {
+  useEffect(() => {
+    const SCRIPT_ID = 'switcher-embed-js';
+    if (!document.getElementById(SCRIPT_ID)) {
+      const script = document.createElement('script');
+      script.id = SCRIPT_ID;
+      script.src = 'https://player.switcherstudio.com/embed.js';
+      script.async = true;
+      script.onload = onReady;
+      document.body.appendChild(script);
+    } else {
+      // Script already present from a prior mount — fire onReady immediately
+      onReady();
+    }
+    return () => {
+      const existing = document.getElementById(SCRIPT_ID);
+      if (existing) existing.remove();
+    };
+  // onReady is stable (defined inline in JSX) — intentionally excluded
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="absolute inset-0 pointer-events-auto">
+      {!playerReady && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black z-10">
+          <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      )}
+      <div
+        className="dff402f7-5be0-4890-b831-95c5b63ddb42"
+        data-hostname="https://player.switcherstudio.com"
+        data-path="/embed"
+        data-catalogid="4f5ea6d3-17fd-449c-9c0d-09996f4805c8"
+        data-location="iframe"
+        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+      />
+    </div>
+  );
+}
+
 const PPV_PRICE_CAD = 4.99;
 const ALBERTA_GST = 0.05;
 /** Tax-inclusive price shown to Alberta viewers */
 const PPV_PRICE_TOTAL = Math.round(PPV_PRICE_CAD * (1 + ALBERTA_GST) * 100) / 100;
 
-// Legacy Switcher Studio config removed.
-// ReactPlayer stream URL is configured via AdminStreamControls.
 
-/**
- * Normalize Facebook Live URLs:
- * - Strip fbclid tracking parameter that breaks embed playback
- * - Ensure /live/ suffix is present for direct FB Live embeds
- */
-function normalizeFacebookUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    if (!u.hostname.includes('facebook.com')) return url;
-    u.searchParams.delete('fbclid');
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
 
 const DEVICE_TOKEN_KEY = 'sbbl:stream-device-token:v1';
 
 function getOrCreateDeviceToken(): string {
-  const existing = window.localStorage.getItem(DEVICE_TOKEN_KEY);
+  const existing = globalThis.localStorage.getItem(DEVICE_TOKEN_KEY);
   if (existing && existing.length >= 16) return existing;
   const generated = crypto.randomUUID();
-  window.localStorage.setItem(DEVICE_TOKEN_KEY, generated);
+  globalThis.localStorage.setItem(DEVICE_TOKEN_KEY, generated);
   return generated;
 }
 
@@ -180,7 +212,7 @@ export function LiveStreamPlayer({
   roles,
   hasPremiumPlayerAccess,
   isStreamLive,
-}: LiveStreamPlayerProps) {
+}: Readonly<LiveStreamPlayerProps>) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
   const [accessChecked, setAccessChecked] = useState(false);
@@ -191,9 +223,6 @@ export function LiveStreamPlayer({
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
   const [codeCopied, setCodeCopied] = useState(false);
 
-  // Increment to retrigger the playback-session useEffect without a full
-  // page reload. This is the warm-reconnect mechanism.
-  const [reconnectCount, setReconnectCount] = useState(0);
 
   const [playbackUrl, setPlaybackUrl] = useState('');
   const [playbackLoading, setPlaybackLoading] = useState(false);
@@ -202,32 +231,21 @@ export function LiveStreamPlayer({
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
 
-  // ── StreamForge QoE telemetry + warm-reconnect orchestrator ─────────────
-  const sfDeviceToken = getOrCreateDeviceToken();
+  // ── StreamForge QoE telemetry (observational — never mutates player) ──────
+  const sessionSeed = useMemo(
+    () => (userId ? `${userId}-${getOrCreateDeviceToken()}` : getOrCreateDeviceToken()),
+    [userId],
+  );
   const sf = useStreamForge({
-    gameId: game.id,
+    gameId: userId ? game.id : null,
     playbackUrl: playbackUrl || null,
-    sessionSeed: `${userId ?? 'anon'}-${game.id}-${sfDeviceToken}`,
-    beaconIntervalMs: 15_000,
+    sessionSeed,
   });
-
-  // Warm reconnect handler: resets UI state and retriggers the session effect.
-  const handleWarmReconnect = useCallback(() => {
-    if (!sf.canWarmReconnect()) return;
-    sf.markWarmReconnect();
-    setHeartbeatFailures(0);
-    setPlayerError(null);
-    setPlayerReady(false);
-    setReconnectCount((n) => n + 1);
-  }, [sf]);
 
   // ── Role classification ──────────────────────────────────────────────────
   const isPlayer    = roles.includes('player');
   const isPaidFan   = roles.includes('paid_fan');
   const isSuperAdmin = roles.includes('super_admin');
-
-  // Detect Facebook stream URLs so we can lock down the embed for non-admins
-  const isFacebookStream = /facebook\.com|fb\.watch/i.test(playbackUrl);
 
   const hasRoleAccess = isPlayer || isPaidFan || isSuperAdmin;
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
@@ -259,7 +277,7 @@ export function LiveStreamPlayer({
   useEffect(() => {
     if (!hasAccess || !userId) return;
     let active = true;
-    let heartbeatId: number | null = null;
+    let heartbeatId: ReturnType<typeof globalThis.setInterval> | null = null;
     let sessionIdForCleanup: string | null = null;
     let consecutiveFailures = 0;
     setPlaybackLoading(true);
@@ -278,7 +296,7 @@ export function LiveStreamPlayer({
           body: JSON.stringify({ sessionKey }),
         }, null);
         if (!active) return;
-        setPlaybackUrl(normalizeFacebookUrl(res.playback.url));
+        setPlaybackUrl(res.playback.url);
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
 
@@ -293,7 +311,7 @@ export function LiveStreamPlayer({
             }, msUntilCap);
           }
         }
-        heartbeatId = window.setInterval(() => {
+        heartbeatId = globalThis.setInterval(() => {
           void apiFetch(`/api/streams/${game.id}/session/heartbeat`, {
             method: 'POST',
             body: JSON.stringify({ sessionId: res.session.id }),
@@ -350,7 +368,7 @@ export function LiveStreamPlayer({
         }, null).catch(() => {});
       }
     };
-  }, [hasAccess, userId, game.id, isSuperAdmin, reconnectCount]); // reconnectCount triggers warm reconnect
+  }, [hasAccess, userId, game.id, isSuperAdmin]);
 
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
@@ -411,117 +429,14 @@ export function LiveStreamPlayer({
             </button>
           </div>
         ) : playbackUrl ? (
-          <div className="absolute inset-0 pointer-events-auto">
-            {!playerReady && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black z-10">
-                <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-              </div>
-            )}
-            {isFacebookStream ? (
-              // Direct Facebook video plugin embed + always-visible "Watch on FB"
-              // fallback. The iframe works for public Pages and logged-in viewers;
-              // the fallback CTA covers personal-profile videos and viewers who
-              // can't see the embed (FB blocks plugin embeds for personal-profile
-              // Live broadcasts even when the video is technically "Public").
-              // Bypasses ReactPlayer's facebook plugin so we don't need
-              // VITE_FACEBOOK_APP_ID.
-              <>
-                <iframe
-                  src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(playbackUrl)}&show_text=false&autoplay=true&mute=1&width=auto`}
-                  title="Live Stream"
-                  width="100%"
-                  height="100%"
-                  style={{ position: 'absolute', top: 0, left: 0, border: 0 }}
-                  scrolling="no"
-                  frameBorder={0}
-                  allowFullScreen
-                  allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
-                  onLoad={() => {
-                    setPlayerReady(true);
-                    sf.reportEvent('playing');
-                    sf.recordSuccess();
-                  }}
-                />
-                <a
-                  href={playbackUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="absolute bottom-4 left-1/2 -translate-x-1/2 z-30 bg-amber-500 hover:bg-amber-400 text-black px-6 py-3 rounded-full font-display font-bold uppercase tracking-wider text-xs shadow-2xl inline-flex items-center gap-2 whitespace-nowrap"
-                  onClick={() => sf.reportEvent('play')}
-                >
-                  <Play className="w-4 h-4 fill-current" />
-                  Watch Live on Facebook
-                </a>
-              </>
-            ) : (
-              <ReactPlayer
-                url={playbackUrl}
-                playing={true}
-                muted={true}
-                controls={true}
-                width="100%"
-                height="100%"
-                onReady={() => {
-                  setPlayerReady(true);
-                  sf.reportEvent('playing');
-                  sf.recordSuccess();
-                }}
-                onPlay={() => sf.reportEvent('play')}
-                onPause={() => sf.reportEvent('pause')}
-                onBuffer={() => {
-                  setPlayerReady(true);
-                  sf.reportEvent('waiting');
-                }}
-                onBufferEnd={() => sf.reportEvent('playing')}
-                onError={(e) => {
-                  console.error('[ReactPlayer] Stream error:', e);
-                  sf.reportEvent('error', { errorCode: String(e ?? 'unknown') });
-                  sf.recordFailure();
-                  setPlayerError('The stream source could not be loaded. The URL may be invalid or the stream may have ended.');
-                }}
-                onEnded={() => sf.reportEvent('ended')}
-                onProgress={({ loaded, playedSeconds }) => {
-                  // Report buffer-ahead as a rough measure: loaded fraction of
-                  // remaining duration. ReactPlayer does not expose buffer ahead
-                  // in ms directly; we use loadedSeconds as a proxy when
-                  // available via the internal player.
-                  const aheadProxy =
-                    typeof loaded === 'number' && loaded > 0 && playedSeconds > 0
-                      ? Math.round(loaded * 1000)
-                      : undefined;
-                  sf.reportEvent('heartbeat', { bufferAheadMs: aheadProxy });
-                }}
-                config={{
-                  twitch: {
-                    options: {
-                      parent: ['sbbl-hq.icu', 'www.sbbl-hq.icu', 'localhost'],
-                      muted: true,
-                    }
-                  },
-                  youtube: {
-                    playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1, mute: 1 }
-                  },
-                  facebook: {
-                    appId: import.meta.env.VITE_FACEBOOK_APP_ID || '',
-                    version: 'v18.0',
-                    playerId: 'sbbl-fb-player',
-                  }
-                }}
-                style={{ position: 'absolute', top: 0, left: 0 }}
-              />
-            )}
-            {/* Block Facebook UI navigation for non-super-admin viewers.
-                The video autoplays via playing={true} so they can still watch;
-                this overlay only prevents clicking into Facebook's feed/related
-                videos. Super admins get the full embed for monitoring purposes. */}
-            {isFacebookStream && !isSuperAdmin && (
-              <div
-                className="absolute inset-0 z-10"
-                aria-hidden="true"
-                style={{ pointerEvents: 'all', background: 'transparent', cursor: 'default' }}
-              />
-            )}
-          </div>
+          <SwitcherPlayer
+            onReady={() => {
+              setPlayerReady(true);
+              sf.reportEvent('playing');
+              sf.recordSuccess();
+            }}
+            playerReady={playerReady}
+          />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3">
             <p className="text-sm text-muted-foreground">Live game found, but no playable stream URL is configured.</p>
@@ -541,17 +456,8 @@ export function LiveStreamPlayer({
                 Only one device can stream at a time per account. To watch here, sign in on this device and start a new session.
               </p>
             </div>
-            {/* Warm reconnect: re-creates the session in-place (~1.5 s) rather
-                than a full cold page reload (~8 s). Falls back to reload only
-                when the warm reconnect cooldown has not yet elapsed. */}
             <button
-              onClick={() => {
-                if (sf.canWarmReconnect()) {
-                  handleWarmReconnect();
-                } else {
-                  window.location.reload();
-                }
-              }}
+              onClick={() => window.location.reload()}
               className="bg-amber-500 hover:bg-amber-400 text-black px-6 py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded-2xl transition-colors"
             >
               Resume on This Device
@@ -690,14 +596,14 @@ export function LiveStreamPlayer({
                 {
                   method: 'POST',
                   body: JSON.stringify({
-                    successUrl: `${window.location.origin}/live?access=1`,
-                    cancelUrl: `${window.location.origin}/live`,
+                    successUrl: `${globalThis.location.origin}/live?access=1`,
+                    cancelUrl: `${globalThis.location.origin}/live`,
                     captchaToken: await resolveToken(),
                   }),
                 },
                 null,
               );
-              if (res.url) window.location.href = res.url;
+              if (res.url) globalThis.location.href = res.url;
             } catch {
               toast.error('Could not start checkout. Please try again.');
             } finally {
