@@ -56,8 +56,8 @@ function AccessCodeRedeem({
     try {
       await redeemAccessCode(
         trimmed,
-        null,
         { captchaToken: await resolveToken() },
+        null,
       );
       toast.success('Access granted — loading stream…');
       if (onRedeemed) {
@@ -170,6 +170,7 @@ function SwitcherPlayer({
       )}
       <div
         className="dff402f7-5be0-4890-b831-95c5b63ddb42"
+        data-testid="switcher-player-host"
         data-hostname="https://player.switcherstudio.com"
         data-path="/embed"
         data-catalogid="4f5ea6d3-17fd-449c-9c0d-09996f4805c8"
