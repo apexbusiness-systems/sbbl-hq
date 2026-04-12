@@ -105,6 +105,54 @@ function json(data: unknown, status = 200, extraHeaders: Record<string, string> 
   });
 }
 
+type ValidatedYouTubeStream = {
+  canonicalUrl: string;
+  videoId: string;
+};
+
+function validateYouTubeLiveUrl(raw: string): ValidatedYouTubeStream | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  let url: URL;
+  try {
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  if (!/^https?:$/.test(url.protocol)) return null;
+
+  const host = url.hostname.toLowerCase();
+  const normalizedHost = host.startsWith("www.") ? host.slice(4) : host;
+
+  const cleanVideoId = (value: string | null): string | null => {
+    if (!value) return null;
+    const id = value.trim();
+    return /^[A-Za-z0-9_-]{11}$/.test(id) ? id : null;
+  };
+
+  if (normalizedHost === "youtube.com") {
+    if (url.pathname === "/watch") {
+      const v = cleanVideoId(url.searchParams.get("v"));
+      return v ? { canonicalUrl: `https://www.youtube.com/watch?v=${v}`, videoId: v } : null;
+    }
+
+    if (url.pathname.startsWith("/live/")) {
+      const parts = url.pathname.split("/").filter(Boolean);
+      const v = cleanVideoId(parts[1] ?? null);
+      return v ? { canonicalUrl: `https://www.youtube.com/live/${v}`, videoId: v } : null;
+    }
+  }
+
+  if (normalizedHost === "youtu.be") {
+    const v = cleanVideoId(url.pathname.split("/").filter(Boolean)[0] ?? null);
+    return v ? { canonicalUrl: `https://youtu.be/${v}`, videoId: v } : null;
+  }
+
+  return null;
+}
+
 function enforceInMemoryRateLimit(
   key: string,
   limit: number,
@@ -612,8 +660,18 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   } | null;
   if (!body) return json({ ok: false, error: "invalid_body" }, 400);
   const patch: Record<string, unknown> = {};
-  if (typeof body.collectionId === "string")
-    patch.collection_id = body.collectionId.trim();
+  if (typeof body.collectionId === "string") {
+    const candidate = body.collectionId.trim();
+    if (candidate.length > 0) {
+      const validated = validateYouTubeLiveUrl(candidate);
+      if (!validated) {
+        return json({ ok: false, error: "invalid_youtube_live_url" }, 400);
+      }
+      patch.collection_id = validated.canonicalUrl;
+    } else {
+      patch.collection_id = "";
+    }
+  }
   if (typeof body.title === "string") patch.title = body.title.trim();
   if (typeof body.source === "string") patch.source = body.source;
   if (Object.keys(patch).length === 0)
@@ -658,6 +716,14 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   } | null;
   if (typeof body?.isLive !== "boolean")
     return json({ ok: false, error: "is_live_required" }, 400);
+  if (body.isLive) {
+    const cfg = await getOrCreateStreamConfig(ctx.admin);
+    const playbackUrl = String(cfg.collection_id ?? "").trim();
+    if (!playbackUrl) return json({ ok: false, error: "stream_not_configured" }, 400);
+    if (!validateYouTubeLiveUrl(playbackUrl)) {
+      return json({ ok: false, error: "invalid_youtube_live_url" }, 400);
+    }
+  }
   const nowIso = new Date().toISOString();
   const patch: Record<string, unknown> = {
     id: true,
@@ -3259,14 +3325,16 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   const isSuperAdmin = roles.includes("super_admin");
 
   // ── Super admin fast-path ──────────────────────────────────────────────
-  // No access checks, no PPV, no "stream_not_configured" 503, no one-device
-  // displacement. Super admin can always start a playback session from any
-  // device at any time regardless of whether a URL is set or a game exists.
-  // If collection_id is empty, the client receives an empty url string and
-  // surfaces its own "configure URL" UX instead of a hard backend failure.
+  // No entitlement/PPV checks. Super admin can always start a playback
+  // session from any device regardless of game-id, but stream source must
+  // still be a valid YouTube live URL for baseline safety.
   if (isSuperAdmin) {
     const cfg = await getOrCreateStreamConfig(ctx.admin);
     const playbackUrl = String(cfg.collection_id ?? "").trim();
+    if (!playbackUrl) return json({ ok: false, error: "stream_not_configured" }, 503);
+    if (!validateYouTubeLiveUrl(playbackUrl)) {
+      return json({ ok: false, error: "invalid_youtube_live_url" }, 503);
+    }
     const session = await createOrRefreshPlaybackSession(
       ctx,
       gameId,
@@ -3313,6 +3381,9 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   const playbackUrl = String(cfg.collection_id ?? "").trim();
   if (!playbackUrl) {
     return json({ ok: false, error: "stream_not_configured" }, 503);
+  }
+  if (!validateYouTubeLiveUrl(playbackUrl)) {
+    return json({ ok: false, error: "invalid_youtube_live_url" }, 503);
   }
   const session = await createOrRefreshPlaybackSession(
     ctx,
@@ -4633,22 +4704,18 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
-  // Prevents XSS, data exfiltration, and clickjacking at the browser level.
-  // Facebook + YouTube + Twitch domains required for /live page stream embeds.
-  // facebook.com/plugins/video.php loads scripts and frames from *.fbcdn.net
-  // and staticxx.facebook.com — both must be allow-listed broadly across
-  // script-src, frame-src, and child-src for the Live embed to render.
+  // Baseline livestream restore supports YouTube Live embeds only.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://*.fbcdn.net https://assets.twitch.tv; " +
-    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://*.fbcdn.net https://assets.twitch.tv; " +
-    "style-src 'self' 'unsafe-inline' https://*.facebook.com https://*.fbcdn.net; " +
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://www.youtube.com; " +
+    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://www.youtube.com; " +
+    "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: blob: https:; " +
-    "font-src 'self' data: https://*.facebook.com https://*.fbcdn.net; " +
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://*.facebook.com https://*.facebook.net https://graph.facebook.com https://*.fbcdn.net wss://*.facebook.com; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://*.facebook.net https://*.fbcdn.net https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
-    "child-src https://*.facebook.com https://*.fbcdn.net https://*.facebook.net; " +
-    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.facebook.com https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
+    "font-src 'self' data:; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com; " +
+    "child-src https://www.youtube.com https://www.youtube-nocookie.com; " +
+    "media-src 'self' blob: https://*.googlevideo.com; " +
     "worker-src 'self' blob:; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +

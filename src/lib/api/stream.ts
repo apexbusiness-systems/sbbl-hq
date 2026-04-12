@@ -184,6 +184,21 @@ export async function updateStreamConfig(
   patch: Partial<Pick<StreamConfig, 'collectionId' | 'title' | 'source'>>,
   token: string | null,
 ) {
+  if (typeof patch.collectionId === 'string' && patch.collectionId.trim().length > 0) {
+    const trimmed = patch.collectionId.trim();
+    let parsed: URL;
+    try {
+      parsed = new URL(trimmed);
+    } catch {
+      throw new Error('invalid_youtube_live_url');
+    }
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    const valid =
+      (host === 'youtube.com' && parsed.pathname === '/watch' && /^[A-Za-z0-9_-]{11}$/.test(parsed.searchParams.get('v') ?? '')) ||
+      (host === 'youtube.com' && /^\/live\/[A-Za-z0-9_-]{11}$/.test(parsed.pathname)) ||
+      (host === 'youtu.be' && /^\/[A-Za-z0-9_-]{11}$/.test(parsed.pathname));
+    if (!valid) throw new Error('invalid_youtube_live_url');
+  }
   return apiFetch<{ ok: boolean; config: StreamConfig }>('/ops/streams/config', {
     method: 'POST',
     headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-stream-config') },

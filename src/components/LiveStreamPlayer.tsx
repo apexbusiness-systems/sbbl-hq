@@ -3,7 +3,7 @@
  * Renders the live-stream broadcast area with a multi-layer access gate:
  *
  *   Unregistered (no auth.user)           → registration wall → /register?redirect=/live
- *   player role                           → free access always → Switcher Studio player
+ *   player role                           → free access always → YouTube Live player
  *   paid_fan | super_admin                → free access + invite generator → player
  *   fan with PPV entitlement (Stripe)     → access → player
  *   fan with redeemed invite              → access → player
@@ -12,7 +12,7 @@
  * IP locking and single-use enforcement happen server-side in /api/invite/redeem.
  * No role/entitlement data is trusted from the client.
  *
- * Uses Switcher Studio's script-based embed player.
+ * Uses YouTube Live iframe embed only.
  */
 
 import { useState, useEffect, useMemo } from 'react';
@@ -56,8 +56,8 @@ function AccessCodeRedeem({
     try {
       await redeemAccessCode(
         trimmed,
-        null,
         { captchaToken: await resolveToken() },
+        null,
       );
       toast.success('Access granted — loading stream…');
       if (onRedeemed) {
@@ -126,41 +126,39 @@ function AccessCodeRedeem({
   );
 }
 
-/**
- * SwitcherPlayer
- * Renders the Switcher Studio embed via their script-based API.
- * Script is injected once on mount and cleaned up on unmount.
- * onReady fires after the embed script loads — no Facebook SDK,
- * no env vars, no iframe hotfix required.
- */
-function SwitcherPlayer({
+function normalizeYouTubeEmbedUrl(raw: string): string | null {
+  const input = raw.trim();
+  if (!input) return null;
+  let url: URL;
+  try {
+    url = new URL(input);
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  const asVideoId = (value: string | null): string | null =>
+    value && /^[A-Za-z0-9_-]{11}$/.test(value) ? value : null;
+
+  let id: string | null = null;
+  if (host === 'youtube.com' && url.pathname === '/watch') {
+    id = asVideoId(url.searchParams.get('v'));
+  } else if (host === 'youtube.com' && url.pathname.startsWith('/live/')) {
+    id = asVideoId(url.pathname.split('/').filter(Boolean)[1] ?? null);
+  } else if (host === 'youtu.be') {
+    id = asVideoId(url.pathname.split('/').filter(Boolean)[0] ?? null);
+  }
+  return id ? `https://www.youtube.com/embed/${id}?autoplay=1&playsinline=1&rel=0&modestbranding=1` : null;
+}
+
+function YouTubePlayer({
+  embedUrl,
   onReady,
   playerReady,
 }: Readonly<{
+  embedUrl: string;
   onReady: () => void;
   playerReady: boolean;
 }>) {
-  useEffect(() => {
-    const SCRIPT_ID = 'switcher-embed-js';
-    if (!document.getElementById(SCRIPT_ID)) {
-      const script = document.createElement('script');
-      script.id = SCRIPT_ID;
-      script.src = 'https://player.switcherstudio.com/embed.js';
-      script.async = true;
-      script.onload = onReady;
-      document.body.appendChild(script);
-    } else {
-      // Script already present from a prior mount — fire onReady immediately
-      onReady();
-    }
-    return () => {
-      const existing = document.getElementById(SCRIPT_ID);
-      if (existing) existing.remove();
-    };
-  // onReady is stable (defined inline in JSX) — intentionally excluded
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   return (
     <div className="absolute inset-0 pointer-events-auto">
       {!playerReady && (
@@ -168,13 +166,14 @@ function SwitcherPlayer({
           <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
         </div>
       )}
-      <div
-        className="dff402f7-5be0-4890-b831-95c5b63ddb42"
-        data-hostname="https://player.switcherstudio.com"
-        data-path="/embed"
-        data-catalogid="4f5ea6d3-17fd-449c-9c0d-09996f4805c8"
-        data-location="iframe"
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+      <iframe
+        title="SBBL Live Stream"
+        src={embedUrl}
+        className="absolute inset-0 w-full h-full border-0"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+        allowFullScreen
+        referrerPolicy="origin-when-cross-origin"
+        onLoad={onReady}
       />
     </div>
   );
@@ -241,6 +240,7 @@ export function LiveStreamPlayer({
     playbackUrl: playbackUrl || null,
     sessionSeed,
   });
+  const embedUrl = useMemo(() => normalizeYouTubeEmbedUrl(playbackUrl), [playbackUrl]);
 
   // ── Role classification ──────────────────────────────────────────────────
   const isPlayer    = roles.includes('player');
@@ -346,13 +346,23 @@ export function LiveStreamPlayer({
               }
             });
         }, hbMs);
-      } catch {
-        // Silent for super admin — the worker super-admin fast-path should
-        // never fail, and if it does the admin will see it in dev-tools. For
-        // regular users, surface the generic error.
-        if (active && !isSuperAdmin) {
-          toast.error('Unable to start secure playback session.');
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : '';
+        if (!active) return;
+        if (msg === 'stream_not_configured') {
+          setPlayerError(isSuperAdmin
+            ? 'No YouTube Live URL configured. Add a YouTube live link in Broadcast Controls.'
+            : 'Stream is currently unavailable.');
+          return;
         }
+        if (msg === 'invalid_youtube_live_url') {
+          setPlayerError(isSuperAdmin
+            ? 'Saved stream URL is invalid. Use only youtube.com/watch?v=..., youtube.com/live/..., or youtu.be/...'
+            : 'Stream is currently unavailable.');
+          return;
+        }
+        if (!isSuperAdmin) toast.error('Unable to start secure playback session.');
+        setPlayerError('Unable to start secure playback session. Please try again.');
       } finally {
         if (active) setPlaybackLoading(false);
       }
@@ -428,8 +438,9 @@ export function LiveStreamPlayer({
               Retry
             </button>
           </div>
-        ) : playbackUrl ? (
-          <SwitcherPlayer
+        ) : embedUrl ? (
+          <YouTubePlayer
+            embedUrl={embedUrl}
             onReady={() => {
               setPlayerReady(true);
               sf.reportEvent('playing');
@@ -439,7 +450,11 @@ export function LiveStreamPlayer({
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3">
-            <p className="text-sm text-muted-foreground">Live game found, but no playable stream URL is configured.</p>
+            <p className="text-sm text-muted-foreground">
+              {isSuperAdmin
+                ? 'Invalid YouTube source URL. Update the stream URL in Broadcast Controls.'
+                : 'Stream Starting Soon'}
+            </p>
           </div>
         )}
 

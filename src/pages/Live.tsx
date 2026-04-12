@@ -135,7 +135,12 @@ function AdminStreamOverlay({
       try {
         await setStreamLive(nextLive, token);
       } catch (liveErr) {
-        toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
+        const msg = liveErr instanceof Error ? liveErr.message : String(liveErr);
+        if (msg === 'stream_not_configured' || msg === 'invalid_youtube_live_url') {
+          toast.error('Cannot go live: set a valid YouTube Live URL first.');
+        } else {
+          toast.error(`Config saved, but live toggle failed: ${msg}. Try again.`);
+        }
         setSaving(false);
         return;
       }
@@ -143,7 +148,12 @@ function AdminStreamOverlay({
       toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
       if (nextLive) setOpen(false);
     } catch (err) {
-      toast.error(`Failed to save config: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === 'invalid_youtube_live_url') {
+        toast.error('Invalid URL. Use youtube.com/watch?v=..., youtube.com/live/..., or youtu.be/...');
+      } else {
+        toast.error(`Failed to save config: ${msg}`);
+      }
     } finally {
       setSaving(false);
     }
@@ -211,7 +221,7 @@ function AdminStreamOverlay({
                 value={customStreamUrl}
                 onChange={e => setCustomStreamUrl(e.target.value)}
                 className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50"
-                placeholder="YouTube, Twitch, or direct URL…"
+                placeholder="YouTube Live URL (watch/live/youtu.be)…"
               />
             </div>
 
