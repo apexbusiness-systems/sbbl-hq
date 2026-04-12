@@ -417,61 +417,84 @@ export function LiveStreamPlayer({
                 <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
               </div>
             )}
-            <ReactPlayer
-              url={playbackUrl}
-              playing={true}
-              muted={true}
-              controls={true}
-              width="100%"
-              height="100%"
-              onReady={() => {
-                setPlayerReady(true);
-                sf.reportEvent('playing');
-                sf.recordSuccess();
-              }}
-              onPlay={() => sf.reportEvent('play')}
-              onPause={() => sf.reportEvent('pause')}
-              onBuffer={() => {
-                setPlayerReady(true);
-                sf.reportEvent('waiting');
-              }}
-              onBufferEnd={() => sf.reportEvent('playing')}
-              onError={(e) => {
-                console.error('[ReactPlayer] Stream error:', e);
-                sf.reportEvent('error', { errorCode: String(e ?? 'unknown') });
-                sf.recordFailure();
-                setPlayerError('The stream source could not be loaded. The URL may be invalid or the stream may have ended.');
-              }}
-              onEnded={() => sf.reportEvent('ended')}
-              onProgress={({ loaded, playedSeconds }) => {
-                // Report buffer-ahead as a rough measure: loaded fraction of
-                // remaining duration. ReactPlayer does not expose buffer ahead
-                // in ms directly; we use loadedSeconds as a proxy when
-                // available via the internal player.
-                const aheadProxy =
-                  typeof loaded === 'number' && loaded > 0 && playedSeconds > 0
-                    ? Math.round(loaded * 1000)
-                    : undefined;
-                sf.reportEvent('heartbeat', { bufferAheadMs: aheadProxy });
-              }}
-              config={{
-                twitch: {
-                  options: {
-                    parent: ['sbbl-hq.icu', 'www.sbbl-hq.icu', 'localhost'],
-                    muted: true,
+            {isFacebookStream ? (
+              // Direct Facebook video plugin embed.
+              // Bypasses ReactPlayer's facebook plugin entirely so we don't need
+              // VITE_FACEBOOK_APP_ID. Works for any public FB Live broadcast.
+              // The href= param accepts the same URL the broadcaster shares.
+              <iframe
+                src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(playbackUrl)}&show_text=false&autoplay=true&mute=1&width=auto`}
+                title="Live Stream"
+                width="100%"
+                height="100%"
+                style={{ position: 'absolute', top: 0, left: 0, border: 0 }}
+                scrolling="no"
+                frameBorder={0}
+                allowFullScreen
+                allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
+                onLoad={() => {
+                  setPlayerReady(true);
+                  sf.reportEvent('playing');
+                  sf.recordSuccess();
+                }}
+              />
+            ) : (
+              <ReactPlayer
+                url={playbackUrl}
+                playing={true}
+                muted={true}
+                controls={true}
+                width="100%"
+                height="100%"
+                onReady={() => {
+                  setPlayerReady(true);
+                  sf.reportEvent('playing');
+                  sf.recordSuccess();
+                }}
+                onPlay={() => sf.reportEvent('play')}
+                onPause={() => sf.reportEvent('pause')}
+                onBuffer={() => {
+                  setPlayerReady(true);
+                  sf.reportEvent('waiting');
+                }}
+                onBufferEnd={() => sf.reportEvent('playing')}
+                onError={(e) => {
+                  console.error('[ReactPlayer] Stream error:', e);
+                  sf.reportEvent('error', { errorCode: String(e ?? 'unknown') });
+                  sf.recordFailure();
+                  setPlayerError('The stream source could not be loaded. The URL may be invalid or the stream may have ended.');
+                }}
+                onEnded={() => sf.reportEvent('ended')}
+                onProgress={({ loaded, playedSeconds }) => {
+                  // Report buffer-ahead as a rough measure: loaded fraction of
+                  // remaining duration. ReactPlayer does not expose buffer ahead
+                  // in ms directly; we use loadedSeconds as a proxy when
+                  // available via the internal player.
+                  const aheadProxy =
+                    typeof loaded === 'number' && loaded > 0 && playedSeconds > 0
+                      ? Math.round(loaded * 1000)
+                      : undefined;
+                  sf.reportEvent('heartbeat', { bufferAheadMs: aheadProxy });
+                }}
+                config={{
+                  twitch: {
+                    options: {
+                      parent: ['sbbl-hq.icu', 'www.sbbl-hq.icu', 'localhost'],
+                      muted: true,
+                    }
+                  },
+                  youtube: {
+                    playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1, mute: 1 }
+                  },
+                  facebook: {
+                    appId: import.meta.env.VITE_FACEBOOK_APP_ID || '',
+                    version: 'v18.0',
+                    playerId: 'sbbl-fb-player',
                   }
-                },
-                youtube: {
-                  playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1, mute: 1 }
-                },
-                facebook: {
-                  appId: import.meta.env.VITE_FACEBOOK_APP_ID || '',
-                  version: 'v18.0',
-                  playerId: 'sbbl-fb-player',
-                }
-              }}
-              style={{ position: 'absolute', top: 0, left: 0 }}
-            />
+                }}
+                style={{ position: 'absolute', top: 0, left: 0 }}
+              />
+            )}
             {/* Block Facebook UI navigation for non-super-admin viewers.
                 The video autoplays via playing={true} so they can still watch;
                 this overlay only prevents clicking into Facebook's feed/related
