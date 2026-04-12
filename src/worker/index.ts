@@ -3201,11 +3201,15 @@ async function createOrRefreshPlaybackSession(
   // lost" banner.  Super admin bypasses this — they may monitor the stream
   // from multiple devices simultaneously (ops console + personal device).
   if (!options.skipDisplace) {
-    await ctx.admin
+    // PostgREST: .eq("col", null) generates ?col=eq.null which the parser
+    // tries to cast to the column type (uuid here) and 500s. Use .is() for
+    // null comparisons (broadcast alias has gameId=null).
+    let displaceQ = ctx.admin
       .from("stream_access_sessions")
       .update({ status: "displaced", expires_at: nowIso, updated_by: userId })
-      .eq("user_id", userId)
-      .eq("game_id", gameId)
+      .eq("user_id", userId);
+    displaceQ = gameId === null ? displaceQ.is("game_id", null) : displaceQ.eq("game_id", gameId);
+    await displaceQ
       .eq("status", "active")
       .neq("idempotency_key", sessionKey);
   }
@@ -3371,13 +3375,15 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
 
   // Authoritative ACK gate: confirm the session exists, belongs to the caller,
   // is scoped to the same game, and is still active before we acknowledge.
-  const sessionRes = await ctx.admin
+  // PostgREST .eq() with JS null serializes to ?col=eq.null which fails for
+  // uuid columns; use .is() for null (broadcast alias passes gameId=null).
+  let lookupQ = ctx.admin
     .from("stream_access_sessions")
     .select("id,status,max_expires_at")
     .eq("id", body.sessionId)
-    .eq("user_id", userId)
-    .eq("game_id", gameId)
-    .maybeSingle();
+    .eq("user_id", userId);
+  lookupQ = gameId === null ? lookupQ.is("game_id", null) : lookupQ.eq("game_id", gameId);
+  const sessionRes = await lookupQ.maybeSingle();
   if (sessionRes.error) throw new Error(sessionRes.error.message);
   if (!sessionRes.data) {
     return json({ ok: false, error: "session_not_found" }, 404);
@@ -3388,7 +3394,7 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   // Hard 6-hour cap guard: if the authoritative max expiry is reached, end
   // the session immediately and reject the heartbeat.
   if (sessionRes.data.max_expires_at && now >= String(sessionRes.data.max_expires_at)) {
-    await ctx.admin
+    let capQ = ctx.admin
       .from("stream_access_sessions")
       .update({
         status: "ended",
@@ -3397,8 +3403,9 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
         updated_by: userId,
       })
       .eq("id", body.sessionId)
-      .eq("user_id", userId)
-      .eq("game_id", gameId);
+      .eq("user_id", userId);
+    capQ = gameId === null ? capQ.is("game_id", null) : capQ.eq("game_id", gameId);
+    await capQ;
     return json({ ok: false, error: "session_expired" }, 403);
   }
 
@@ -3435,7 +3442,9 @@ async function handleStreamSessionEnd(ctx: HandlerCtx) {
     sessionId?: string;
   } | null;
   if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
-  const endRes = await ctx.admin
+  // PostgREST .eq() with JS null serializes to ?col=eq.null which fails for
+  // uuid columns. Use .is() for null (broadcast alias passes gameId=null).
+  let endQ = ctx.admin
     .from("stream_access_sessions")
     .update({
       status: "ended",
@@ -3444,10 +3453,9 @@ async function handleStreamSessionEnd(ctx: HandlerCtx) {
       updated_by: userId,
     })
     .eq("id", body.sessionId)
-    .eq("user_id", userId)
-    .eq("game_id", gameId)
-    .select("id")
-    .maybeSingle();
+    .eq("user_id", userId);
+  endQ = gameId === null ? endQ.is("game_id", null) : endQ.eq("game_id", gameId);
+  const endRes = await endQ.select("id").maybeSingle();
   if (endRes.error) throw new Error(endRes.error.message);
   return json({ ok: true, ended: Boolean(endRes.data) });
 }
