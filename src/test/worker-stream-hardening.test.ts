@@ -148,7 +148,7 @@ describe('stream hardening worker handlers', () => {
       api_idempotency_keys: [],
       user_role_assignments: [],
       games: [{ id: 'game-1', status: 'live' }],
-      stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_admin_config: [{ id: true, collection_id: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', title: 'Live', is_live: true }],
       stream_access_sessions: [],
     } as Record<string, Row[]>;
 
@@ -176,7 +176,7 @@ describe('stream hardening worker handlers', () => {
     } as any);
     expect(allowed.status).toBe(200);
     const body = await allowed.json() as Record<string, any>;
-    expect(body.playback.url).toContain('https://playback.example');
+    expect(body.playback.url).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   });
 
   it('session heartbeat refreshes active presence', async () => {
@@ -227,7 +227,7 @@ describe('stream hardening worker handlers', () => {
       api_idempotency_keys: [],
       user_role_assignments: [],
       games: [{ id: 'game-1', status: 'live' }],
-      stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_admin_config: [{ id: true, collection_id: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', title: 'Live', is_live: true }],
       stream_access_sessions: [{
         id: 'old-sess',
         game_id: 'game-1',

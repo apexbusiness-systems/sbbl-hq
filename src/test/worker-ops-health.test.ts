@@ -67,13 +67,12 @@ describe('/api/public-config contract', () => {
   });
 });
 
-describe('CSP includes Facebook embed domains', () => {
-  it('allows Facebook frame-src for /live page embeds', async () => {
+describe('CSP includes YouTube embed domains', () => {
+  it('allows YouTube frame-src for /live page embeds', async () => {
     const res = await worker.fetch(new Request('https://local/api/public-config'), env);
     const csp = res.headers.get('Content-Security-Policy') ?? '';
-    expect(csp).toContain('https://www.facebook.com');
-    expect(csp).toContain('https://web.facebook.com');
     expect(csp).toContain('https://www.youtube.com');
+    expect(csp).toContain('https://www.youtube-nocookie.com');
   });
 
   it('allows self-hosted Supabase connect-src', async () => {

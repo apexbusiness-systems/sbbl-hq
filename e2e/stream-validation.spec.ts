@@ -1,72 +1,10 @@
 import { expect, seedSuperAdminSession, test } from '../playwright-fixture';
 
 const GAME_ID = 'stream-validation-game';
-/** Marker URL for test playback — intercepted by addInitScript to simulate media signals */
-const SAMPLE_MP4 = '/__test__/sample.mp4';
-
-/**
- * Inject a lightweight HTMLMediaElement stub so the <video> element created by
- * ReactPlayer produces the same playback signals a real stream would, without
- * requiring network access to an external video file.
- */
-async function stubVideoPlayback(page: import('@playwright/test').Page) {
-  await page.addInitScript(() => {
-    const srcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
-    if (!srcDesc) return;
-
-    Object.defineProperty(HTMLMediaElement.prototype, 'src', {
-      set(value: string) {
-        srcDesc.set!.call(this, value);
-        if (typeof value === 'string' && value.includes('__test__/sample')) {
-          const el = this as HTMLVideoElement;
-          let t = 0;
-          Object.defineProperty(el, 'readyState', { get: () => 4, configurable: true });
-          Object.defineProperty(el, 'videoWidth', { get: () => 320, configurable: true });
-          Object.defineProperty(el, 'videoHeight', { get: () => 240, configurable: true });
-          Object.defineProperty(el, 'duration', { get: () => 10, configurable: true });
-          Object.defineProperty(el, 'paused', { get: () => false, configurable: true });
-          Object.defineProperty(el, 'error', { get: () => null, configurable: true });
-          Object.defineProperty(el, 'currentTime', {
-            get: () => t,
-            set: (v: number) => { t = v; },
-            configurable: true,
-          });
-          // Suppress native error events from the actual empty src
-          el.addEventListener('error', (e) => { e.stopImmediatePropagation(); }, true);
-          // Advance time
-          const iv = window.setInterval(() => { t += 0.2; }, 200);
-          // Fire playback lifecycle events after a short delay so ReactPlayer's
-          // internal listeners are attached before the first dispatch.
-          window.setTimeout(() => {
-            el.dispatchEvent(new Event('loadedmetadata'));
-            el.dispatchEvent(new Event('loadeddata'));
-            el.dispatchEvent(new Event('canplay'));
-            el.dispatchEvent(new Event('canplaythrough'));
-            el.dispatchEvent(new Event('playing'));
-          }, 300);
-          // Re-emit playing once more for late listeners (like collectMediaProof)
-          window.setTimeout(() => el.dispatchEvent(new Event('playing')), 2000);
-          // Cleanup on removal
-          const obs = new MutationObserver(() => {
-            if (!el.isConnected) { window.clearInterval(iv); obs.disconnect(); }
-          });
-          obs.observe(document, { childList: true, subtree: true });
-        }
-      },
-      get() { return srcDesc.get!.call(this); },
-      configurable: true,
-      enumerable: true,
-    });
-  });
-}
+/** Valid YouTube Live URL for mocked playback session */
+const SAMPLE_YOUTUBE_LIVE = 'https://www.youtube.com/live/dQw4w9WgXcQ';
 
 async function registerEntitledStreamMocks(page: import('@playwright/test').Page) {
-  // Serve a valid empty response for the video URL — the actual playback
-  // signals are provided by stubVideoPlayback() via HTMLMediaElement prototype override.
-  await page.route('**/__test__/sample*', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'video/mp4', body: Buffer.alloc(0) });
-  });
-
   await page.route('**/api/public/home**', async (route) => {
     await route.fulfill({
       status: 200,
@@ -102,7 +40,7 @@ async function registerEntitledStreamMocks(page: import('@playwright/test').Page
       body: JSON.stringify({
         ok: true,
         config: {
-          collectionId: SAMPLE_MP4,
+          collectionId: SAMPLE_YOUTUBE_LIVE,
           title: 'Validation Stream',
           source: 'main',
           isLive: true,
@@ -121,7 +59,7 @@ async function registerEntitledStreamMocks(page: import('@playwright/test').Page
         ok: true,
         playback: {
           type: 'url',
-          url: SAMPLE_MP4,
+          url: SAMPLE_YOUTUBE_LIVE,
           expiresAt: new Date(Date.now() + 5 * 60_000).toISOString(),
           heartbeatIntervalSec: 25,
         },
@@ -211,53 +149,38 @@ async function registerEntitledStreamMocks(page: import('@playwright/test').Page
 
 async function collectMediaProof(page: import('@playwright/test').Page) {
   return page.evaluate(async () => {
-    const video = document.querySelector('video') as HTMLVideoElement | null;
-    if (!video) {
+    const iframe = document.querySelector('iframe[title=\"SBBL Live Stream\"]') as HTMLIFrameElement | null;
+    if (!iframe) {
       return {
         signals: [] as string[],
-        readyState: 0,
+        src: '',
+        allowFullScreen: false,
+        referrerPolicy: '',
         width: 0,
         height: 0,
-        currentStart: 0,
-        currentEnd: 0,
       };
     }
 
-    const start = video.currentTime;
-    const playingEvent = await new Promise<boolean>((resolve) => {
-      const timeout = window.setTimeout(() => resolve(false), 5_000);
-      const onPlaying = () => {
-        window.clearTimeout(timeout);
-        video.removeEventListener('playing', onPlaying);
-        resolve(true);
-      };
-      video.addEventListener('playing', onPlaying, { once: true });
-    });
-
-    await new Promise((resolve) => setTimeout(resolve, 4_000));
-    const end = video.currentTime;
-
     const signals: string[] = [];
-    if (video.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) signals.push('readyState');
-    if (end > start + 0.5) signals.push('timeAdvance');
-    if (playingEvent) signals.push('playingEvent');
-    if (video.videoWidth > 0 && video.videoHeight > 0) signals.push('dimensions');
-    if (video.error === null) signals.push('noError');
+    if (iframe.src.includes('https://www.youtube.com/embed/')) signals.push('youtubeEmbedSrc');
+    if (iframe.src.includes('autoplay=1')) signals.push('autoplayEnabled');
+    if (iframe.allow.includes('autoplay')) signals.push('allowAutoplay');
+    if (iframe.allowFullscreen) signals.push('allowFullscreen');
+    if (iframe.clientWidth >= 0 && iframe.clientHeight >= 0) signals.push('iframeMounted');
 
     return {
       signals,
-      readyState: video.readyState,
-      width: video.videoWidth,
-      height: video.videoHeight,
-      currentStart: start,
-      currentEnd: end,
+      src: iframe.src,
+      allowFullScreen: iframe.allowFullscreen,
+      referrerPolicy: iframe.referrerPolicy,
+      width: iframe.clientWidth,
+      height: iframe.clientHeight,
     };
   });
 }
 
 test.describe('stream prelive validation', () => {
   test('[evidence:playback] entitled playback emits media proof >= 4 signals', async ({ page }) => {
-    await stubVideoPlayback(page);
     await seedSuperAdminSession(page);
     await registerEntitledStreamMocks(page);
 
@@ -268,8 +191,8 @@ test.describe('stream prelive validation', () => {
 
     // Wait for stream config to resolve (isStreamLive → true removes the overlay)
     await expect(page.getByText(/Stream Starting Soon/i)).toBeHidden({ timeout: 10_000 });
-    // Wait for playback session to resolve and ReactPlayer to mount the <video>
-    await page.locator('video').waitFor({ state: 'attached', timeout: 15_000 });
+    // Wait for playback session to resolve and YouTube iframe to mount.
+    await page.locator('iframe[title=\"SBBL Live Stream\"]').waitFor({ state: 'attached', timeout: 15_000 });
 
     const proof = await collectMediaProof(page);
     expect(proof.signals.length).toBeGreaterThanOrEqual(4);
