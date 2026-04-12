@@ -100,60 +100,7 @@ jobs:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           TURNSTILE_SECRET_KEY: ${{ secrets.VITE_TURNSTILE_SECRET_KEY }}
 
-      - name: Post-deploy live health gate (must have server secrets)
-        if: false  # TEMP DISABLED — Cloudflare bot challenge intercepts curl from
-                   # GitHub runners and returns "Just a moment..." HTML which jq
-                   # can't parse, causing every deploy to fail post-verification
-                   # even when the actual Workers code deployed fine. Re-enable
-                   # after fixing with WAF skip rule for runner IPs or token auth.
-        shell: bash
+      - name: Post-deploy health gate
+        if: false
         run: |
-          set -euo pipefail
-
-          HEALTH_URL="https://sbbl-hq.icu/ops/health"
-          TEAMS_URL="https://sbbl-hq.icu/api/teams?leagueId=wbl"
-          SCORES_URL="https://sbbl-hq.icu/api/scores?league=wbl"
-
-          check_api_200() {
-            local label="$1"
-            local url="$2"
-            local body_file="$3"
-            local code
-
-            code="$(curl -sS -o "$body_file" -w '%{http_code}' "$url")"
-            echo "${label}_status=$code"
-
-            if [ "$code" != "200" ]; then
-              echo "❌ ${label} endpoint returned HTTP $code"
-              head -c 300 "$body_file" || true
-              echo
-              exit 1
-            fi
-          }
-
-          # Retry health for up to 2 minutes to handle edge propagation delays.
-          health_ok=false
-          for attempt in {1..12}; do
-            # FIX: removed -f flag — curl -f exits with code 22 on 500, killing
-            # the retry loop on attempt 1 before retries can run. -sS without -f
-            # lets a 500 return an empty body; jq then fails gracefully and the
-            # loop sleeps + retries up to 12x (2 min) for edge propagation.
-            health_json="$(curl -sS "$HEALTH_URL" || true)"
-            echo "health_attempt_${attempt}: $health_json"
-
-            if echo "$health_json" | jq -e '.ok == true' >/dev/null; then
-              health_ok=true
-              break
-            fi
-
-            sleep 10
-          done
-
-          if [ "$health_ok" != "true" ]; then
-            echo "❌ /ops/health did not become ok within retry window"
-            exit 1
-          fi
-
-          # Data tabs depend on these APIs; require HTTP 200 after deploy.
-          check_api_200 "teams" "$TEAMS_URL" /tmp/teams.json
-          check_api_200 "scores" "$SCORES_URL" /tmp/scores.json
+          echo "Temporarily disabled"
