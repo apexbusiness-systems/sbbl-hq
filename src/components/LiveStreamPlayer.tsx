@@ -181,8 +181,8 @@ function UnifiedReactPlayer({
               modestbranding: 1,
               rel: 0,
               iv_load_policy: 3,
-              controls: 0,
-              fs: 0,
+              
+              
             },
           },
         }}
