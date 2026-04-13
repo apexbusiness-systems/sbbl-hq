@@ -21,6 +21,7 @@ describe('/ops/health endpoint', () => {
     expect(body).toHaveProperty('time');
     expect(body).toHaveProperty('uptime_s');
     expect(body).toHaveProperty('supabase_url');
+    expect(body).not.toHaveProperty('supabase_service_key');
     // Supabase URL must be redacted (no full URL exposed)
     expect(body.supabase_url).not.toContain('supabase.co');
   });
