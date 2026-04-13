@@ -3466,13 +3466,18 @@ export async function handleListComments(ctx: HandlerCtx) {
   const url = new URL(ctx.req.url);
   const limit = parseCommentLimit(url);
   const before = url.searchParams.get("before");
+  const wantsHidden = url.searchParams.get("includeHidden") === "1";
+  const roles = getRolesFromVerifiedSession(ctx.req);
+  const canViewHidden = roles.includes("league_admin") || roles.includes("super_admin");
   let query = ctx.admin
     .from("stream_chat_messages")
     .select("id,message,status,created_at,user_id")
     .eq("game_id", gameId)
-    .eq("status", "active")
     .order("created_at", { ascending: false })
     .limit(limit);
+  if (!(wantsHidden && canViewHidden)) {
+    query = query.eq("status", "active");
+  }
   if (before) query = query.lt("created_at", before);
   const res = await query;
   if (res.error) throw new Error(res.error.message);
@@ -3499,6 +3504,7 @@ export async function handleListComments(ctx: HandlerCtx) {
       .map((row) => ({
         id: String(row.id),
         message: String(row.message),
+        status: String(row.status) === "hidden" ? "hidden" : "active",
         createdAt: String(row.created_at),
         userId: String(row.user_id),
         userDisplayName: nameByUser.get(String(row.user_id)) ?? "Fan",

@@ -51,6 +51,7 @@ export interface StreamComment {
   createdAt: string;
   userId: string;
   userDisplayName?: string;
+  status?: 'active' | 'hidden';
 }
 
 export interface StreamSession {
@@ -155,9 +156,19 @@ export async function endPlaybackSession(
   );
 }
 
-export async function fetchStreamComments(gameId: string, limit = 40) {
+export async function fetchStreamComments(
+  gameId: string,
+  limit = 40,
+  options: { includeHidden?: boolean; token?: string | null } = {},
+) {
+  const params = new URLSearchParams({
+    limit: String(Math.min(100, Math.max(1, limit))),
+  });
+  if (options.includeHidden) params.set('includeHidden', '1');
   return apiFetch<{ ok: boolean; comments: StreamComment[] }>(
-    `/api/streams/${encodeURIComponent(gameId)}/comments?limit=${Math.min(100, Math.max(1, limit))}`,
+    `/api/streams/${encodeURIComponent(gameId)}/comments?${params.toString()}`,
+    {},
+    options.token,
   );
 }
 

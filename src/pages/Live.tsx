@@ -92,12 +92,13 @@ function AdminStreamOverlay({
     const gameId = activeGameId ?? 'broadcast';
     setCompGenerating(true);
     try {
+      const token = await getAuthToken();
       const hours = Number(compHours);
       const expiresInHours = Number.isFinite(hours) && hours > 0 ? Math.min(168, hours) : 24;
       const res = await generateCompCode(
         gameId,
         { note: compNote.trim() || undefined, expiresInHours },
-        null,
+        token,
       );
       if (res.ok) {
         setCompCode(res.code);
@@ -457,7 +458,7 @@ const LivePage = () => {
     }
   }, []);
 
-  const [comments, setComments] = useState<Array<{ id: string; user: string; text: string }>>([]);
+  const [comments, setComments] = useState<Array<{ id: string; user: string; text: string; status: 'active' | 'hidden' }>>([]);
   const [chatInput, setChatInput] = useState('');
 
   // ── Real reactions (persisted + Realtime-broadcast) ──────────────────────
@@ -548,12 +549,16 @@ const LivePage = () => {
     let active = true;
     const fetchComments = async () => {
       try {
-        const res = await fetchStreamComments(liveGame.id, 60);
+        const res = await fetchStreamComments(liveGame.id, 60, {
+          includeHidden: canModerateLive,
+          token: session?.access_token ?? null,
+        });
         if (!active) return;
         setComments(res.comments.map((comment) => ({
           id: comment.id,
           user: comment.userDisplayName ?? 'Fan',
           text: comment.message,
+          status: comment.status ?? 'active',
         })));
       } catch {
         // non-blocking for playback UX
@@ -565,7 +570,7 @@ const LivePage = () => {
       active = false;
       clearInterval(id);
     };
-  }, [liveGame?.id]);
+  }, [canModerateLive, liveGame?.id, session?.access_token]);
 
   // All hooks above this line. Early returns must come after all hooks.
   // Fan who registered but hasn't completed onboarding must finish it before
@@ -598,12 +603,13 @@ const LivePage = () => {
   const handleSendChat = () => {
     const text = chatInput.trim();
     if (!text || !liveGame?.id || !session) return;
-    void postStreamComment(liveGame.id, text, null)
+    void postStreamComment(liveGame.id, text, session.access_token ?? null)
       .then((res) => {
         setComments(prev => [...prev, {
           id: res.comment.id,
           user: 'You',
           text: res.comment.message,
+          status: 'active',
         }]);
         setChatInput('');
         setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
@@ -618,13 +624,17 @@ const LivePage = () => {
       });
   };
 
-  const handleHideComment = (commentId: string) => {
+  const handleModerateComment = (commentId: string, action: 'hide' | 'restore') => {
     if (!liveGame?.id || !session || !canModerateLive) return;
-    void moderateStreamComment(liveGame.id, commentId, 'hide', session.access_token ?? null)
+    void moderateStreamComment(liveGame.id, commentId, action, session.access_token ?? null)
       .then(() => {
-        // Remove hidden comment locally so moderators get immediate feedback.
-        setComments((prev) => prev.filter((comment) => comment.id !== commentId));
-        toast.success('Comment hidden');
+        // Keep moderated rows visible to admins so they can restore in-place.
+        setComments((prev) => prev.map((comment) => (
+          comment.id === commentId
+            ? { ...comment, status: action === 'hide' ? 'hidden' : 'active' }
+            : comment
+        )));
+        toast.success(action === 'hide' ? 'Comment hidden' : 'Comment restored');
       })
       .catch(() => {
         toast.error('Could not moderate comment.');
@@ -818,13 +828,13 @@ const LivePage = () => {
                   {comments.map((c) => (
                     <div key={c.id} className="flex gap-2">
                       <span className="text-xs font-semibold shrink-0 text-primary">{c.user}</span>
-                      <span className="text-xs text-foreground">{c.text}</span>
+                      <span className={`text-xs ${c.status === 'hidden' ? 'text-muted-foreground italic' : 'text-foreground'}`}>{c.text}</span>
                       {canModerateLive && (
                         <button
-                          onClick={() => handleHideComment(c.id)}
+                          onClick={() => handleModerateComment(c.id, c.status === 'hidden' ? 'restore' : 'hide')}
                           className="text-[10px] text-muted-foreground hover:text-primary"
                         >
-                          Hide
+                          {c.status === 'hidden' ? 'Restore' : 'Hide'}
                         </button>
                       )}
                     </div>

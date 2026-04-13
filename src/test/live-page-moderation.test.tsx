@@ -5,7 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LivePage from '@/pages/Live';
 
 const streamModerationMocks = vi.hoisted(() => ({
-  moderateStreamComment: vi.fn(async () => ({ ok: true, commentId: 'c1', status: 'hidden' })),
+  moderateStreamComment: vi.fn(async (_gameId, commentId, action) => ({
+    ok: true,
+    commentId,
+    status: action === 'restore' ? 'active' : 'hidden',
+  })),
   resetStreamReactions: vi.fn(async () => ({ ok: true, gameId: 'game-live-1', reset: true })),
 }));
 
@@ -56,7 +60,7 @@ vi.mock('@/lib/api/public', () => ({
 vi.mock('@/lib/api/stream', () => ({
   fetchAdminStreamConfig: vi.fn(async () => ({ ok: true, config: { title: 'Live', isLive: true, collectionId: 'https://youtube.com/watch?v=abcdefghijk' } })),
   fetchPublicStreamStatus: vi.fn(async () => ({ ok: true, isLive: true, title: 'Live', gameId: 'game-live-1', viewerCount: 10 })),
-  fetchStreamComments: vi.fn(async () => ({ ok: true, comments: [{ id: 'c1', userDisplayName: 'Fan', message: 'hello' }] })),
+  fetchStreamComments: vi.fn(async () => ({ ok: true, comments: [{ id: 'c1', userDisplayName: 'Fan', message: 'hello', status: 'active' }] })),
   generateCompCode: vi.fn(async () => ({ ok: true, code: 'CODE', gameId: 'game-live-1', expiresAt: new Date().toISOString(), createdAt: new Date().toISOString() })),
   postStreamComment: vi.fn(async () => ({ ok: true, comment: { id: 'new', message: 'test', createdAt: new Date().toISOString(), userId: 'admin-1' } })),
   moderateStreamComment: streamModerationMocks.moderateStreamComment,
@@ -71,7 +75,7 @@ describe('Live page moderation controls', () => {
     streamModerationMocks.resetStreamReactions.mockClear();
   });
 
-  it('lets super admins hide comments and reset reactions', async () => {
+  it('lets super admins hide/restore comments and reset reactions', async () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
@@ -90,6 +94,9 @@ describe('Live page moderation controls', () => {
 
     fireEvent.click(screen.getByText('Hide'));
     await waitFor(() => expect(streamModerationMocks.moderateStreamComment).toHaveBeenCalledWith('game-live-1', 'c1', 'hide', 'token'));
+
+    fireEvent.click(screen.getByText('Restore'));
+    await waitFor(() => expect(streamModerationMocks.moderateStreamComment).toHaveBeenCalledWith('game-live-1', 'c1', 'restore', 'token'));
 
     fireEvent.click(screen.getByText('Reset Reactions'));
     await waitFor(() => expect(streamModerationMocks.resetStreamReactions).toHaveBeenCalledWith('game-live-1', 'token'));

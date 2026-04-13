@@ -331,7 +331,7 @@ describe('stream hardening worker handlers', () => {
     await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'active_session_required' });
   });
 
-  it('league_admin can hide chat comments and hidden comments stop listing', async () => {
+  it('league_admin can hide/restore chat comments and include hidden rows when requested', async () => {
     const state = {
       api_idempotency_keys: [],
       user_role_assignments: [{ user_id: 'league-admin-user', role: 'league_admin' }],
@@ -364,6 +364,31 @@ describe('stream hardening worker handlers', () => {
     } as any);
     expect(listRes.status).toBe(200);
     await expect(listRes.json()).resolves.toMatchObject({ ok: true, comments: [] });
+
+    const listIncludingHidden = await handleListComments({
+      req: new Request('https://local/api/streams/game-1/comments?limit=20&includeHidden=1', {
+        headers: { 'x-sbbl-roles-verified': 'league_admin' },
+      }),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+    await expect(listIncludingHidden.json()).resolves.toMatchObject({
+      ok: true,
+      comments: [{ id: 'chat-1', status: 'hidden' }],
+    });
+
+    const restoreRes = await handleModerateComment({
+      req: new Request('https://local/ops/streams/game-1/comments/chat-1', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'moderate-comment-2', 'x-sbbl-user-id-verified': 'league-admin-user' },
+        body: JSON.stringify({ action: 'restore' }),
+      }),
+      params: { gameId: 'game-1', commentId: 'chat-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+    await expect(restoreRes.json()).resolves.toMatchObject({ ok: true, status: 'active' });
   });
 
   it('super_admin can reset reactions and counts return zero', async () => {
