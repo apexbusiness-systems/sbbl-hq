@@ -4798,7 +4798,7 @@ function addSecurityHeaders(res: Response): Response {
     "img-src 'self' data: blob: https:; " +
     "font-src 'self' data: https://*.facebook.com https://*.fbcdn.net; " +
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://*.facebook.com https://*.facebook.net https://graph.facebook.com https://*.fbcdn.net wss://*.facebook.com; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://*.facebook.net https://*.fbcdn.net https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "frame-src https://www.youtube.com https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://*.facebook.net https://*.fbcdn.net https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
     "child-src https://*.facebook.com https://*.fbcdn.net https://*.facebook.net; " +
     "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.facebook.com https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
     "worker-src 'self' blob:; " +
