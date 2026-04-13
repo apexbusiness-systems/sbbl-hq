@@ -4158,7 +4158,10 @@ async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
   // Poster tab projection: include event/league-wide art and promote photo assets
   // to poster cards without mutating source records.
   const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
-  const mapped = mapPublicMediaRows(rows, true).filter((row, index, list) => {
+
+  // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
+  const seen = new Set<string>();
+  const mapped = mapPublicMediaRows(rows, true).filter((row, index) => {
     const raw = rows[index] ?? {};
     const payload = (raw.render_payload ?? {}) as Record<string, unknown>;
     const metadata = (((raw.media_assets as Record<string, unknown> | null) ?? {}).metadata ?? {}) as Record<string, unknown>;
@@ -4170,7 +4173,9 @@ async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
     if (surface === "potg" || teamName.length > 0) return false;
 
     // Idempotent response: ensure each id appears once even if source rows overlap.
-    return list.findIndex((candidate) => candidate.id === row.id) === index;
+    if (seen.has(row.id)) return false;
+    seen.add(row.id);
+    return true;
   });
 
   return json({ ok: true, data: mapped }, 200, {
