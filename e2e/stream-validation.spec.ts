@@ -3,7 +3,7 @@ import { expect, seedSuperAdminSession, test } from '../playwright-fixture';
 const GAME_ID = 'stream-validation-game';
 /** Marker URL for test playback — intercepted by addInitScript to simulate media signals */
 const SAMPLE_MP4 = '/__test__/sample.mp4';
-const SWITCHER_HOST_SELECTOR = '[data-testid="switcher-player-host"]';
+const PLAYER_HOST_SELECTOR = '[data-testid="unified-react-player"]';
 
 /**
  * Inject a lightweight HTMLMediaElement stub so the <video> element created by
@@ -214,18 +214,13 @@ async function collectMediaProof(page: import('@playwright/test').Page) {
   return page.evaluate(async () => {
     const video = document.querySelector('video') as HTMLVideoElement | null;
     if (!video) {
-      // Switcher embed path (no direct <video> in DOM): validate player shell
-      // and script bootstrap so playback surface proof still exists.
-      const switcherHost = document.querySelector('[data-testid="switcher-player-host"]') as HTMLElement | null;
-      const embedScript = document.getElementById('switcher-embed-js');
-      const hasIframe = Boolean(
-        switcherHost?.querySelector('iframe') ??
-        document.querySelector('iframe[src*="player.switcherstudio.com"]'),
-      );
+      // Provider iframe path (no direct <video> in DOM): validate player shell
+      // so playback surface proof still exists.
+      const switcherHost = document.querySelector('[data-testid="unified-react-player"]') as HTMLElement | null;
+      const hasIframe = Boolean(switcherHost?.querySelector('iframe'));
       const hostRect = switcherHost?.getBoundingClientRect();
       const signals: string[] = [];
       if (switcherHost) signals.push('switcherHost');
-      if (embedScript) signals.push('embedScript');
       if (hasIframe) signals.push('iframeMounted');
       if ((hostRect?.width ?? 0) > 0 && (hostRect?.height ?? 0) > 0) signals.push('hostSized');
       if (!document.body.textContent?.includes('Stream Unavailable')) signals.push('noPlayerError');
@@ -286,7 +281,7 @@ test.describe('stream prelive validation', () => {
     await expect(page.getByText(/Stream Starting Soon/i)).toBeHidden({ timeout: 10_000 });
     // Wait for playback session to resolve and playback surface to mount.
     await expect
-      .poll(async () => page.locator(`video, ${SWITCHER_HOST_SELECTOR}`).count(), { timeout: 15_000 })
+      .poll(async () => page.locator(`video, ${PLAYER_HOST_SELECTOR}`).count(), { timeout: 15_000 })
       .toBeGreaterThan(0);
 
     const proof = await collectMediaProof(page);
