@@ -55,4 +55,19 @@ describe('RequireAdmin', () => {
 
     expect(screen.getByText('ops content')).toBeInTheDocument();
   });
+
+  it('allows unauthenticated access only when VITE_E2E_BYPASS_ADMIN is true', () => {
+    authState.isSignedIn = false;
+    vi.stubEnv('VITE_E2E_BYPASS_ADMIN', 'true');
+
+    render(
+      <MemoryRouter>
+        <RequireAdmin>
+          <div>ops content</div>
+        </RequireAdmin>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('ops content')).toBeInTheDocument();
+  });
 });
