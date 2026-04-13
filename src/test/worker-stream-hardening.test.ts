@@ -17,6 +17,7 @@ function createQuery(table: string, state: Record<string, Row[]>) {
   const filters: Array<(row: Row) => boolean> = [];
   const api: any = {
     eq(col: string, val: unknown) { filters.push((r) => r[col] === val); return api; },
+    is(col: string, val: unknown) { filters.push((r) => r[col] === val); return api; },
     gt(col: string, val: unknown) { filters.push((r) => String(r[col]) > String(val)); return api; },
     in(col: string, vals: unknown[]) { filters.push((r) => vals.includes(r[col])); return api; },
     order() { return api; },
@@ -271,6 +272,40 @@ describe('stream hardening worker handlers', () => {
     expect(maxExpiresAt).toBeGreaterThanOrEqual(now + (6 * 60 * 60 * 1000) - 2_000);
     expect(maxExpiresAt).toBeLessThanOrEqual(Date.now() + (6 * 60 * 60 * 1000) + 2_000);
     expect((state.stream_access_sessions[0].status)).toBe('displaced');
+  });
+
+  it('playback refresh preserves original maxExpiresAt for same idempotency key', async () => {
+    const originalCap = new Date(Date.now() + (2 * 60 * 60 * 1000)).toISOString();
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      games: [{ id: 'game-1', status: 'live' }],
+      stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_access_sessions: [{
+        id: 'sess-fixed-cap',
+        game_id: 'game-1',
+        user_id: 'allowed-user',
+        status: 'active',
+        expires_at: new Date(Date.now() + 30_000).toISOString(),
+        max_expires_at: originalCap,
+        idempotency_key: 'stable-session-key',
+      }],
+    } as Record<string, Row[]>;
+
+    const res = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/game-1/session', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'idempotency-key-923456789', 'x-sbbl-user-id-verified': 'allowed-user' },
+        body: JSON.stringify({ sessionKey: 'stable-session-key' }),
+      }),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, any>;
+    expect(body.session.maxExpiresAt).toBe(originalCap);
   });
 
   it('chat validation blocks invalid input and enforces message length', async () => {

@@ -225,9 +225,18 @@ async function verifyStripeSignature(
 
   const payload = `${parsed.timestamp}.${rawBody}`;
   const expected = await signHmacSha256(secret, payload);
-  return parsed.signatures.some(
-    (candidate) => candidate.toLowerCase() === expected,
+  return parsed.signatures.some((candidate) =>
+    constantTimeEqualHex(candidate.toLowerCase(), expected),
   );
+}
+
+export function constantTimeEqualHex(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
 }
 
 async function verifyTurnstileToken(
@@ -405,7 +414,11 @@ async function handleStats({ req, admin }: HandlerCtx) {
     p_filters: filters,
   });
   if (error) throw new Error(error.message);
-  return json({ ok: true, userId, data }, 200, { "Cache-Control": "public, s-maxage=60, max-age=30" });
+  return json(
+    { ok: true, userId, data },
+    200,
+    { "Cache-Control": "private, no-store", Vary: "Authorization" },
+  );
 }
 
 async function handleLeaderboards({ req, admin }: HandlerCtx) {
@@ -415,7 +428,11 @@ async function handleLeaderboards({ req, admin }: HandlerCtx) {
     p_filters: filters,
   });
   if (error) throw new Error(error.message);
-  return json({ ok: true, userId, data }, 200, { "Cache-Control": "public, s-maxage=60, max-age=30" });
+  return json(
+    { ok: true, userId, data },
+    200,
+    { "Cache-Control": "private, no-store", Vary: "Authorization" },
+  );
 }
 
 async function handleDraft(ctx: HandlerCtx) {
@@ -3193,7 +3210,23 @@ async function createOrRefreshPlaybackSession(
   const nowIso = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 70_000).toISOString();
   // Hard 6-hour ceiling — heartbeats may never extend past this
-  const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
+  const defaultMaxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
+  let existingSessionQuery = ctx.admin
+    .from("stream_access_sessions")
+    .select("max_expires_at")
+    .eq("user_id", userId)
+    .eq("idempotency_key", sessionKey)
+    .eq("status", "active");
+  existingSessionQuery =
+    gameId === null
+      ? existingSessionQuery.is("game_id", null)
+      : existingSessionQuery.eq("game_id", gameId);
+  const existingSession = await existingSessionQuery.maybeSingle();
+  if (existingSession.error) throw new Error(existingSession.error.message);
+  const maxExpiresAt = String(
+    (existingSession.data as { max_expires_at?: string } | null)?.max_expires_at ??
+      defaultMaxExpiresAt,
+  );
 
   // One-device enforcement: terminate any existing active session for this
   // user + game before creating the new one.  The displaced device's next
@@ -4357,18 +4390,12 @@ async function handleOpsHealth({ env, admin }: HandlerCtx) {
     }
   }
 
-  const serviceKeySet = Boolean(env.SUPABASE_SERVICE_ROLE_KEY);
-  const serviceKeyPrefix = serviceKeySet
-    ? env.SUPABASE_SERVICE_ROLE_KEY.substring(0, 10) + "..."
-    : "NOT_SET";
-
   return json({
     ok: true,
     db_ok: dbStatus === "connected",
     version: "2026.04-hardened",
     commit: (env as unknown as Record<string, unknown>).CF_PAGES_COMMIT_SHA ?? "unknown",
     supabase_url: env.SUPABASE_URL ? env.SUPABASE_URL.replace(/https?:\/\//, "").split(".")[0] + "...[redacted]" : "not_set",
-    supabase_service_key: serviceKeyPrefix,
     db_status: dbStatus,
     db_error: dbError,
     time: new Date().toISOString(),
@@ -4691,6 +4718,64 @@ function getCompiled() {
 }
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5MB request body limit
+const BODY_TOO_LARGE_ERROR = "payload_too_large";
+
+const bodySizeChecks = new WeakMap<Request, Promise<void>>();
+let requestBodyGuardPatched = false;
+
+function contentLengthExceedsLimit(req: Request): boolean {
+  const raw = req.headers.get("content-length");
+  if (!raw) return false;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > MAX_BODY_BYTES;
+}
+
+async function ensureBodyWithinLimit(req: Request): Promise<void> {
+  if (contentLengthExceedsLimit(req)) throw new Error(BODY_TOO_LARGE_ERROR);
+  const pending = bodySizeChecks.get(req);
+  if (pending) return pending;
+
+  const check = (async () => {
+    const cloned = req.clone();
+    const bytes = (await cloned.arrayBuffer()).byteLength;
+    if (bytes > MAX_BODY_BYTES) throw new Error(BODY_TOO_LARGE_ERROR);
+  })();
+  bodySizeChecks.set(req, check);
+  return check;
+}
+
+function withBodySizeGuard(req: Request): Request {
+  const guardedReq = req as Request & {
+    json: Request["json"];
+    text: Request["text"];
+  };
+  const originalJson = req.json.bind(req);
+  const originalText = req.text.bind(req);
+
+  guardedReq.json = async () => {
+    await ensureBodyWithinLimit(req);
+    return originalJson();
+  };
+  guardedReq.text = async () => {
+    await ensureBodyWithinLimit(req);
+    return originalText();
+  };
+  return guardedReq;
+}
+
+function installRequestBodyGuard() {
+  if (requestBodyGuardPatched) return;
+  requestBodyGuardPatched = true;
+  const rawJson = Request.prototype.json;
+  const rawText = Request.prototype.text;
+
+  Request.prototype.json = function jsonWithLimit() {
+    return ensureBodyWithinLimit(this).then(() => rawJson.call(this));
+  };
+  Request.prototype.text = function textWithLimit() {
+    return ensureBodyWithinLimit(this).then(() => rawText.call(this));
+  };
+}
 
 function addSecurityHeaders(res: Response): Response {
   const headers = new Headers(res.headers);
@@ -4749,6 +4834,8 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
+installRequestBodyGuard();
+
 export default Sentry.withSentry(
   (env: Env) => ({
     dsn: env.SENTRY_DSN,
@@ -4806,7 +4893,7 @@ export default Sentry.withSentry(
     // Internal verified headers are set here and ONLY here, after JWT verification.
     // These use a -verified suffix to distinguish them from any client-supplied headers
     // (which were stripped above).
-    const enrichedRequest = new Request(cleanReq, {
+    const enrichedRequest = withBodySizeGuard(new Request(cleanReq, {
       headers: session
         ? {
             ...Object.fromEntries(cleanReq.headers.entries()),
@@ -4814,7 +4901,7 @@ export default Sentry.withSentry(
             "x-sbbl-roles-verified": session.roles.join(","),
           }
         : cleanReq.headers,
-    });
+    }));
 
     for (const route of getCompiled()) {
       if (route.method !== req.method) continue;
@@ -4843,6 +4930,8 @@ export default Sentry.withSentry(
             ? 401
             : message === "forbidden"
               ? 403
+              : message === BODY_TOO_LARGE_ERROR
+                ? 413
               : message.startsWith("Missing or invalid idempotency key") ||
                   message.startsWith("Duplicate idempotency key")
                 ? 400
@@ -4854,6 +4943,14 @@ export default Sentry.withSentry(
           });
         }
         recordMetrics(status, Date.now() - _fetchStart);
+        if (status === 413) {
+          return addSecurityHeaders(
+            json(
+              { ok: false, error: BODY_TOO_LARGE_ERROR, maxBytes: MAX_BODY_BYTES },
+              413,
+            ),
+          );
+        }
         return addSecurityHeaders(json({ ok: false, error: message }, status));
       }
     }
