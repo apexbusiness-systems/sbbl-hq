@@ -132,7 +132,7 @@ function AdminStreamOverlay({
     setSaving(true);
     try {
       const token = await getAuthToken();
-      const normalized = nextLive ? normalizeYoutubeUrl(customStreamUrl) : null;
+      const normalized = nextLive ? normalizeYoutubeUrl(customStreamUrl, { youtubeOnly: true }) : null;
       if (nextLive && (!normalized || normalized.ok === false)) {
         setStreamUrlError(normalized?.ok === false ? normalized.error : 'Invalid stream URL.');
         setSaving(false);
@@ -245,8 +245,8 @@ function AdminStreamOverlay({
               />
             </div>
 
-            {/* Go Live / End Stream — requires a valid absolute http(s) stream URL.
-                YouTube links are canonicalized; other providers are passed through. */}
+            {/* Go Live / End Stream — baseline mode enforces a valid YouTube URL
+                before going live. End Stream still works without URL edits. */}
             <button
               onClick={handleGoLive}
               disabled={saving}

@@ -32,6 +32,15 @@ function extractYoutubeVideoId(url: URL): string | null {
   return null;
 }
 
+export function getYoutubeVideoId(raw: string): string | null {
+  try {
+    const parsed = new URL(raw.trim());
+    return extractYoutubeVideoId(parsed);
+  } catch {
+    return null;
+  }
+}
+
 export function isYoutubeUrl(raw: string): boolean {
   try {
     const parsed = new URL(raw.trim());
@@ -41,25 +50,30 @@ export function isYoutubeUrl(raw: string): boolean {
   }
 }
 
-export function normalizeYoutubeUrl(raw: string): { ok: true; url: string } | { ok: false; error: string } {
+type NormalizeOptions = {
+  youtubeOnly?: boolean;
+};
+
+export function normalizeYoutubeUrl(
+  raw: string,
+  options: NormalizeOptions = {},
+): { ok: true; url: string } | { ok: false; error: string } {
   const trimmed = raw.trim();
   if (!trimmed) return { ok: false, error: 'Stream URL is required to go live.' };
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
   } catch {
-    return { ok: false, error: 'Enter a valid absolute URL (e.g. https://www.youtube.com/watch?v=VIDEO_ID).' };
+    return { ok: false, error: 'Enter a valid URL (e.g. https://www.youtube.com/watch?v=VIDEO_ID).' };
   }
-
-  // Accept only web URLs so ops can use YouTube, Twitch, Vimeo, or direct
-  // HLS/MP4 links without frontend-level provider lock-in.
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { ok: false, error: 'Only http(s) stream URLs are supported.' };
   }
-
-  // If this is a YouTube URL with a valid id, normalize to canonical watch URL
-  // for stable embeds and consistency in saved config/history.
   const host = parsed.hostname.toLowerCase();
+  const youtubeOnly = options.youtubeOnly ?? false;
+  if (youtubeOnly && !YOUTUBE_HOSTS.has(host)) {
+    return { ok: false, error: 'Only YouTube Live URLs are allowed in baseline mode.' };
+  }
   if (YOUTUBE_HOSTS.has(host)) {
     const videoId = extractYoutubeVideoId(parsed);
     if (!videoId) {
@@ -67,6 +81,12 @@ export function normalizeYoutubeUrl(raw: string): { ok: true; url: string } | { 
     }
     return { ok: true, url: `https://www.youtube.com/watch?v=${videoId}` };
   }
+  return { ok: true, url: trimmed };
+}
 
-  return { ok: true, url: parsed.toString() };
+export function toPlayableYoutubeEmbedUrl(raw: string): string | null {
+  const videoId = getYoutubeVideoId(raw);
+  if (!videoId) return null;
+  // Use the embed endpoint explicitly; this avoids provider-level /live URL parsing issues.
+  return `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1`;
 }

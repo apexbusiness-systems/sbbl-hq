@@ -22,6 +22,7 @@ import ReactPlayer from 'react-player';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
+import { toPlayableYoutubeEmbedUrl } from '@/lib/stream/youtube-url';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { useStreamForge } from '@/hooks/use-streamforge';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
@@ -225,6 +226,14 @@ const PPV_PRICE_TOTAL = Math.round(PPV_PRICE_CAD * (1 + ALBERTA_GST) * 100) / 10
 
 const DEVICE_TOKEN_KEY = 'sbbl:stream-device-token:v1';
 
+function toPlayableUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  const embedUrl = toPlayableYoutubeEmbedUrl(trimmed);
+  // Keep non-YouTube sources untouched (HLS, MP4, etc.).
+  return embedUrl ?? trimmed;
+}
+
 function getOrCreateDeviceToken(): string {
   const existing = globalThis.localStorage.getItem(DEVICE_TOKEN_KEY);
   if (existing && existing.length >= 16) return existing;
@@ -330,7 +339,7 @@ export function LiveStreamPlayer({
           body: JSON.stringify({ sessionKey }),
         }, null);
         if (!active) return;
-        setPlaybackUrl(res.playback.url);
+        setPlaybackUrl(toPlayableUrl(res.playback.url));
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
 
