@@ -24,6 +24,7 @@ import {
   setStreamLive,
   updateStreamConfig,
 } from '@/lib/api/stream';
+import { normalizeYoutubeUrl } from '@/lib/stream/youtube-url';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
@@ -83,6 +84,7 @@ function AdminStreamOverlay({
   const [compCode, setCompCode] = useState<string | null>(null);
   const [compExpiresAt, setCompExpiresAt] = useState<string | null>(null);
   const [compCopied, setCompCopied] = useState(false);
+  const [streamUrlError, setStreamUrlError] = useState<string | null>(null);
 
   const handleGenerateCompCode = async () => {
     const gameId = activeGameId ?? 'broadcast';
@@ -127,8 +129,15 @@ function AdminStreamOverlay({
     setSaving(true);
     try {
       const token = await getAuthToken();
+      const normalized = nextLive ? normalizeYoutubeUrl(customStreamUrl) : null;
+      if (nextLive && (!normalized || normalized.ok === false)) {
+        setStreamUrlError(normalized?.ok === false ? normalized.error : 'Invalid stream URL.');
+        setSaving(false);
+        return;
+      }
+      if (streamUrlError) setStreamUrlError(null);
       // Step 1: Save config (URL + title)
-      await updateStreamConfig({ collectionId: customStreamUrl, title: streamTitle }, token);
+      await updateStreamConfig({ collectionId: normalized?.ok ? normalized.url : customStreamUrl, title: streamTitle }, token);
       // Step 2: Toggle live status — if this fails, config is saved but
       // stream state is unchanged. Admin sees the error and can retry
       // the toggle without re-entering the URL.
@@ -209,10 +218,16 @@ function AdminStreamOverlay({
               <input
                 type="text"
                 value={customStreamUrl}
-                onChange={e => setCustomStreamUrl(e.target.value)}
+                onChange={e => {
+                  setCustomStreamUrl(e.target.value);
+                  if (streamUrlError) setStreamUrlError(null);
+                }}
                 className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50"
-                placeholder="YouTube, Twitch, or direct URL…"
+                placeholder="https://www.youtube.com/watch?v=..."
               />
+              {streamUrlError && (
+                <p className="mt-1 text-[10px] text-red-300">{streamUrlError}</p>
+              )}
             </div>
 
             {/* Stream Title */}
@@ -227,9 +242,8 @@ function AdminStreamOverlay({
               />
             </div>
 
-            {/* Go Live / End Stream — super admin can toggle live at any time,
-                even without a URL configured yet. The player handles the
-                "no URL configured" state gracefully. */}
+            {/* Go Live / End Stream — baseline mode enforces a valid YouTube URL
+                before going live. End Stream still works without URL edits. */}
             <button
               onClick={handleGoLive}
               disabled={saving}
