@@ -35,5 +35,13 @@ describe('normalizeYoutubeUrl', () => {
       ok: false,
       error: 'Use a YouTube watch/live/embed/share URL with a valid video id.',
     });
+    expect(normalizeYoutubeUrl('https://youtu.be/shortid')).toEqual({
+      ok: false,
+      error: 'Use a YouTube watch/live/embed/share URL with a valid video id.',
+    });
+    expect(normalizeYoutubeUrl('https://www.youtube.com/watch?v=abc123def45zzz')).toEqual({
+      ok: false,
+      error: 'Use a YouTube watch/live/embed/share URL with a valid video id.',
+    });
   });
 });

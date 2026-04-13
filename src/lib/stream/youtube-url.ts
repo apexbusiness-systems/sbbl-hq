@@ -6,21 +6,27 @@ const YOUTUBE_HOSTS = new Set([
   'www.youtu.be',
 ]);
 
+const YOUTUBE_VIDEO_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/;
+
+function isValidYoutubeVideoId(id: string): boolean {
+  return YOUTUBE_VIDEO_ID_REGEX.test(id);
+}
+
 function extractYoutubeVideoId(url: URL): string | null {
   const host = url.hostname.toLowerCase();
   if (host === 'youtu.be' || host === 'www.youtu.be') {
     const id = url.pathname.split('/').filter(Boolean)[0];
-    return id && id.length >= 6 ? id : null;
+    return id && isValidYoutubeVideoId(id) ? id : null;
   }
   if (host.endsWith('youtube.com')) {
     if (url.pathname === '/watch') {
       const id = url.searchParams.get('v');
-      return id && id.length >= 6 ? id : null;
+      return id && isValidYoutubeVideoId(id) ? id : null;
     }
     const parts = url.pathname.split('/').filter(Boolean);
     if (parts[0] === 'live' || parts[0] === 'embed') {
       const id = parts[1];
-      return id && id.length >= 6 ? id : null;
+      return id && isValidYoutubeVideoId(id) ? id : null;
     }
   }
   return null;
