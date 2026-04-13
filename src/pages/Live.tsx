@@ -130,8 +130,8 @@ function AdminStreamOverlay({
     try {
       const token = await getAuthToken();
       const normalized = nextLive ? normalizeYoutubeUrl(customStreamUrl) : null;
-      if (nextLive && (!normalized || !normalized.ok)) {
-        setStreamUrlError(normalized?.error ?? 'Invalid stream URL.');
+      if (nextLive && (!normalized || normalized.ok === false)) {
+        setStreamUrlError(normalized?.ok === false ? normalized.error : 'Invalid stream URL.');
         setSaving(false);
         return;
       }
