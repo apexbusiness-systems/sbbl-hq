@@ -90,9 +90,13 @@ const MediaPage = () => {
       ? [...allMedia, ...posterProjection]
       : allMedia;
 
-    const dedupedById = baseList.filter((item, idx, arr) =>
-      arr.findIndex(candidate => candidate.id === item.id) === idx,
-    );
+    // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
+    const seen = new Set<string>();
+    const dedupedById = baseList.filter(item => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
 
     return dedupedById.filter(m => {
       const leagueMatch = leagueFilter === 'all' || m.leagueId === leagueFilter;

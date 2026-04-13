@@ -85,6 +85,78 @@ export async function fetchOpsList(entity: 'teams' | 'players' | 'products' | 'e
   return apiFetch<{ ok: boolean; data: unknown[] }>(`/ops/list/${entity}`);
 }
 
+// ── Media Editor (Admin) ──────────────────────────────────────────────────
+// Super-admin CRUD over media_publications (covers drafts + archived rows
+// that the public /api/public/media feed intentionally hides).
+
+export type MediaPublicationStatus = 'draft' | 'scheduled' | 'published' | 'archived';
+
+export type OpsMediaPublication = {
+  id: string;
+  mediaAssetId: string;
+  surface: string;
+  title: string;
+  subtitle: string | null;
+  status: MediaPublicationStatus;
+  publishedAt: string | null;
+  scheduledAt: string | null;
+  sortAt: string | null;
+  leagueId: string | null;
+  leagueCode: string | null;
+  leagueName: string | null;
+  type: string;
+  thumbnail: string;
+  createdAt: string | null;
+};
+
+export type OpsMediaListFilters = {
+  status?: MediaPublicationStatus | 'all';
+  surface?: string | 'all';
+  leagueId?: string;
+  limit?: number;
+};
+
+export async function fetchOpsMediaList(filters: OpsMediaListFilters = {}) {
+  const params = new URLSearchParams();
+  if (filters.status && filters.status !== 'all') params.set('status', filters.status);
+  if (filters.surface && filters.surface !== 'all') params.set('surface', filters.surface);
+  if (filters.leagueId) params.set('leagueId', filters.leagueId);
+  if (filters.limit) params.set('limit', String(filters.limit));
+  const qs = params.toString();
+  const suffix = qs.length > 0 ? `?${qs}` : '';
+  return apiFetch<{ ok: boolean; data: OpsMediaPublication[] }>(`/ops/list/media${suffix}`);
+}
+
+export async function patchOpsMediaPublication(
+  id: string,
+  payload: {
+    title?: string;
+    subtitle?: string | null;
+    status?: MediaPublicationStatus;
+    leagueId?: string | null;
+    sortAt?: string;
+  },
+) {
+  return apiFetch<{ ok: boolean; data: Record<string, unknown> }>(
+    `/ops/media/publications/${id}`,
+    {
+      method: 'PATCH',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-media-patch-${id}`) },
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function deleteOpsMediaPublication(id: string) {
+  return apiFetch<{ ok: boolean; data: Record<string, unknown> }>(
+    `/ops/media/publications/${id}`,
+    {
+      method: 'DELETE',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-media-delete-${id}`) },
+    },
+  );
+}
+
 export async function patchOpsEntity(entity: 'teams' | 'players' | 'products' | 'events' | 'schedules', id: string, payload: Record<string, unknown>) {
   return apiFetch<{ ok: boolean; data: unknown }>(`/ops/${entity}/${id}`, {
     method: 'PATCH',

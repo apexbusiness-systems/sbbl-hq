@@ -3,7 +3,7 @@
  * Renders the live-stream broadcast area with a multi-layer access gate:
  *
  *   Unregistered (no auth.user)           → registration wall → /register?redirect=/live
- *   player role                           → free access always → Switcher Studio player
+ *   player role                           → free access always → branded app player
  *   paid_fan | super_admin                → free access + invite generator → player
  *   fan with PPV entitlement (Stripe)     → access → player
  *   fan with redeemed invite              → access → player
@@ -12,14 +12,14 @@
  * IP locking and single-use enforcement happen server-side in /api/invite/redeem.
  * No role/entitlement data is trusted from the client.
  *
- * Uses Switcher Studio's script-based embed player.
+ * Uses a unified ReactPlayer surface controlled by app-level RBAC gates.
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
-import { toast } from 'sonner';
+import { Lock, Play, Ticket, Copy, Check, KeyRound, Pause, Volume2, VolumeX, Maximize } from 'lucide-react';
 import ReactPlayer from 'react-player';
+import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
 import { useTurnstile } from '@/hooks/use-turnstile';
@@ -48,10 +48,10 @@ import type { AppRole } from '@/lib/auth/roles';
 function AccessCodeRedeem({
   variant = 'dark',
   onRedeemed,
-}: {
+}: Readonly<{
   variant?: 'dark' | 'light';
   onRedeemed?: () => void;
-}) {
+}>) {
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
@@ -133,37 +133,109 @@ function AccessCodeRedeem({
   );
 }
 
+function UnifiedReactPlayer({
+  url,
+  onReady,
+  onPlay,
+  onError,
+}: Readonly<{
+  url: string;
+  onReady: () => void;
+  onPlay: () => void;
+  onError: (message: string) => void;
+}>) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [playing, setPlaying] = useState(true);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(0.8);
+
+  const handleFullscreen = async () => {
+    const host = containerRef.current;
+    if (!host) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await host.requestFullscreen();
+      }
+    } catch (err) {
+      onError(`Fullscreen unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="unified-react-player">
+      <ReactPlayer
+        url={url}
+        width="100%"
+        height="100%"
+        playing={playing}
+        controls={false}
+        muted={muted}
+        volume={volume}
+        onReady={onReady}
+        onPlay={() => {
+          setPlaying(true);
+          onPlay();
+        }}
+        onPause={() => setPlaying(false)}
+        onError={(err) => onError(`Playback failed: ${err instanceof Error ? err.message : 'provider rejected stream URL'}`)}
+        config={{
+          youtube: {
+            playerVars: {
+              modestbranding: 1,
+              rel: 0,
+              iv_load_policy: 3,
+              controls: 0,
+              fs: 0,
+            },
+          },
+        }}
+      />
+      <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm">
+        <button type="button" className="p-2 rounded hover:bg-white/10 text-white" aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
+          {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+        </button>
+        <button type="button" className="p-2 rounded hover:bg-white/10 text-white" aria-label={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted(v => !v)}>
+          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        </button>
+        <input
+          aria-label="Volume"
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={volume}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setMuted(next === 0);
+            setVolume(next);
+          }}
+          className="w-24 accent-amber-500"
+        />
+        <div className="flex-1" />
+        <button type="button" className="p-2 rounded hover:bg-white/10 text-white" aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
+          <Maximize className="w-4 h-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const PPV_PRICE_CAD = 4.99;
 const ALBERTA_GST = 0.05;
 /** Tax-inclusive price shown to Alberta viewers */
 const PPV_PRICE_TOTAL = Math.round(PPV_PRICE_CAD * (1 + ALBERTA_GST) * 100) / 100;
 
-// Legacy Switcher Studio config removed.
-// ReactPlayer stream URL is configured via AdminStreamControls.
 
-/**
- * Normalize Facebook Live URLs:
- * - Strip fbclid tracking parameter that breaks embed playback
- * - Ensure /live/ suffix is present for direct FB Live embeds
- */
-function normalizeFacebookUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    if (!u.hostname.includes('facebook.com')) return url;
-    u.searchParams.delete('fbclid');
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
 
 const DEVICE_TOKEN_KEY = 'sbbl:stream-device-token:v1';
 
 function getOrCreateDeviceToken(): string {
-  const existing = window.localStorage.getItem(DEVICE_TOKEN_KEY);
+  const existing = globalThis.localStorage.getItem(DEVICE_TOKEN_KEY);
   if (existing && existing.length >= 16) return existing;
   const generated = crypto.randomUUID();
-  window.localStorage.setItem(DEVICE_TOKEN_KEY, generated);
+  globalThis.localStorage.setItem(DEVICE_TOKEN_KEY, generated);
   return generated;
 }
 
@@ -182,7 +254,7 @@ export function LiveStreamPlayer({
   roles,
   hasPremiumPlayerAccess,
   isStreamLive,
-}: LiveStreamPlayerProps) {
+}: Readonly<LiveStreamPlayerProps>) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
   const [accessChecked, setAccessChecked] = useState(false);
@@ -196,7 +268,6 @@ export function LiveStreamPlayer({
 
   const [playbackUrl, setPlaybackUrl] = useState('');
   const [playbackLoading, setPlaybackLoading] = useState(false);
-  const [playerReady, setPlayerReady] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [playerRestartNonce, setPlayerRestartNonce] = useState(0);
   const [recoveryAttempt, setRecoveryAttempt] = useState(0);
@@ -257,11 +328,10 @@ export function LiveStreamPlayer({
   useEffect(() => {
     if (!hasAccess || !userId) return;
     let active = true;
-    let heartbeatId: number | null = null;
+    let heartbeatId: ReturnType<typeof globalThis.setInterval> | null = null;
     let sessionIdForCleanup: string | null = null;
     let consecutiveFailures = 0;
     setPlaybackLoading(true);
-    setPlayerReady(false);
     setPlayerError(null);
     setHeartbeatFailures(0);
     const deviceToken = getOrCreateDeviceToken();
@@ -276,7 +346,7 @@ export function LiveStreamPlayer({
           body: JSON.stringify({ sessionKey }),
         }, null);
         if (!active) return;
-        setPlaybackUrl(normalizeFacebookUrl(res.playback.url));
+        setPlaybackUrl(res.playback.url);
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
 
@@ -291,7 +361,7 @@ export function LiveStreamPlayer({
             }, msUntilCap);
           }
         }
-        heartbeatId = window.setInterval(() => {
+        heartbeatId = globalThis.setInterval(() => {
           void apiFetch(`/api/streams/${game.id}/session/heartbeat`, {
             method: 'POST',
             body: JSON.stringify({ sessionId: res.session.id }),
@@ -680,14 +750,14 @@ export function LiveStreamPlayer({
                 {
                   method: 'POST',
                   body: JSON.stringify({
-                    successUrl: `${window.location.origin}/live?access=1`,
-                    cancelUrl: `${window.location.origin}/live`,
+                    successUrl: `${globalThis.location.origin}/live?access=1`,
+                    cancelUrl: `${globalThis.location.origin}/live`,
                     captchaToken: await resolveToken(),
                   }),
                 },
                 null,
               );
-              if (res.url) window.location.href = res.url;
+              if (res.url) globalThis.location.href = res.url;
             } catch {
               toast.error('Could not start checkout. Please try again.');
             } finally {

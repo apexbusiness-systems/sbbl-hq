@@ -6,6 +6,12 @@ import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
 import { signSyncPacket, type SyncPacket } from "@/lib/sync-packets";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
+  mergeBeaconIntoAggregate,
+  parseBeaconPayload,
+  toHealthReport,
+  type AggregatedHealth,
+} from "@/lib/stream/streamforge";
+import {
   handlePublicConfig as _handlePublicConfig,
   handlePublicHome as _handlePublicHome,
   handlePublicSchedule as _handlePublicSchedule,
@@ -1925,33 +1931,26 @@ const handlePublicSchedule = _handlePublicSchedule;
 const handlePublicPotg = _handlePublicPotg;
 
 // Ops List handlers
-function requireSuperAdmin(req: Request) {
-  const userId = requireAuth(req);
-  const roles = req.headers.get('x-sbbl-roles-verified')?.split(',') ?? [];
-  if (!roles.includes('super_admin')) throw new Error('forbidden');
-  return userId;
-}
-
 async function handleOpsListTeams({ req, admin }: HandlerCtx) {
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const { data, error } = await admin.from('teams').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
 async function handleOpsListPlayers({ req, admin }: HandlerCtx) {
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const { data, error } = await admin.from('players').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
 async function handleOpsListProducts({ req, admin }: HandlerCtx) {
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const { data, error } = await admin.from('products').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
 async function handleOpsListEvents({ req, admin }: HandlerCtx) {
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const { data, error } = await admin.from('league_events').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
@@ -1960,7 +1959,7 @@ async function handleOpsListEvents({ req, admin }: HandlerCtx) {
 // Ops Edit (Patch) handlers
 async function handleOpsPatch(table: string, req: Request, admin: import("@supabase/supabase-js").SupabaseClient, params: Record<string, string>) {
   await ensureMutation(req, { req, admin, params } as unknown as HandlerCtx);
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const id = params.id;
   if (!id) throw new Error('Missing ID');
   const body = await req.json().catch(() => null);
@@ -1989,7 +1988,7 @@ async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch(
 // Ops Delete (Archive) handlers
 async function handleOpsDelete(table: string, req: Request, admin: import("@supabase/supabase-js").SupabaseClient, params: Record<string, string>) {
   await ensureMutation(req, { req, admin, params } as unknown as HandlerCtx);
-  requireSuperAdmin(req);
+  await requireSuperAdminSession(req, admin);
   const id = params.id;
   if (!id) throw new Error('Missing ID');
 
@@ -2012,6 +2011,167 @@ async function handleOpsDeleteTeams(ctx: HandlerCtx) { return handleOpsDelete('t
 async function handleOpsDeletePlayers(ctx: HandlerCtx) { return handleOpsDelete('players', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete('products', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('league_events', ctx.req, ctx.admin, ctx.params); }
+
+// ── Media Editor (Admin) ──────────────────────────────────────────────────
+// Super-admin CRUD over media_publications rows (all statuses). Public reads
+// continue to filter on status='published' via handlePublicMedia; this admin
+// surface is the only way to edit title/status/league once a publication has
+// been projected from the ingest pipeline.
+
+const MEDIA_PUBLICATION_STATUSES = ['draft', 'scheduled', 'published', 'archived'] as const;
+type MediaPublicationStatus = typeof MEDIA_PUBLICATION_STATUSES[number];
+const isMediaPublicationStatus = (v: unknown): v is MediaPublicationStatus =>
+  typeof v === 'string' && (MEDIA_PUBLICATION_STATUSES as readonly string[]).includes(v);
+
+async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
+  await requireSuperAdminSession(req, admin);
+  const url = new URL(req.url);
+  const statusFilter = url.searchParams.get('status');
+  const surfaceFilter = url.searchParams.get('surface');
+  const leagueFilter = url.searchParams.get('leagueId');
+  const limitParam = Number(url.searchParams.get('limit') ?? '100');
+  const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 100, 1), 200);
+
+  let query = admin
+    .from('media_publications')
+    .select(
+      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,league_id,render_payload,' +
+      'media_assets!inner(id,metadata,created_at),' +
+      'leagues:leagues!league_id(id,code,name)'
+    )
+    .order('sort_at', { ascending: false })
+    .limit(limit);
+
+  if (statusFilter && isMediaPublicationStatus(statusFilter)) {
+    query = query.eq('status', statusFilter);
+  }
+  if (surfaceFilter) query = query.eq('surface', surfaceFilter);
+  if (leagueFilter) query = query.eq('league_id', leagueFilter);
+
+  const { data, error } = await query;
+  if (error) throw new Error(error.message);
+
+  const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((raw) => {
+    const asset = (raw.media_assets as Record<string, unknown> | null) ?? {};
+    const assetMeta = (asset.metadata as Record<string, unknown> | null) ?? {};
+    const payload = (raw.render_payload as Record<string, unknown> | null) ?? {};
+    const leagueRow = (raw.leagues as Record<string, unknown> | null) ?? {};
+    const thumbnail = String(
+      payload.thumbnail ?? payload.image_url ?? assetMeta.thumbnail ?? assetMeta.image_url ?? ''
+    );
+    const type = String(payload.type ?? assetMeta.type ?? 'poster');
+    return {
+      id: String(raw.id),
+      mediaAssetId: String(raw.media_asset_id ?? asset.id ?? ''),
+      surface: String(raw.surface ?? ''),
+      title: String(raw.title ?? ''),
+      subtitle: raw.subtitle == null ? null : String(raw.subtitle),
+      status: String(raw.status ?? ''),
+      publishedAt: raw.published_at == null ? null : String(raw.published_at),
+      scheduledAt: raw.scheduled_at == null ? null : String(raw.scheduled_at),
+      sortAt: raw.sort_at == null ? null : String(raw.sort_at),
+      leagueId: raw.league_id == null ? null : String(raw.league_id),
+      leagueCode: leagueRow.code == null ? null : String(leagueRow.code),
+      leagueName: leagueRow.name == null ? null : String(leagueRow.name),
+      type,
+      thumbnail,
+      createdAt: asset.created_at == null ? null : String(asset.created_at),
+    };
+  });
+
+  return json({ ok: true, data: rows });
+}
+
+async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const id = ctx.params.id;
+  if (!id) return json({ ok: false, error: 'missing_id' }, 400);
+
+  const body = (await ctx.req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!body || Object.keys(body).length === 0) {
+    return json({ ok: false, error: 'empty_patch_body' }, 400);
+  }
+
+  const update: Record<string, unknown> = {};
+  if (typeof body.title === 'string' && body.title.trim().length > 0) {
+    update.title = body.title.trim();
+  }
+  if (body.subtitle === null) {
+    update.subtitle = null;
+  } else if (typeof body.subtitle === 'string') {
+    update.subtitle = body.subtitle;
+  }
+  if (body.status !== undefined) {
+    if (!isMediaPublicationStatus(body.status)) {
+      return json({ ok: false, error: `invalid_status (allowed: ${MEDIA_PUBLICATION_STATUSES.join(',')})` }, 400);
+    }
+    update.status = body.status;
+    // Keep published_at consistent with status transitions.
+    if (body.status === 'published') {
+      update.published_at = new Date().toISOString();
+    } else if (body.status === 'archived' || body.status === 'draft') {
+      update.published_at = null;
+    }
+  }
+  if (body.leagueId === null) {
+    update.league_id = null;
+  } else if (typeof body.leagueId === 'string' && body.leagueId.length > 0) {
+    update.league_id = body.leagueId;
+  }
+  if (typeof body.sortAt === 'string' && body.sortAt.length > 0) {
+    update.sort_at = body.sortAt;
+  }
+
+  if (Object.keys(update).length === 0) {
+    return json({ ok: false, error: 'no_editable_fields' }, 400);
+  }
+
+  const { data, error } = await ctx.admin
+    .from('media_publications')
+    .update(update)
+    .eq('id', id)
+    .select('id,title,subtitle,status,league_id,published_at,sort_at')
+    .single();
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_patch_media_publication',
+    ref_type: 'media_publications',
+    ref_id: id,
+    payload: update,
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, data });
+}
+
+async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const id = ctx.params.id;
+  if (!id) return json({ ok: false, error: 'missing_id' }, 400);
+
+  const { data, error } = await ctx.admin
+    .from('media_publications')
+    .update({ status: 'archived', published_at: null })
+    .eq('id', id)
+    .select('id,status')
+    .single();
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_archive_media_publication',
+    ref_type: 'media_publications',
+    ref_id: id,
+    payload: {},
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, data });
+}
 
 
 // handlePublicConfig — extracted to src/worker/routes/public.ts
@@ -2834,7 +2994,7 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
 
 const REACTIONS_CACHE_TTL_S = 5;
 
-async function handleStreamReactions({ req, admin }: HandlerCtx) {
+export async function handleStreamReactions({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   // Support /api/streams/:gameId/reactions and /api/streams/reactions?gameId=...
   const pathGameId = req.url.match(/\/api\/streams\/([^/]+)\/reactions/)?.[1];
@@ -2905,6 +3065,121 @@ async function handleStreamReact(ctx: HandlerCtx) {
   return json({ ok: true, gameId: pathGameId, type: reactionType });
 }
 
+// ── STREAM QoE TELEMETRY ─────────────────────────────────────────────────────
+//
+// Proprietary StreamForge edge-aggregated broadcast health layer.
+//
+// Architecture
+// ────────────
+//  POST /api/streams/:gameId/qoe        — ingest a single client beacon
+//  GET  /api/streams/:gameId/qoe/health — read the rolling health report
+//
+// Both endpoints are public (no auth required) because:
+//  a) sendBeacon cannot set Authorization headers
+//  b) health data carries no PII (session id hashes only)
+//
+// Aggregation uses Cloudflare Cache API (zero cost, no new infra). Each
+// colo maintains an independent aggregate; for our sub-200-viewer target
+// this is an accurate per-region signal. Extend to Durable Objects only
+// when global exact aggregation is a hard requirement.
+
+const QOE_CACHE_TTL_S = 30;
+
+function qoeCacheUrl(gameId: string): Request {
+  return new Request(
+    `https://sbbl-hq.icu/__cache/qoe/${encodeURIComponent(gameId)}`,
+  );
+}
+
+/**
+ * POST /api/streams/:gameId/qoe
+ * Accept a StreamForge QoE beacon from a viewer. Validates, rate-limits,
+ * and merges into the per-colo rolling aggregate. Returns 204 on success.
+ *
+ * Rate limit: 10 beacons / 60 s per IP — blocks floods without touching DB.
+ */
+async function handleStreamQoeBeacon(ctx: HandlerCtx): Promise<Response> {
+  const gameId = ctx.params.gameId ?? null;
+  if (!gameId || gameId.length > 64) {
+    return json({ ok: false, error: "invalid_game_id" }, 400);
+  }
+
+  const clientIp = getClientIP(ctx.req);
+  if (!enforceInMemoryRateLimit(`qoe:${clientIp}`, 10, 60_000)) {
+    return new Response(null, { status: 429 });
+  }
+
+  const rawBody = await ctx.req.json().catch(() => null);
+  const beacon = parseBeaconPayload(rawBody);
+  if (!beacon) {
+    return json({ ok: false, error: "invalid_payload" }, 400);
+  }
+  // Prevent a client from poisoning a different game's aggregate.
+  if (beacon.gameId !== gameId) {
+    return json({ ok: false, error: "game_id_mismatch" }, 400);
+  }
+
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = qoeCacheUrl(gameId);
+
+  let existing: AggregatedHealth | null = null;
+  try {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) {
+      const data = await hit.json().catch(() => null);
+      if (data && typeof data === "object") existing = data as AggregatedHealth;
+    }
+  } catch {
+    /* cache miss — start fresh */
+  }
+
+  const updated = mergeBeaconIntoAggregate(existing, beacon);
+  const aggregateRes = new Response(JSON.stringify(updated), {
+    status: 200,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "Cache-Control": `public, max-age=${QOE_CACHE_TTL_S}`,
+    },
+  });
+  cfCaches.default.put(cacheKey, aggregateRes).catch(() => {});
+
+  return new Response(null, { status: 204 });
+}
+
+/**
+ * GET /api/streams/:gameId/qoe/health
+ * Return a human-readable HealthReport from the current rolling aggregate.
+ * Public, cached 30 s. Returns { ok: true, report: null } if no beacons yet.
+ */
+async function handleStreamQoeHealth(ctx: HandlerCtx): Promise<Response> {
+  const gameId = ctx.params.gameId ?? null;
+  if (!gameId || gameId.length > 64) {
+    return json({ ok: false, error: "invalid_game_id" }, 400);
+  }
+
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = qoeCacheUrl(gameId);
+
+  let report = null;
+  try {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) {
+      const agg = await hit.json().catch(() => null);
+      if (agg && typeof agg === "object") {
+        report = toHealthReport(agg as AggregatedHealth);
+      }
+    }
+  } catch {
+    /* cache miss */
+  }
+
+  return json(
+    { ok: true, gameId, report },
+    200,
+    { "Cache-Control": `public, max-age=${QOE_CACHE_TTL_S}` },
+  );
+}
+
 // ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
 
 async function handleStreamAccess({ req, admin }: HandlerCtx) {
@@ -2945,11 +3220,15 @@ async function createOrRefreshPlaybackSession(
   // lost" banner.  Super admin bypasses this — they may monitor the stream
   // from multiple devices simultaneously (ops console + personal device).
   if (!options.skipDisplace) {
-    await ctx.admin
+    // PostgREST: .eq("col", null) generates ?col=eq.null which the parser
+    // tries to cast to the column type (uuid here) and 500s. Use .is() for
+    // null comparisons (broadcast alias has gameId=null).
+    let displaceQ = ctx.admin
       .from("stream_access_sessions")
       .update({ status: "displaced", expires_at: nowIso, updated_by: userId })
-      .eq("user_id", userId)
-      .eq("game_id", gameId)
+      .eq("user_id", userId);
+    displaceQ = gameId === null ? displaceQ.is("game_id", null) : displaceQ.eq("game_id", gameId);
+    await displaceQ
       .eq("status", "active")
       .neq("idempotency_key", sessionKey);
   }
@@ -3115,13 +3394,15 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
 
   // Authoritative ACK gate: confirm the session exists, belongs to the caller,
   // is scoped to the same game, and is still active before we acknowledge.
-  const sessionRes = await ctx.admin
+  // PostgREST .eq() with JS null serializes to ?col=eq.null which fails for
+  // uuid columns; use .is() for null (broadcast alias passes gameId=null).
+  let lookupQ = ctx.admin
     .from("stream_access_sessions")
     .select("id,status,max_expires_at")
     .eq("id", body.sessionId)
-    .eq("user_id", userId)
-    .eq("game_id", gameId)
-    .maybeSingle();
+    .eq("user_id", userId);
+  lookupQ = gameId === null ? lookupQ.is("game_id", null) : lookupQ.eq("game_id", gameId);
+  const sessionRes = await lookupQ.maybeSingle();
   if (sessionRes.error) throw new Error(sessionRes.error.message);
   if (!sessionRes.data) {
     return json({ ok: false, error: "session_not_found" }, 404);
@@ -3132,7 +3413,7 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   // Hard 6-hour cap guard: if the authoritative max expiry is reached, end
   // the session immediately and reject the heartbeat.
   if (sessionRes.data.max_expires_at && now >= String(sessionRes.data.max_expires_at)) {
-    await ctx.admin
+    let capQ = ctx.admin
       .from("stream_access_sessions")
       .update({
         status: "ended",
@@ -3141,8 +3422,9 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
         updated_by: userId,
       })
       .eq("id", body.sessionId)
-      .eq("user_id", userId)
-      .eq("game_id", gameId);
+      .eq("user_id", userId);
+    capQ = gameId === null ? capQ.is("game_id", null) : capQ.eq("game_id", gameId);
+    await capQ;
     return json({ ok: false, error: "session_expired" }, 403);
   }
 
@@ -3179,7 +3461,9 @@ async function handleStreamSessionEnd(ctx: HandlerCtx) {
     sessionId?: string;
   } | null;
   if (!body?.sessionId) return json({ ok: false, error: "session_id_required" }, 400);
-  const endRes = await ctx.admin
+  // PostgREST .eq() with JS null serializes to ?col=eq.null which fails for
+  // uuid columns. Use .is() for null (broadcast alias passes gameId=null).
+  let endQ = ctx.admin
     .from("stream_access_sessions")
     .update({
       status: "ended",
@@ -3188,27 +3472,31 @@ async function handleStreamSessionEnd(ctx: HandlerCtx) {
       updated_by: userId,
     })
     .eq("id", body.sessionId)
-    .eq("user_id", userId)
-    .eq("game_id", gameId)
-    .select("id")
-    .maybeSingle();
+    .eq("user_id", userId);
+  endQ = gameId === null ? endQ.is("game_id", null) : endQ.eq("game_id", gameId);
+  const endRes = await endQ.select("id").maybeSingle();
   if (endRes.error) throw new Error(endRes.error.message);
   return json({ ok: true, ended: Boolean(endRes.data) });
 }
 
-async function handleListComments(ctx: HandlerCtx) {
+export async function handleListComments(ctx: HandlerCtx) {
   const gameId = ctx.params.gameId;
   if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
   const url = new URL(ctx.req.url);
   const limit = parseCommentLimit(url);
   const before = url.searchParams.get("before");
+  const wantsHidden = url.searchParams.get("includeHidden") === "1";
+  const roles = getRolesFromVerifiedSession(ctx.req);
+  const canViewHidden = roles.includes("league_admin") || roles.includes("super_admin");
   let query = ctx.admin
     .from("stream_chat_messages")
     .select("id,message,status,created_at,user_id")
     .eq("game_id", gameId)
-    .eq("status", "active")
     .order("created_at", { ascending: false })
     .limit(limit);
+  if (!(wantsHidden && canViewHidden)) {
+    query = query.eq("status", "active");
+  }
   if (before) query = query.lt("created_at", before);
   const res = await query;
   if (res.error) throw new Error(res.error.message);
@@ -3235,12 +3523,21 @@ async function handleListComments(ctx: HandlerCtx) {
       .map((row) => ({
         id: String(row.id),
         message: String(row.message),
+        status: String(row.status) === "hidden" ? "hidden" : "active",
         createdAt: String(row.created_at),
         userId: String(row.user_id),
         userDisplayName: nameByUser.get(String(row.user_id)) ?? "Fan",
       }))
       .reverse(),
   });
+}
+
+async function requireLeagueOrSuperAdmin(req: Request, admin: SupabaseClient) {
+  const session = await requireAdminSession(req, admin);
+  if (!session.roles.includes("league_admin") && !session.roles.includes("super_admin")) {
+    throw new Error("forbidden");
+  }
+  return session;
 }
 
 export async function handlePostComment(ctx: HandlerCtx) {
@@ -3286,6 +3583,44 @@ export async function handlePostComment(ctx: HandlerCtx) {
       userId: String(insert.data.user_id),
     },
   });
+}
+
+export async function handleModerateComment(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const moderator = await requireLeagueOrSuperAdmin(ctx.req, ctx.admin);
+  const gameId = ctx.params.gameId;
+  const commentId = ctx.params.commentId;
+  if (!gameId || !commentId) return json({ ok: false, error: "invalid_params" }, 400);
+  const body = (await ctx.req.json().catch(() => null)) as { action?: "hide" | "restore" } | null;
+  if (!body?.action || !["hide", "restore"].includes(body.action)) {
+    return json({ ok: false, error: "invalid_action" }, 400);
+  }
+  const nextStatus = body.action === "hide" ? "hidden" : "active";
+  const update = await ctx.admin
+    .from("stream_chat_messages")
+    .update({ status: nextStatus, updated_by: moderator.userId, updated_at: new Date().toISOString() })
+    .eq("id", commentId)
+    .eq("game_id", gameId)
+    .select("id")
+    .maybeSingle();
+  if (update.error) throw new Error(update.error.message);
+  if (!update.data) return json({ ok: false, error: "comment_not_found" }, 404);
+  return json({ ok: true, commentId, status: nextStatus });
+}
+
+export async function handleResetReactions(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  await requireLeagueOrSuperAdmin(ctx.req, ctx.admin);
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const del = await ctx.admin.from("stream_reactions").delete().eq("game_id", gameId);
+  if (del.error) throw new Error(del.error.message);
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheDelete = (cfCaches.default as { delete?: (req: Request) => Promise<boolean> }).delete;
+  if (cacheDelete) {
+    cacheDelete(new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${gameId}`)).catch(() => {});
+  }
+  return json({ ok: true, gameId, reset: true });
 }
 
 async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
@@ -3896,7 +4231,10 @@ async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
   // Poster tab projection: include event/league-wide art and promote photo assets
   // to poster cards without mutating source records.
   const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
-  const mapped = mapPublicMediaRows(rows, true).filter((row, index, list) => {
+
+  // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
+  const seen = new Set<string>();
+  const mapped = mapPublicMediaRows(rows, true).filter((row, index) => {
     const raw = rows[index] ?? {};
     const payload = (raw.render_payload ?? {}) as Record<string, unknown>;
     const metadata = (((raw.media_assets as Record<string, unknown> | null) ?? {}).metadata ?? {}) as Record<string, unknown>;
@@ -3908,7 +4246,9 @@ async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
     if (surface === "potg" || teamName.length > 0) return false;
 
     // Idempotent response: ensure each id appears once even if source rows overlap.
-    return list.findIndex((candidate) => candidate.id === row.id) === index;
+    if (seen.has(row.id)) return false;
+    seen.add(row.id);
+    return true;
   });
 
   return json({ ok: true, data: mapped }, 200, {
@@ -4180,6 +4520,16 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     path: "/api/streams/:gameId/comments",
     handler: handlePostComment,
   },
+  {
+    method: "POST",
+    path: "/ops/streams/:gameId/comments/:commentId",
+    handler: handleModerateComment,
+  },
+  {
+    method: "POST",
+    path: "/ops/streams/:gameId/reactions/reset",
+    handler: handleResetReactions,
+  },
   { method: "GET", path: "/api/cart", handler: handleGetCart },
   { method: "POST", path: "/api/cart/items", handler: handleAddCartItem },
   {
@@ -4374,15 +4724,21 @@ function addSecurityHeaders(res: Response): Response {
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
   // Facebook + YouTube + Twitch domains required for /live page stream embeds.
+  // facebook.com/plugins/video.php loads scripts and frames from *.fbcdn.net
+  // and staticxx.facebook.com — both must be allow-listed broadly across
+  // script-src, frame-src, and child-src for the Live embed to render.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://assets.twitch.tv; " +
-    "style-src 'self' 'unsafe-inline' https://*.facebook.com; " +
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://*.fbcdn.net https://assets.twitch.tv; " +
+    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://*.fbcdn.net https://assets.twitch.tv; " +
+    "style-src 'self' 'unsafe-inline' https://*.facebook.com https://*.fbcdn.net; " +
     "img-src 'self' data: blob: https:; " +
     "font-src 'self' data: https://*.facebook.com https://*.fbcdn.net; " +
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://*.facebook.com https://*.facebook.net https://graph.facebook.com https://*.fbcdn.net wss://*.facebook.com; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://*.facebook.net https://*.fbcdn.net https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "child-src https://*.facebook.com https://*.fbcdn.net https://*.facebook.net; " +
     "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.facebook.com https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
+    "worker-src 'self' blob:; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
     "form-action 'self' https://checkout.stripe.com;"
@@ -5017,7 +5373,7 @@ async function handleOpsDeleteSchedules(ctx: HandlerCtx) {
  */
 async function handleOpsBatchProducts(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const userId = requireSuperAdmin(ctx.req);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const body = await ctx.req.json().catch(() => null) as { items?: Array<{ title?: string; price?: string | number; leagueId?: string }> } | null;
   const items = body?.items ?? [];
   if (!Array.isArray(items) || items.length === 0) {
@@ -5050,7 +5406,7 @@ async function handleOpsBatchProducts(ctx: HandlerCtx) {
 // surface that needs to push an already-uploaded image into the public render layer.
 async function handleOpsMediaPublish(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  requireSuperAdmin(ctx.req);
+  await requireSuperAdminSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     title?: string;
@@ -5124,6 +5480,9 @@ routes.push(
   { method: "GET",    path: "/ops/list/players",   handler: handleOpsListPlayers },
   { method: "GET",    path: "/ops/list/products",  handler: handleOpsListProducts },
   { method: "GET",    path: "/ops/list/events",    handler: handleOpsListEvents },
+  { method: "GET",    path: "/ops/list/media",              handler: handleOpsListMediaPublications },
+  { method: "PATCH",  path: "/ops/media/publications/:id",  handler: handleOpsPatchMediaPublications },
+  { method: "DELETE", path: "/ops/media/publications/:id",  handler: handleOpsDeleteMediaPublications },
 );
 
 // ── Scores handlers ────────────────────────────────────────────────────────
