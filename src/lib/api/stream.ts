@@ -172,6 +172,35 @@ export async function postStreamComment(gameId: string, message: string, token: 
   );
 }
 
+export async function moderateStreamComment(
+  gameId: string,
+  commentId: string,
+  action: 'hide' | 'restore',
+  token: string | null,
+) {
+  return apiFetch<{ ok: boolean; commentId: string; status: 'active' | 'hidden' }>(
+    `/ops/streams/${encodeURIComponent(gameId)}/comments/${encodeURIComponent(commentId)}`,
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-comment-${commentId}-${action}`) },
+      body: JSON.stringify({ action }),
+    },
+    token,
+  );
+}
+
+export async function resetStreamReactions(gameId: string, token: string | null) {
+  return apiFetch<{ ok: boolean; gameId: string; reset: true }>(
+    `/ops/streams/${encodeURIComponent(gameId)}/reactions/reset`,
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-reactions-reset-${gameId}`) },
+      body: JSON.stringify({}),
+    },
+    token,
+  );
+}
+
 // ── Admin Config ─────────────────────────────────────────────────────────────
 
 /** Fetch full stream config — requires league_admin or higher */

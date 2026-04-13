@@ -20,7 +20,9 @@ import {
   fetchPublicStreamStatus,
   fetchStreamComments,
   generateCompCode,
+  moderateStreamComment,
   postStreamComment,
+  resetStreamReactions,
   setStreamLive,
   updateStreamConfig,
 } from '@/lib/api/stream';
@@ -388,6 +390,7 @@ const LivePage = () => {
   const { user, session, roles, needsOnboarding, loading: authLoading } = useAuth();
   const { access, config: liveAccessConfig } = useLiveAccess();
   const isSuperAdmin = roles.includes('super_admin');
+  const canModerateLive = roles.includes('super_admin') || roles.includes('league_admin');
   // Any privileged role (roster player, paid fan, or super admin) gets the
   // camera-only broadcast fallback when the admin has flipped the stream live
   // but no real live game row exists yet. Non-privileged fans still need a
@@ -615,6 +618,31 @@ const LivePage = () => {
       });
   };
 
+  const handleHideComment = (commentId: string) => {
+    if (!liveGame?.id || !session || !canModerateLive) return;
+    void moderateStreamComment(liveGame.id, commentId, 'hide', session.access_token ?? null)
+      .then(() => {
+        // Remove hidden comment locally so moderators get immediate feedback.
+        setComments((prev) => prev.filter((comment) => comment.id !== commentId));
+        toast.success('Comment hidden');
+      })
+      .catch(() => {
+        toast.error('Could not moderate comment.');
+      });
+  };
+
+  const handleResetReactions = () => {
+    if (!activeGameId || !session || !canModerateLive) return;
+    void resetStreamReactions(activeGameId, session.access_token ?? null)
+      .then(() => {
+        setReactions({ fire: 0, heart: 0, clap: 0 });
+        toast.success('Reactions reset');
+      })
+      .catch(() => {
+        toast.error('Could not reset reactions.');
+      });
+  };
+
   const sidebar = (
     <div className="space-y-4">
       {/* Featured Merch Carousel */}
@@ -759,6 +787,15 @@ const LivePage = () => {
                 <button onClick={() => postReaction('clap')} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   👏 <span className="stat-numeral">{reactions.clap}</span>
                 </button>
+                {canModerateLive && (
+                  <button
+                    onClick={handleResetReactions}
+                    disabled={!activeGameId || !session}
+                    className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 disabled:opacity-40 transition-colors"
+                  >
+                    Reset Reactions
+                  </button>
+                )}
                 <button
                   onClick={handleClip}
                   className={`panel px-3 py-2 text-xs flex items-center gap-1.5 transition-colors ${clipSaved ? 'border-primary/50 text-primary' : 'hover:border-primary/30'}`}
@@ -782,6 +819,14 @@ const LivePage = () => {
                     <div key={c.id} className="flex gap-2">
                       <span className="text-xs font-semibold shrink-0 text-primary">{c.user}</span>
                       <span className="text-xs text-foreground">{c.text}</span>
+                      {canModerateLive && (
+                        <button
+                          onClick={() => handleHideComment(c.id)}
+                          className="text-[10px] text-muted-foreground hover:text-primary"
+                        >
+                          Hide
+                        </button>
+                      )}
                     </div>
                   ))}
                   <div ref={chatEndRef} />
