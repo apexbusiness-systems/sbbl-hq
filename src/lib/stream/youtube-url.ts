@@ -48,15 +48,25 @@ export function normalizeYoutubeUrl(raw: string): { ok: true; url: string } | { 
   try {
     parsed = new URL(trimmed);
   } catch {
-    return { ok: false, error: 'Enter a valid URL (e.g. https://www.youtube.com/watch?v=VIDEO_ID).' };
+    return { ok: false, error: 'Enter a valid absolute URL (e.g. https://www.youtube.com/watch?v=VIDEO_ID).' };
   }
+
+  // Accept only web URLs so ops can use YouTube, Twitch, Vimeo, or direct
+  // HLS/MP4 links without frontend-level provider lock-in.
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+    return { ok: false, error: 'Only http(s) stream URLs are supported.' };
+  }
+
+  // If this is a YouTube URL with a valid id, normalize to canonical watch URL
+  // for stable embeds and consistency in saved config/history.
   const host = parsed.hostname.toLowerCase();
-  if (!YOUTUBE_HOSTS.has(host)) {
-    return { ok: false, error: 'Only YouTube Live URLs are allowed in baseline mode.' };
+  if (YOUTUBE_HOSTS.has(host)) {
+    const videoId = extractYoutubeVideoId(parsed);
+    if (!videoId) {
+      return { ok: false, error: 'Use a YouTube watch/live/embed/share URL with a valid video id.' };
+    }
+    return { ok: true, url: `https://www.youtube.com/watch?v=${videoId}` };
   }
-  const videoId = extractYoutubeVideoId(parsed);
-  if (!videoId) {
-    return { ok: false, error: 'Use a YouTube watch/live/embed/share URL with a valid video id.' };
-  }
-  return { ok: true, url: `https://www.youtube.com/watch?v=${videoId}` };
+
+  return { ok: true, url: parsed.toString() };
 }

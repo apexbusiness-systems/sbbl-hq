@@ -245,8 +245,8 @@ function AdminStreamOverlay({
               />
             </div>
 
-            {/* Go Live / End Stream — baseline mode enforces a valid YouTube URL
-                before going live. End Stream still works without URL edits. */}
+            {/* Go Live / End Stream — requires a valid absolute http(s) stream URL.
+                YouTube links are canonicalized; other providers are passed through. */}
             <button
               onClick={handleGoLive}
               disabled={saving}

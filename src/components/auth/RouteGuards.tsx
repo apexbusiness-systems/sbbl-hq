@@ -12,10 +12,14 @@ export function RequireAuth({ children }: { children: ReactElement }) {
 }
 
 export function RequireAdmin({ children }: { children: ReactElement }) {
-  // const { isAdmin, needsOnboarding, loading } = useAuth();
-  // Bypass admin requirement for local testing so playwright can take a screenshot!
-  // if (loading) return <div className="container py-10 text-sm text-muted-foreground">Loading access…</div>;
-  // if (needsOnboarding) return <Navigate to="/onboarding" replace />;
-  // if (!isAdmin) return <Navigate to="/" replace />;
+  const { isAdmin, needsOnboarding, loading, isSignedIn } = useAuth();
+  const bypassAdmin = import.meta.env.VITE_E2E_BYPASS_ADMIN === 'true';
+
+  if (loading) return <div className="container py-10 text-sm text-muted-foreground">Loading access…</div>;
+  // E2E bypass intentionally skips route-level auth/admin redirects so page-level fail-closed states can be asserted.
+  if (bypassAdmin) return children;
+  if (!isSignedIn) return <Navigate to="/login" replace />;
+  if (needsOnboarding) return <Navigate to="/onboarding" replace />;
+  if (!isAdmin) return <Navigate to="/" replace />;
   return children;
 }
