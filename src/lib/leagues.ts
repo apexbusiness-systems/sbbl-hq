@@ -13,6 +13,12 @@ export type LeagueIdentity = {
   order: number;
 };
 
+export const LEAGUE_SEASON_NUMBERS: Record<LeagueId, number> = {
+  sbbl: 11,
+  wbl: 3,
+  tgifbl: 1,
+};
+
 /**
  * Canonical league identity registry.
  * This is the ONLY source of league branding in the app.
@@ -72,6 +78,10 @@ export function leagueIdFromCode(code: string): LeagueId {
 
 export function leagueCodeFromId(id: LeagueId): string {
   return getLeagueConfig(id).code;
+}
+
+export function getLeagueSeasonLabel(id: LeagueId): string {
+  return `Season ${LEAGUE_SEASON_NUMBERS[id]}`;
 }
 
 const LEAGUE_STORAGE_KEY = 'sbblhq.activeLeague';

@@ -72,8 +72,10 @@ export interface Product {
 export interface MediaAsset {
   id: string;
   title: string;
+  caption?: string;
   type: 'highlight' | 'clip' | 'poster' | 'photo';
   thumbnail: string;
+  videoUrl?: string;
   leagueId: LeagueId;
   status: 'draft' | 'ready' | 'published';
   date: string;
