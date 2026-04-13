@@ -51,13 +51,13 @@ vi.mock('@/lib/api/stream', () => ({
   generateCompCode: vi.fn(async () => ({ ok: true, code: 'CODE', expiresAt: new Date().toISOString() })),
 }));
 
-describe('Live page YouTube baseline validation', () => {
+describe('Live page stream URL validation', () => {
   beforeEach(() => {
     updateStreamConfigMock.mockClear();
     setStreamLiveMock.mockClear();
   });
 
-  it('blocks non-YouTube URLs and does not submit go-live update', async () => {
+  it('blocks unsupported protocol URLs and does not submit go-live update', async () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
@@ -71,11 +71,11 @@ describe('Live page YouTube baseline validation', () => {
     });
     fireEvent.click(screen.getByTitle('Stream controls'));
     const input = await screen.findByPlaceholderText('https://www.youtube.com/watch?v=...');
-    fireEvent.change(input, { target: { value: 'https://vimeo.com/12345' } });
+    fireEvent.change(input, { target: { value: 'rtmp://example.com/live/12345' } });
     fireEvent.click(screen.getByRole('button', { name: 'Go Live' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Only YouTube Live URLs are allowed in baseline mode.')).toBeInTheDocument();
+      expect(screen.getByText('Only http(s) stream URLs are supported.')).toBeInTheDocument();
     });
     expect(updateStreamConfigMock).not.toHaveBeenCalled();
     expect(setStreamLiveMock).not.toHaveBeenCalled();
