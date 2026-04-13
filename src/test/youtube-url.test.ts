@@ -21,15 +21,19 @@ describe('normalizeYoutubeUrl', () => {
     });
   });
 
-  it('rejects malformed/empty/non-youtube URLs', () => {
+  it('rejects malformed/empty/unsupported protocol URLs', () => {
     expect(normalizeYoutubeUrl('')).toEqual({ ok: false, error: 'Stream URL is required to go live.' });
     expect(normalizeYoutubeUrl('not-a-url')).toEqual({
       ok: false,
-      error: 'Enter a valid URL (e.g. https://www.youtube.com/watch?v=VIDEO_ID).',
+      error: 'Enter a valid absolute URL (e.g. https://www.youtube.com/watch?v=VIDEO_ID).',
     });
     expect(normalizeYoutubeUrl('https://vimeo.com/12345')).toEqual({
+      ok: true,
+      url: 'https://vimeo.com/12345',
+    });
+    expect(normalizeYoutubeUrl('rtmp://example.com/live/stream')).toEqual({
       ok: false,
-      error: 'Only YouTube Live URLs are allowed in baseline mode.',
+      error: 'Only http(s) stream URLs are supported.',
     });
     expect(normalizeYoutubeUrl('https://youtube.com/watch')).toEqual({
       ok: false,
