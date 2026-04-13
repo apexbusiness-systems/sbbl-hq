@@ -3,7 +3,7 @@
  * Renders the live-stream broadcast area with a multi-layer access gate:
  *
  *   Unregistered (no auth.user)           → registration wall → /register?redirect=/live
- *   player role                           → free access always → Switcher Studio player
+ *   player role                           → free access always → branded app player
  *   paid_fan | super_admin                → free access + invite generator → player
  *   fan with PPV entitlement (Stripe)     → access → player
  *   fan with redeemed invite              → access → player
@@ -12,12 +12,13 @@
  * IP locking and single-use enforcement happen server-side in /api/invite/redeem.
  * No role/entitlement data is trusted from the client.
  *
- * Uses Switcher Studio's script-based embed player.
+ * Uses a unified ReactPlayer surface controlled by app-level RBAC gates.
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
+import { Lock, Play, Ticket, Copy, Check, KeyRound, Pause, Volume2, VolumeX, Maximize } from 'lucide-react';
+import ReactPlayer from 'react-player';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
@@ -126,57 +127,91 @@ function AccessCodeRedeem({
   );
 }
 
-/**
- * SwitcherPlayer
- * Renders the Switcher Studio embed via their script-based API.
- * Script is injected once on mount and cleaned up on unmount.
- * onReady fires after the embed script loads — no Facebook SDK,
- * no env vars, no iframe hotfix required.
- */
-function SwitcherPlayer({
+function UnifiedReactPlayer({
+  url,
   onReady,
-  playerReady,
+  onPlay,
+  onError,
 }: Readonly<{
+  url: string;
   onReady: () => void;
-  playerReady: boolean;
+  onPlay: () => void;
+  onError: (message: string) => void;
 }>) {
-  useEffect(() => {
-    const SCRIPT_ID = 'switcher-embed-js';
-    if (!document.getElementById(SCRIPT_ID)) {
-      const script = document.createElement('script');
-      script.id = SCRIPT_ID;
-      script.src = 'https://player.switcherstudio.com/embed.js';
-      script.async = true;
-      script.onload = onReady;
-      document.body.appendChild(script);
-    } else {
-      // Script already present from a prior mount — fire onReady immediately
-      onReady();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [playing, setPlaying] = useState(true);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(0.8);
+
+  const handleFullscreen = async () => {
+    const host = containerRef.current;
+    if (!host) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await host.requestFullscreen();
+      }
+    } catch (err) {
+      onError(`Fullscreen unavailable: ${err instanceof Error ? err.message : String(err)}`);
     }
-    return () => {
-      const existing = document.getElementById(SCRIPT_ID);
-      if (existing) existing.remove();
-    };
-  // onReady is stable (defined inline in JSX) — intentionally excluded
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
 
   return (
-    <div className="absolute inset-0 pointer-events-auto">
-      {!playerReady && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black z-10">
-          <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-        </div>
-      )}
-      <div
-        className="dff402f7-5be0-4890-b831-95c5b63ddb42"
-        data-testid="switcher-player-host"
-        data-hostname="https://player.switcherstudio.com"
-        data-path="/embed"
-        data-catalogid="4f5ea6d3-17fd-449c-9c0d-09996f4805c8"
-        data-location="iframe"
-        style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+    <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="unified-react-player">
+      <ReactPlayer
+        url={url}
+        width="100%"
+        height="100%"
+        playing={playing}
+        controls={false}
+        muted={muted}
+        volume={volume}
+        onReady={onReady}
+        onPlay={() => {
+          setPlaying(true);
+          onPlay();
+        }}
+        onPause={() => setPlaying(false)}
+        onError={(err) => onError(`Playback failed: ${err instanceof Error ? err.message : 'provider rejected stream URL'}`)}
+        config={{
+          youtube: {
+            playerVars: {
+              modestbranding: 1,
+              rel: 0,
+              iv_load_policy: 3,
+              controls: 0,
+              fs: 0,
+            },
+          },
+        }}
       />
+      <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm">
+        <button type="button" className="p-2 rounded hover:bg-white/10 text-white" aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
+          {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+        </button>
+        <button type="button" className="p-2 rounded hover:bg-white/10 text-white" aria-label={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted(v => !v)}>
+          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+        </button>
+        <input
+          aria-label="Volume"
+          type="range"
+          min={0}
+          max={1}
+          step={0.05}
+          value={volume}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            setMuted(next === 0);
+            setVolume(next);
+          }}
+          className="w-24 accent-amber-500"
+        />
+        <div className="flex-1" />
+        <button type="button" className="p-2 rounded hover:bg-white/10 text-white" aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
+          <Maximize className="w-4 h-4" />
+        </button>
+      </div>
     </div>
   );
 }
@@ -227,7 +262,6 @@ export function LiveStreamPlayer({
 
   const [playbackUrl, setPlaybackUrl] = useState('');
   const [playbackLoading, setPlaybackLoading] = useState(false);
-  const [playerReady, setPlayerReady] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
@@ -282,7 +316,6 @@ export function LiveStreamPlayer({
     let sessionIdForCleanup: string | null = null;
     let consecutiveFailures = 0;
     setPlaybackLoading(true);
-    setPlayerReady(false);
     setPlayerError(null);
     setHeartbeatFailures(0);
     const deviceToken = getOrCreateDeviceToken();
@@ -423,20 +456,24 @@ export function LiveStreamPlayer({
             <p className="text-sm text-white/80 font-medium mb-1">Stream Unavailable</p>
             <p className="text-xs text-white/50 mb-4">{playerError}</p>
             <button
-              onClick={() => { setPlayerError(null); setPlayerReady(false); }}
+              onClick={() => { setPlayerError(null); }}
               className="px-4 py-2 text-xs font-display font-bold uppercase tracking-wider bg-amber-500 text-black rounded hover:bg-amber-400 transition-colors"
             >
               Retry
             </button>
           </div>
         ) : playbackUrl ? (
-          <SwitcherPlayer
+          <UnifiedReactPlayer
+            url={playbackUrl}
             onReady={() => {
-              setPlayerReady(true);
-              sf.reportEvent('playing');
+              sf.reportEvent('play');
               sf.recordSuccess();
             }}
-            playerReady={playerReady}
+            onPlay={() => sf.reportEvent('playing')}
+            onError={(message) => {
+              setPlayerError(message);
+              sf.recordFailure();
+            }}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3">

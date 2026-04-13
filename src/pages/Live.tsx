@@ -20,10 +20,13 @@ import {
   fetchPublicStreamStatus,
   fetchStreamComments,
   generateCompCode,
+  moderateStreamComment,
   postStreamComment,
+  resetStreamReactions,
   setStreamLive,
   updateStreamConfig,
 } from '@/lib/api/stream';
+import { normalizeYoutubeUrl } from '@/lib/stream/youtube-url';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
@@ -83,17 +86,19 @@ function AdminStreamOverlay({
   const [compCode, setCompCode] = useState<string | null>(null);
   const [compExpiresAt, setCompExpiresAt] = useState<string | null>(null);
   const [compCopied, setCompCopied] = useState(false);
+  const [streamUrlError, setStreamUrlError] = useState<string | null>(null);
 
   const handleGenerateCompCode = async () => {
     const gameId = activeGameId ?? 'broadcast';
     setCompGenerating(true);
     try {
+      const token = await getAuthToken();
       const hours = Number(compHours);
       const expiresInHours = Number.isFinite(hours) && hours > 0 ? Math.min(168, hours) : 24;
       const res = await generateCompCode(
         gameId,
         { note: compNote.trim() || undefined, expiresInHours },
-        null,
+        token,
       );
       if (res.ok) {
         setCompCode(res.code);
@@ -127,8 +132,15 @@ function AdminStreamOverlay({
     setSaving(true);
     try {
       const token = await getAuthToken();
+      const normalized = nextLive ? normalizeYoutubeUrl(customStreamUrl) : null;
+      if (nextLive && (!normalized || normalized.ok === false)) {
+        setStreamUrlError(normalized?.ok === false ? normalized.error : 'Invalid stream URL.');
+        setSaving(false);
+        return;
+      }
+      if (streamUrlError) setStreamUrlError(null);
       // Step 1: Save config (URL + title)
-      await updateStreamConfig({ collectionId: customStreamUrl, title: streamTitle }, token);
+      await updateStreamConfig({ collectionId: normalized?.ok ? normalized.url : customStreamUrl, title: streamTitle }, token);
       // Step 2: Toggle live status — if this fails, config is saved but
       // stream state is unchanged. Admin sees the error and can retry
       // the toggle without re-entering the URL.
@@ -209,10 +221,16 @@ function AdminStreamOverlay({
               <input
                 type="text"
                 value={customStreamUrl}
-                onChange={e => setCustomStreamUrl(e.target.value)}
+                onChange={e => {
+                  setCustomStreamUrl(e.target.value);
+                  if (streamUrlError) setStreamUrlError(null);
+                }}
                 className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50"
-                placeholder="YouTube, Twitch, or direct URL…"
+                placeholder="https://www.youtube.com/watch?v=..."
               />
+              {streamUrlError && (
+                <p className="mt-1 text-[10px] text-red-300">{streamUrlError}</p>
+              )}
             </div>
 
             {/* Stream Title */}
@@ -227,9 +245,8 @@ function AdminStreamOverlay({
               />
             </div>
 
-            {/* Go Live / End Stream — super admin can toggle live at any time,
-                even without a URL configured yet. The player handles the
-                "no URL configured" state gracefully. */}
+            {/* Go Live / End Stream — baseline mode enforces a valid YouTube URL
+                before going live. End Stream still works without URL edits. */}
             <button
               onClick={handleGoLive}
               disabled={saving}
@@ -374,6 +391,7 @@ const LivePage = () => {
   const { user, session, roles, needsOnboarding, loading: authLoading } = useAuth();
   const { access, config: liveAccessConfig } = useLiveAccess();
   const isSuperAdmin = roles.includes('super_admin');
+  const canModerateLive = roles.includes('super_admin') || roles.includes('league_admin');
   // Any privileged role (roster player, paid fan, or super admin) gets the
   // camera-only broadcast fallback when the admin has flipped the stream live
   // but no real live game row exists yet. Non-privileged fans still need a
@@ -440,7 +458,7 @@ const LivePage = () => {
     }
   }, []);
 
-  const [comments, setComments] = useState<Array<{ id: string; user: string; text: string }>>([]);
+  const [comments, setComments] = useState<Array<{ id: string; user: string; text: string; status: 'active' | 'hidden' }>>([]);
   const [chatInput, setChatInput] = useState('');
 
   // ── Real reactions (persisted + Realtime-broadcast) ──────────────────────
@@ -531,12 +549,16 @@ const LivePage = () => {
     let active = true;
     const fetchComments = async () => {
       try {
-        const res = await fetchStreamComments(liveGame.id, 60);
+        const res = await fetchStreamComments(liveGame.id, 60, {
+          includeHidden: canModerateLive,
+          token: session?.access_token ?? null,
+        });
         if (!active) return;
         setComments(res.comments.map((comment) => ({
           id: comment.id,
           user: comment.userDisplayName ?? 'Fan',
           text: comment.message,
+          status: comment.status ?? 'active',
         })));
       } catch {
         // non-blocking for playback UX
@@ -548,7 +570,7 @@ const LivePage = () => {
       active = false;
       clearInterval(id);
     };
-  }, [liveGame?.id]);
+  }, [canModerateLive, liveGame?.id, session?.access_token]);
 
   // All hooks above this line. Early returns must come after all hooks.
   // Fan who registered but hasn't completed onboarding must finish it before
@@ -581,12 +603,13 @@ const LivePage = () => {
   const handleSendChat = () => {
     const text = chatInput.trim();
     if (!text || !liveGame?.id || !session) return;
-    void postStreamComment(liveGame.id, text, null)
+    void postStreamComment(liveGame.id, text, session.access_token ?? null)
       .then((res) => {
         setComments(prev => [...prev, {
           id: res.comment.id,
           user: 'You',
           text: res.comment.message,
+          status: 'active',
         }]);
         setChatInput('');
         setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
@@ -598,6 +621,35 @@ const LivePage = () => {
         } else {
           toast.error('Could not send message.');
         }
+      });
+  };
+
+  const handleModerateComment = (commentId: string, action: 'hide' | 'restore') => {
+    if (!liveGame?.id || !session || !canModerateLive) return;
+    void moderateStreamComment(liveGame.id, commentId, action, session.access_token ?? null)
+      .then(() => {
+        // Keep moderated rows visible to admins so they can restore in-place.
+        setComments((prev) => prev.map((comment) => (
+          comment.id === commentId
+            ? { ...comment, status: action === 'hide' ? 'hidden' : 'active' }
+            : comment
+        )));
+        toast.success(action === 'hide' ? 'Comment hidden' : 'Comment restored');
+      })
+      .catch(() => {
+        toast.error('Could not moderate comment.');
+      });
+  };
+
+  const handleResetReactions = () => {
+    if (!activeGameId || !session || !canModerateLive) return;
+    void resetStreamReactions(activeGameId, session.access_token ?? null)
+      .then(() => {
+        setReactions({ fire: 0, heart: 0, clap: 0 });
+        toast.success('Reactions reset');
+      })
+      .catch(() => {
+        toast.error('Could not reset reactions.');
       });
   };
 
@@ -745,6 +797,15 @@ const LivePage = () => {
                 <button onClick={() => postReaction('clap')} className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 transition-colors">
                   👏 <span className="stat-numeral">{reactions.clap}</span>
                 </button>
+                {canModerateLive && (
+                  <button
+                    onClick={handleResetReactions}
+                    disabled={!activeGameId || !session}
+                    className="panel px-3 py-2 text-xs flex items-center gap-1.5 hover:border-primary/30 disabled:opacity-40 transition-colors"
+                  >
+                    Reset Reactions
+                  </button>
+                )}
                 <button
                   onClick={handleClip}
                   className={`panel px-3 py-2 text-xs flex items-center gap-1.5 transition-colors ${clipSaved ? 'border-primary/50 text-primary' : 'hover:border-primary/30'}`}
@@ -767,7 +828,15 @@ const LivePage = () => {
                   {comments.map((c) => (
                     <div key={c.id} className="flex gap-2">
                       <span className="text-xs font-semibold shrink-0 text-primary">{c.user}</span>
-                      <span className="text-xs text-foreground">{c.text}</span>
+                      <span className={`text-xs ${c.status === 'hidden' ? 'text-muted-foreground italic' : 'text-foreground'}`}>{c.text}</span>
+                      {canModerateLive && (
+                        <button
+                          onClick={() => handleModerateComment(c.id, c.status === 'hidden' ? 'restore' : 'hide')}
+                          className="text-[10px] text-muted-foreground hover:text-primary"
+                        >
+                          {c.status === 'hidden' ? 'Restore' : 'Hide'}
+                        </button>
+                      )}
                     </div>
                   ))}
                   <div ref={chatEndRef} />

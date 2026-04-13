@@ -2975,7 +2975,7 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
 
 const REACTIONS_CACHE_TTL_S = 5;
 
-async function handleStreamReactions({ req, admin }: HandlerCtx) {
+export async function handleStreamReactions({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   // Support /api/streams/:gameId/reactions and /api/streams/reactions?gameId=...
   const pathGameId = req.url.match(/\/api\/streams\/([^/]+)\/reactions/)?.[1];
@@ -3460,19 +3460,24 @@ async function handleStreamSessionEnd(ctx: HandlerCtx) {
   return json({ ok: true, ended: Boolean(endRes.data) });
 }
 
-async function handleListComments(ctx: HandlerCtx) {
+export async function handleListComments(ctx: HandlerCtx) {
   const gameId = ctx.params.gameId;
   if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
   const url = new URL(ctx.req.url);
   const limit = parseCommentLimit(url);
   const before = url.searchParams.get("before");
+  const wantsHidden = url.searchParams.get("includeHidden") === "1";
+  const roles = getRolesFromVerifiedSession(ctx.req);
+  const canViewHidden = roles.includes("league_admin") || roles.includes("super_admin");
   let query = ctx.admin
     .from("stream_chat_messages")
     .select("id,message,status,created_at,user_id")
     .eq("game_id", gameId)
-    .eq("status", "active")
     .order("created_at", { ascending: false })
     .limit(limit);
+  if (!(wantsHidden && canViewHidden)) {
+    query = query.eq("status", "active");
+  }
   if (before) query = query.lt("created_at", before);
   const res = await query;
   if (res.error) throw new Error(res.error.message);
@@ -3499,12 +3504,21 @@ async function handleListComments(ctx: HandlerCtx) {
       .map((row) => ({
         id: String(row.id),
         message: String(row.message),
+        status: String(row.status) === "hidden" ? "hidden" : "active",
         createdAt: String(row.created_at),
         userId: String(row.user_id),
         userDisplayName: nameByUser.get(String(row.user_id)) ?? "Fan",
       }))
       .reverse(),
   });
+}
+
+async function requireLeagueOrSuperAdmin(req: Request, admin: SupabaseClient) {
+  const session = await requireAdminSession(req, admin);
+  if (!session.roles.includes("league_admin") && !session.roles.includes("super_admin")) {
+    throw new Error("forbidden");
+  }
+  return session;
 }
 
 export async function handlePostComment(ctx: HandlerCtx) {
@@ -3550,6 +3564,44 @@ export async function handlePostComment(ctx: HandlerCtx) {
       userId: String(insert.data.user_id),
     },
   });
+}
+
+export async function handleModerateComment(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const moderator = await requireLeagueOrSuperAdmin(ctx.req, ctx.admin);
+  const gameId = ctx.params.gameId;
+  const commentId = ctx.params.commentId;
+  if (!gameId || !commentId) return json({ ok: false, error: "invalid_params" }, 400);
+  const body = (await ctx.req.json().catch(() => null)) as { action?: "hide" | "restore" } | null;
+  if (!body?.action || !["hide", "restore"].includes(body.action)) {
+    return json({ ok: false, error: "invalid_action" }, 400);
+  }
+  const nextStatus = body.action === "hide" ? "hidden" : "active";
+  const update = await ctx.admin
+    .from("stream_chat_messages")
+    .update({ status: nextStatus, updated_by: moderator.userId, updated_at: new Date().toISOString() })
+    .eq("id", commentId)
+    .eq("game_id", gameId)
+    .select("id")
+    .maybeSingle();
+  if (update.error) throw new Error(update.error.message);
+  if (!update.data) return json({ ok: false, error: "comment_not_found" }, 404);
+  return json({ ok: true, commentId, status: nextStatus });
+}
+
+export async function handleResetReactions(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  await requireLeagueOrSuperAdmin(ctx.req, ctx.admin);
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const del = await ctx.admin.from("stream_reactions").delete().eq("game_id", gameId);
+  if (del.error) throw new Error(del.error.message);
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheDelete = (cfCaches.default as { delete?: (req: Request) => Promise<boolean> }).delete;
+  if (cacheDelete) {
+    cacheDelete(new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${gameId}`)).catch(() => {});
+  }
+  return json({ ok: true, gameId, reset: true });
 }
 
 async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
@@ -4441,6 +4493,16 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/api/streams/:gameId/comments",
     handler: handlePostComment,
+  },
+  {
+    method: "POST",
+    path: "/ops/streams/:gameId/comments/:commentId",
+    handler: handleModerateComment,
+  },
+  {
+    method: "POST",
+    path: "/ops/streams/:gameId/reactions/reset",
+    handler: handleResetReactions,
   },
   { method: "GET", path: "/api/cart", handler: handleGetCart },
   { method: "POST", path: "/api/cart/items", handler: handleAddCartItem },
