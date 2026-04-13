@@ -87,6 +87,5 @@ export function normalizeYoutubeUrl(
 export function toPlayableYoutubeEmbedUrl(raw: string): string | null {
   const videoId = getYoutubeVideoId(raw);
   if (!videoId) return null;
-  // Use the embed endpoint explicitly; this avoids provider-level /live URL parsing issues.
-  return `https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0&modestbranding=1`;
+  return `https://www.youtube.com/watch?v=${videoId}`;
 }
