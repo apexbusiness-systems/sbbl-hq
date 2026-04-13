@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LivePage from '@/pages/Live';
 
 const { updateStreamConfigMock, setStreamLiveMock } = vi.hoisted(() => ({
@@ -52,6 +52,11 @@ vi.mock('@/lib/api/stream', () => ({
 }));
 
 describe('Live page YouTube baseline validation', () => {
+  beforeEach(() => {
+    updateStreamConfigMock.mockClear();
+    setStreamLiveMock.mockClear();
+  });
+
   it('blocks non-YouTube URLs and does not submit go-live update', async () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
@@ -74,5 +79,31 @@ describe('Live page YouTube baseline validation', () => {
     });
     expect(updateStreamConfigMock).not.toHaveBeenCalled();
     expect(setStreamLiveMock).not.toHaveBeenCalled();
+  });
+
+  it('normalizes valid YouTube URLs before config save and go-live toggle', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <LivePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Stream controls')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTitle('Stream controls'));
+    const input = await screen.findByPlaceholderText('https://www.youtube.com/watch?v=...');
+    fireEvent.change(input, { target: { value: 'https://youtu.be/abc123def45?t=5' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Go Live' }));
+
+    await waitFor(() => {
+      expect(updateStreamConfigMock).toHaveBeenCalledWith(
+        { collectionId: 'https://www.youtube.com/watch?v=abc123def45', title: 'Camera Feed' },
+        null,
+      );
+      expect(setStreamLiveMock).toHaveBeenCalledWith(true, null);
+    });
   });
 });

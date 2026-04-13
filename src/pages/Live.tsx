@@ -242,9 +242,8 @@ function AdminStreamOverlay({
               />
             </div>
 
-            {/* Go Live / End Stream — super admin can toggle live at any time,
-                even without a URL configured yet. The player handles the
-                "no URL configured" state gracefully. */}
+            {/* Go Live / End Stream — baseline mode enforces a valid YouTube URL
+                before going live. End Stream still works without URL edits. */}
             <button
               onClick={handleGoLive}
               disabled={saving}
