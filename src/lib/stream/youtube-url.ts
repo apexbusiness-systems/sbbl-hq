@@ -50,7 +50,14 @@ export function isYoutubeUrl(raw: string): boolean {
   }
 }
 
-export function normalizeYoutubeUrl(raw: string): { ok: true; url: string } | { ok: false; error: string } {
+type NormalizeOptions = {
+  youtubeOnly?: boolean;
+};
+
+export function normalizeYoutubeUrl(
+  raw: string,
+  options: NormalizeOptions = {},
+): { ok: true; url: string } | { ok: false; error: string } {
   const trimmed = raw.trim();
   if (!trimmed) return { ok: false, error: 'Stream URL is required to go live.' };
   let parsed: URL;
