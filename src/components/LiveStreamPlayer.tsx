@@ -17,12 +17,12 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Lock, Play, Ticket, Copy, Check, KeyRound, Pause, Volume2, VolumeX, Maximize } from 'lucide-react';
+import { Lock, Play, Pause, Ticket, Copy, Check, KeyRound, Volume2, VolumeX, Maximize } from 'lucide-react';
 import ReactPlayer from 'react-player';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
-import { toPlayableYoutubeEmbedUrl } from '@/lib/stream/youtube-url';
+import { isYoutubeUrl, toPlayableYoutubeEmbedUrl } from '@/lib/stream/youtube-url';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { useStreamForge } from '@/hooks/use-streamforge';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
@@ -128,6 +128,40 @@ function AccessCodeRedeem({
   );
 }
 
+/** Maps YouTube IFrame API numeric error codes to human-readable messages. */
+const YOUTUBE_ERROR_MESSAGES: Partial<Record<number, string>> = {
+  2:   'Invalid stream URL — check the link in broadcast controls.',
+  5:   'This video cannot play in an embedded player.',
+  100: 'Video not found or set to private.',
+  101: 'Stream owner has disabled embedding. Try a different source URL.',
+  150: 'Stream owner has disabled embedding. Try a different source URL.',
+};
+
+function parsePlayerError(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  err: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: any,
+): string {
+  // YouTube IFrame API: data = { error: <number> }
+  if (data != null && typeof data.error === 'number') {
+    return (
+      YOUTUBE_ERROR_MESSAGES[data.error as number] ??
+      `Stream error (YouTube code ${data.error as number}). Try a different URL.`
+    );
+  }
+  // HTML5 MediaError (HLS, MP4, etc.)
+  if (err instanceof Event) {
+    const video = (err as Event & { target?: HTMLVideoElement }).target;
+    const code = video?.error?.code;
+    if (code === 2) return 'Network error while loading stream. Check your connection.';
+    if (code === 3) return 'Stream format is not supported by this browser.';
+    if (code === 4) return 'Stream source is unavailable or the URL is invalid.';
+  }
+  if (err instanceof Error) return `Stream error: ${err.message}`;
+  return 'Stream connection failed — check the URL in broadcast controls or try again.';
+}
+
 function UnifiedReactPlayer({
   url,
   onReady,
@@ -143,6 +177,11 @@ function UnifiedReactPlayer({
   const [playing, setPlaying] = useState(true);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(0.8);
+
+  // YouTube Live REQUIRES controls=1 — passing controls=0 causes the live embed
+  // to be rejected. For all other sources (HLS, Twitch, Vimeo, direct MP4) we
+  // suppress native controls and render the custom branded bar instead.
+  const isYoutube = isYoutubeUrl(url);
 
   const handleFullscreen = async () => {
     const host = containerRef.current;
@@ -165,7 +204,9 @@ function UnifiedReactPlayer({
         width="100%"
         height="100%"
         playing={playing}
-        controls={false}
+        // YouTube Live embeds reject controls=0 → always pass controls=1 for YouTube.
+        // For non-YouTube sources we hide native controls and use the custom bar.
+        controls={isYoutube}
         muted={muted}
         volume={volume}
         onReady={onReady}
@@ -174,45 +215,65 @@ function UnifiedReactPlayer({
           onPlay();
         }}
         onPause={() => setPlaying(false)}
-        onError={(err) => onError(`Playback failed: ${err instanceof Error ? err.message : 'provider rejected stream URL'}`)}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onError={(err: any, data: any) => onError(parsePlayerError(err, data))}
         config={{
           youtube: {
             playerVars: {
-              modestbranding: 1,
               rel: 0,
               iv_load_policy: 3,
-              
-              
+              // modestbranding deprecated since 2023 — YouTube ignores it
             },
           },
         }}
       />
-      <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm">
-        <button type="button" className="p-2 rounded hover:bg-white/10 text-white" aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
-          {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-        </button>
-        <button type="button" className="p-2 rounded hover:bg-white/10 text-white" aria-label={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted(v => !v)}>
-          {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-        </button>
-        <input
-          aria-label="Volume"
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={volume}
-          onChange={(e) => {
-            const next = Number(e.target.value);
-            setMuted(next === 0);
-            setVolume(next);
-          }}
-          className="w-24 accent-amber-500"
-        />
-        <div className="flex-1" />
-        <button type="button" className="p-2 rounded hover:bg-white/10 text-white" aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
-          <Maximize className="w-4 h-4" />
-        </button>
-      </div>
+      {/* Custom RBAC controls — rendered for non-YouTube sources only.
+          YouTube Live requires its own native controls (controls=1).
+          This bar provides play/pause, volume, and fullscreen with SBBL brand
+          styling for HLS, MP4, and other direct stream sources. */}
+      {!isYoutube && (
+        <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm">
+          <button
+            type="button"
+            className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label={playing ? 'Pause playback' : 'Play playback'}
+            onClick={() => setPlaying(v => !v)}
+          >
+            {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+          </button>
+          <button
+            type="button"
+            className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label={muted ? 'Unmute' : 'Mute'}
+            onClick={() => setMuted(v => !v)}
+          >
+            {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+          <input
+            aria-label="Volume"
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            onChange={(e) => {
+              const next = Number(e.target.value);
+              setMuted(next === 0);
+              setVolume(next);
+            }}
+            className="w-24 accent-amber-500"
+          />
+          <div className="flex-1" />
+          <button
+            type="button"
+            className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label="Toggle fullscreen"
+            onClick={() => void handleFullscreen()}
+          >
+            <Maximize className="w-4 h-4" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -594,6 +655,21 @@ export function LiveStreamPlayer({
                 {generatingInvite ? 'Generating…' : 'Generate Fan Invite'}
               </button>
             )}
+          </div>
+        )}
+
+        {/* RBAC role badge — bottom-left, visible when stream is playing */}
+        {playbackUrl && !playerError && !playbackLoading && (
+          <div className="absolute bottom-4 left-4 z-10 pointer-events-none select-none">
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest backdrop-blur-sm border ${
+              isSuperAdmin
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400/90'
+                : isPlayer
+                  ? 'bg-blue-500/10 border-blue-500/30 text-blue-300/80'
+                  : 'bg-white/5 border-white/15 text-white/50'
+            }`}>
+              {isSuperAdmin ? 'Admin Access' : isPlayer ? 'Player Access' : 'Fan Access'}
+            </span>
           </div>
         )}
 
