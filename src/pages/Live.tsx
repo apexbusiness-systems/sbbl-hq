@@ -132,7 +132,9 @@ function AdminStreamOverlay({
     setSaving(true);
     try {
       const token = await getAuthToken();
-      const normalized = nextLive ? normalizeYoutubeUrl(customStreamUrl, { youtubeOnly: true }) : null;
+      // No youtubeOnly restriction — any valid https stream URL is accepted.
+      // Facebook is always blocked inside normalizeYoutubeUrl regardless.
+      const normalized = nextLive ? normalizeYoutubeUrl(customStreamUrl) : null;
       if (nextLive && (!normalized || normalized.ok === false)) {
         setStreamUrlError(normalized?.ok === false ? normalized.error : 'Invalid stream URL.');
         setSaving(false);
@@ -226,7 +228,7 @@ function AdminStreamOverlay({
                   if (streamUrlError) setStreamUrlError(null);
                 }}
                 className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50"
-                placeholder="https://www.youtube.com/watch?v=..."
+                placeholder="YouTube, Twitch, Vimeo, or direct stream URL…"
               />
               {streamUrlError && (
                 <p className="mt-1 text-[10px] text-red-300">{streamUrlError}</p>

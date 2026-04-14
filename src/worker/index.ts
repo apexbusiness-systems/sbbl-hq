@@ -629,8 +629,29 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   } | null;
   if (!body) return json({ ok: false, error: "invalid_body" }, 400);
   const patch: Record<string, unknown> = {};
-  if (typeof body.collectionId === "string")
-    patch.collection_id = body.collectionId.trim();
+  if (typeof body.collectionId === "string") {
+    const trimmedUrl = body.collectionId.trim();
+    // Allow empty string (clearing the URL). Non-empty URLs must be valid
+    // https:// and must not be a Facebook domain (blocked stream source).
+    if (trimmedUrl !== "") {
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(trimmedUrl);
+      } catch {
+        return json({ ok: false, error: "invalid_stream_url" }, 422);
+      }
+      if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
+        return json({ ok: false, error: "invalid_stream_url" }, 422);
+      }
+      const streamHost = parsedUrl.hostname.toLowerCase();
+      const BLOCKED_RE =
+        /(?:^|\.)(?:facebook\.com|fb\.me|fbcdn\.net|facebook\.net|m\.me)$/;
+      if (BLOCKED_RE.test(streamHost)) {
+        return json({ ok: false, error: "unsupported_stream_source" }, 422);
+      }
+    }
+    patch.collection_id = trimmedUrl;
+  }
   if (typeof body.title === "string") patch.title = body.title.trim();
   if (typeof body.source === "string") patch.source = body.source;
   if (Object.keys(patch).length === 0)
@@ -4786,21 +4807,19 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
-  // Facebook + YouTube + Twitch domains required for /live page stream embeds.
-  // facebook.com/plugins/video.php loads scripts and frames from *.fbcdn.net
-  // and staticxx.facebook.com — both must be allow-listed broadly across
-  // script-src, frame-src, and child-src for the Live embed to render.
+  // Facebook is explicitly NOT included — it is a blocked stream source.
+  // ReactPlayer supports YouTube, Twitch, and Vimeo iframes; all three are
+  // allow-listed in frame-src. Direct HLS/MP4 streams require no frame-src.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://*.fbcdn.net https://assets.twitch.tv; " +
-    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://*.fbcdn.net https://assets.twitch.tv; " +
-    "style-src 'self' 'unsafe-inline' https://*.facebook.com https://*.fbcdn.net; " +
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://assets.twitch.tv; " +
+    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com; " +
+    "style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: blob: https:; " +
-    "font-src 'self' data: https://*.facebook.com https://*.fbcdn.net; " +
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://*.facebook.com https://*.facebook.net https://graph.facebook.com https://*.fbcdn.net wss://*.facebook.com; " +
-    "frame-src https://www.youtube.com https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://*.facebook.net https://*.fbcdn.net https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
-    "child-src https://*.facebook.com https://*.fbcdn.net https://*.facebook.net; " +
-    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.facebook.com https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
+    "font-src 'self' data:; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "media-src 'self' blob: https://*.googlevideo.com https://*.ytimg.com https://*.twitch.tv https://*.twitchsvc.net; " +
     "worker-src 'self' blob:; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
