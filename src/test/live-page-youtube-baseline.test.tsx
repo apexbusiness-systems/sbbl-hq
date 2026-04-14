@@ -57,7 +57,7 @@ describe('Live page YouTube baseline validation', () => {
     setStreamLiveMock.mockClear();
   });
 
-  it('blocks non-YouTube URLs and does not submit go-live update', async () => {
+  it('blocks Facebook stream URLs and does not submit go-live update', async () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
@@ -70,12 +70,12 @@ describe('Live page YouTube baseline validation', () => {
       expect(screen.getByTitle('Stream controls')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByTitle('Stream controls'));
-    const input = await screen.findByPlaceholderText('https://www.youtube.com/watch?v=...');
-    fireEvent.change(input, { target: { value: 'https://vimeo.com/12345' } });
+    const input = await screen.findByPlaceholderText('YouTube, Twitch, Vimeo, or direct stream URL…');
+    fireEvent.change(input, { target: { value: 'https://www.facebook.com/live/12345' } });
     fireEvent.click(screen.getByRole('button', { name: 'Go Live' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Only YouTube Live URLs are allowed in baseline mode.')).toBeInTheDocument();
+      expect(screen.getByText('Facebook is not a supported stream source.')).toBeInTheDocument();
     });
     expect(updateStreamConfigMock).not.toHaveBeenCalled();
     expect(setStreamLiveMock).not.toHaveBeenCalled();
@@ -94,7 +94,7 @@ describe('Live page YouTube baseline validation', () => {
       expect(screen.getByTitle('Stream controls')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByTitle('Stream controls'));
-    const input = await screen.findByPlaceholderText('https://www.youtube.com/watch?v=...');
+    const input = await screen.findByPlaceholderText('YouTube, Twitch, Vimeo, or direct stream URL…');
     fireEvent.change(input, { target: { value: 'https://youtu.be/abc123def45?t=5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Go Live' }));
 

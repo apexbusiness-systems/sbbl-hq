@@ -58,12 +58,14 @@ describe('normalizeYoutubeUrl', () => {
 });
 
 describe('toPlayableYoutubeEmbedUrl', () => {
-  it('converts supported youtube URL shapes into an embeddable URL', () => {
+  // Returns canonical watch URLs — ReactPlayer handles the embed conversion
+  // internally, so we surface the watch URL rather than a raw embed URL.
+  it('converts supported youtube URL shapes into a canonical watch URL', () => {
     expect(toPlayableYoutubeEmbedUrl('https://youtube.com/live/D_h4ChDG72k?feature=share')).toBe(
-      'https://www.youtube.com/embed/D_h4ChDG72k?autoplay=1&rel=0&modestbranding=1',
+      'https://www.youtube.com/watch?v=D_h4ChDG72k',
     );
     expect(toPlayableYoutubeEmbedUrl('https://www.youtube.com/watch?v=D_h4ChDG72k')).toBe(
-      'https://www.youtube.com/embed/D_h4ChDG72k?autoplay=1&rel=0&modestbranding=1',
+      'https://www.youtube.com/watch?v=D_h4ChDG72k',
     );
   });
 

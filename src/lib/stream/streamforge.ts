@@ -664,8 +664,8 @@ export const KNOWN_STREAM_ORIGINS: readonly string[] = Object.freeze([
   'https://i.ytimg.com',
   'https://player.twitch.tv',
   'https://static-cdn.jtvnw.net',
-  'https://www.facebook.com',
-  'https://static.xx.fbcdn.net',
+  'https://player.vimeo.com',
+  // Facebook is a blocked stream source — intentionally excluded.
 ]);
 
 /**
