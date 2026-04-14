@@ -68,6 +68,7 @@ function AdminStreamOverlay({
   viewerCount,
   customStreamUrl, setCustomStreamUrl,
   activeGameId,
+  onGoLive,
 }: {
   isLive: boolean;
   setIsLive: (v: boolean) => void;
@@ -77,6 +78,10 @@ function AdminStreamOverlay({
   customStreamUrl: string;
   setCustomStreamUrl: (v: string) => void;
   activeGameId: string | null;
+  /** Called after each successful Go Live / End Stream save — parent uses this
+   *  to increment a key that forces the player to remount and re-fetch the
+   *  newly saved stream URL from the database. */
+  onGoLive?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -154,6 +159,8 @@ function AdminStreamOverlay({
         return;
       }
       setIsLive(nextLive);
+      // Signal parent to remount the player so it re-fetches the newly saved URL.
+      onGoLive?.();
       toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
       if (nextLive) setOpen(false);
     } catch (err) {
@@ -368,14 +375,20 @@ const LivePage = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const { data: leaderboardsData = [] } = useQuery({
+  const {
+    data: leaderboardsData = [],
+    isLoading: performersLoading,
+    isError: performersError,
+  } = useQuery({
     queryKey: ['public-leaderboards', LEAGUE_IDS[activeLeagueIdx]],
     queryFn: async () => {
       const supabase = getSupabaseClient();
-      const { data } = await supabase.rpc('get_leaderboards', { p_filters: { league: LEAGUE_IDS[activeLeagueIdx] } });
-      return data?.leaders || [];
+      const { data, error } = await supabase.rpc('get_leaderboards', { p_filters: { league: LEAGUE_IDS[activeLeagueIdx] } });
+      if (error) throw new Error(error.message);
+      return (data as { leaders?: unknown[] } | null)?.leaders ?? [];
     },
     staleTime: 1000 * 60 * 5, // 5 min
+    retry: 1,
   });
 
   const topPerformers = useMemo(() => {
@@ -401,6 +414,10 @@ const LivePage = () => {
   const hasPrivilegedBroadcastAccess =
     roles.includes('player') || roles.includes('paid_fan') || isSuperAdmin;
   const [liveGame, setLiveGame] = useState<Game | null>(null);
+  // Incremented each time the admin saves a Go Live / End Stream action.
+  // Used as React key on PlayerErrorBoundary to force a fresh session fetch
+  // so the player picks up the newly saved stream URL without a full reload.
+  const [streamNonce, setStreamNonce] = useState(0);
 
   // Admin stream state — fetched from backend (single source of truth)
   const [isStreamLive, setIsStreamLive] = useState(false);
@@ -666,7 +683,8 @@ const LivePage = () => {
               src={carouselProduct.image}
               alt={carouselProduct.name}
               className="w-full h-full object-contain animate-fade-in"
-              loading="lazy"
+              loading="eager"
+              fetchPriority="high"
             />
             <span className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 bg-primary text-primary-foreground text-[9px] font-bold uppercase tracking-wider rounded-sm">
               <Tag className="w-2.5 h-2.5" /> Sale
@@ -717,7 +735,13 @@ const LivePage = () => {
       {/* Top Performers */}
       <div className="panel p-4">
         <h3 className="font-display font-bold text-sm mb-3">Top Performers</h3>
-        {topPerformers.length > 0 ? topPerformers.map((p: PlayerProfile | any) => (
+        {performersLoading ? (
+          <div className="flex justify-center py-4">
+            <div className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : performersError ? (
+          <p className="text-xs text-muted-foreground py-4 text-center">Could not load top performers.</p>
+        ) : topPerformers.length > 0 ? topPerformers.map((p: PlayerProfile | any) => (
           <div key={p.id} className="flex items-center gap-3 py-2 border-b border-border last:border-0">
             <PlayerAvatar src={p.avatar} alt={p.name} className="w-8 h-8" />
             <div className="flex-1 min-w-0">
@@ -730,7 +754,7 @@ const LivePage = () => {
             <span className="stat-numeral text-sm text-primary">{p.pts ? p.pts.toFixed(1) : '0.0'} PTS</span>
           </div>
         )) : (
-          <div className="text-xs text-muted-foreground py-4 text-center">Loading players...</div>
+          <p className="text-xs text-muted-foreground py-4 text-center">No top performers yet.</p>
         )}
       </div>
     </div>
@@ -757,11 +781,12 @@ const LivePage = () => {
                     customStreamUrl={customStreamUrl}
                     setCustomStreamUrl={setCustomStreamUrl}
                     activeGameId={activeGameId}
+                    onGoLive={() => setStreamNonce(n => n + 1)}
                   />
                 )}
 
               {(liveGame || fallbackBroadcastGame) ? (
-                <PlayerErrorBoundary>
+                <PlayerErrorBoundary key={streamNonce}>
                   <LiveStreamPlayer
                     game={(liveGame ?? fallbackBroadcastGame)!}
                     userId={user?.id ?? null}
