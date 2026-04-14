@@ -101,11 +101,18 @@ jobs:
           TURNSTILE_SECRET_KEY: ${{ secrets.VITE_TURNSTILE_SECRET_KEY }}
 
       - name: Post-deploy health gate
+        # Target the workers.dev URL directly to bypass Cloudflare Bot Management
+        # rules that are applied only to the custom domain (sbbl-hq.icu). The
+        # workers.dev subdomain routes straight to the Worker runtime and is not
+        # subject to per-zone bot management challenges, so the CI runner IP is
+        # never presented with a JS challenge page.
         run: |
-          for attempt in {1..12}; do
+          for attempt in {1..8}; do
             echo "Health check attempt $attempt..."
 
-            response=$(curl -s -A "sbbl-health-check" https://sbbl-hq.icu/ops/health || true)
+            response=$(curl -sf --max-time 10 \
+              -A "sbbl-deploy-health/1.0 (+https://github.com/$GITHUB_REPOSITORY)" \
+              https://sbbl-hq-worker.sbblhqapp.workers.dev/ops/health || true)
 
             echo "$response"
 
@@ -114,8 +121,8 @@ jobs:
               exit 0
             fi
 
-            echo "❌ Health check failed, retrying..."
-            sleep 10
+            echo "❌ Health check not ready, retrying in 15s..."
+            sleep 15
           done
 
           echo "🚨 Health check failed after retries"
