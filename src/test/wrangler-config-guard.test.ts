@@ -90,7 +90,7 @@ describe("deploy.yml guardrails", () => {
   });
 
   it("must include a retry loop for post-deploy health checks", () => {
-    expect(deployYml).toContain("for attempt in {1..12}; do");
-    expect(deployYml).toContain("sleep 10");
+    expect(deployYml).toContain("for attempt in {1..8}; do");
+    expect(deployYml).toContain("sleep 15");
   });
 });
