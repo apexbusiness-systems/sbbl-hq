@@ -536,7 +536,10 @@ const LivePage = () => {
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const featuredProducts = products.filter(p => p.sale);
+  // ⚡ Bolt Performance Optimization: Extract expensive object creation from the render loop
+  // into useMemo to prevent recreating the featured products array on every render.
+  const featuredProducts = useMemo(() => products.filter(p => p.sale), []);
+
   const [carouselIdx, setCarouselIdx] = useState(0);
   const carouselProduct = featuredProducts[carouselIdx] ?? products[0];
 

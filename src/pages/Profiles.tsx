@@ -42,6 +42,23 @@ const ProfilesPage = () => {
     return map;
   }, [teams]);
 
+  // ⚡ Bolt Performance Optimization: Pre-calculate counts in a single O(N) pass
+  // instead of O(N * L) filtering inside the render loop mapping.
+  const leagueStats = useMemo(() => {
+    const counts: Record<string, { teams: number; players: number }> = {};
+    leagues.forEach(l => counts[l.id] = { teams: 0, players: 0 });
+
+    teams.forEach(t => {
+      if (counts[t.leagueId]) counts[t.leagueId].teams++;
+    });
+
+    players.forEach(p => {
+      if (counts[p.leagueId]) counts[p.leagueId].players++;
+    });
+
+    return counts;
+  }, [teams]);
+
   const detail = selectedPlayer ? players.find((p) => p.id === selectedPlayer) : null;
 
   // Both tabs are always shown. 'players' is always first and always visible.
@@ -172,11 +189,11 @@ const ProfilesPage = () => {
                     <p className="text-xs text-muted-foreground">Season Fee</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-base font-bold">{teams.filter((t) => t.leagueId === l.id).length}</p>
+                    <p className="text-base font-bold">{leagueStats[l.id]?.teams ?? 0}</p>
                     <p className="text-xs text-muted-foreground">Teams</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-base font-bold">{players.filter((p) => p.leagueId === l.id).length}</p>
+                    <p className="text-base font-bold">{leagueStats[l.id]?.players ?? 0}</p>
                     <p className="text-xs text-muted-foreground">Players</p>
                   </div>
                 </div>
