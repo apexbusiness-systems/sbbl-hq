@@ -4815,9 +4815,12 @@ function addSecurityHeaders(res: Response): Response {
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://embed.twitch.tv https://assets.twitch.tv https://static.cloudflareinsights.com; " +
     "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://embed.twitch.tv https://static.cloudflareinsights.com; " +
-    "style-src 'self' 'unsafe-inline'; " +
+    // fonts.googleapis.com serves the @font-face CSS (style-src).
+    // fonts.gstatic.com serves the actual .woff2 files (font-src).
+    // Both are required for Bebas Neue + Space Grotesk loaded in index.html.
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
     "img-src 'self' data: blob: https:; " +
-    "font-src 'self' data:; " +
+    "font-src 'self' data: https://fonts.gstatic.com; " +
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://cloudflareinsights.com https://static.cloudflareinsights.com; " +
     "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
     "media-src 'self' blob: https://*.googlevideo.com https://*.ytimg.com https://*.twitch.tv https://*.twitchsvc.net; " +
@@ -4899,7 +4902,13 @@ export default Sentry.withSentry(
     // query in EVERY route handler will fail with "Invalid API key".
     // We validate the key format before creating the client.
     if (!env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY.length < 20) {
-      if (url.pathname.startsWith("/api") || url.pathname.startsWith("/ops") || url.pathname.startsWith("/auth")) {
+      // /ops/health is a liveness probe — it must respond even before secrets
+      // are propagated (e.g. first deploy, or secret rotation in progress).
+      // Its own try-catch handles DB errors gracefully; no hard block needed.
+      if (
+        url.pathname !== "/ops/health" &&
+        (url.pathname.startsWith("/api") || url.pathname.startsWith("/ops") || url.pathname.startsWith("/auth"))
+      ) {
         return addSecurityHeaders(json({
           ok: false,
           error: "supabase_service_key_missing",
