@@ -54,6 +54,25 @@ jobs:
         #    which prevents server env validation from failing globally.
         run: |
           set -euo pipefail
+          WRANGLER_WORKER_NAME="sbbl-hq-worker"
+          WRANGLER_ENV_TARGET="${CLOUDFLARE_DEPLOY_ENV:-}"
+          WRANGLER_CONFIG_FILE="wrangler.deploy.jsonc"
+
+          put_secret_value() {
+            local name="$1"
+            local value="$2"
+            local -a env_args=()
+            if [ -n "$WRANGLER_ENV_TARGET" ]; then
+              env_args=(--env "$WRANGLER_ENV_TARGET")
+            fi
+
+            # Versions-aware secret writes are required when Workers Versions
+            # is enabled; this avoids "latest version not deployed" failures.
+            printf '%s' "$value" | npx wrangler versions secret put "$name" \
+              --name "$WRANGLER_WORKER_NAME" \
+              --config "$WRANGLER_CONFIG_FILE" \
+              "${env_args[@]}" >/dev/null
+          }
 
           put_required_secret() {
             local name="$1"
@@ -62,7 +81,7 @@ jobs:
               echo "❌ Missing required GitHub secret: $name"
               exit 1
             fi
-            printf '%s' "$value" | npx wrangler secret put "$name" --name sbbl-hq-worker >/dev/null
+            put_secret_value "$name" "$value"
             echo "✅ Synced required secret: $name"
           }
 
@@ -73,7 +92,7 @@ jobs:
               echo "ℹ️ Skipping optional secret (empty): $name"
               return 0
             fi
-            printf '%s' "$value" | npx wrangler secret put "$name" --name sbbl-hq-worker >/dev/null
+            put_secret_value "$name" "$value"
             echo "✅ Synced optional secret: $name"
           }
 
@@ -90,6 +109,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_WORKERS || secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_DEPLOY_ENV: ${{ vars.CLOUDFLARE_DEPLOY_ENV || '' }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
