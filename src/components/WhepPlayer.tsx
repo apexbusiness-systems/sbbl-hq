@@ -97,7 +97,6 @@ export function WhepPlayer({
       updateStatus('error');
       scheduleRetry();
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [whepUrl, destroy, updateStatus, scheduleRetry]);
 
   useEffect(() => {

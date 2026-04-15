@@ -432,7 +432,7 @@ export function LiveStreamPlayer({
         }, null).catch(() => {});
       }
     };
-  }, [hasAccess, userId, game.id, isSuperAdmin]);
+  }, [hasAccess, userId, game.id, isSuperAdmin, game.stream_url]);
 
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
