@@ -205,7 +205,7 @@ async function registerEntitledStreamMocks(page: import('@playwright/test').Page
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
-      body: JSON.stringify({ ok: true, isLive: true, title: 'Validation Stream', viewerCount: 2, gameId: GAME_ID }),
+      body: JSON.stringify({ ok: true, isLive: true, title: 'Validation Stream', viewerCount: 2 }),
     });
   });
 }
@@ -330,7 +330,7 @@ test.describe('stream prelive validation', () => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, isLive: true, title: 'Test', viewerCount: 0, gameId: 'gate-test-game' }),
+        body: JSON.stringify({ ok: true, isLive: true, title: 'Test', viewerCount: 0 }),
       });
     });
 

@@ -59,7 +59,7 @@ vi.mock('@/lib/api/public', () => ({
 
 vi.mock('@/lib/api/stream', () => ({
   fetchAdminStreamConfig: vi.fn(async () => ({ ok: true, config: { title: 'Live', isLive: true, collectionId: 'https://youtube.com/watch?v=abcdefghijk' } })),
-  fetchPublicStreamStatus: vi.fn(async () => ({ ok: true, isLive: true, title: 'Live', gameId: 'game-live-1', viewerCount: 10 })),
+  fetchPublicStreamStatus: vi.fn(async () => ({ ok: true, isLive: true, title: 'Live', viewerCount: 10 })),
   fetchStreamComments: vi.fn(async () => ({ ok: true, comments: [{ id: 'c1', userDisplayName: 'Fan', message: 'hello', status: 'active' }] })),
   generateCompCode: vi.fn(async () => ({ ok: true, code: 'CODE', gameId: 'game-live-1', expiresAt: new Date().toISOString(), createdAt: new Date().toISOString() })),
   postStreamComment: vi.fn(async () => ({ ok: true, comment: { id: 'new', message: 'test', createdAt: new Date().toISOString(), userId: 'admin-1' } })),

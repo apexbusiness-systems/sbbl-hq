@@ -51,7 +51,6 @@ vi.mock('@/lib/api/stream', () => ({
     ok: true,
     isLive: true,
     title: 'Live Now',
-    gameId: 'game-live-1',
     viewerCount: 10,
   })),
 }));

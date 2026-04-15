@@ -1,7 +1,7 @@
 <!-- Version: v1.4.0 | Date: 2026-04-05 | Status: Current -->
 # SBBL HQ — Operations Runbook
 
-> Last updated: 2026-04-05
+> Last updated: 2026-04-15
 > Owner: APEX Business Systems Ltd
 
 This document is the canonical reference for all operational tasks, deployment procedures, emergency recovery steps, and script/tooling inventory for the SBBL HQ platform.
@@ -71,7 +71,7 @@ npm run cf:deploy:staging
 
 ### Worker (Cloudflare Workers)
 
-Worker is deployed as part of the same Cloudflare Pages project. Worker name in `wrangler.jsonc` is **`sbbl-hq-worker`**. Entry point: `src/worker/index.ts`.
+Worker is deployed as part of the same Cloudflare Pages project. Worker name in `wrangler.jsonc` is **`sbbl-hq-worker`**. Entry point is `src/worker/validation-contract-wrapper.ts`, which delegates to the canonical handler file `src/worker/index.ts`.
 
 ### Stripe Webhook Edge Function
 
@@ -164,8 +164,11 @@ Job 3: Build & Bundle Check (depends on Job 1)
        query-vendor 80, utils-vendor 140, forms-vendor 80
        (tree-shaken chunks handled via || true under pipefail)
 
-Job 4: Playwright E2E (depends on Job 3)
-  └── Blocking gate — job failure fails CI
+Job 4: Lighthouse LCP Budget (depends on Job 3)
+  └── Warning-only (continue-on-error)
+
+Job 5: Playwright E2E (depends on Job 3)
+  └── Blocking gate (fails CI on test failure)
 
 External Checks:
   ├── Supabase Preview (migration validation on preview branch)
@@ -285,7 +288,7 @@ Admin opens /live → gear icon → pastes stream URL → clicks "Go Live"
     ↓
 POST /ops/streams/config (save URL + title) → POST /ops/streams/status (isLive=true)
     ↓
-App polls GET /api/streams/status every 15s → { isLive: true, gameId }
+App polls GET /api/streams/status every 15s → { isLive, title, viewerCount }
 (Edge-cached with 10s TTL, cache-busted on admin changes)
     ↓
 User hits GET /api/streams/:gameId/access → can_user_view_stream RPC
@@ -307,7 +310,7 @@ The stream URL is stored in `stream_admin_config.collection_id` and served to au
 
 ### Viewer count
 
-Viewer count is derived from active playback presence: `COUNT(DISTINCT user_id)` in `stream_access_sessions` where `status='active'` AND `expires_at > now()`, scoped by `game_id`. Verified accurate to 0.00% drift at 20,000 concurrent viewers.
+Viewer count is derived from active playback presence: `COUNT(DISTINCT user_id)` in `stream_access_sessions` where `status='active'` AND `expires_at > now()`, scoped by `game_id`. Validate drift before major events via the livestream stress suite (`src/test/stream-20k-stress.test.ts`).
 
 ### Auth resilience
 

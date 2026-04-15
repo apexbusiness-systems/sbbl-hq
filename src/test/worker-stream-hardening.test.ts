@@ -158,6 +158,7 @@ describe('stream hardening worker handlers', () => {
     const body = await res.json() as Record<string, unknown>;
     expect(Number(body.viewerCount)).toBeGreaterThanOrEqual(0);
     expect(body.collectionId).toBeUndefined();
+    expect(body.gameId).toBeUndefined();
   });
 
   it('playback session denies unauthorized viewers and allows entitled users', async () => {
