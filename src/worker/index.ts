@@ -2696,6 +2696,79 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
   }
 }
 
+function normalizeTeamToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeTeamLabel(value: string): string {
+  return value
+    .replace(/\b\d+\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function canonicalTeamVariants(teamName: string): string[] {
+  const normalized = normalizeTeamToken(normalizeTeamLabel(teamName));
+  const variants = new Set<string>([normalized]);
+
+  // POTG cards sometimes use shorthand vs roster records.
+  if (normalized === "14ozathletics") variants.add("fourteenounceathletics");
+  if (normalized === "fourteenounceathletics") variants.add("14ozathletics");
+
+  return [...variants];
+}
+
+function extractPotgTeamCandidates(team: string, gameResult: string): string[] {
+  const candidates = new Set<string>();
+  const addCandidate = (value: string) => {
+    const normalized = normalizeTeamLabel(value);
+    if (normalized.length > 0) candidates.add(normalized);
+  };
+
+  addCandidate(team);
+  for (const side of gameResult.split(/\bvs\b/i)) addCandidate(side);
+
+  return [...candidates];
+}
+
+async function inferPotgLeagueCode(
+  ctx: HandlerCtx,
+  team: string,
+  gameResult: string,
+): Promise<"wbl" | "tgifbl" | "sbbl" | null> {
+  const candidates = extractPotgTeamCandidates(team, gameResult);
+  if (candidates.length === 0) return null;
+
+  const { data: teamRows, error } = await ctx.admin
+    .from("teams")
+    .select("name, leagues:leagues!league_id(code)");
+  if (error || !teamRows) return null;
+
+  const hitsByLeague: Record<string, number> = {};
+  for (const candidate of candidates) {
+    const candidateVariants = canonicalTeamVariants(candidate);
+    for (const row of teamRows as Array<Record<string, unknown>>) {
+      const teamName = String(row.name ?? "");
+      const leagueCode = String((row.leagues as Record<string, unknown> | null)?.code ?? "").toLowerCase();
+      if (!leagueCode) continue;
+      const dbVariants = canonicalTeamVariants(teamName);
+      const isMatch = candidateVariants.some((candidateToken) =>
+        dbVariants.some((dbToken) =>
+          dbToken === candidateToken || dbToken.includes(candidateToken) || candidateToken.includes(dbToken)
+        )
+      );
+      if (isMatch) hitsByLeague[leagueCode] = (hitsByLeague[leagueCode] ?? 0) + 1;
+    }
+  }
+
+  const ranked = Object.entries(hitsByLeague).sort((a, b) => b[1] - a[1]);
+  if (ranked.length === 0) return null;
+  if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) return null;
+
+  const winner = ranked[0][0];
+  return winner === "wbl" || winner === "tgifbl" || winner === "sbbl" ? winner : null;
+}
+
 async function handleSubmitPotg(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireAdminSession(ctx.req, ctx.admin);
@@ -2715,12 +2788,16 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     return json({ ok: false, error: "missing_required_fields" }, 400);
   }
 
+  const requestedLeagueCode = String(body.leagueId).toLowerCase();
+  const inferredLeagueCode = await inferPotgLeagueCode(ctx, body.team, body.gameResult);
+  const effectiveLeagueCode = inferredLeagueCode ?? requestedLeagueCode;
+
   // Resolve league code (e.g. 'wbl') to UUID for FK references
   let leagueUuid: string | null = null;
   const { data: leagueLookup } = await ctx.admin
     .from("leagues")
     .select("id")
-    .ilike("code", body.leagueId)
+    .ilike("code", effectiveLeagueCode)
     .maybeSingle();
   leagueUuid = leagueLookup?.id ?? null;
 
@@ -2745,11 +2822,13 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
         rebs: body.rebs,
         assts: body.assts,
         gameResult: body.gameResult,
-        leagueId: body.leagueId,
+        leagueId: effectiveLeagueCode,
         date: body.date ?? new Date().toISOString().split("T")[0],
         imageUrl: body.imageUrl ?? null,
         matched_profile_id: profileData?.user_id ?? null,
         source: "potg_image_parser",
+        requestedLeagueId: requestedLeagueCode,
+        inferredLeagueId: inferredLeagueCode,
       },
       status: profileData ? "completed" : "pending_match",
       total_rows: 1,
@@ -2784,6 +2863,7 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
       thumbnail: body.imageUrl,
       date: potgDate,
       potg: true,
+      leagueId: effectiveLeagueCode,
       playerName: body.playerName,
       team: body.team,
       pts: body.pts,
