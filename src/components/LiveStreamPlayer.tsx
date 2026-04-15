@@ -267,6 +267,16 @@ function StreamPlayer({
     file: {
       ...(forceHls ? { forceHLS: true } : {}),
       ...(forceDash ? { forceDASH: true } : {}),
+      hlsOptions: {
+        // Required for proxy mode so the browser includes sbbl_proxy_auth on segment requests.
+        xhrSetup: (xhr: XMLHttpRequest) => {
+          xhr.withCredentials = true;
+        },
+      },
+      attributes: {
+        // Mirror credentials behavior for native HLS paths where supported.
+        crossOrigin: 'use-credentials',
+      },
     },
   };
 
