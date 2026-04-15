@@ -165,7 +165,7 @@ Job 3: Build & Bundle Check (depends on Job 1)
        (tree-shaken chunks handled via || true under pipefail)
 
 Job 4: Playwright E2E (depends on Job 3)
-  └── Currently non-blocking — must be made blocking before production release
+  └── Blocking gate — job failure fails CI
 
 External Checks:
   ├── Supabase Preview (migration validation on preview branch)

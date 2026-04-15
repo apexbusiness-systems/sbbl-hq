@@ -78,19 +78,19 @@ Primary artifacts reviewed:
 
 ## ⚠️ Critical risks against 20K target
 
-### RISK-1 (P0): Heartbeat acknowledgment is optimistic, not authoritative
+### RISK-1 (P1): Heartbeat acknowledgment is authoritative for viewer sessions, with an admin-only synthetic exception
 
 **Observation**
 
-`handleStreamSessionHeartbeat` returns `ok:true` after queueing payload, without synchronous confirmation that the session row still exists and is active.
+`handleStreamSessionHeartbeat` now performs a synchronous session gate (`id`, `user_id`, `game_id`, `status='active'`) before acknowledging regular viewer heartbeats. The remaining exception is the super-admin synthetic session fast-path, which intentionally bypasses DB session-row validation.
 
 **20K impact**
 
-At scale, optimistic ACKs can hide session invalidation/displacement for an entire flush window and create telemetry drift between client-perceived liveness and persisted liveness.
+Viewer-session displacement and expiry are now detected before ACK, eliminating optimistic ACK drift in the critical PPV viewer path. Admin synthetic sessions still trade strict persistence for operational continuity, but are outside paid-viewer entitlement enforcement.
 
-**Required hardening**
+**Required hardening status**
 
-Pre-queue synchronous existence/status gate (`id`, `user_id`, `game_id`, `status='active'`) before returning success.
+Completed for viewer sessions; maintain explicit documentation that admin synthetic sessions are operational exceptions.
 
 ### RISK-2 (P1): Replay lifecycle forks job lineage
 
