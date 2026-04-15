@@ -397,6 +397,35 @@ function AdminStreamOverlay({
   );
 }
 
+// ── Live Page Skeleton ────────────────────────────────────────────────────
+// Shown while useAuth() resolves on cold load. Mirrors the page layout so
+// there is no layout shift when real content mounts.
+function LivePageSkeleton() {
+  return (
+    <div className="min-h-screen">
+      <div className="lg:container lg:py-4">
+        <div className="lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
+          <div className="lg:col-span-2 flex flex-col">
+            {/* Video area */}
+            <div className="aspect-video bg-muted animate-pulse lg:rounded-sm" />
+            <div className="container lg:px-0 py-4 space-y-3">
+              {/* Reaction bar */}
+              <div className="h-9 bg-muted animate-pulse rounded" />
+              {/* Chat panel */}
+              <div className="h-64 bg-muted animate-pulse rounded" />
+            </div>
+          </div>
+          <div className="hidden lg:block space-y-4">
+            {/* Sidebar panels */}
+            <div className="aspect-square bg-muted animate-pulse rounded" />
+            <div className="h-48 bg-muted animate-pulse rounded" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main Live Page ─────────────────────────────────────────────────────────
 const LivePage = () => {
   const { hasPremiumPlayerAccess } = useApp();
@@ -466,9 +495,18 @@ const LivePage = () => {
   const [customStreamUrl, setCustomStreamUrl] = useState('');
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
 
+  // FIX #2: Track whether the initial poll has completed and whether it errored.
+  // initialPollDone prevents the page from showing content before the first
+  // fetch attempt resolves. initialPollError surfaces a toast so the viewer
+  // knows the page failed to load live status rather than silently sitting
+  // on the empty state indefinitely.
+  const [initialPollDone, setInitialPollDone] = useState(false);
+  const [initialPollError, setInitialPollError] = useState(false);
+
   // Auto-sync stream status from backend
   useEffect(() => {
     let active = true;
+    let isFirstFetch = true;
     const fetchStatus = async () => {
       try {
         const home = await fetchPublicHome();
@@ -498,8 +536,20 @@ const LivePage = () => {
             setViewerCount(typeof res.viewerCount === 'number' && res.viewerCount >= 0 ? res.viewerCount : 0);
           }
         }
+        // Mark initial poll done on first successful fetch
+        if (active && isFirstFetch) {
+          setInitialPollDone(true);
+          isFirstFetch = false;
+        }
       } catch {
-        // Poller errors are non-fatal; next tick retries with a fresh token.
+        // Subsequent poll errors are non-fatal; next tick retries with a fresh token.
+        // First-load error: surface a toast so the viewer knows something went wrong.
+        if (active && isFirstFetch) {
+          setInitialPollDone(true);
+          setInitialPollError(true);
+          isFirstFetch = false;
+          toast.error('Could not load live status. Retrying…', { id: 'live-poll-error' });
+        }
       }
     };
 
@@ -638,6 +688,14 @@ const LivePage = () => {
   }, [canModerateLive, liveGame?.id, session?.access_token]);
 
   // All hooks above this line. Early returns must come after all hooks.
+
+  // FIX #1: Show skeleton while auth is resolving to prevent flash of
+  // "No Active Broadcast" before we know the user's role or stream state.
+  // Priority: skeleton → onboarding redirect → full page.
+  if (authLoading || !initialPollDone) {
+    return <LivePageSkeleton />;
+  }
+
   // Fan who registered but hasn't completed onboarding must finish it before
   // reaching the PPV paywall.
   if (!authLoading && needsOnboarding) {
@@ -846,7 +904,11 @@ const LivePage = () => {
                     <Radio className="w-6 h-6 text-muted-foreground" />
                   </div>
                   <p className="text-sm text-white/70 font-medium">No Active Broadcast</p>
-                  <p className="text-xs text-white/40 mt-1">Check back when a game is scheduled or a stream goes live.</p>
+                  <p className="text-xs text-white/40 mt-1">
+                    {initialPollError
+                      ? 'Could not reach the server. Retrying in the background…'
+                      : 'Check back when a game is scheduled or a stream goes live.'}
+                  </p>
                 </div>
               )}
               {/* RC-1: LiveGate removed — LiveStreamPlayer is the single source of
