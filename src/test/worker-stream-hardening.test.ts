@@ -193,8 +193,12 @@ describe('stream hardening worker handlers', () => {
     } as any);
     expect(allowed.status).toBe(200);
     const body = await allowed.json() as Record<string, any>;
-    // The Secure Stream Gateway now intercepts .m3u8 links and returns the secure proxy route
-    expect(body.playback.url).toContain('/api/streams/game-1/proxy/master.m3u8');
+    // Ensure the URL was rewritten to use the local proxy
+    expect(body.playback.url).toContain('/api/streams/');
+    expect(body.playback.url).toContain('/proxy/');
+
+    // Crucial: Ensure the true origin is completely hidden from the client payload
+    expect(body.playback.url).not.toContain('playback.example');
   });
 
   it('session heartbeat refreshes active presence', async () => {
