@@ -26,7 +26,7 @@ import {
   setStreamLive,
   updateStreamConfig,
 } from '@/lib/api/stream';
-import { detectStreamUrlType, STREAM_TYPE_LABELS } from '@/lib/stream/url-detector';
+import { detectStreamUrlType, STREAM_TYPE_LABELS, toPlayableUrl } from '@/lib/stream/url-detector';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
@@ -143,13 +143,15 @@ function AdminStreamOverlay({
       return;
     }
     if (streamUrlError) setStreamUrlError(null);
+    // Normalize YouTube short URLs to canonical watch URL before persisting
+    const normalizedUrl = trimmedUrl ? (toPlayableUrl(trimmedUrl).url || trimmedUrl) : trimmedUrl;
     setSaving(true);
     try {
       const token = await getAuthToken();
       let atomicSuccess = false;
       // RC-6: Try atomic go-live endpoint first
       try {
-        const res = await goLive({ isLive: nextLive, collectionId: trimmedUrl, title: streamTitle }, token);
+        const res = await goLive({ isLive: nextLive, collectionId: normalizedUrl, title: streamTitle }, token);
         if (res.ok) {
           atomicSuccess = true;
           setIsLive(nextLive);
@@ -164,7 +166,7 @@ function AdminStreamOverlay({
 
       if (!atomicSuccess) {
         // Fallback: sequential calls with 500ms delay before nonce increment
-        await updateStreamConfig({ collectionId: trimmedUrl, title: streamTitle }, token);
+        await updateStreamConfig({ collectionId: normalizedUrl, title: streamTitle }, token);
         try {
           await setStreamLive(nextLive, token);
         } catch (liveErr) {

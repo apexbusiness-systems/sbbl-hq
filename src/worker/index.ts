@@ -3364,7 +3364,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   // RC-2: For the broadcast alias (no real game), enforce is_live for non-admins.
   // Super admins already return above via the fast-path. Privileged roles
   // (player/paid_fan) still need the stream to be online.
-  if (gameId === null && !Boolean(cfg.is_live)) {
+  if (gameId === null && !cfg.is_live) {
     return json({ ok: false, error: "stream_offline" }, 403);
   }
 
