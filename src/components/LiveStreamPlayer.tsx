@@ -229,6 +229,44 @@ function StreamPlayer({
   }, [playerType, url, onReady, onPlay, onError]);
 
   if (playerType === 'invalid') return null;
+  // HLS / DASH / YouTube / Twitch / Vimeo / direct / unknown — use ReactPlayer
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
+  const reactPlayerConfig = {
+    youtube: {
+      playerVars: {
+        rel: 0,
+        iv_load_policy: 3,
+        modestbranding: 1,
+        controls: 1,
+        // FIX: origin must match the host to prevent YouTube iframe API
+        // postMessage cross-origin errors that crash the embed entirely.
+        // Without this, the YT iframe tries to postMessage to youtube.com
+        // instead of sbbl-hq.icu, which the browser blocks.
+        origin: typeof window !== 'undefined' ? window.location.origin : 'https://sbbl-hq.icu',
+      },
+    },
+    twitch: {
+      options: {
+        // REQUIRED: Twitch embeds will not load without the parent domain.
+        // https://dev.twitch.tv/docs/embed/everything/#required-parameters
+        parent: [currentHost],
+      },
+    },
+    file: {
+      ...(forceHls ? { forceHLS: true } : {}),
+      ...(forceDash ? { forceDASH: true } : {}),
+      hlsOptions: {
+        // Required for proxy mode so the browser includes sbbl_proxy_auth on segment requests.
+        xhrSetup: (xhr: XMLHttpRequest) => {
+          xhr.withCredentials = true;
+        },
+      },
+      attributes: {
+        // Mirror credentials behavior for native HLS paths where supported.
+        crossOrigin: 'use-credentials',
+      },
+    },
+  };
 
   return (
     <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">

@@ -29,10 +29,37 @@ export type StreamUrlType =
   | 'unknown';
 
 export type StreamAdvisoryLevel = 'ok' | 'warn' | 'info';
+export type StreamDeliveryClass = 'embed' | 'proxy' | 'unsupported';
 
 export interface StreamAdvisory {
   level: StreamAdvisoryLevel;
   message: string;
+}
+
+export function getStreamDeliveryClass(url: string): StreamDeliveryClass {
+  const normalized = url.trim().toLowerCase();
+  if (!normalized) return 'unsupported';
+
+  if (
+    normalized.includes('youtube.com') ||
+    normalized.includes('youtu.be') ||
+    normalized.includes('twitch.tv') ||
+    normalized.includes('vimeo.com') ||
+    normalized.includes('facebook.com')
+  ) {
+    return 'embed';
+  }
+
+  if (
+    normalized.endsWith('.m3u8') ||
+    normalized.endsWith('.mp4') ||
+    normalized.endsWith('.mpd') ||
+    normalized.includes('stream.sbbl-hq.icu')
+  ) {
+    return 'proxy';
+  }
+
+  return 'unsupported';
 }
 
 /**

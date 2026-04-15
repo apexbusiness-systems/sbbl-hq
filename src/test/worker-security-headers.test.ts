@@ -14,13 +14,24 @@ const env = {
 describe('Worker security headers', () => {
   it('sets security headers on /api/public-config', async () => {
     const res = await worker.fetch(new Request('https://local/api/public-config'), env);
+    const csp = res.headers.get('Content-Security-Policy') ?? '';
     expect(res.status).toBe(200);
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(res.headers.get('X-Frame-Options')).toBe('DENY');
     expect(res.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
     expect(res.headers.get('Permissions-Policy')).toBe('camera=(), microphone=(), geolocation=()');
     expect(res.headers.get('Strict-Transport-Security')).toBe('max-age=63072000; includeSubDomains; preload');
-    expect(res.headers.get('Content-Security-Policy')).toContain("default-src 'self'");
+    expect(csp).toContain("default-src 'self'");
+    // YouTube iframe API dynamically loads from s.ytimg.com.
+    expect(csp).toContain('script-src');
+    expect(csp).toContain('script-src-elem');
+    expect(csp).toContain('https://s.ytimg.com');
+    // YouTube live runtime opens websocket channels on www.youtube.com.
+    expect(csp).toContain("connect-src 'self'");
+    expect(csp).toContain('wss://www.youtube.com');
+    // Embedded playback requires explicit frame source allowlist.
+    expect(csp).toContain('frame-src');
+    expect(csp).toContain('https://www.youtube.com');
   });
 
   it('sets security headers on 404 responses (no ASSETS fallback)', async () => {
