@@ -143,7 +143,14 @@ export function WhepPlayer({
   }, [connect]);
 
   useEffect(() => {
-    if (whepUrl) void connect();
+    reconnectRef.current = () => {
+      void connect();
+    };
+  }, [connect]);
+
+  useEffect(() => {
+    if (!whepUrl) return destroy;
+    void connect(); // fire-and-forget initial dial while lifecycle cleanup is handled by destroy
     return destroy;
   }, [whepUrl, connect, destroy]);
 
