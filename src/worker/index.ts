@@ -3320,7 +3320,9 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   // surfaces its own "configure URL" UX instead of a hard backend failure.
   if (isSuperAdmin) {
     const cfg = await getOrCreateStreamConfig(ctx.admin);
-    const playbackUrl = String(cfg.collection_id ?? "").trim();
+    const playbackUrl =
+      String(cfg.collection_id ?? "").trim() ||
+      String(ctx.env.VITE_STREAM_URL ?? "").trim();
     const session = await createOrRefreshPlaybackSession(
       ctx,
       gameId,
@@ -3364,7 +3366,9 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   if (!hasAccess) return json({ ok: false, error: "forbidden" }, 403);
 
   const cfg = await getOrCreateStreamConfig(ctx.admin);
-  const playbackUrl = String(cfg.collection_id ?? "").trim();
+  const playbackUrl =
+    String(cfg.collection_id ?? "").trim() ||
+    String(ctx.env.VITE_STREAM_URL ?? "").trim();
   if (!playbackUrl) {
     return json({ ok: false, error: "stream_not_configured" }, 503);
   }
