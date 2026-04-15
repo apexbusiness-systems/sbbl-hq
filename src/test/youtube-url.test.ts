@@ -23,7 +23,9 @@ function extractYoutubeVideoId(url: URL): string | null {
     if (
       url.pathname === '/watch' ||
       url.pathname.startsWith('/live/') ||
-      url.pathname.startsWith('/shorts/')
+      url.pathname.startsWith('/shorts/') ||
+      url.pathname.startsWith('/embed/') ||
+      url.pathname.startsWith('/v/')
     ) {
       if (url.pathname === '/watch') {
         const watchId = url.searchParams.get('v');
