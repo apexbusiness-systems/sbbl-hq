@@ -465,12 +465,29 @@ export function LiveStreamPlayer({
               }
             });
         }, hbMs);
-      } catch {
-        // Silent for super admin — the worker super-admin fast-path should
-        // never fail, and if it does the admin will see it in dev-tools. For
-        // regular users, surface the generic error.
-        if (active && !isSuperAdmin) {
-          toast.error('Unable to start secure playback session.');
+      } catch (err: unknown) {
+        if (!active) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        // Map known worker error codes to actionable messages.
+        // Previously super-admin errors were silently swallowed, causing a
+        // blank black screen with no indication of what was wrong.
+        if (msg === 'empty_stream_url') {
+          setPlayerError(
+            isSuperAdmin
+              ? 'No stream URL configured — open Broadcast Controls to add one'
+              : 'Stream starting soon',
+          );
+        } else if (msg === 'stream_offline') {
+          setPlayerError(
+            isSuperAdmin ? 'Stream is marked offline' : 'Stream is starting soon',
+          );
+        } else {
+          setPlayerError(
+            isSuperAdmin
+              ? `Could not start session: ${msg} — check Broadcast Controls`
+              : 'Unable to start secure playback session.',
+          );
+          if (!isSuperAdmin) toast.error('Unable to start secure playback session.');
         }
       } finally {
         if (active) setPlaybackLoading(false);
