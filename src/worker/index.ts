@@ -777,25 +777,7 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   const patch: Record<string, unknown> = {};
   if (typeof body.collectionId === "string") {
     const trimmedUrl = body.collectionId.trim();
-    // Allow empty string (clearing the URL). Non-empty URLs must be valid
-    // https:// and must not be a Facebook domain (blocked stream source).
-    if (trimmedUrl !== "") {
-      let parsedUrl: URL;
-      try {
-        parsedUrl = new URL(trimmedUrl);
-      } catch {
-        return json({ ok: false, error: "invalid_stream_url" }, 422);
-      }
-      if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
-        return json({ ok: false, error: "invalid_stream_url" }, 422);
-      }
-      const streamHost = parsedUrl.hostname.toLowerCase();
-      const BLOCKED_RE =
-        /(?:^|\.)(?:facebook\.com|fb\.me|fbcdn\.net|facebook\.net|m\.me)$/;
-      if (BLOCKED_RE.test(streamHost)) {
-        return json({ ok: false, error: "unsupported_stream_source" }, 422);
-      }
-    }
+    // Alerting for unsupported sources is handled client-side; never block save.
     patch.collection_id = trimmedUrl;
   }
   if (typeof body.title === "string") patch.title = body.title.trim();
@@ -4117,26 +4099,6 @@ async function handleGoLive(ctx: HandlerCtx) {
 
   if (!body || typeof body.isLive !== "boolean") {
     return json({ ok: false, error: "is_live_required" }, 400);
-  }
-
-  // Validate the stream URL when going live
-  const rawUrl = typeof body.collectionId === "string" ? body.collectionId.trim() : "";
-  if (body.isLive && rawUrl !== "") {
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(rawUrl);
-    } catch {
-      return json({ ok: false, error: "invalid_stream_url" }, 422);
-    }
-    // Block dangerous protocols; RTMP is allowed (advisory shown in UI)
-    if (
-      parsedUrl.protocol !== "https:" &&
-      parsedUrl.protocol !== "http:" &&
-      parsedUrl.protocol !== "rtmp:" &&
-      parsedUrl.protocol !== "rtmps:"
-    ) {
-      return json({ ok: false, error: "invalid_stream_url" }, 422);
-    }
   }
 
   const nowIso = new Date().toISOString();
