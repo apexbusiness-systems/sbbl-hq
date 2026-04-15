@@ -12,7 +12,7 @@
  * IP locking and single-use enforcement happen server-side in /api/invite/redeem.
  * No role/entitlement data is trusted from the client.
  *
- * Uses a unified ReactPlayer surface controlled by app-level RBAC gates.
+ * Uses ReactPlayer for live stream playback (YouTube, HLS, etc.).
  */
 
 import { useState, useEffect, useMemo, useRef } from 'react';
@@ -143,14 +143,12 @@ function parsePlayerError(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any,
 ): string {
-  // YouTube IFrame API: data = { error: <number> }
   if (data != null && typeof data.error === 'number') {
     return (
       YOUTUBE_ERROR_MESSAGES[data.error as number] ??
       `Stream error (YouTube code ${data.error as number}). Try a different URL.`
     );
   }
-  // HTML5 MediaError (HLS, MP4, etc.)
   if (err instanceof Event) {
     const video = (err as Event & { target?: HTMLVideoElement }).target;
     const code = video?.error?.code;
@@ -162,7 +160,7 @@ function parsePlayerError(
   return 'Stream connection failed — check the URL in broadcast controls or try again.';
 }
 
-function UnifiedReactPlayer({
+function StreamPlayer({
   url,
   onReady,
   onPlay,
@@ -177,10 +175,6 @@ function UnifiedReactPlayer({
   const [playing, setPlaying] = useState(true);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(0.8);
-
-  // YouTube Live REQUIRES controls=1 — passing controls=0 causes the live embed
-  // to be rejected. For all other sources (HLS, Twitch, Vimeo, direct MP4) we
-  // suppress native controls and render the custom branded bar instead.
   const isYoutube = isYoutubeUrl(url);
 
   const handleFullscreen = async () => {
@@ -198,78 +192,38 @@ function UnifiedReactPlayer({
   };
 
   return (
-    <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="unified-react-player">
+    <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
       <ReactPlayer
         url={url}
         width="100%"
         height="100%"
         playing={playing}
-        // YouTube Live embeds reject controls=0 → always pass controls=1 for YouTube.
-        // For non-YouTube sources we hide native controls and use the custom bar.
         controls={isYoutube}
         muted={muted}
         volume={volume}
         onReady={onReady}
-        onPlay={() => {
-          setPlaying(true);
-          onPlay();
-        }}
+        onPlay={() => { setPlaying(true); onPlay(); }}
         onPause={() => setPlaying(false)}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onError={(err: any, data: any) => onError(parsePlayerError(err, data))}
-        config={{
-          youtube: {
-            playerVars: {
-              rel: 0,
-              iv_load_policy: 3,
-              // modestbranding deprecated since 2023 — YouTube ignores it
-            },
-          },
-        }}
+        config={{ youtube: { playerVars: { rel: 0, iv_load_policy: 3 } } }}
       />
-      {/* Custom RBAC controls — rendered for non-YouTube sources only.
-          YouTube Live requires its own native controls (controls=1).
-          This bar provides play/pause, volume, and fullscreen with SBBL brand
-          styling for HLS, MP4, and other direct stream sources. */}
       {!isYoutube && (
         <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm">
-          <button
-            type="button"
-            className="p-2 rounded hover:bg-white/10 text-white transition-colors"
-            aria-label={playing ? 'Pause playback' : 'Play playback'}
-            onClick={() => setPlaying(v => !v)}
-          >
+          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
             {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           </button>
-          <button
-            type="button"
-            className="p-2 rounded hover:bg-white/10 text-white transition-colors"
-            aria-label={muted ? 'Unmute' : 'Mute'}
-            onClick={() => setMuted(v => !v)}
-          >
+          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted(v => !v)}>
             {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
-          <input
-            aria-label="Volume"
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={volume}
-            onChange={(e) => {
-              const next = Number(e.target.value);
-              setMuted(next === 0);
-              setVolume(next);
-            }}
-            className="w-24 accent-amber-500"
-          />
+          <input aria-label="Volume" type="range" min={0} max={1} step={0.05} value={volume}
+            onChange={(e) => { const n = Number(e.target.value); setMuted(n === 0); setVolume(n); }}
+            className="w-24 accent-amber-500" />
           <div className="flex-1" />
-          <button
-            type="button"
-            className="p-2 rounded hover:bg-white/10 text-white transition-colors"
-            aria-label="Toggle fullscreen"
-            onClick={() => void handleFullscreen()}
-          >
+          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
             <Maximize className="w-4 h-4" />
           </button>
         </div>
@@ -400,7 +354,13 @@ export function LiveStreamPlayer({
           body: JSON.stringify({ sessionKey }),
         }, null);
         if (!active) return;
-        setPlaybackUrl(toPlayableUrl(res.playback.url));
+        // Use URL from session, fall back to game.stream_url, then env var.
+        const resolvedUrl =
+          res.playback.url ||
+          game.stream_url ||
+          (import.meta.env.VITE_STREAM_URL as string | undefined) ||
+          '';
+        setPlaybackUrl(toPlayableUrl(resolvedUrl));
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
 
@@ -472,7 +432,7 @@ export function LiveStreamPlayer({
         }, null).catch(() => {});
       }
     };
-  }, [hasAccess, userId, game.id, isSuperAdmin]);
+  }, [hasAccess, userId, game.id, isSuperAdmin, game.stream_url]);
 
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
@@ -526,28 +486,22 @@ export function LiveStreamPlayer({
             <p className="text-sm text-white/80 font-medium mb-1">Stream Unavailable</p>
             <p className="text-xs text-white/50 mb-4">{playerError}</p>
             <button
-              onClick={() => { setPlayerError(null); }}
+              onClick={() => setPlayerError(null)}
               className="px-4 py-2 text-xs font-display font-bold uppercase tracking-wider bg-amber-500 text-black rounded hover:bg-amber-400 transition-colors"
             >
               Retry
             </button>
           </div>
         ) : playbackUrl ? (
-          <UnifiedReactPlayer
+          <StreamPlayer
             url={playbackUrl}
-            onReady={() => {
-              sf.reportEvent('play');
-              sf.recordSuccess();
-            }}
+            onReady={() => { sf.reportEvent('play'); sf.recordSuccess(); }}
             onPlay={() => sf.reportEvent('playing')}
-            onError={(message) => {
-              setPlayerError(message);
-              sf.recordFailure();
-            }}
+            onError={(message) => { setPlayerError(message); sf.recordFailure(); }}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3">
-            <p className="text-sm text-muted-foreground">Live game found, but no playable stream URL is configured.</p>
+            <p className="text-sm text-muted-foreground">Stream not configured yet.</p>
           </div>
         )}
 

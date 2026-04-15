@@ -1,0 +1,33 @@
+# ops/Caddyfile
+# Caddy reverse proxy for EC2 MediaMTX WHEP streaming endpoint.
+# Deploy to EC2 alongside MediaMTX. Caddy handles TLS + CORS for the
+# WHEP WebRTC egress endpoint so browsers on sbbl-hq.icu can connect.
+#
+# Usage:
+#   caddy run --config /etc/caddy/Caddyfile
+#   caddy reload --config /etc/caddy/Caddyfile
+
+stream.sbbl-hq.icu {
+  # ── CORS preflight for WHEP ───────────────────────────────────────────
+  @whep_options {
+    method OPTIONS
+    path /whep/*
+  }
+  respond @whep_options 204
+
+  header /whep/* {
+    Access-Control-Allow-Origin "https://sbbl-hq.icu"
+    Access-Control-Allow-Methods "POST, PATCH, DELETE, OPTIONS"
+    Access-Control-Allow-Headers "Content-Type, Authorization, If-Match"
+    Access-Control-Expose-Headers "Location, ETag, Link"
+    Access-Control-Max-Age "86400"
+    # Prevent caching of CORS preflight responses
+    -Cache-Control
+  }
+
+  # ── Proxy to MediaMTX WebRTC/WHEP server (default port 8889) ─────────
+  reverse_proxy /whep/* localhost:8889
+
+  # ── MediaMTX API (optional — restrict to loopback in production) ──────
+  reverse_proxy /api/* localhost:9997
+}

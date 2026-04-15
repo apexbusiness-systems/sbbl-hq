@@ -45,6 +45,8 @@ export interface Game {
   status: GameStatus;
   score?: { home: number; away: number };
   ppvPrice: number;
+  /** WHEP endpoint URL for this game's live stream. Null when not configured. */
+  stream_url?: string | null;
 }
 
 export interface StatLine {

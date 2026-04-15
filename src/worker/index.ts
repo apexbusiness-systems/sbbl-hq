@@ -4808,9 +4808,8 @@ function addSecurityHeaders(res: Response): Response {
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
   // Facebook is explicitly NOT included — it is a blocked stream source.
-  // ReactPlayer loads provider IFrame APIs as <script> tags from the parent page
-  // (youtube.com/iframe_api, embed.twitch.tv/embed/v1.js) — both need script-src.
-  // Provider iframes (youtube.com/embed, player.twitch.tv, player.vimeo.com) need frame-src.
+  // WHEP (WebRTC egress) connections to stream.sbbl-hq.icu are covered by the
+  // *.sbbl-hq.icu wildcard in connect-src; media-src blob: covers WebRTC tracks.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
     "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://embed.twitch.tv https://assets.twitch.tv https://static.cloudflareinsights.com; " +
