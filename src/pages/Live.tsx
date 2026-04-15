@@ -55,6 +55,7 @@ function mapHomeGameToUi(row: Record<string, unknown>): Game {
     status: String(row.status ?? 'upcoming') as Game['status'],
     score: { home: Number(row.home_score ?? 0), away: Number(row.away_score ?? 0) },
     ppvPrice: 4.99,
+    stream_url: typeof row.stream_url === 'string' ? row.stream_url : null,
   };
 }
 
