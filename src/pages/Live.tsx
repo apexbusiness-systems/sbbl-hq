@@ -523,9 +523,11 @@ const LivePage = () => {
   // ── Real reactions (persisted + Realtime-broadcast) ──────────────────────
   const [reactions, setReactions] = useState({ fire: 0, heart: 0, clap: 0 });
 
-  // Fetch initial counts whenever the active game is known
+  // Fetch initial counts whenever the active game is known.
+  // Skip the 'broadcast' alias — it has no real game row in the DB so
+  // reaction counts would always 404 / return empty.
   useEffect(() => {
-    if (!activeGameId) return;
+    if (!activeGameId || activeGameId === 'broadcast') return;
     void apiFetch<{ ok: boolean; fire: number; heart: number; clap: number }>(
       `/api/streams/${activeGameId}/reactions`,
     ).then(data => {
@@ -533,9 +535,10 @@ const LivePage = () => {
     }).catch(() => {});
   }, [activeGameId]);
 
-  // Subscribe to Supabase Realtime — broadcast every new reaction to all viewers
+  // Subscribe to Supabase Realtime — broadcast every new reaction to all viewers.
+  // Skip the 'broadcast' alias for the same reason as above.
   useEffect(() => {
-    if (!activeGameId) return;
+    if (!activeGameId || activeGameId === 'broadcast') return;
     const client = getSupabaseClient();
     if (!client) return;
 
@@ -559,8 +562,8 @@ const LivePage = () => {
   const postReaction = useCallback(async (type: 'fire' | 'heart' | 'clap') => {
     // Optimistic update immediately
     setReactions(r => ({ ...r, [type]: r[type] + 1 }));
-    // Persist to DB (auth required; silently skip if not signed in)
-    if (!user?.id || !activeGameId || !session) return;
+    // Persist to DB (auth required; skip for broadcast alias which has no DB row)
+    if (!user?.id || !activeGameId || activeGameId === 'broadcast' || !session) return;
     try {
       await apiFetch(`/api/streams/${activeGameId}/react`, {
         method: 'POST',

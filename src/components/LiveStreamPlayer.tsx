@@ -418,6 +418,12 @@ export function LiveStreamPlayer({
       .finally(() => setAccessChecked(true));
   }, [userId, game.id, hasRoleAccess]);
 
+  // Retry key: incrementing this re-triggers the session effect after the
+  // user clicks "Retry" on the player error screen, without requiring a full
+  // page reload.  Previously clicking Retry only cleared the error state but
+  // never re-ran the effect, so the player stayed blank forever.
+  const [retryKey, setRetryKey] = useState(0);
+
   // Start playback session — all API calls use null token so apiFetch
   // auto-refreshes the JWT, preventing stale-token 401 loops.
   // Circuit breaker: after 3 consecutive heartbeat failures, notify the
@@ -551,7 +557,9 @@ export function LiveStreamPlayer({
         }, null).catch(() => {});
       }
     };
-  }, [hasAccess, userId, game.id, isSuperAdmin, game.stream_url]);
+    // retryKey is intentionally included: clicking Retry bumps it to re-run
+    // the session start without a full page reload.
+  }, [hasAccess, userId, game.id, isSuperAdmin, game.stream_url, retryKey]);
 
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
@@ -605,7 +613,7 @@ export function LiveStreamPlayer({
             <p className="text-sm text-white/80 font-medium mb-1">Stream Unavailable</p>
             <p className="text-xs text-white/50 mb-4">{playerError}</p>
             <button
-              onClick={() => setPlayerError(null)}
+              onClick={() => { setPlayerError(null); setRetryKey(k => k + 1); }}
               className="px-4 py-2 text-xs font-display font-bold uppercase tracking-wider bg-amber-500 text-black rounded hover:bg-amber-400 transition-colors"
             >
               Retry
