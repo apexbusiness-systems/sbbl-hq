@@ -68,6 +68,11 @@ function readBrowserNetwork(): NetworkProfile {
   });
 }
 
+/** Monotonic timestamp in ms. Module-level constant so it is never recreated. */
+function nowMs(): number {
+  return Date.now();
+}
+
 function subscribeToNetwork(cb: (np: NetworkProfile) => void): () => void {
   if (typeof navigator === 'undefined') return () => {};
   const nav = navigator as NavigatorWithConnection;
@@ -172,15 +177,10 @@ export function useStreamForge(
     disabled = false,
   } = options;
 
-  const now = (): number =>
-    typeof performance !== 'undefined' && typeof performance.now === 'function'
-      ? Date.now()
-      : Date.now();
-
   const sessionHash = useMemo(() => hashSessionId(sessionSeed), [sessionSeed]);
 
   const [snapshot, setSnapshot] = useState<QoeSnapshot>(() =>
-    initQoeSnapshot(sessionHash, now(), readBrowserNetwork()),
+    initQoeSnapshot(sessionHash, nowMs(), readBrowserNetwork()),
   );
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
   const lastReconnectTsRef = useRef<number | null>(null);
@@ -199,7 +199,7 @@ export function useStreamForge(
       setSnapshot((prev) =>
         applyQoeEvent(prev, {
           kind,
-          ts: now(),
+          ts: nowMs(),
           ...(extra ?? {}),
         }),
       );
@@ -219,13 +219,13 @@ export function useStreamForge(
     const decision = shouldWarmReconnect({
       consecutiveFailures,
       lastReconnectTs: lastReconnectTsRef.current,
-      now: now(),
+      now: nowMs(),
     });
     return decision.reconnect;
   }, [consecutiveFailures]);
 
   const markWarmReconnect = useCallback(() => {
-    lastReconnectTsRef.current = now();
+    lastReconnectTsRef.current = nowMs();
     setConsecutiveFailures(0);
   }, []);
 
@@ -286,7 +286,7 @@ export function useStreamForge(
       rebufferCount: s.rebufferCount,
       errorCount: s.errorCount,
       network: s.network,
-      ts: now(),
+      ts: nowMs(),
     };
   }, [gameId]);
 
@@ -307,7 +307,7 @@ export function useStreamForge(
     // Also mark heartbeat ticks in the snapshot so playbackMs stays current.
     const id = setInterval(() => {
       setSnapshot((prev) =>
-        applyQoeEvent(prev, { kind: 'heartbeat', ts: now() }),
+        applyQoeEvent(prev, { kind: 'heartbeat', ts: nowMs() }),
       );
       flushBeacon();
     }, interval);
