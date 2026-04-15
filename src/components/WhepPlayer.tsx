@@ -53,22 +53,22 @@ export function WhepPlayer({
     }
   }, []);
 
-  const scheduleRetry = useCallback(() => {
-    if (retryIntervalMs <= 0) return;
-    if (maxRetries > 0 && retryCount.current >= maxRetries) {
-      updateStatus('offline');
-      return;
-    }
-    retryCount.current += 1;
-    retryTimer.current = setTimeout(() => {
-      void connect();
-    }, retryIntervalMs);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [retryIntervalMs, maxRetries]);
-
   const connect = useCallback(async () => {
     if (!videoRef.current || !whepUrl) return;
-    destroy();
+    // Clear any pending retry timer before starting a fresh connection
+    if (retryTimer.current) {
+      clearTimeout(retryTimer.current);
+      retryTimer.current = null;
+    }
+    // Tear down previous player instance without clearing the retry timer
+    // (destroy() would also clear it, but we already did above)
+    if (playerRef.current) {
+      try { playerRef.current.destroy(); } catch { /* noop */ }
+      playerRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
     updateStatus('connecting');
 
     try {
@@ -81,7 +81,13 @@ export function WhepPlayer({
 
       player.on('no-media', () => {
         updateStatus('offline');
-        scheduleRetry();
+        if (retryIntervalMs <= 0) return;
+        if (maxRetries > 0 && retryCount.current >= maxRetries) {
+          updateStatus('offline');
+          return;
+        }
+        retryCount.current += 1;
+        retryTimer.current = setTimeout(() => void connect(), retryIntervalMs);
       });
 
       player.on('media-recovered', () => {
@@ -95,9 +101,17 @@ export function WhepPlayer({
     } catch (err) {
       console.error('[WhepPlayer] connection failed:', err);
       updateStatus('error');
-      scheduleRetry();
+      if (retryIntervalMs <= 0) return;
+      if (maxRetries > 0 && retryCount.current >= maxRetries) {
+        updateStatus('offline');
+        return;
+      }
+      retryCount.current += 1;
+      retryTimer.current = setTimeout(() => void connect(), retryIntervalMs);
     }
-  }, [whepUrl, destroy, updateStatus, scheduleRetry]);
+  // connect references itself via the retry timers; deps are the external inputs only
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [whepUrl, updateStatus, retryIntervalMs, maxRetries]);
 
   useEffect(() => {
     if (whepUrl) void connect();
@@ -137,12 +151,13 @@ export function WhepPlayer({
           </div>
           <button
             type="button"
-            onClick={() => { retryCount.current = 0; void connect(); }}
+            onClick={() => { retryCount.current = 0; void connect(); /* manual retry: reset counter before connect */ }}
             className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black text-sm font-bold rounded-lg transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
             Retry
           </button>
+          {/* retryCount reset is handled inside connect() on manual trigger */}
         </div>
       )}
 
