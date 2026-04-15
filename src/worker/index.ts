@@ -263,8 +263,8 @@ function readCookie(req: Request, name: string): string | null {
   return null;
 }
 
-function toProxyPath(pathname: string, gameId: string): string {
-  const prefix = `/api/streams/${gameId}/proxy/`;
+function toRelayPath(pathname: string, gameId: string): string {
+  const prefix = `/api/streams/${gameId}/relay/`;
   return pathname.startsWith(prefix) ? pathname.slice(prefix.length) : "";
 }
 
@@ -272,13 +272,13 @@ function toGatewayAbsoluteUrl(input: string, gameId: string): string {
   if (/^(?:https?:)?\/\//i.test(input)) {
     try {
       const parsed = new URL(input, "https://placeholder.local");
-      return `/api/streams/${gameId}/proxy/${parsed.pathname.replace(/^\/+/, "")}${parsed.search}`;
+      return `/api/streams/${gameId}/relay/${parsed.pathname.replace(/^\/+/, "")}${parsed.search}`;
     } catch {
       return input;
     }
   }
-  if (input.startsWith("/")) return `/api/streams/${gameId}/proxy/${input.replace(/^\/+/, "")}`;
-  return `/api/streams/${gameId}/proxy/${input}`;
+  if (input.startsWith("/")) return `/api/streams/${gameId}/relay/${input.replace(/^\/+/, "")}`;
+  return `/api/streams/${gameId}/relay/${input}`;
 }
 
 function rewriteManifestToGateway(manifest: string, gameId: string): string {
@@ -295,8 +295,8 @@ function rewriteManifestToGateway(manifest: string, gameId: string): string {
 
 function resolveProxyTarget(trueOrigin: string, requestUrl: string, gameId: string): string {
   const reqUrl = new URL(requestUrl);
-  const proxyPath = toProxyPath(reqUrl.pathname, gameId);
-  const target = new URL(proxyPath, trueOrigin);
+  const proxyPath = toRelayPath(reqUrl.pathname, gameId);
+  const safeBase = trueOrigin.endsWith('/') ? trueOrigin : trueOrigin + '/'; const target = new URL(proxyPath, safeBase);
   reqUrl.searchParams.forEach((value, key) => target.searchParams.set(key, value));
   return target.toString();
 }
@@ -3501,7 +3501,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       );
       cookieHeaders["Set-Cookie"] =
         `${PROXY_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=70`;
-      clientPlaybackUrl = `/api/streams/${gameId}/proxy/master.m3u8`;
+      clientPlaybackUrl = `/api/streams/${gameId}/relay/master.m3u8`;
     }
     return json({
       ok: true,
@@ -3575,7 +3575,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     );
     cookieHeaders["Set-Cookie"] =
       `${PROXY_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=70`;
-    clientPlaybackUrl = `/api/streams/${gameId}/proxy/master.m3u8`;
+    clientPlaybackUrl = `/api/streams/${gameId}/relay/master.m3u8`;
   }
   return json({
     ok: true,
@@ -3718,7 +3718,7 @@ async function handleStreamSessionEnd(ctx: HandlerCtx) {
   return json({ ok: true, ended: Boolean(endRes.data) });
 }
 
-async function handleStreamProxy(ctx: HandlerCtx) {
+async function handleStreamRelay(ctx: HandlerCtx) {
   const gameId = ctx.params.gameId;
   if (!gameId) return new Response("Forbidden", { status: 403 });
 
@@ -4862,8 +4862,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "GET",
-    path: "/api/streams/:gameId/proxy/*",
-    handler: handleStreamProxy,
+    path: "/api/streams/:gameId/relay/*",
+    handler: handleStreamRelay,
   },
   {
     method: "POST",
@@ -5222,7 +5222,7 @@ export default Sentry.withSentry(
   }),
   {
   async fetch(req: Request, env: Env): Promise<Response> {
-    const _fetchStart = Date.now();
+    if (req.method === 'OPTIONS') { return new Response(null, { status: 204, headers: { 'Access-Control-Allow-Origin': req.headers.get('Origin') ?? '*', 'Access-Control-Allow-Methods': 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization, Cookie, x-idempotency-key', 'Access-Control-Allow-Credentials': 'true', 'Access-Control-Max-Age': '86400' } }); } const _fetchStart = Date.now();
         const parsed = safeServerEnv(env as unknown as Record<string, unknown>);
 
     const url = new URL(req.url);
