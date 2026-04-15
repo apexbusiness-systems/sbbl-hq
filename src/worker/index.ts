@@ -5681,7 +5681,7 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
   await ctx.admin.from("ingest_jobs").update({ state: "validated" }).eq("id", jobId);
 
   // ── Step 3: Write media_asset (state=written) ───────────────────────────
-  const assetMeta = {
+  const assetMeta: Record<string, unknown> = {
     type: "poster",
     thumbnail: publicUrl,
     image_url: publicUrl,
