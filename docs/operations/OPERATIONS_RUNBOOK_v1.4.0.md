@@ -148,8 +148,7 @@ Triggers on push to `main`/`staging`/`release/**` and PRs targeting `main`/`stag
 Job 1: Lint & Typecheck
   ├── npm ci
   ├── npx eslint . --max-warnings 0
-  ├── npx tsc --noEmit -p tsconfig.app.json
-  └── npx tsc --noEmit -p tsconfig.node.json (continue-on-error)
+  └── npm run typecheck
 
 Job 2: Unit & Integration Tests
   ├── npm ci
@@ -169,6 +168,13 @@ Job 4: Lighthouse LCP Budget (depends on Job 3)
 
 Job 5: Playwright E2E (depends on Job 3)
   └── Blocking gate (fails CI on test failure)
+
+Job 6: Livestream Critical Path (depends on Jobs 1, 2, 3)
+  ├── Targeted livestream vitest suite
+  └── Playwright stream-validation spec (blocking)
+
+Job 7: Livestream 20K Stress (depends on Job 6)
+  └── STRESS=1 vitest run src/test/stream-20k-stress.test.ts (blocking)
 
 External Checks:
   ├── Supabase Preview (migration validation on preview branch)
