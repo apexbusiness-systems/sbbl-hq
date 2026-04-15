@@ -176,8 +176,10 @@ const ScoresPage = () => {
     if (Array.isArray(apiGames) && apiGames.length > 0) {
       return apiGames;
     }
-    // Fallback to mock data when API returns empty
-    return mockGames.map((g): ScoreEntry => ({
+    // Fallback to mock data when API returns empty.
+    // Keep fallback filters aligned with active UI filters to avoid
+    // showing unrelated categories (e.g. league cards under 1v1).
+    const fallback = mockGames.map((g): ScoreEntry => ({
       id: g.id,
       category: 'league',
       leagueId: g.leagueId,
@@ -189,7 +191,14 @@ const ScoresPage = () => {
       gameDate: g.date,
       notes: `${g.venue} — ${g.court}`,
     }));
-  }, [scoresQuery.data?.games]);
+    return fallback.filter((entry) => {
+      if (category !== 'all' && entry.category !== category) return false;
+      if (leagueFilter !== 'all' && entry.leagueId !== leagueFilter) return false;
+      if (statusFilter === 'recent' && entry.status !== 'final') return false;
+      if (statusFilter === 'upcoming' && entry.status !== 'upcoming') return false;
+      return true;
+    });
+  }, [scoresQuery.data?.games, category, leagueFilter, statusFilter]);
 
   // Group by category when viewing "All"
   const grouped = useMemo(() => {
