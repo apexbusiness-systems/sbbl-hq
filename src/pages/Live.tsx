@@ -26,7 +26,7 @@ import {
   setStreamLive,
   updateStreamConfig,
 } from '@/lib/api/stream';
-import { detectStreamUrlType, STREAM_TYPE_LABELS, toPlayableUrl } from '@/lib/stream/url-detector';
+import { detectStreamUrlType, getStreamTypeAdvisory, STREAM_TYPE_LABELS, toPlayableUrl } from '@/lib/stream/url-detector';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
@@ -252,18 +252,10 @@ function AdminStreamOverlay({
                     const val = e.target.value;
                     setCustomStreamUrl(val);
                     if (streamUrlError) setStreamUrlError(null);
-                    // URL type detection + advisory
+                    // URL type detection + centralized advisory
                     if (val.trim()) {
-                      const type = detectStreamUrlType(val.trim());
-                      if (type === 'rtmp') {
-                        setUrlTypeAdvisory('RTMP cannot play in browser — use an HLS endpoint instead.');
-                      } else if (type === 'whep') {
-                        setUrlTypeAdvisory('WebRTC/WHEP — ultra-low latency mode active');
-                      } else if (type === 'hls') {
-                        setUrlTypeAdvisory('HLS stream detected');
-                      } else {
-                        setUrlTypeAdvisory(null);
-                      }
+                      const advisory = getStreamTypeAdvisory(detectStreamUrlType(val.trim()));
+                      setUrlTypeAdvisory(advisory.message || null);
                     } else {
                       setUrlTypeAdvisory(null);
                     }
@@ -280,13 +272,14 @@ function AdminStreamOverlay({
               {streamUrlError && (
                 <p className="mt-1 text-[10px] text-red-300">{streamUrlError}</p>
               )}
-              {urlTypeAdvisory && !streamUrlError && (
-                <p className={`mt-1 text-[10px] leading-relaxed ${
-                  detectStreamUrlType(customStreamUrl.trim()) === 'rtmp'
-                    ? 'text-amber-400'
-                    : 'text-white/50'
-                }`}>{urlTypeAdvisory}</p>
-              )}
+              {urlTypeAdvisory && !streamUrlError && (() => {
+                const advisory = getStreamTypeAdvisory(detectStreamUrlType(customStreamUrl.trim()));
+                return (
+                  <p className={`mt-1 text-[10px] leading-relaxed ${
+                    advisory.level === 'warn' ? 'text-amber-400' : 'text-white/50'
+                  }`}>{urlTypeAdvisory}</p>
+                );
+              })()}
             </div>
 
             {/* Stream Title */}
