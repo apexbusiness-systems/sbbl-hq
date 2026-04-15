@@ -55,27 +55,23 @@ jobs:
         run: |
           set -euo pipefail
           WRANGLER_WORKER_NAME="sbbl-hq-worker"
-          WRANGLER_ENV_TARGET=""
+          WRANGLER_ENV_TARGET="${CLOUDFLARE_DEPLOY_ENV:-}"
           WRANGLER_CONFIG_FILE="wrangler.deploy.jsonc"
 
           put_secret_value() {
             local name="$1"
             local value="$2"
-
-            # Use versions-aware secret write first. This avoids the
-            # "latest version isn't currently deployed" hard failure.
-            if printf '%s' "$value" | npx wrangler versions secret put "$name" \
-              --name "$WRANGLER_WORKER_NAME" \
-              --config "$WRANGLER_CONFIG_FILE" \
-              --env="$WRANGLER_ENV_TARGET" >/dev/null 2>&1; then
-              return 0
+            local -a env_args=()
+            if [ -n "$WRANGLER_ENV_TARGET" ]; then
+              env_args=(--env "$WRANGLER_ENV_TARGET")
             fi
 
-            # Backward-compatible fallback for older Wrangler builds.
-            printf '%s' "$value" | npx wrangler secret put "$name" \
+            # Versions-aware secret writes are required when Workers Versions
+            # is enabled; this avoids "latest version not deployed" failures.
+            printf '%s' "$value" | npx wrangler versions secret put "$name" \
               --name "$WRANGLER_WORKER_NAME" \
               --config "$WRANGLER_CONFIG_FILE" \
-              --env="$WRANGLER_ENV_TARGET" >/dev/null
+              "${env_args[@]}" >/dev/null
           }
 
           put_required_secret() {
@@ -113,6 +109,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_WORKERS || secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_DEPLOY_ENV: ${{ vars.CLOUDFLARE_DEPLOY_ENV || '' }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
