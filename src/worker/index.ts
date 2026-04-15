@@ -5727,6 +5727,16 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     ...meta,
   };
 
+  // Ensure POTG stats are deterministically tabulated for TGIF POTG
+  if (body.kind === "potg" && (body.leagueId === "tgifbl" || meta.leagueId === "tgifbl" || meta.leagueId === "TGIFBL" || body.leagueId === "TGIFBL")) {
+    assetMeta.pts = typeof meta.pts === 'number' ? meta.pts : Number(meta.pts ?? 0);
+    assetMeta.rebs = typeof meta.rebs === 'number' ? meta.rebs : Number(meta.rebs ?? 0);
+    assetMeta.assts = typeof meta.assts === 'number' ? meta.assts : Number(meta.assts ?? 0);
+    assetMeta.gameResult = String(meta.gameResult ?? "");
+    assetMeta.playerName = String(meta.playerName ?? body.title ?? "");
+    assetMeta.team = String(meta.team ?? "");
+  }
+
   const { data: asset, error: assetErr } = await ctx.admin
     .from("media_assets")
     .insert({
