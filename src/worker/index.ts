@@ -2734,6 +2734,49 @@ function extractPotgTeamCandidates(team: string, gameResult: string): string[] {
   return [...candidates];
 }
 
+function parsePotgResultSide(side: string): { label: string; score: number | null } {
+  const trimmed = side.trim().replace(/\s+/g, " ");
+  if (!trimmed) return { label: "", score: null };
+
+  // Supports both "Team Name 82" and "82 Team Name" card formats.
+  const trailing = trimmed.match(/^(.*?)(\d{1,3})$/);
+  if (trailing) {
+    return {
+      label: trailing[1].trim(),
+      score: Number.isFinite(Number(trailing[2])) ? Number(trailing[2]) : null,
+    };
+  }
+
+  const leading = trimmed.match(/^(\d{1,3})(.*)$/);
+  if (leading) {
+    return {
+      label: leading[2].trim(),
+      score: Number.isFinite(Number(leading[1])) ? Number(leading[1]) : null,
+    };
+  }
+
+  return { label: trimmed, score: null };
+}
+
+function parsePotgGameResult(gameResult: string): {
+  homeLabel: string;
+  awayLabel: string;
+  homeScore: number | null;
+  awayScore: number | null;
+} | null {
+  const sides = gameResult.split(/\bvs\b/i).map((s) => s.trim()).filter(Boolean);
+  if (sides.length !== 2) return null;
+  const home = parsePotgResultSide(sides[0]);
+  const away = parsePotgResultSide(sides[1]);
+  if (!home.label || !away.label) return null;
+  return {
+    homeLabel: home.label,
+    awayLabel: away.label,
+    homeScore: home.score,
+    awayScore: away.score,
+  };
+}
+
 async function inferPotgLeagueCode(
   ctx: HandlerCtx,
   team: string,
@@ -2794,6 +2837,8 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
   const requestedLeagueCode = String(body.leagueId).toLowerCase();
   const inferredLeagueCode = await inferPotgLeagueCode(ctx, body.team, body.gameResult);
   const effectiveLeagueCode = inferredLeagueCode ?? requestedLeagueCode;
+  const potgDate = body.date ?? new Date().toISOString().split("T")[0];
+  const parsedResult = parsePotgGameResult(body.gameResult ?? "");
 
   // Resolve league code (e.g. 'wbl') to UUID for FK references
   let leagueUuid: string | null = null;
@@ -2810,6 +2855,64 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     .select("user_id")
     .ilike("display_name", body.playerName.trim())
     .maybeSingle();
+  const playerUserId = profileData?.user_id ?? null;
+  const { data: playerRow } = playerUserId
+    ? await ctx.admin
+      .from("players")
+      .select("id")
+      .eq("user_id", playerUserId)
+      .maybeSingle()
+    : { data: null as { id?: string } | null };
+  const playerId = playerRow?.id ?? null;
+
+  // Link POTG to an existing score row when possible; otherwise create
+  // a minimal league game row so Scores and stats tabs can tabulate it.
+  let gameId: string | null = null;
+  if (leagueUuid && parsedResult) {
+    const { data: candidateGames } = await ctx.admin
+      .from("games")
+      .select("id,participant1_label,participant2_label")
+      .eq("league_id", leagueUuid)
+      .eq("category", "league")
+      .eq("game_date", potgDate)
+      .limit(25);
+
+    const targetA = normalizeTeamToken(normalizeTeamLabel(parsedResult.homeLabel));
+    const targetB = normalizeTeamToken(normalizeTeamLabel(parsedResult.awayLabel));
+    const matched = (candidateGames ?? []).find((g) => {
+      const rowA = normalizeTeamToken(
+        normalizeTeamLabel(String(g.participant1_label ?? ""))
+      );
+      const rowB = normalizeTeamToken(
+        normalizeTeamLabel(String(g.participant2_label ?? ""))
+      );
+      return (rowA === targetA && rowB === targetB) || (rowA === targetB && rowB === targetA);
+    });
+
+    if (matched?.id) {
+      gameId = String(matched.id);
+      await ctx.admin.from("games").update({
+        status: "final",
+        participant1_label: parsedResult.homeLabel,
+        participant2_label: parsedResult.awayLabel,
+        home_score: parsedResult.homeScore,
+        away_score: parsedResult.awayScore,
+      }).eq("id", gameId);
+    } else {
+      const { data: newGame } = await ctx.admin.from("games").insert({
+        league_id: leagueUuid,
+        category: "league",
+        status: "final",
+        game_date: potgDate,
+        participant1_label: parsedResult.homeLabel,
+        participant2_label: parsedResult.awayLabel,
+        home_score: parsedResult.homeScore,
+        away_score: parsedResult.awayScore,
+        notes: "Auto-created from POTG submission",
+      }).select("id").single();
+      gameId = newGame?.id ? String(newGame.id) : null;
+    }
+  }
 
   // Upsert into player_game_stats via award_records table if player found,
   // otherwise write to import_jobs as a pending manual match
@@ -2826,9 +2929,10 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
         assts: body.assts,
         gameResult: body.gameResult,
         leagueId: effectiveLeagueCode,
-        date: body.date ?? new Date().toISOString().split("T")[0],
+        date: potgDate,
         imageUrl: body.imageUrl ?? null,
         matched_profile_id: profileData?.user_id ?? null,
+        game_id: gameId,
         source: "potg_image_parser",
         requestedLeagueId: requestedLeagueCode,
         inferredLeagueId: inferredLeagueCode,
@@ -2846,21 +2950,21 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
 
   if (jobError) throw new Error(jobError.message);
 
-  // player_game_stats requires a non-null game_id FK (games.id).
-  // We don't have a game_id at POTG parse time, so we intentionally skip
-  // this upsert. The import_jobs record carries the full payload; a
-  // subsequent manual-match step will write the stat row once a game_id
-  // is available.
-  // DO NOT add a upsert({ game_id: null }) here — it violates the NOT NULL FK.
-  if (profileData?.user_id) {
-    // stat write deferred — see import_jobs.payload for pending record
+  // Persist player stat row when both player and game are resolvable.
+  if (playerId && gameId) {
+    await ctx.admin.from("player_game_stats").upsert({
+      game_id: gameId,
+      player_id: playerId,
+      pts: Number(body.pts ?? 0),
+      reb: Number(body.rebs ?? 0),
+      ast: Number(body.assts ?? 0),
+    }, { onConflict: "game_id,player_id" });
   }
 
   // Write media_assets + media_publications so the POTG card renders
   // via the canonical publication layer. Only when an image is present.
   if (body.imageUrl) {
     const potgTitle = `POTG — ${body.playerName} (${body.team})`;
-    const potgDate = body.date ?? new Date().toISOString().split("T")[0];
     const potgMeta = {
       type: "poster",
       thumbnail: body.imageUrl,
