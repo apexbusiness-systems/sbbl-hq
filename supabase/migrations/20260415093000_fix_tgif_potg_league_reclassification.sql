@@ -87,8 +87,7 @@ patterns as (
   ]::text[] as team_like
 )
 update public.media_publications mp
-set league_id = li.tgifbl_id,
-    updated_at = now()
+set league_id = li.tgifbl_id
 from league_ids li, patterns p
 where li.wbl_id is not null
   and li.tgifbl_id is not null
