@@ -61,14 +61,14 @@ export function WhepPlayer({
       return;
     }
     if (retryTimer.current) {
-      clearTimeout(retryTimer.current); // prevent overlapping reconnect attempts after repeated no-media events
+      clearTimeout(retryTimer.current); // collapse bursty no-media/error events into a single pending retry
       retryTimer.current = null;
     }
     retryCount.current += 1;
     retryTimer.current = setTimeout(() => {
       reconnectRef.current();
     }, retryIntervalMs);
-  }, [retryIntervalMs, maxRetries, updateStatus]);
+  }, [maxRetries, retryIntervalMs, updateStatus]);
 
   const connect = useCallback(async () => {
     if (!videoRef.current || !whepUrl) return;
@@ -129,6 +129,12 @@ export function WhepPlayer({
   // connect references itself via the retry timers; deps are the external inputs only
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [whepUrl, updateStatus, retryIntervalMs, maxRetries]);
+
+  useEffect(() => {
+    reconnectRef.current = () => {
+      void connect();
+    };
+  }, [connect]);
 
   useEffect(() => {
     reconnectRef.current = () => {
