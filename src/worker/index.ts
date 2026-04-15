@@ -11,6 +11,7 @@ import {
   toHealthReport,
   type AggregatedHealth,
 } from "@/lib/stream/streamforge";
+import { getStreamDeliveryClass } from "@/lib/stream/url-detector";
 import {
   handlePublicConfig as _handlePublicConfig,
   handlePublicHome as _handlePublicHome,
@@ -34,6 +35,8 @@ type Handler = (ctx: HandlerCtx) => Promise<Response>;
 type Route = { method: string; regex: RegExp; handler: Handler };
 const transientIdempotency = new Map<string, number>();
 const transientRateLimits = new Map<string, number[]>();
+const streamUrlCache = new Map<string, { url: string; expiresAtMs: number }>();
+const STREAM_URL_CACHE_TTL_MS = 30_000;
 
 // Per-isolate cached admin Supabase client.  Cloudflare Workers reuse isolate
 // memory across requests, so we avoid creating a new client on every fetch.
@@ -178,6 +181,149 @@ function getBearerToken(req: Request) {
 }
 
 const textEncoder = new TextEncoder();
+const proxyEncoder = new TextEncoder();
+const PROXY_AUTH_COOKIE = "sbbl_proxy_auth";
+
+type ProxyTokenPayload = {
+  gameId: string;
+  userId: string;
+  sessionId: string;
+  exp: number;
+};
+
+function toBase64Url(input: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < input.byteLength; i += 1) binary += String.fromCharCode(input[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function fromBase64Url(input: string): Uint8Array | null {
+  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "===".slice((normalized.length + 3) % 4);
+  try {
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+async function signProxyToken(payload: ProxyTokenPayload, secret: string): Promise<string> {
+  const payloadBytes = proxyEncoder.encode(JSON.stringify(payload));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    proxyEncoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, payloadBytes);
+  return `${toBase64Url(payloadBytes)}.${toBase64Url(new Uint8Array(signature))}`;
+}
+
+async function verifyProxyToken(token: string, secret: string): Promise<ProxyTokenPayload | null> {
+  const [payloadPart, signaturePart] = token.split(".");
+  if (!payloadPart || !signaturePart) return null;
+  const payloadBytes = fromBase64Url(payloadPart);
+  const signatureBytes = fromBase64Url(signaturePart);
+  if (!payloadBytes || !signatureBytes) return null;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    proxyEncoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  const valid = await crypto.subtle.verify("HMAC", key, signatureBytes, payloadBytes);
+  if (!valid) return null;
+  const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as ProxyTokenPayload;
+  if (
+    !payload ||
+    typeof payload.gameId !== "string" ||
+    typeof payload.userId !== "string" ||
+    typeof payload.sessionId !== "string" ||
+    typeof payload.exp !== "number"
+  ) {
+    return null;
+  }
+  if (Math.floor(Date.now() / 1000) >= payload.exp) return null;
+  return payload;
+}
+
+function readCookie(req: Request, name: string): string | null {
+  const cookie = req.headers.get("cookie");
+  if (!cookie) return null;
+  const prefix = `${name}=`;
+  for (const part of cookie.split(";")) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) return decodeURIComponent(trimmed.slice(prefix.length));
+  }
+  return null;
+}
+
+function toProxyPath(pathname: string, gameId: string): string {
+  const prefix = `/api/streams/${gameId}/proxy/`;
+  return pathname.startsWith(prefix) ? pathname.slice(prefix.length) : "";
+}
+
+function toGatewayAbsoluteUrl(input: string, gameId: string): string {
+  if (/^(?:https?:)?\/\//i.test(input)) {
+    try {
+      const parsed = new URL(input, "https://placeholder.local");
+      return `/api/streams/${gameId}/proxy/${parsed.pathname.replace(/^\/+/, "")}${parsed.search}`;
+    } catch {
+      return input;
+    }
+  }
+  if (input.startsWith("/")) return `/api/streams/${gameId}/proxy/${input.replace(/^\/+/, "")}`;
+  return `/api/streams/${gameId}/proxy/${input}`;
+}
+
+function rewriteManifestToGateway(manifest: string, gameId: string): string {
+  const rewrittenAttrs = manifest.replace(
+    /URI="([^"]+)"/g,
+    (_match: string, uri: string) => `URI="${toGatewayAbsoluteUrl(uri, gameId)}"`,
+  );
+  // Single-pass line transform: only non-comment URIs are rewritten.
+  return rewrittenAttrs.replace(
+    /^(?!#)([^\r\n]+)$/gm,
+    (line: string) => toGatewayAbsoluteUrl(line.trim(), gameId),
+  );
+}
+
+function resolveProxyTarget(trueOrigin: string, requestUrl: string, gameId: string): string {
+  const reqUrl = new URL(requestUrl);
+  const proxyPath = toProxyPath(reqUrl.pathname, gameId);
+  const target = new URL(proxyPath, trueOrigin);
+  reqUrl.searchParams.forEach((value, key) => target.searchParams.set(key, value));
+  return target.toString();
+}
+
+async function getStreamUrlForGame(
+  admin: SupabaseClient,
+  gameId: string,
+  env: Env,
+): Promise<string> {
+  const nowMs = Date.now();
+  const cacheHit = streamUrlCache.get(gameId);
+  if (cacheHit && cacheHit.expiresAtMs > nowMs) return cacheHit.url;
+
+  const game = await admin
+    .from("games")
+    .select("stream_url")
+    .eq("id", gameId)
+    .maybeSingle();
+  if (game.error) throw new Error(game.error.message);
+  const streamUrl =
+    String((game.data as { stream_url?: string } | null)?.stream_url ?? "").trim() ||
+    String(env.VITE_STREAM_URL ?? "").trim();
+  if (!streamUrl) throw new Error("stream_not_configured");
+
+  streamUrlCache.set(gameId, { url: streamUrl, expiresAtMs: nowMs + STREAM_URL_CACHE_TTL_MS });
+  return streamUrl;
+}
 
 export function parseStripeSignature(header: string) {
   const fields = header.split(",").map((part) => part.trim());
@@ -2424,10 +2570,15 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
 
 function compilePath(path: string) {
   const keys: string[] = [];
-  const pattern = path.replace(/:([^/]+)/g, (_, key: string) => {
-    keys.push(key);
-    return "([^/]+)";
-  });
+  const pattern = path
+    .replace(/:([^/*]+)/g, (_, key: string) => {
+      keys.push(key);
+      return "([^/]+)";
+    })
+    .replace(/\*/g, () => {
+      keys.push("wildcard");
+      return "(.*)";
+    });
   return { regex: new RegExp(`^${pattern}$`), keys };
 }
 
@@ -3321,14 +3472,29 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     const playbackUrl =
       String(cfg.collection_id ?? "").trim() ||
       String(ctx.env.VITE_STREAM_URL ?? "").trim();
+    const deliveryClass = getStreamDeliveryClass(playbackUrl);
     const fakeSessionId = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + 70_000).toISOString();
     const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
+    const cookieHeaders: Record<string, string> = {};
+    let clientPlaybackUrl = playbackUrl;
+    if (deliveryClass === "proxy" && gameId) {
+      const exp = Math.floor(Date.now() / 1000) + 70;
+      const secret = ctx.env.OMNIHUB_SIGNING_SECRET ?? ctx.env.SUPABASE_SERVICE_ROLE_KEY;
+      const token = await signProxyToken(
+        { gameId, userId, sessionId: fakeSessionId, exp },
+        secret,
+      );
+      cookieHeaders["Set-Cookie"] =
+        `${PROXY_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=70`;
+      clientPlaybackUrl = `/api/streams/${gameId}/proxy/master.m3u8`;
+    }
     return json({
       ok: true,
       playback: {
         type: "url",
-        url: playbackUrl,
+        url: clientPlaybackUrl,
+        deliveryClass,
         expiresAt,
         maxExpiresAt,
         heartbeatIntervalSec: 25,
@@ -3338,7 +3504,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
         gameId: gameId ?? null,
         maxExpiresAt,
       },
-    });
+    }, 200, cookieHeaders);
   }
 
   const hasPrivilegedRole = roles.some(
@@ -3385,11 +3551,26 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     userId,
     body.sessionKey,
   );
+  const deliveryClass = getStreamDeliveryClass(playbackUrl);
+  const cookieHeaders: Record<string, string> = {};
+  let clientPlaybackUrl = playbackUrl;
+  if (deliveryClass === "proxy" && gameId) {
+    const exp = Math.floor(Date.now() / 1000) + 70;
+    const secret = ctx.env.OMNIHUB_SIGNING_SECRET ?? ctx.env.SUPABASE_SERVICE_ROLE_KEY;
+    const token = await signProxyToken(
+      { gameId, userId, sessionId: session.id, exp },
+      secret,
+    );
+    cookieHeaders["Set-Cookie"] =
+      `${PROXY_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=70`;
+    clientPlaybackUrl = `/api/streams/${gameId}/proxy/master.m3u8`;
+  }
   return json({
     ok: true,
     playback: {
       type: "url",
-      url: playbackUrl,
+      url: clientPlaybackUrl,
+      deliveryClass,
       expiresAt: session.expiresAt,
       maxExpiresAt: session.maxExpiresAt,
       heartbeatIntervalSec: 25,
@@ -3399,7 +3580,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       gameId: gameId ?? null,
       maxExpiresAt: session.maxExpiresAt,
     },
-  });
+  }, 200, cookieHeaders);
 }
 
 export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
@@ -3523,6 +3704,55 @@ async function handleStreamSessionEnd(ctx: HandlerCtx) {
   const endRes = await endQ.select("id").maybeSingle();
   if (endRes.error) throw new Error(endRes.error.message);
   return json({ ok: true, ended: Boolean(endRes.data) });
+}
+
+async function handleStreamProxy(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId;
+  if (!gameId) return new Response("Forbidden", { status: 403 });
+
+  const token = readCookie(ctx.req, PROXY_AUTH_COOKIE);
+  if (!token) return new Response("Forbidden", { status: 403 });
+
+  const secret = ctx.env.OMNIHUB_SIGNING_SECRET ?? ctx.env.SUPABASE_SERVICE_ROLE_KEY;
+  const payload = await verifyProxyToken(token, secret);
+  if (!payload || payload.gameId !== gameId) return new Response("Forbidden", { status: 403 });
+
+  const trueOrigin = await getStreamUrlForGame(ctx.admin, gameId, ctx.env);
+  const targetUrl = resolveProxyTarget(trueOrigin, ctx.req.url, gameId);
+  const pathLower = new URL(targetUrl).pathname.toLowerCase();
+  const isManifest = pathLower.endsWith(".m3u8");
+  const isSegment = pathLower.endsWith(".ts") || pathLower.endsWith(".m4s") || pathLower.endsWith(".mp4");
+
+  const upstream = await fetch(targetUrl, {
+    cf: {
+      cacheEverything: true,
+      cacheTtl: isManifest ? 2 : isSegment ? 3600 : 60,
+    },
+  } as RequestInit & { cf: { cacheEverything: boolean; cacheTtl: number } });
+  if (!upstream.ok) return new Response("Upstream error", { status: upstream.status });
+
+  const headers = new Headers(upstream.headers);
+  headers.set("Access-Control-Allow-Origin", new URL(ctx.req.url).origin);
+  headers.set("Access-Control-Allow-Credentials", "true");
+  headers.set("Vary", "Origin");
+
+  if (!isManifest) {
+    return new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers,
+    });
+  }
+
+  const manifest = await upstream.text();
+  const rewritten = rewriteManifestToGateway(manifest, gameId);
+  headers.set("content-type", "application/vnd.apple.mpegurl; charset=utf-8");
+  headers.set("cache-control", "public, max-age=2");
+  return new Response(rewritten, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers,
+  });
 }
 
 export async function handleListComments(ctx: HandlerCtx) {
@@ -4617,6 +4847,11 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/api/streams/:gameId/session",
     handler: handlePlaybackSession,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/proxy/*",
+    handler: handleStreamProxy,
   },
   {
     method: "POST",
