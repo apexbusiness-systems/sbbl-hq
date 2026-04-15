@@ -3313,36 +3313,30 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   const isSuperAdmin = roles.includes("super_admin");
 
   // ── Super admin fast-path ──────────────────────────────────────────────
-  // No access checks, no PPV, no "stream_not_configured" 503, no one-device
-  // displacement. Super admin can always start a playback session from any
-  // device at any time regardless of whether a URL is set or a game exists.
-  // If collection_id is empty, the client receives an empty url string and
-  // surfaces its own "configure URL" UX instead of a hard backend failure.
+  // No access checks, no PPV, no one-device displacement, and no DB session
+  // row (entitlement_id NOT NULL makes the upsert impossible for admin).
+  // Returns a synthetic session UUID — the heartbeat fast-path accepts it.
   if (isSuperAdmin) {
     const cfg = await getOrCreateStreamConfig(ctx.admin);
     const playbackUrl =
       String(cfg.collection_id ?? "").trim() ||
       String(ctx.env.VITE_STREAM_URL ?? "").trim();
-    const session = await createOrRefreshPlaybackSession(
-      ctx,
-      gameId,
-      userId,
-      body.sessionKey,
-      { skipDisplace: true },
-    );
+    const fakeSessionId = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 70_000).toISOString();
+    const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
     return json({
       ok: true,
       playback: {
         type: "url",
         url: playbackUrl,
-        expiresAt: session.expiresAt,
-        maxExpiresAt: session.maxExpiresAt,
+        expiresAt,
+        maxExpiresAt,
         heartbeatIntervalSec: 25,
       },
       session: {
-        id: session.id,
+        id: fakeSessionId,
         gameId: gameId ?? null,
-        maxExpiresAt: session.maxExpiresAt,
+        maxExpiresAt,
       },
     });
   }
