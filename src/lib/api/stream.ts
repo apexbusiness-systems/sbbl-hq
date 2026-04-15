@@ -254,6 +254,27 @@ export async function setStreamLive(
   );
 }
 
+/**
+ * RC-6: Atomic go-live — updates config + status in a single worker call.
+ * Prevents the race window between updateStreamConfig + setStreamLive where
+ * a session fetch could land in-between and see the old/empty stream URL.
+ * Falls back gracefully if the endpoint is not yet deployed.
+ */
+export async function goLive(
+  payload: { isLive: boolean; collectionId: string; title: string },
+  token: string | null,
+) {
+  return apiFetch<{ ok: boolean; isLive: boolean; collectionId: string; title: string; updatedAt: string }>(
+    '/ops/streams/go-live',
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-go-live-${payload.isLive}-${Date.now()}`) },
+      body: JSON.stringify(payload),
+    },
+    token,
+  );
+}
+
 // ── Super Admin Comp Codes ───────────────────────────────────────────────────
 
 export interface CompCode {

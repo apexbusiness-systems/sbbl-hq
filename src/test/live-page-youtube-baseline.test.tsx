@@ -4,9 +4,12 @@ import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LivePage from '@/pages/Live';
 
-const { updateStreamConfigMock, setStreamLiveMock } = vi.hoisted(() => ({
+const { updateStreamConfigMock, setStreamLiveMock, goLiveMock } = vi.hoisted(() => ({
   updateStreamConfigMock: vi.fn(async () => ({ ok: true })),
   setStreamLiveMock: vi.fn(async () => ({ ok: true, isLive: true })),
+  // Returns ok:false so handleGoLive always falls back to the sequential path,
+  // making tests deterministic regardless of whether the atomic endpoint is deployed.
+  goLiveMock: vi.fn(async () => ({ ok: false })),
 }));
 
 vi.mock('@/hooks/use-auth', () => ({
@@ -48,6 +51,7 @@ vi.mock('@/lib/api/stream', () => ({
   postStreamComment: vi.fn(async () => ({ ok: true })),
   setStreamLive: setStreamLiveMock,
   updateStreamConfig: updateStreamConfigMock,
+  goLive: goLiveMock,
   generateCompCode: vi.fn(async () => ({ ok: true, code: 'CODE', expiresAt: new Date().toISOString() })),
 }));
 
@@ -55,9 +59,10 @@ describe('Live page YouTube baseline validation', () => {
   beforeEach(() => {
     updateStreamConfigMock.mockClear();
     setStreamLiveMock.mockClear();
+    goLiveMock.mockClear();
   });
 
-  it('blocks Facebook stream URLs and does not submit go-live update', async () => {
+  it('accepts unrecognized stream URLs (e.g. Facebook) without blocking and submits go-live', async () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
@@ -70,15 +75,18 @@ describe('Live page YouTube baseline validation', () => {
       expect(screen.getByTitle('Stream controls')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByTitle('Stream controls'));
-    const input = await screen.findByPlaceholderText('YouTube, Twitch, Vimeo, or direct stream URL…');
+    const input = await screen.findByPlaceholderText('YouTube, Twitch, HLS, WHEP, or any stream URL…');
     fireEvent.change(input, { target: { value: 'https://www.facebook.com/live/12345' } });
     fireEvent.click(screen.getByRole('button', { name: 'Go Live' }));
 
     await waitFor(() => {
-      expect(screen.getByText('Facebook is not a supported stream source.')).toBeInTheDocument();
+      expect(updateStreamConfigMock).toHaveBeenCalledWith(
+        { collectionId: 'https://www.facebook.com/live/12345', title: 'Camera Feed' },
+        null,
+      );
+      expect(setStreamLiveMock).toHaveBeenCalledWith(true, null);
     });
-    expect(updateStreamConfigMock).not.toHaveBeenCalled();
-    expect(setStreamLiveMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('Facebook is not a supported stream source.')).not.toBeInTheDocument();
   });
 
   it('normalizes valid YouTube URLs before config save and go-live toggle', async () => {
@@ -94,7 +102,7 @@ describe('Live page YouTube baseline validation', () => {
       expect(screen.getByTitle('Stream controls')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByTitle('Stream controls'));
-    const input = await screen.findByPlaceholderText('YouTube, Twitch, Vimeo, or direct stream URL…');
+    const input = await screen.findByPlaceholderText('YouTube, Twitch, HLS, WHEP, or any stream URL…');
     fireEvent.change(input, { target: { value: 'https://youtu.be/abc123def45?t=5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Go Live' }));
 

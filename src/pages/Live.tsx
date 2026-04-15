@@ -8,7 +8,6 @@ import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { useLiveAccess } from '@/hooks/useLiveAccess';
-import { LiveGate } from '@/components/live/LiveGate';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
 import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
@@ -20,13 +19,14 @@ import {
   fetchPublicStreamStatus,
   fetchStreamComments,
   generateCompCode,
+  goLive,
   moderateStreamComment,
   postStreamComment,
   resetStreamReactions,
   setStreamLive,
   updateStreamConfig,
 } from '@/lib/api/stream';
-import { normalizeYoutubeUrl } from '@/lib/stream/youtube-url';
+import { detectStreamUrlType, STREAM_TYPE_LABELS, toPlayableUrl } from '@/lib/stream/url-detector';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
@@ -93,6 +93,7 @@ function AdminStreamOverlay({
   const [compExpiresAt, setCompExpiresAt] = useState<string | null>(null);
   const [compCopied, setCompCopied] = useState(false);
   const [streamUrlError, setStreamUrlError] = useState<string | null>(null);
+  const [urlTypeAdvisory, setUrlTypeAdvisory] = useState<string | null>(null);
 
   const handleGenerateCompCode = async () => {
     const gameId = activeGameId ?? 'broadcast';
@@ -135,35 +136,50 @@ function AdminStreamOverlay({
 
   const handleGoLive = async () => {
     const nextLive = !isLive;
+    // Validate: URL must not be empty when going live
+    const trimmedUrl = customStreamUrl.trim();
+    if (nextLive && !trimmedUrl) {
+      setStreamUrlError('Stream URL is required to go live.');
+      return;
+    }
+    if (streamUrlError) setStreamUrlError(null);
+    // Normalize YouTube short URLs to canonical watch URL before persisting
+    const normalizedUrl = trimmedUrl ? (toPlayableUrl(trimmedUrl).url || trimmedUrl) : trimmedUrl;
     setSaving(true);
     try {
       const token = await getAuthToken();
-      // No youtubeOnly restriction — any valid https stream URL is accepted.
-      // Facebook is always blocked inside normalizeYoutubeUrl regardless.
-      const normalized = nextLive ? normalizeYoutubeUrl(customStreamUrl) : null;
-      if (nextLive && (!normalized || normalized.ok === false)) {
-        setStreamUrlError(normalized?.ok === false ? normalized.error : 'Invalid stream URL.');
-        setSaving(false);
-        return;
-      }
-      if (streamUrlError) setStreamUrlError(null);
-      // Step 1: Save config (URL + title)
-      await updateStreamConfig({ collectionId: normalized?.ok ? normalized.url : customStreamUrl, title: streamTitle }, token);
-      // Step 2: Toggle live status — if this fails, config is saved but
-      // stream state is unchanged. Admin sees the error and can retry
-      // the toggle without re-entering the URL.
+      let atomicSuccess = false;
+      // RC-6: Try atomic go-live endpoint first
       try {
-        await setStreamLive(nextLive, token);
-      } catch (liveErr) {
-        toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
-        setSaving(false);
-        return;
+        const res = await goLive({ isLive: nextLive, collectionId: normalizedUrl, title: streamTitle }, token);
+        if (res.ok) {
+          atomicSuccess = true;
+          setIsLive(nextLive);
+          // Nonce only increments on confirmed DB commit
+          onGoLive?.();
+          toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
+          if (nextLive) setOpen(false);
+        }
+      } catch {
+        // Atomic endpoint not yet deployed — fall back to sequential calls
       }
-      setIsLive(nextLive);
-      // Signal parent to remount the player so it re-fetches the newly saved URL.
-      onGoLive?.();
-      toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
-      if (nextLive) setOpen(false);
+
+      if (!atomicSuccess) {
+        // Fallback: sequential calls with 500ms delay before nonce increment
+        await updateStreamConfig({ collectionId: normalizedUrl, title: streamTitle }, token);
+        try {
+          await setStreamLive(nextLive, token);
+        } catch (liveErr) {
+          toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
+          setSaving(false);
+          return;
+        }
+        setIsLive(nextLive);
+        // RC-6: 500ms delay before nonce increment to let the DB commit settle
+        setTimeout(() => { onGoLive?.(); }, 500);
+        toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
+        if (nextLive) setOpen(false);
+      }
     } catch (err) {
       toast.error(`Failed to save config: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
@@ -228,18 +244,48 @@ function AdminStreamOverlay({
             {/* Stream URL */}
             <div>
               <label className="text-[9px] uppercase tracking-wider text-white/50 block mb-1">Stream URL</label>
-              <input
-                type="text"
-                value={customStreamUrl}
-                onChange={e => {
-                  setCustomStreamUrl(e.target.value);
-                  if (streamUrlError) setStreamUrlError(null);
-                }}
-                className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50"
-                placeholder="YouTube, Twitch, Vimeo, or direct stream URL…"
-              />
+              <div className="relative">
+                <input
+                  type="text"
+                  value={customStreamUrl}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setCustomStreamUrl(val);
+                    if (streamUrlError) setStreamUrlError(null);
+                    // URL type detection + advisory
+                    if (val.trim()) {
+                      const type = detectStreamUrlType(val.trim());
+                      if (type === 'rtmp') {
+                        setUrlTypeAdvisory('RTMP cannot play in browser — use an HLS endpoint instead.');
+                      } else if (type === 'whep') {
+                        setUrlTypeAdvisory('WebRTC/WHEP — ultra-low latency mode active');
+                      } else if (type === 'hls') {
+                        setUrlTypeAdvisory('HLS stream detected');
+                      } else {
+                        setUrlTypeAdvisory(null);
+                      }
+                    } else {
+                      setUrlTypeAdvisory(null);
+                    }
+                  }}
+                  className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50 pr-16"
+                  placeholder="YouTube, Twitch, HLS, WHEP, or any stream URL…"
+                />
+                {customStreamUrl.trim() && (
+                  <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/15 text-white/70 pointer-events-none">
+                    {STREAM_TYPE_LABELS[detectStreamUrlType(customStreamUrl.trim())]}
+                  </span>
+                )}
+              </div>
               {streamUrlError && (
                 <p className="mt-1 text-[10px] text-red-300">{streamUrlError}</p>
+              )}
+              {urlTypeAdvisory && !streamUrlError && (
+                <p className={`mt-1 text-[10px] leading-relaxed ${
+                  detectStreamUrlType(customStreamUrl.trim()) === 'rtmp'
+                    ? 'text-amber-400'
+                    : 'text-white/50'
+                }`}>{urlTypeAdvisory}</p>
               )}
             </div>
 
@@ -808,11 +854,9 @@ const LivePage = () => {
                   <p className="text-xs text-white/40 mt-1">Check back when a game is scheduled or a stream goes live.</p>
                 </div>
               )}
-              <LiveGate
-                access={access}
-                config={liveAccessConfig}
-                checkoutEndpoint={`/api/streams/${activeGameId ?? 'broadcast'}/purchase`}
-              />
+              {/* RC-1: LiveGate removed — LiveStreamPlayer is the single source of
+                  truth for access gating (unregistered, privileged, PPV, invite, paywall).
+                  useLiveAccess() is kept for isLive badge + title chrome only. */}
             </div>
 
             {/* Actions + Chat */}
