@@ -180,6 +180,28 @@ describe('stream hardening worker handlers', () => {
       admin: createAdmin(state),
     } as any);
     expect(denied.status).toBe(403);
+    await expect(denied.json()).resolves.toMatchObject({
+      error: 'forbidden',
+      message: 'paywall',
+      playback: { url: null, heartbeatIntervalSec: 10 },
+      session: { id: null },
+    });
+
+    const anonymousDenied = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/game-1/session', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'idempotency-key-123456790' },
+        body: JSON.stringify({ sessionKey: 'session-key-1a' }),
+      }),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+    expect(anonymousDenied.status).toBe(403);
+    await expect(anonymousDenied.json()).resolves.toMatchObject({
+      playback: { url: null },
+      session: { id: null },
+    });
 
     const allowed = await handlePlaybackSession({
       req: new Request('https://local/api/streams/game-1/session', {

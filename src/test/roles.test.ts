@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { APP_ROLES, hasRole, canAccessOps, assertRole, type AppRole } from '@/lib/auth/roles';
+import { APP_ROLES, hasRole, canAccessOps, canControlStream, assertRole, type AppRole } from '@/lib/auth/roles';
 
 describe('role system', () => {
   it('includes all expected roles', () => {
@@ -51,6 +51,13 @@ describe('role system', () => {
     expect(() => assertRole(['league_admin'], 'league_admin')).not.toThrow();
     expect(() => assertRole(['super_admin'], 'league_admin')).not.toThrow();
     expect(() => assertRole(['coach'], 'coach')).not.toThrow();
+  });
+
+
+  it('canControlStream is super-admin only', () => {
+    expect(canControlStream(['super_admin'])).toBe(true);
+    expect(canControlStream(['league_admin'])).toBe(false);
+    expect(canControlStream(['paid_fan'])).toBe(false);
   });
 
   it('paid_fan can generate invites but not access ops', () => {

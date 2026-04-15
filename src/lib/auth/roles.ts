@@ -37,3 +37,9 @@ export function assertRole(userRoles: AppRole[], required: AppRole) {
     throw new Error(`forbidden: requires ${required}`);
   }
 }
+
+
+export function canControlStream(userRoles: AppRole[]) {
+  // Streaming broadcast controls strictly require level 5
+  return hasRole(userRoles, 'super_admin');
+}

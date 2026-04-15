@@ -17,15 +17,15 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Lock, Play, Pause, Ticket, Copy, Check, KeyRound, Volume2, VolumeX, Maximize, AlertTriangle } from 'lucide-react';
+import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
 import ReactPlayer from 'react-player';
+import videojs from 'video.js';
+import 'video.js/dist/video-js.css';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
 import { IDEMPOTENCY_HEADER, createIdempotencyKey } from '@/lib/api/idempotency';
-import { isYoutubeUrl } from '@/lib/stream/youtube-url';
-import { detectStreamUrlType, toPlayableUrl } from '@/lib/stream/url-detector';
-import { WhepPlayer } from '@/components/WhepPlayer';
+import { toPlayableUrl } from '@/lib/stream/url-detector';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { useStreamForge } from '@/hooks/use-streamforge';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
@@ -165,7 +165,7 @@ function parsePlayerError(
 
 function StreamPlayer({
   url,
-  isSuperAdmin: _isSuperAdmin,
+  isSuperAdmin,
   onReady,
   onPlay,
   onError,
@@ -177,144 +177,84 @@ function StreamPlayer({
   onError: (message: string) => void;
 }>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [playing, setPlaying] = useState(true);
-  const [muted, setMuted] = useState(false);
-  const [volume, setVolume] = useState(0.8);
-  // Auto-retry: allow one silent retry on transient errors before showing error UI
-  const retryCountRef = useRef(0);
-  const MAX_AUTO_RETRIES = 1;
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [playerType, setPlayerType] = useState<'hls' | 'wrapper' | 'invalid'>('invalid');
 
-  const urlType = detectStreamUrlType(url);
-  const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
-  const isTwitch = urlType === 'twitch';
-  const isVimeo = urlType === 'vimeo';
-  const isWhep = urlType === 'whep';
-  const isRtmp = urlType === 'rtmp';
-  // HLS and DASH use ReactPlayer with explicit forcing flags
-  const forceHls = urlType === 'hls';
-  const forceDash = urlType === 'dash';
-  // Show native controls for platform embeds that handle their own UI
-  const showNativeControls = isYoutube || isTwitch || isVimeo;
-
-  const handleFullscreen = async () => {
-    const host = containerRef.current;
-    if (!host) return;
-    try {
-      if (document.fullscreenElement) {
-        await document.exitFullscreen();
-      } else {
-        await host.requestFullscreen();
-      }
-    } catch (err) {
-      onError(`Fullscreen unavailable: ${err instanceof Error ? err.message : String(err)}`);
+  useEffect(() => {
+    if (!url) {
+      setPlayerType('invalid');
+      return;
     }
-  };
+    if (url.includes('.m3u8')) {
+      setPlayerType('hls');
+    } else if (ReactPlayer.canPlay(url)) {
+      setPlayerType('wrapper');
+    } else {
+      setPlayerType('invalid');
+      onError('Unsupported stream format.');
+    }
+  }, [url, onError]);
 
-  // RTMP URLs cannot play in the browser — show advisory overlay
-  if (isRtmp) {
-    return (
-      <div className="absolute inset-0 bg-black flex flex-col items-center justify-center gap-3 px-6 text-center" data-testid="stream-player">
-        <AlertTriangle className="w-10 h-10 text-amber-400" />
-        <p className="text-sm font-semibold text-white">RTMP Stream Detected</p>
-        <p className="text-xs text-white/60 max-w-xs leading-relaxed">
-          RTMP cannot play directly in the browser. Configure an HLS endpoint
-          (e.g. <code className="text-amber-400">https://…/live/stream.m3u8</code>) in Broadcast Controls.
-        </p>
-      </div>
-    );
-  }
+  // keep prop referenced for strict/noUnusedLocals builds
+  void isSuperAdmin;
 
-  // WHEP — WebRTC low-latency player
-  if (isWhep) {
-    return (
-      <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
-        <WhepPlayer
-          whepUrl={url}
-          retryIntervalMs={10_000}
-          maxRetries={5}
-          onStatusChange={(status) => {
-            if (status === 'live') { onReady(); onPlay(); }
-            if (status === 'error') onError('WebRTC connection failed — the stream may not have started yet.');
-          }}
-        />
-      </div>
-    );
-  }
+  // Video.js HLS Mount Logic (Bypasses Safari restrictions)
+  useEffect(() => {
+    if (playerType === 'hls' && videoRef.current) {
+      const player = videojs(videoRef.current, {
+        autoplay: 'muted', // Forced muted autoplay for mobile UX
+        controls: true,
+        fluid: true,
+        responsive: true,
+        controlBar: {
+          playToggle: true,
+          volumePanel: { inline: false },
+          progressControl: true, // Enables seeking
+          fullscreenToggle: true,
+          pictureInPictureToggle: false,
+        },
+        sources: [{ src: url, type: 'application/x-mpegURL' }],
+      });
 
-  // HLS / DASH / YouTube / Twitch / Vimeo / direct / unknown — use ReactPlayer
-  const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
-  const reactPlayerConfig = {
-    youtube: {
-      playerVars: {
-        rel: 0,
-        iv_load_policy: 3,
-        modestbranding: 1,
-        controls: 1,
-        // FIX: origin must match the host to prevent YouTube iframe API
-        // postMessage cross-origin errors that crash the embed entirely.
-        // Without this, the YT iframe tries to postMessage to youtube.com
-        // instead of sbbl-hq.icu, which the browser blocks.
-        origin: typeof window !== 'undefined' ? window.location.origin : 'https://sbbl-hq.icu',
-      },
-    },
-    twitch: {
-      options: {
-        // REQUIRED: Twitch embeds will not load without the parent domain.
-        // https://dev.twitch.tv/docs/embed/everything/#required-parameters
-        parent: [currentHost],
-      },
-    },
-    file: {
-      ...(forceHls ? { forceHLS: true } : {}),
-      ...(forceDash ? { forceDASH: true } : {}),
-    },
-  };
+      player.on('ready', onReady);
+      player.on('play', onPlay);
+      player.on('error', () => onError('Native HLS playback failed.'));
+
+      return () => {
+        if (player && !player.isDisposed()) {
+          player.dispose();
+        }
+      };
+    }
+  }, [playerType, url, onReady, onPlay, onError]);
+
+  if (playerType === 'invalid') return null;
 
   return (
     <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
-      <ReactPlayer
-        url={url}
-        width="100%"
-        height="100%"
-        playing={playing}
-        controls={showNativeControls}
-        muted={muted}
-        volume={volume}
-        onReady={() => { retryCountRef.current = 0; onReady(); }}
-        onPlay={() => { setPlaying(true); retryCountRef.current = 0; onPlay(); }}
-        onPause={() => setPlaying(false)}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onError={(err: any, data: any) => {
-          // Auto-retry: on first transient error, retry silently after 3s
-          // to avoid killing the player for 20k viewers on a single hiccup.
-          if (retryCountRef.current < MAX_AUTO_RETRIES) {
-            retryCountRef.current += 1;
-            setPlaying(false);
-            setTimeout(() => setPlaying(true), 3_000);
-            return;
-          }
-          onError(parsePlayerError(err, data));
-        }}
-        config={reactPlayerConfig}
-      />
-      {!showNativeControls && (
-        <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm">
-          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
-            aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
-            {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-          </button>
-          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
-            aria-label={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted(v => !v)}>
-            {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </button>
-          <input aria-label="Volume" type="range" min={0} max={1} step={0.05} value={volume}
-            onChange={(e) => { const n = Number(e.target.value); setMuted(n === 0); setVolume(n); }}
-            className="w-24 accent-amber-500" />
-          <div className="flex-1" />
-          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
-            aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
-            <Maximize className="w-4 h-4" />
-          </button>
+      {playerType === 'wrapper' ? (
+        <ReactPlayer
+          url={url}
+          width="100%"
+          height="100%"
+          playing={true}
+          controls={true} // Standard Viewer Controls
+          muted={false}
+          onReady={onReady}
+          onPlay={onPlay}
+          onError={(err, data) => onError(parsePlayerError(err, data))}
+          config={{
+            youtube: {
+              playerVars: { showinfo: 0, modestbranding: 1, rel: 0, origin: window.location.origin },
+            },
+            twitch: {
+              options: { parent: [window.location.hostname, 'localhost'] },
+            },
+          }}
+        />
+      ) : (
+        <div data-vjs-player className="w-full h-full">
+          <video ref={videoRef} className="video-js vjs-big-play-centered vjs-theme-city w-full h-full" playsInline />
         </div>
       )}
     </div>

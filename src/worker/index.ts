@@ -3298,10 +3298,24 @@ async function createOrRefreshPlaybackSession(
   };
 }
 
+function paywallDeniedResponse() {
+  return json({
+    error: "forbidden",
+    message: "paywall",
+    playback: { url: null, heartbeatIntervalSec: 10 },
+    session: { id: null },
+  }, 403);
+}
+
 export async function handlePlaybackSession(ctx: HandlerCtx) {
-  await ensureMutation(ctx.req, ctx);
-  const userId = requireAuth(ctx.req);
+  const userId = ctx.req.headers.get("x-sbbl-user-id-verified");
   const gameId = ctx.params.gameId ?? null;
+  if (!userId) {
+    return paywallDeniedResponse();
+  }
+
+  await ensureMutation(ctx.req, ctx);
+
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionKey?: string;
   } | null;
@@ -3341,23 +3355,21 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     });
   }
 
-  const hasPrivilegedRole = roles.some(
-    (role) => role === "player" || role === "paid_fan",
-  );
-  // Camera-only broadcast alias (gameId=null) is accessible to any privileged
-  // role — roster players and paid fans (season pass). PPV is game-specific
-  // and does not apply when there is no game. Regular fans are expected to
-  // purchase PPV for a specific game instead.
-  let hasAccess = hasPrivilegedRole;
-  if (!hasAccess && gameId) {
+  const isPaidFan = roles.includes("paid_fan");
+  let hasActivePass = false;
+  if (gameId) {
     const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
       p_game_id: gameId,
       p_user_id: userId,
     });
     if (accessRpc.error) throw new Error(accessRpc.error.message);
-    hasAccess = Boolean(accessRpc.data);
+    hasActivePass = Boolean(accessRpc.data);
   }
-  if (!hasAccess) return json({ ok: false, error: "forbidden" }, 403);
+
+  // Server-authoritative paywall: scrub playback URL for unauthorized viewers.
+  if (!isSuperAdmin && !isPaidFan && !hasActivePass) {
+    return paywallDeniedResponse();
+  }
 
   const cfg = await getOrCreateStreamConfig(ctx.admin);
 

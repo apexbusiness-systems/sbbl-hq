@@ -30,7 +30,9 @@
     "test:stream:perf": "node ops/validation/stream-validation.mjs perf",
     "test:stream:all": "npm run test:stream:unit && npm run test:stream:int && npm run test:stream:e2e && npm run test:stream:perf",
     "validate:stream:gate": "node ops/validation/stream-validation.mjs gate",
-    "validate:prelive": "node ops/validation/stream-validation.mjs prelive"
+    "validate:prelive": "node ops/validation/stream-validation.mjs prelive",
+    "test:e2e:phase5": "playwright test e2e/stream-omnitest-phase5.spec.ts",
+    "test:e2e:ingest-broadcast-validation": "playwright test e2e/ops-auth-ingest-harmony.spec.ts e2e/stream-validation.spec.ts e2e/stream-omnitest-phase5.spec.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.0",
@@ -105,6 +107,7 @@
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^0.9.9",
+    "video.js": "^8.23.7",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -121,6 +124,7 @@
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "@types/react-window": "^1.8.8",
+    "@types/video.js": "^7.3.58",
     "@vitejs/plugin-react-swc": "^3.11.0",
     "@vitest/coverage-istanbul": "^3.2.4",
     "autoprefixer": "^10.4.21",

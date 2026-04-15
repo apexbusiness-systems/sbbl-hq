@@ -8,6 +8,7 @@ import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { useLiveAccess } from '@/hooks/useLiveAccess';
+import { canControlStream } from '@/lib/auth/roles';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
 import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
@@ -446,6 +447,7 @@ const LivePage = () => {
   const { user, session, roles, needsOnboarding, loading: authLoading } = useAuth();
   const { access, config: liveAccessConfig } = useLiveAccess();
   const isSuperAdmin = roles.includes('super_admin');
+  const canManageBroadcastControls = canControlStream(roles);
   const canModerateLive = roles.includes('super_admin') || roles.includes('league_admin');
   // Any privileged role (roster player, paid fan, or super admin) gets the
   // camera-only broadcast fallback when the admin has flipped the stream live
@@ -813,7 +815,7 @@ const LivePage = () => {
             {/* Broadcast Area — admin overlay + access-gate player */}
             <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
               {/* Admin stream overlay — inside the video wrapper, super_admin only */}
-              {isSuperAdmin && (
+              {canManageBroadcastControls && (
                   <AdminStreamOverlay
                     isLive={isStreamLive}
                     setIsLive={setIsStreamLive}
