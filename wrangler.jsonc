@@ -40,7 +40,8 @@
     // Sentry DSN for the Worker — fill in after creating sbbl-hq-worker project in Sentry.
     // Worker Sentry project: Sentry Dashboard → sbbl-hq-worker → Settings → Client Keys (DSN)
     "SENTRY_DSN": "",
-    "ENABLE_STREAM_VALIDATION": "false"
+    "ENABLE_STREAM_VALIDATION": "false",
+    "VITE_STREAM_URL": ""
   },
   "env": {
     "staging": {

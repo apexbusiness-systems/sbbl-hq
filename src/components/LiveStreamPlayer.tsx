@@ -22,6 +22,7 @@ import ReactPlayer from 'react-player';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
+import { IDEMPOTENCY_HEADER, createIdempotencyKey } from '@/lib/api/idempotency';
 import { isYoutubeUrl, toPlayableYoutubeEmbedUrl } from '@/lib/stream/youtube-url';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { useStreamForge } from '@/hooks/use-streamforge';
@@ -351,6 +352,7 @@ export function LiveStreamPlayer({
           session: { id: string; maxExpiresAt?: string };
         }>(`/api/streams/${game.id}/session`, {
           method: 'POST',
+          headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('stream-session') },
           body: JSON.stringify({ sessionKey }),
         }, null);
         if (!active) return;
