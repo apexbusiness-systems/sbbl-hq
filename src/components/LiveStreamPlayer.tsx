@@ -23,7 +23,13 @@ import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
 import { IDEMPOTENCY_HEADER, createIdempotencyKey } from '@/lib/api/idempotency';
-import { isYoutubeUrl, toPlayableYoutubeEmbedUrl } from '@/lib/stream/youtube-url';
+import { isYoutubeUrl } from '@/lib/stream/youtube-url';
+import {
+  detectStreamUrlType,
+  toPlayableUrl,
+  type StreamUrlType,
+} from '@/lib/stream/url-detector';
+import { WhepPlayer } from '@/components/WhepPlayer';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { useStreamForge } from '@/hooks/use-streamforge';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
@@ -161,6 +167,9 @@ function parsePlayerError(
   return 'Stream connection failed — check the URL in broadcast controls or try again.';
 }
 
+const WHEP_RETRY_INTERVAL_MS = 3000;
+const WHEP_MAX_RETRIES = 10;
+
 function StreamPlayer({
   url,
   onReady,
@@ -176,7 +185,9 @@ function StreamPlayer({
   const [playing, setPlaying] = useState(true);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(0.8);
-  const isYoutube = isYoutubeUrl(url);
+
+  const urlType: StreamUrlType = detectStreamUrlType(url);
+  const isYoutube = urlType === 'youtube';
 
   const handleFullscreen = async () => {
     const host = containerRef.current;
@@ -188,43 +199,95 @@ function StreamPlayer({
         await host.requestFullscreen();
       }
     } catch (err) {
-      onError(`Fullscreen unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      onError(
+        `Fullscreen unavailable: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   };
 
+  // RTMP — browser cannot play. Show an actionable overlay instead.
+  if (urlType === 'rtmp') {
+    return (
+      <div className="absolute inset-0 bg-black flex flex-col items-center justify-center text-center px-6 gap-3">
+        <p className="text-sm text-amber-400 font-semibold">
+          RTMP Stream Detected
+        </p>
+        <p className="text-xs text-white/60 max-w-sm leading-relaxed">
+          Browsers cannot play RTMP directly. Configure an HLS or WHEP
+          endpoint on your encoder and update the stream URL in Broadcast
+          Controls.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
-      <ReactPlayer
-        url={url}
-        width="100%"
-        height="100%"
-        playing={playing}
-        controls={isYoutube}
-        muted={muted}
-        volume={volume}
-        onReady={onReady}
-        onPlay={() => { setPlaying(true); onPlay(); }}
-        onPause={() => setPlaying(false)}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onError={(err: any, data: any) => onError(parsePlayerError(err, data))}
-        config={{ youtube: { playerVars: { rel: 0, iv_load_policy: 3 } } }}
-      />
-      {!isYoutube && (
+      {urlType === 'whep' ? (
+        <WhepPlayer
+          whepUrl={url}
+          retryIntervalMs={WHEP_RETRY_INTERVAL_MS}
+          maxRetries={WHEP_MAX_RETRIES}
+          onStatusChange={(status) => {
+            if (status === 'live') {
+              onReady();
+              onPlay();
+            }
+            if (status === 'error' || status === 'offline') {
+              onError('WHEP stream unavailable — check endpoint and encoder state.');
+            }
+          }}
+        />
+      ) : (
+        <ReactPlayer
+          url={url}
+          width="100%"
+          height="100%"
+          playing={playing}
+          controls={isYoutube}
+          muted={muted}
+          volume={volume}
+          onReady={onReady}
+          onPlay={() => { setPlaying(true); onPlay(); }}
+          onPause={() => setPlaying(false)}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onError={(err: any, data: any) => onError(parsePlayerError(err, data))}
+          config={{
+            file: {
+              forceHLS: urlType === 'hls',
+              forceDASH: urlType === 'dash',
+            },
+            youtube: { playerVars: { rel: 0, iv_load_policy: 3 } },
+          }}
+        />
+      )}
+
+      {/* Custom controls — hidden for YouTube (uses native controls) and WHEP */}
+      {urlType !== 'youtube' && urlType !== 'whep' && (
         <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm">
-          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
-            aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
+          <button type="button"
+            className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label={playing ? 'Pause playback' : 'Play playback'}
+            onClick={() => setPlaying(v => !v)}>
             {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
           </button>
-          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
-            aria-label={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted(v => !v)}>
+          <button type="button"
+            className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label={muted ? 'Unmute' : 'Mute'}
+            onClick={() => setMuted(v => !v)}>
             {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
           </button>
-          <input aria-label="Volume" type="range" min={0} max={1} step={0.05} value={volume}
+          <input
+            aria-label="Volume" type="range" min={0} max={1} step={0.05}
+            value={volume}
             onChange={(e) => { const n = Number(e.target.value); setMuted(n === 0); setVolume(n); }}
-            className="w-24 accent-amber-500" />
+            className="w-24 accent-amber-500"
+          />
           <div className="flex-1" />
-          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
-            aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
+          <button type="button"
+            className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label="Toggle fullscreen"
+            onClick={() => void handleFullscreen()}>
             <Maximize className="w-4 h-4" />
           </button>
         </div>
@@ -241,14 +304,6 @@ const PPV_PRICE_TOTAL = Math.round(PPV_PRICE_CAD * (1 + ALBERTA_GST) * 100) / 10
 
 
 const DEVICE_TOKEN_KEY = 'sbbl:stream-device-token:v1';
-
-function toPlayableUrl(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed) return '';
-  const embedUrl = toPlayableYoutubeEmbedUrl(trimmed);
-  // Keep non-YouTube sources untouched (HLS, MP4, etc.).
-  return embedUrl ?? trimmed;
-}
 
 function getOrCreateDeviceToken(): string {
   const existing = globalThis.localStorage.getItem(DEVICE_TOKEN_KEY);
@@ -357,12 +412,27 @@ export function LiveStreamPlayer({
         }, null);
         if (!active) return;
         // Use URL from session, fall back to game.stream_url, then env var.
-        const resolvedUrl =
+        const rawUrl =
           res.playback.url ||
           game.stream_url ||
           (import.meta.env.VITE_STREAM_URL as string | undefined) ||
           '';
-        setPlaybackUrl(toPlayableUrl(resolvedUrl));
+        if (!rawUrl) {
+          if (isSuperAdmin) {
+            setPlayerError(
+              'No stream URL configured — add one in Broadcast Controls before going live.',
+            );
+          } else {
+            setPlayerError('stream_starting_soon');
+          }
+          return;
+        }
+        const { url: resolvedUrl, warning } = toPlayableUrl(rawUrl);
+        if (warning) {
+          // Surface RTMP warning but do not block playback (pass through).
+          console.warn('[LiveStreamPlayer] stream warning:', warning);
+        }
+        setPlaybackUrl(resolvedUrl);
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
 
@@ -486,7 +556,11 @@ export function LiveStreamPlayer({
               <Play className="w-6 h-6 text-red-400" />
             </div>
             <p className="text-sm text-white/80 font-medium mb-1">Stream Unavailable</p>
-            <p className="text-xs text-white/50 mb-4">{playerError}</p>
+            <p className="text-xs text-white/50 mb-4">
+              {playerError === 'stream_starting_soon'
+                ? 'Stream starting soon — check back shortly.'
+                : playerError}
+            </p>
             <button
               onClick={() => setPlayerError(null)}
               className="px-4 py-2 text-xs font-display font-bold uppercase tracking-wider bg-amber-500 text-black rounded hover:bg-amber-400 transition-colors"
@@ -501,11 +575,7 @@ export function LiveStreamPlayer({
             onPlay={() => sf.reportEvent('playing')}
             onError={(message) => { setPlayerError(message); sf.recordFailure(); }}
           />
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3">
-            <p className="text-sm text-muted-foreground">Stream not configured yet.</p>
-          </div>
-        )}
+        ) : null}
 
         {/* Connection lost / displaced banner — circuit breaker triggered.
             Suppressed for super admin: they never get displaced or kicked. */}

@@ -390,3 +390,36 @@ export async function resolveReviewItem(
     token,
   );
 }
+
+/**
+ * goLive — Atomic go-live / end-broadcast call to the worker.
+ * Replaces the sequential updateStreamConfig + setStreamLive two-call
+ * pattern. The single upsert guarantees collection_id and is_live are
+ * committed together before the caller increments streamNonce.
+ */
+export async function goLive(
+  payload: { isLive: boolean; collectionId: string; title: string },
+  token: string | null,
+): Promise<{
+  ok: boolean;
+  isLive: boolean;
+  collectionId: string;
+  title: string;
+  updatedAt: string;
+}> {
+  return apiFetch<{
+    ok: boolean;
+    isLive: boolean;
+    collectionId: string;
+    title: string;
+    updatedAt: string;
+  }>(
+    '/ops/streams/go-live',
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('go-live') },
+      body: JSON.stringify(payload),
+    },
+    token,
+  );
+}

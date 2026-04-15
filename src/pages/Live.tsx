@@ -8,7 +8,6 @@ import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { useLiveAccess } from '@/hooks/useLiveAccess';
-import { LiveGate } from '@/components/live/LiveGate';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
 import { games, players, products } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
@@ -23,10 +22,9 @@ import {
   moderateStreamComment,
   postStreamComment,
   resetStreamReactions,
-  setStreamLive,
-  updateStreamConfig,
+  goLive,
 } from '@/lib/api/stream';
-import { normalizeYoutubeUrl } from '@/lib/stream/youtube-url';
+import { detectStreamUrlType } from '@/lib/stream/url-detector';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
@@ -92,7 +90,6 @@ function AdminStreamOverlay({
   const [compCode, setCompCode] = useState<string | null>(null);
   const [compExpiresAt, setCompExpiresAt] = useState<string | null>(null);
   const [compCopied, setCompCopied] = useState(false);
-  const [streamUrlError, setStreamUrlError] = useState<string | null>(null);
 
   const handleGenerateCompCode = async () => {
     const gameId = activeGameId ?? 'broadcast';
@@ -133,39 +130,30 @@ function AdminStreamOverlay({
     setCompCopied(false);
   };
 
+  const detectedUrlType = detectStreamUrlType(customStreamUrl);
+
   const handleGoLive = async () => {
-    const nextLive = !isLive;
+    if (saving) return;
+    const currentIsLive = isLive;
     setSaving(true);
     try {
-      const token = await getAuthToken();
-      // No youtubeOnly restriction — any valid https stream URL is accepted.
-      // Facebook is always blocked inside normalizeYoutubeUrl regardless.
-      const normalized = nextLive ? normalizeYoutubeUrl(customStreamUrl) : null;
-      if (nextLive && (!normalized || normalized.ok === false)) {
-        setStreamUrlError(normalized?.ok === false ? normalized.error : 'Invalid stream URL.');
-        setSaving(false);
-        return;
-      }
-      if (streamUrlError) setStreamUrlError(null);
-      // Step 1: Save config (URL + title)
-      await updateStreamConfig({ collectionId: normalized?.ok ? normalized.url : customStreamUrl, title: streamTitle }, token);
-      // Step 2: Toggle live status — if this fails, config is saved but
-      // stream state is unchanged. Admin sees the error and can retry
-      // the toggle without re-entering the URL.
-      try {
-        await setStreamLive(nextLive, token);
-      } catch (liveErr) {
-        toast.error(`Config saved, but live toggle failed: ${liveErr instanceof Error ? liveErr.message : String(liveErr)}. Try again.`);
-        setSaving(false);
-        return;
-      }
-      setIsLive(nextLive);
-      // Signal parent to remount the player so it re-fetches the newly saved URL.
+      await goLive(
+        {
+          isLive: !currentIsLive,
+          collectionId: customStreamUrl.trim(),
+          title: streamTitle.trim(),
+        },
+        null,
+      );
+      setIsLive(!currentIsLive);
+      // Increment nonce ONLY on confirmed DB commit.
+      // This remounts LiveStreamPlayer so it fetches the new URL.
       onGoLive?.();
-      toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
-      if (nextLive) setOpen(false);
+      toast.success(!currentIsLive ? 'Stream is now live!' : 'Broadcast ended.');
+      if (!currentIsLive) setOpen(false);
     } catch (err) {
-      toast.error(`Failed to save config: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : 'unknown error';
+      toast.error(`Go Live failed: ${msg}`);
     } finally {
       setSaving(false);
     }
@@ -233,15 +221,40 @@ function AdminStreamOverlay({
                 value={customStreamUrl}
                 onChange={e => {
                   setCustomStreamUrl(e.target.value);
-                  if (streamUrlError) setStreamUrlError(null);
                 }}
                 className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50"
                 placeholder="YouTube, Twitch, Vimeo, or direct stream URL…"
               />
-              {streamUrlError && (
-                <p className="mt-1 text-[10px] text-red-300">{streamUrlError}</p>
-              )}
             </div>
+            {customStreamUrl.trim() && (
+              <div className="flex flex-col gap-1 mt-1">
+                <span className="inline-flex items-center gap-1">
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-widest bg-secondary border border-border text-muted-foreground">
+                    {detectedUrlType === 'unknown' ? 'Direct' : detectedUrlType.toUpperCase()}
+                  </span>
+                  {detectedUrlType === 'whep' && (
+                    <span className="text-[10px] text-amber-400">
+                      WebRTC/WHEP — ultra-low latency mode active
+                    </span>
+                  )}
+                  {detectedUrlType === 'hls' && (
+                    <span className="text-[10px] text-blue-400">
+                      HLS stream detected — adaptive bitrate playback enabled
+                    </span>
+                  )}
+                  {detectedUrlType === 'dash' && (
+                    <span className="text-[10px] text-blue-400">
+                      MPEG-DASH stream detected
+                    </span>
+                  )}
+                  {detectedUrlType === 'rtmp' && (
+                    <span className="text-[10px] text-orange-400">
+                      RTMP cannot play in browser — use an HLS or WHEP endpoint
+                    </span>
+                  )}
+                </span>
+              </div>
+            )}
 
             {/* Stream Title */}
             <div>
@@ -259,7 +272,7 @@ function AdminStreamOverlay({
                 before going live. End Stream still works without URL edits. */}
             <button
               onClick={handleGoLive}
-              disabled={saving}
+              disabled={saving || !customStreamUrl.trim()}
               className={`w-full py-2.5 font-display font-bold text-xs uppercase tracking-wider rounded transition-colors disabled:opacity-40 ${
                 isLive
                   ? 'bg-red-600 text-white hover:bg-red-500'
@@ -808,11 +821,6 @@ const LivePage = () => {
                   <p className="text-xs text-white/40 mt-1">Check back when a game is scheduled or a stream goes live.</p>
                 </div>
               )}
-              <LiveGate
-                access={access}
-                config={liveAccessConfig}
-                checkoutEndpoint={`/api/streams/${activeGameId ?? 'broadcast'}/purchase`}
-              />
             </div>
 
             {/* Actions + Chat */}

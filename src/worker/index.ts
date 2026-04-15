@@ -631,23 +631,18 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   const patch: Record<string, unknown> = {};
   if (typeof body.collectionId === "string") {
     const trimmedUrl = body.collectionId.trim();
-    // Allow empty string (clearing the URL). Non-empty URLs must be valid
-    // https:// and must not be a Facebook domain (blocked stream source).
+    // Minimal validation: non-empty URLs must be parseable and use a
+    // recognized scheme. RTMP, WHEP, HLS, YouTube, Twitch, Vimeo, MP4,
+    // and generic https:// sources are all accepted. No blocklist.
     if (trimmedUrl !== "") {
-      let parsedUrl: URL;
       try {
-        parsedUrl = new URL(trimmedUrl);
+        const parsed = new URL(trimmedUrl);
+        const validSchemes = ['http:', 'https:', 'rtmp:', 'rtmps:'];
+        if (!validSchemes.includes(parsed.protocol)) {
+          return json({ ok: false, error: "invalid_stream_url_scheme" }, 422);
+        }
       } catch {
         return json({ ok: false, error: "invalid_stream_url" }, 422);
-      }
-      if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
-        return json({ ok: false, error: "invalid_stream_url" }, 422);
-      }
-      const streamHost = parsedUrl.hostname.toLowerCase();
-      const BLOCKED_RE =
-        /(?:^|\.)(?:facebook\.com|fb\.me|fbcdn\.net|facebook\.net|m\.me)$/;
-      if (BLOCKED_RE.test(streamHost)) {
-        return json({ ok: false, error: "unsupported_stream_source" }, 422);
       }
     }
     patch.collection_id = trimmedUrl;
@@ -685,6 +680,82 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
       viewerCount: 0,
       updatedAt: data.updated_at,
     },
+  });
+}
+
+/**
+ * POST /ops/streams/go-live
+ * Atomic: updates collection_id + is_live + title in a single upsert.
+ * Super-admin only. Replaces the previous two-call sequence
+ * (updateStreamConfig then setStreamStatus) to eliminate race conditions
+ * where streamNonce increments before both DB writes are committed.
+ */
+async function handleGoLive(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const body = (await ctx.req.json().catch(() => null)) as {
+    isLive?: boolean;
+    collectionId?: string;
+    title?: string;
+  } | null;
+
+  if (!body || typeof body.isLive !== 'boolean') {
+    return json({ ok: false, error: 'is_live_required' }, 400);
+  }
+
+  const trimmedUrl = (body.collectionId ?? '').trim();
+  if (body.isLive && !trimmedUrl) {
+    return json({ ok: false, error: 'collection_id_required_to_go_live' }, 400);
+  }
+
+  const nowIso = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    id: true,
+    is_live: body.isLive,
+    updated_by: session.userId,
+    updated_at: nowIso,
+  };
+  if (trimmedUrl) patch.collection_id = trimmedUrl;
+  if (typeof body.title === 'string' && body.title.trim()) {
+    patch.title = body.title.trim();
+  }
+  if (body.isLive) {
+    patch.live_started_at = nowIso;
+    patch.live_ended_at = null;
+  } else {
+    patch.live_ended_at = nowIso;
+  }
+
+  const { data, error } = await ctx.admin
+    .from('stream_admin_config')
+    .upsert(patch, { onConflict: 'id' })
+    .select('is_live, collection_id, title, updated_at')
+    .single();
+
+  if (error) {
+    return json({ ok: false, error: error.message }, 500);
+  }
+
+  // Bust edge cache immediately — stale "offline" after Go Live is P0.
+  const cfCache = (caches as unknown as { default: Cache }).default;
+  const bustKey = new Request(streamCacheUrl(null));
+  cfCache.delete(bustKey).catch(() => { cfCache.delete(bustKey).catch(() => {}); });
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: session.userId,
+    action: body.isLive ? 'go_live' : 'end_broadcast',
+    ref_type: 'stream_admin_config',
+    ref_id: null,
+    payload: { isLive: body.isLive, collectionId: trimmedUrl },
+    idempotency_key: readIdempotencyKey(ctx.req.headers),
+  });
+
+  return json({
+    ok: true,
+    isLive: Boolean(data.is_live),
+    collectionId: String(data.collection_id ?? ''),
+    title: String(data.title ?? ''),
+    updatedAt: String(data.updated_at),
   });
 }
 
@@ -3312,6 +3383,71 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   const roles = await getUserRolesFromDB(userId, ctx.admin);
   const isSuperAdmin = roles.includes("super_admin");
 
+  // ── broadcast alias: skip game-row validation ──────────────────────
+  // When gameId is the literal string 'broadcast', treat it as a
+  // first-class alias for the stream_admin_config row. No real game
+  // row is required. Super-admin sees it live or offline; all others
+  // require is_live = true.
+  if (gameId === 'broadcast') {
+    const { data: cfg, error: cfgErr } = await ctx.admin
+      .from('stream_admin_config')
+      .select('is_live, collection_id')
+      .eq('id', true)
+      .maybeSingle();
+
+    if (cfgErr) {
+      return json({ ok: false, error: 'stream_config_unavailable' }, 503);
+    }
+
+    if (!cfg?.collection_id) {
+      return json(
+        {
+          ok: false,
+          error: 'stream_not_configured',
+          hint: 'Set a stream URL in Broadcast Controls before going live.',
+        },
+        409,
+      );
+    }
+
+    if (!cfg.is_live && !isSuperAdmin) {
+      return json({ ok: false, error: 'stream_offline' }, 403);
+    }
+
+    const body2 = (await ctx.req.json().catch(() => ({}))) as {
+      sessionKey?: string;
+    };
+    const sessionKey2 =
+      body2?.sessionKey && body2.sessionKey.length >= 8
+        ? body2.sessionKey
+        : `broadcast-${userId}-${crypto.randomUUID()}`;
+
+    // Store session with game_id='broadcast' (text column — no UUID FK).
+    // Super-admin bypasses one-device enforcement (skipDisplace: true).
+    const session2 = await createOrRefreshPlaybackSession(
+      ctx,
+      'broadcast',
+      userId,
+      sessionKey2,
+      { skipDisplace: isSuperAdmin },
+    );
+
+    return json({
+      ok: true,
+      playback: {
+        url: cfg.collection_id,
+        heartbeatIntervalSec: 30,
+        maxExpiresAt: session2.maxExpiresAt,
+      },
+      session: {
+        id: session2.id,
+        gameId: 'broadcast',
+        maxExpiresAt: session2.maxExpiresAt,
+      },
+    });
+  }
+  // ── end broadcast alias ─────────────────────────────────────────────
+
   // ── Super admin fast-path ──────────────────────────────────────────────
   // No access checks, no PPV, no one-device displacement, and no DB session
   // row (entitlement_id NOT NULL makes the upsert impossible for admin).
@@ -4672,6 +4808,11 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/ops/streams/config",
     handler: handleUpdateStreamConfig,
+  },
+  {
+    method: "POST",
+    path: "/ops/streams/go-live",
+    handler: handleGoLive,
   },
   {
     method: "POST",
