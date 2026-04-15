@@ -3,9 +3,20 @@
 
 with league_ids as (
   select
-    max(case when lower(code) = 'wbl' then id end) as wbl_id,
-    max(case when lower(code) = 'tgifbl' then id end) as tgifbl_id
-  from public.leagues
+    (
+      select l.id
+      from public.leagues l
+      where lower(l.code) = 'wbl'
+      order by l.id
+      limit 1
+    ) as wbl_id,
+    (
+      select l.id
+      from public.leagues l
+      where lower(l.code) = 'tgifbl'
+      order by l.id
+      limit 1
+    ) as tgifbl_id
 ),
 patterns as (
   select array[
@@ -41,9 +52,20 @@ where li.wbl_id is not null
 
 with league_ids as (
   select
-    max(case when lower(code) = 'wbl' then id end) as wbl_id,
-    max(case when lower(code) = 'tgifbl' then id end) as tgifbl_id
-  from public.leagues
+    (
+      select l.id
+      from public.leagues l
+      where lower(l.code) = 'wbl'
+      order by l.id
+      limit 1
+    ) as wbl_id,
+    (
+      select l.id
+      from public.leagues l
+      where lower(l.code) = 'tgifbl'
+      order by l.id
+      limit 1
+    ) as tgifbl_id
 ),
 patterns as (
   select array[
