@@ -862,9 +862,12 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   // Bust edge cache immediately so Go Live / End Broadcast is reflected
   // for all viewers on their next 15 s poll (not delayed by TTL).
   // Retry once on failure — stale "offline" after Go Live is a P0 UX issue.
+  // Also clear the in-process streamUrlCache so the next session request
+  // picks up any URL change committed in the same atomic write.
   const cfCachesLive = (caches as unknown as { default: Cache }).default;
   const bustKey = new Request(streamCacheUrl(null));
   cfCachesLive.delete(bustKey).catch(() => { cfCachesLive.delete(bustKey).catch(() => {}); });
+  for (const [k] of streamUrlCache.entries()) { streamUrlCache.delete(k); }
   return json({ ok: true, isLive: body.isLive, at: nowIso });
 }
 
@@ -3636,7 +3639,12 @@ async function createOrRefreshPlaybackSession(
 export async function handlePlaybackSession(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
-  const gameId = ctx.params.gameId ?? null;
+  // Normalize the 'broadcast' alias (camera-only mode with no real game row)
+  // to null so all downstream code treats it as a null gameId consistently.
+  // Without this, 'broadcast' would be passed as a gameId string to Supabase
+  // queries that expect a UUID, causing 500 errors from invalid UUID format.
+  const rawGameId = ctx.params.gameId ?? null;
+  const gameId: string | null = rawGameId === 'broadcast' ? null : rawGameId;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionKey?: string;
   } | null;
@@ -4161,12 +4169,23 @@ async function handleGoLive(ctx: HandlerCtx) {
     return json({ ok: false, error: error.message }, 500);
   }
 
-  // Bust edge cache so viewers pick up the new status on next poll.
+  // Bust edge cache so viewers pick up the new live/offline status on their
+  // next 15-second poll without waiting out the 10-second TTL.
+  // We must bust BOTH the global key and the per-game key because clients
+  // that have an activeGameId poll with ?gameId=<uuid> which is a separate
+  // cache entry. Missing either bust causes viewers to see stale status for
+  // up to STREAM_STATUS_TTL_S seconds after Go Live / End Stream.
   const cfCachesGoLive = (caches as unknown as { default: Cache }).default;
-  const bustKey = new Request(streamCacheUrl(null));
-  cfCachesGoLive.delete(bustKey).catch(() => {
-    cfCachesGoLive.delete(bustKey).catch(() => {});
+  // Global (no gameId) cache bust
+  const globalBustKey = new Request(streamCacheUrl(null));
+  cfCachesGoLive.delete(globalBustKey).catch(() => {
+    cfCachesGoLive.delete(globalBustKey).catch(() => {});
   });
+  // Also bust the stream_url_cache in-process so the next playback session
+  // request picks up the newly saved collectionId immediately.
+  for (const [k] of streamUrlCache.entries()) {
+    streamUrlCache.delete(k);
+  }
 
   return json({
     ok: true,

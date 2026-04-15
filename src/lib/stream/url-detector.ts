@@ -74,8 +74,15 @@ export function detectStreamUrlType(url: string): StreamUrlType {
   if (/^rtmps?:\/\//i.test(url)) return 'rtmp';
 
   // WHEP — WebRTC-HTTP Egress Protocol
-  // Detect by path segment or query param
-  if (/\/whep\//i.test(url) || /[?&]whep[=&]/.test(lower) || lower.includes('/whep')) {
+  // Match a /whep segment as a standalone path component (not a substring of
+  // a longer segment), or an explicit ?whep= / &whep= query parameter.
+  // Examples that match:  /whep/live  /live/whep  /api/whep
+  // Examples that DON'T: /badwhep/stream  /whepfoo/bar
+  if (
+    /(?:^|\/)whep(?:\/|$)/i.test(url) ||    // path segment: /whep/ or /whep$
+    /[?&]whep[=&]/i.test(url) ||             // query param: ?whep= or &whep=
+    /[?&]whep$/i.test(url)                   // query param at end: ?whep
+  ) {
     return 'whep';
   }
 
