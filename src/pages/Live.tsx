@@ -688,7 +688,6 @@ const LivePage = () => {
               alt={carouselProduct.name}
               className="w-full h-full object-contain animate-fade-in"
               loading="eager"
-              fetchPriority="high"
             />
             <span className="absolute top-2 left-2 flex items-center gap-1 px-2 py-0.5 bg-primary text-primary-foreground text-[9px] font-bold uppercase tracking-wider rounded-sm">
               <Tag className="w-2.5 h-2.5" /> Sale
