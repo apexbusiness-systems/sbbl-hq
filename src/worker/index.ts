@@ -3360,11 +3360,24 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   if (!hasAccess) return json({ ok: false, error: "forbidden" }, 403);
 
   const cfg = await getOrCreateStreamConfig(ctx.admin);
+
+  // RC-2: For the broadcast alias (no real game), enforce is_live for non-admins.
+  // Super admins already return above via the fast-path. Privileged roles
+  // (player/paid_fan) still need the stream to be online.
+  if (gameId === null && !Boolean(cfg.is_live)) {
+    return json({ ok: false, error: "stream_offline" }, 403);
+  }
+
   const playbackUrl =
     String(cfg.collection_id ?? "").trim() ||
     String(ctx.env.VITE_STREAM_URL ?? "").trim();
+  // RC-4: Return named 409 (not silent 503) so the frontend can surface it.
   if (!playbackUrl) {
-    return json({ ok: false, error: "stream_not_configured" }, 503);
+    return json({
+      ok: false,
+      error: "stream_not_configured",
+      hint: "Set a stream URL in Broadcast Controls before going live.",
+    }, 409);
   }
   const session = await createOrRefreshPlaybackSession(
     ctx,
@@ -3658,6 +3671,96 @@ export async function handleResetReactions(ctx: HandlerCtx) {
 
 async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
   return handlePlaybackSession({ ...ctx, params: { ...ctx.params, gameId: null } });
+}
+
+/**
+ * RC-6: Atomic Go Live / End Stream endpoint.
+ * Merges updateStreamConfig + setStreamLive into a single upsert so the
+ * stream URL and live status are committed atomically — no race window
+ * between the two separate writes where a session fetch could see the old URL.
+ *
+ * POST /ops/streams/go-live
+ * Body: { isLive: boolean, collectionId: string, title: string }
+ * Requires: super_admin
+ */
+async function handleGoLive(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    isLive?: boolean;
+    collectionId?: string;
+    title?: string;
+  } | null;
+
+  if (!body || typeof body.isLive !== "boolean") {
+    return json({ ok: false, error: "is_live_required" }, 400);
+  }
+
+  // Validate the stream URL when going live
+  const rawUrl = typeof body.collectionId === "string" ? body.collectionId.trim() : "";
+  if (body.isLive && rawUrl !== "") {
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(rawUrl);
+    } catch {
+      return json({ ok: false, error: "invalid_stream_url" }, 422);
+    }
+    // Block dangerous protocols; RTMP is allowed (advisory shown in UI)
+    if (
+      parsedUrl.protocol !== "https:" &&
+      parsedUrl.protocol !== "http:" &&
+      parsedUrl.protocol !== "rtmp:" &&
+      parsedUrl.protocol !== "rtmps:"
+    ) {
+      return json({ ok: false, error: "invalid_stream_url" }, 422);
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    id: true,
+    is_live: body.isLive,
+    updated_by: session.userId,
+    updated_at: nowIso,
+  };
+  if (typeof body.collectionId === "string") {
+    patch.collection_id = body.collectionId.trim();
+  }
+  if (typeof body.title === "string" && body.title.trim()) {
+    patch.title = body.title.trim();
+  }
+  if (body.isLive) {
+    patch.live_started_at = nowIso;
+    patch.live_ended_at = null;
+  } else {
+    patch.live_ended_at = nowIso;
+  }
+
+  const { data, error } = await ctx.admin
+    .from("stream_admin_config")
+    .upsert(patch, { onConflict: "id" })
+    .select("collection_id,title,is_live,updated_at")
+    .single();
+
+  if (error) {
+    return json({ ok: false, error: error.message }, 500);
+  }
+
+  // Bust edge cache so viewers pick up the new status on next poll.
+  const cfCachesGoLive = (caches as unknown as { default: Cache }).default;
+  const bustKey = new Request(streamCacheUrl(null));
+  cfCachesGoLive.delete(bustKey).catch(() => {
+    cfCachesGoLive.delete(bustKey).catch(() => {});
+  });
+
+  return json({
+    ok: true,
+    isLive: Boolean(data.is_live),
+    collectionId: String(data.collection_id ?? ""),
+    title: String(data.title ?? ""),
+    updatedAt: String(data.updated_at ?? nowIso),
+  });
 }
 
 async function handleBroadcastHeartbeat(ctx: HandlerCtx) {
@@ -4677,6 +4780,12 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/ops/streams/status",
     handler: handleSetStreamStatus,
+  },
+  {
+    // RC-6: Atomic go-live — updates config + status in a single DB upsert.
+    method: "POST",
+    path: "/ops/streams/go-live",
+    handler: handleGoLive,
   },
   {
     method: "POST",
