@@ -136,12 +136,7 @@ function AdminStreamOverlay({
 
   const handleGoLive = async () => {
     const nextLive = !isLive;
-    // Validate: URL must not be empty when going live
     const trimmedUrl = customStreamUrl.trim();
-    if (nextLive && !trimmedUrl) {
-      setStreamUrlError('Stream URL is required to go live.');
-      return;
-    }
     if (streamUrlError) setStreamUrlError(null);
     // Normalize YouTube short URLs to canonical watch URL before persisting
     const normalizedUrl = trimmedUrl ? (toPlayableUrl(trimmedUrl).url || trimmedUrl) : trimmedUrl;
@@ -294,8 +289,21 @@ function AdminStreamOverlay({
               />
             </div>
 
-            {/* Go Live / End Stream — baseline mode enforces a valid YouTube URL
-                before going live. End Stream still works without URL edits. */}
+            {/* Non-blocking broadcast readiness checklist (alert-only). */}
+            <div className="rounded border border-white/10 bg-white/5 p-2.5 space-y-1.5">
+              <p className="text-[9px] uppercase tracking-wider text-white/60">Broadcast Alerts (Never Blocking)</p>
+              <p className={`text-[10px] ${customStreamUrl.trim() ? 'text-emerald-300' : 'text-amber-300'}`}>
+                {customStreamUrl.trim() ? '✓ Stream link is configured' : '⚠ Add a stream link for immediate playback'}
+              </p>
+              <p className={`text-[10px] ${isLive ? 'text-emerald-300' : 'text-white/60'}`}>
+                {isLive ? '✓ Broadcast is currently live' : '• Broadcast remains offline until owner presses Go Live'}
+              </p>
+              <p className={`text-[10px] ${viewerCount > 0 ? 'text-emerald-300' : 'text-white/60'}`}>
+                {viewerCount > 0 ? `✓ ${viewerCount} active viewers detected` : '• No active viewers yet'}
+              </p>
+            </div>
+
+            {/* Go Live / End Stream control. Alerts above are advisory only. */}
             <button
               onClick={handleGoLive}
               disabled={saving}
