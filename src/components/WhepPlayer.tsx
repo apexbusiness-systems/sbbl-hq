@@ -127,7 +127,6 @@ export function WhepPlayer({
       retryTimer.current = setTimeout(() => void connect(), retryIntervalMs);
     }
   // connect references itself via the retry timers; deps are the external inputs only
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [whepUrl, updateStatus, retryIntervalMs, maxRetries]);
 
   useEffect(() => {
@@ -136,23 +135,6 @@ export function WhepPlayer({
     };
   }, [connect]);
 
-  useEffect(() => {
-    reconnectRef.current = () => {
-      void connect();
-    };
-  }, [connect]);
-
-  useEffect(() => {
-    reconnectRef.current = () => {
-      void connect();
-    };
-  }, [connect]);
-
-  useEffect(() => {
-    reconnectRef.current = () => {
-      void connect();
-    };
-  }, [connect]);
 
   useEffect(() => {
     if (!whepUrl) return destroy;
