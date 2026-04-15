@@ -30,6 +30,7 @@ export function WhepPlayer({
 }: WhepPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<WebRTCPlayer | null>(null);
+  const reconnectRef = useRef<() => void>(() => {});
   const retryCount = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<WhepPlayerStatus>('idle');
@@ -59,12 +60,15 @@ export function WhepPlayer({
       updateStatus('offline');
       return;
     }
+    if (retryTimer.current) {
+      clearTimeout(retryTimer.current); // prevent overlapping reconnect attempts after repeated no-media events
+      retryTimer.current = null;
+    }
     retryCount.current += 1;
     retryTimer.current = setTimeout(() => {
-      void connect();
+      reconnectRef.current();
     }, retryIntervalMs);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [retryIntervalMs, maxRetries]);
+  }, [retryIntervalMs, maxRetries, updateStatus]);
 
   const connect = useCallback(async () => {
     if (!videoRef.current || !whepUrl) return;
@@ -98,6 +102,12 @@ export function WhepPlayer({
       scheduleRetry();
     }
   }, [whepUrl, destroy, updateStatus, scheduleRetry]);
+
+  useEffect(() => {
+    reconnectRef.current = () => {
+      void connect();
+    };
+  }, [connect]);
 
   useEffect(() => {
     if (whepUrl) void connect();
