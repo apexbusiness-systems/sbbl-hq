@@ -1,7 +1,7 @@
 // common.js -- Shared utilities for SBBL-HQ k6 load tests
 
-export const BASE_URL = __ENV.BASE_URL || 'http://localhost:8787';
-export const SUPABASE_URL = __ENV.SUPABASE_URL || 'http://localhost:54321';
+export const BASE_URL = __ENV.BASE_URL || 'https://sbbl-hq.icu';
+export const SUPABASE_URL = __ENV.SUPABASE_URL || 'https://ezanilxygnpucwkwpsoc.supabase.co';
 export const ANON_KEY = __ENV.ANON_KEY || '';
 
 // ---------------------------------------------------------------------------
@@ -12,8 +12,21 @@ const profiles = {
   '5k': {
     executor: 'ramping-vus',
     stages: [
-      { duration: '2m', target: 5000 },
+      { duration: '1m', target: 2500 },
+      { duration: '1m', target: 5000 },
       { duration: '3m', target: 5000 },
+      { duration: '1m', target: 0 },
+    ],
+    gracefulRampDown: '30s',
+  },
+  '10k': {
+    executor: 'ramping-vus',
+    stages: [
+      { duration: '2m', target: 2500 },
+      { duration: '1m', target: 5000 },
+      { duration: '1m', target: 7500 },
+      { duration: '1m', target: 10000 },
+      { duration: '3m', target: 10000 },
       { duration: '2m', target: 0 },
     ],
     gracefulRampDown: '30s',
@@ -36,27 +49,15 @@ const profiles = {
     ],
     gracefulRampDown: '60s',
   },
-  '500k': {
-    // 500k is edge-only; tested via cached endpoints with the same shape as 50k.
-    executor: 'ramping-vus',
-    stages: [
-      { duration: '10m', target: 50000 },
-      { duration: '10m', target: 50000 },
-      { duration: '5m', target: 0 },
-    ],
-    gracefulRampDown: '60s',
-  },
 };
 
 /**
  * Return a scenarios object keyed by `scenarioName` using the chosen profile.
- *
- * @param {string} scenarioName - logical name used as the scenario key
- * @param {string} [profileName] - one of 5k | 20k | 50k | 500k (reads __ENV.PROFILE when omitted)
- * @returns {object} k6 scenarios config
+ * @param {string} scenarioName
+ * @param {string} [profileName] - one of 5k | 10k | 20k | 50k
  */
 export function getScenarios(scenarioName, profileName) {
-  const name = profileName || __ENV.PROFILE || '5k';
+  const name = profileName || __ENV.PROFILE || '10k';
   const profile = profiles[name];
   if (!profile) {
     throw new Error(`Unknown profile "${name}". Choose from: ${Object.keys(profiles).join(', ')}`);
@@ -92,23 +93,16 @@ function randomString(length) {
   return result;
 }
 
-/**
- * Generate a random email address for signup/login tests.
- */
 export function randomEmail() {
   return `loadtest+${randomString(10)}@sbbl-hq.test`;
 }
 
-/**
- * Generate a random password that satisfies typical requirements (12 chars, mixed).
- */
 export function randomPassword() {
   return `Lt!${randomString(9)}A1`;
 }
 
 /**
  * Build common request headers.
- *
  * @param {string} [token] - optional Bearer token
  * @returns {object} headers
  */
@@ -116,6 +110,7 @@ export function buildHeaders(token) {
   const headers = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
+    'User-Agent': 'k6-sbbl-load-test/1.0',
   };
   if (ANON_KEY) {
     headers['apikey'] = ANON_KEY;

@@ -5261,9 +5261,9 @@ function addSecurityHeaders(res: Response): Response {
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
     "img-src 'self' data: blob: https:; " +
     "font-src 'self' data: https://fonts.gstatic.com; " +
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://www.youtube.com wss://www.youtube.com https://www.youtube-nocookie.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://cloudflareinsights.com https://static.cloudflareinsights.com; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://www.youtube.com wss://www.youtube.com https://www.youtube-nocookie.com wss://www.youtube-nocookie.com https://s.ytimg.com https://*.googlevideo.com https://jnn-pa.googleapis.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://cloudflareinsights.com https://static.cloudflareinsights.com; " +
     "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
-    "media-src 'self' blob: https://*.googlevideo.com https://*.ytimg.com https://*.twitch.tv https://*.twitchsvc.net; " +
+    "media-src 'self' blob: https://*.googlevideo.com https://*.ytimg.com https://s.ytimg.com https://*.twitch.tv https://*.twitchsvc.net; " +
     "worker-src 'self' blob:; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
@@ -5315,6 +5315,7 @@ export default Sentry.withSentry(
     const url = new URL(req.url);
     if (
       !parsed.ok &&
+      url.pathname !== "/ops/health" &&
       (url.pathname.startsWith("/api") ||
         url.pathname.startsWith("/auth") ||
         url.pathname.startsWith("/ops") ||

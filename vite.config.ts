@@ -111,16 +111,31 @@ export default defineConfig(({ mode }) => {
                 expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 * 7 }, // 1 week
               },
             },
-            // Hashed JS/CSS/Fonts: Cache-First
+            // External player APIs: NetworkOnly — YouTube/Twitch/Vimeo ship live player
+            // updates multiple times per week. A 30-day stale iframe_api breaks live ingest.
             {
-              urlPattern: ({ request }) =>
-                request.destination === 'script' ||
-                request.destination === 'style' ||
-                request.destination === 'font',
+              urlPattern: ({ url }) =>
+                (url.hostname === 'www.youtube.com' && url.pathname.includes('iframe_api')) ||
+                url.hostname === 's.ytimg.com' ||
+                (url.hostname === 'embed.twitch.tv' && (url.pathname.endsWith('.js') || url.pathname.includes('embed'))) ||
+                (url.hostname === 'assets.twitch.tv' && url.pathname.endsWith('.js')) ||
+                (url.hostname === 'player.vimeo.com' && url.pathname.endsWith('.js')),
+              handler: 'NetworkOnly',
+            },
+            // Self-hosted hashed JS/CSS/Fonts: CacheFirst (Vite content-hashes guarantee freshness)
+            {
+              urlPattern: ({ request, url }) =>
+                (request.destination === 'script' ||
+                 request.destination === 'style' ||
+                 request.destination === 'font') &&
+                (url.hostname === 'sbbl-hq.icu' ||
+                 url.hostname === 'www.sbbl-hq.icu' ||
+                 url.hostname === 'localhost' ||
+                 url.hostname === '127.0.0.1'),
               handler: 'CacheFirst',
               options: {
                 cacheName: 'static-assets',
-                expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 }, // 30 days
+                expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 30 },
                 cacheableResponse: { statuses: [0, 200] },
               },
             },
