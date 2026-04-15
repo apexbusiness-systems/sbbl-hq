@@ -253,8 +253,8 @@ function StreamPlayer({
       },
     },
     file: {
-      ...(forceHls ? { forceHLS: true } : {}),
-      ...(forceDash ? { forceDASH: true } : {}),
+      ...(false ? { forceHLS: true } : {}),
+      ...(false ? { forceDASH: true } : {}),
       hlsOptions: {
         // Required for proxy mode so the browser includes sbbl_proxy_auth on segment requests.
         xhrSetup: (xhr: XMLHttpRequest) => {
