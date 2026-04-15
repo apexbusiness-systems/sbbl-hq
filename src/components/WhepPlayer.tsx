@@ -30,6 +30,7 @@ export function WhepPlayer({
 }: WhepPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const playerRef = useRef<WebRTCPlayer | null>(null);
+  const reconnectRef = useRef<() => void>(() => {});
   const retryCount = useRef(0);
   const retryTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<WhepPlayerStatus>('idle');
@@ -112,6 +113,12 @@ export function WhepPlayer({
   // connect references itself via the retry timers; deps are the external inputs only
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [whepUrl, updateStatus, retryIntervalMs, maxRetries]);
+
+  useEffect(() => {
+    reconnectRef.current = () => {
+      void connect();
+    };
+  }, [connect]);
 
   useEffect(() => {
     if (whepUrl) void connect();
