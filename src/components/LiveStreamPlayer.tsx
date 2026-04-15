@@ -236,7 +236,19 @@ function StreamPlayer({
 
   // HLS / DASH / YouTube / direct / unknown — use ReactPlayer
   const reactPlayerConfig = {
-    youtube: { playerVars: { rel: 0, iv_load_policy: 3 } },
+    youtube: {
+      playerVars: {
+        rel: 0,
+        iv_load_policy: 3,
+        modestbranding: 1,
+        controls: 1,
+        // FIX: origin must match the host to prevent YouTube iframe API
+        // postMessage cross-origin errors that crash the embed entirely.
+        // Without this, the YT iframe tries to postMessage to youtube.com
+        // instead of sbbl-hq.icu, which the browser blocks.
+        origin: typeof window !== 'undefined' ? window.location.origin : 'https://sbbl-hq.icu',
+      },
+    },
     file: {
       ...(forceHls ? { forceHLS: true } : {}),
       ...(forceDash ? { forceDASH: true } : {}),
