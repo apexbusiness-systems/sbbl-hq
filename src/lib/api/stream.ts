@@ -31,6 +31,13 @@ export interface StreamConfig {
   updatedAt?: string;
 }
 
+export interface PublicStreamStatus {
+  ok: boolean;
+  isLive: boolean;
+  title: string;
+  viewerCount: number;
+}
+
 export interface StreamPlaybackSession {
   ok: boolean;
   playback: {
@@ -106,7 +113,7 @@ export interface UserAccessLookup {
 /** Poll current stream status — no auth required */
 export async function fetchPublicStreamStatus(gameId?: string) {
   const qs = gameId ? `?gameId=${encodeURIComponent(gameId)}` : '';
-  return apiFetch<{ ok: boolean; isLive: boolean; title: string; viewerCount: number }>(
+  return apiFetch<PublicStreamStatus>(
     `/api/streams/status${qs}`,
   );
 }
