@@ -51,9 +51,9 @@ export function detectStreamUrlType(url: string): StreamUrlType {
   // Platform detection
   if (isYoutubeUrl(url)) return 'youtube';
 
-  if (/(?:^|\.)twitch\.tv/i.test(url)) return 'twitch';
+  if (/(?:^|[./])twitch\.tv(?:\/|$)/i.test(url)) return 'twitch';
 
-  if (/(?:^|\.)vimeo\.com/i.test(url)) return 'vimeo';
+  if (/(?:^|[./])vimeo\.com(?:\/|$)/i.test(url)) return 'vimeo';
 
   return 'unknown';
 }
