@@ -5,6 +5,9 @@
  * Accepts any valid video stream URL with zero strictness on format.
  * The only hard requirements: URL must be parseable and protocol must be
  * http(s)/rtmp(s) or a recognized stream scheme.
+ *
+ * Supports 13 stream source types. Advisory system provides level-coded
+ * feedback (ok / warn / info) without ever hard-blocking a URL.
  */
 
 import { isYoutubeUrl, toPlayableYoutubeEmbedUrl } from '@/lib/stream/youtube-url';
@@ -17,8 +20,20 @@ export type StreamUrlType =
   | 'mp4'
   | 'twitch'
   | 'vimeo'
+  | 'facebook'
+  | 'kick'
+  | 'rumble'
+  | 'x-spaces'
+  | 'instagram'
   | 'rtmp'
   | 'unknown';
+
+export type StreamAdvisoryLevel = 'ok' | 'warn' | 'info';
+
+export interface StreamAdvisory {
+  level: StreamAdvisoryLevel;
+  message: string;
+}
 
 /**
  * Detect the stream URL type from a raw URL string.
@@ -48,12 +63,22 @@ export function detectStreamUrlType(url: string): StreamUrlType {
     return 'mp4';
   }
 
-  // Platform detection
+  // Platform detection — order by expected usage frequency
   if (isYoutubeUrl(url)) return 'youtube';
 
   if (/(?:^|[./])twitch\.tv(?:\/|$)/i.test(url)) return 'twitch';
 
   if (/(?:^|[./])vimeo\.com(?:\/|$)/i.test(url)) return 'vimeo';
+
+  if (/(?:^|[./])(?:facebook\.com|fb\.me|fbcdn\.net)(?:\/|$)/i.test(url)) return 'facebook';
+
+  if (/(?:^|[./])kick\.com(?:\/|$)/i.test(url)) return 'kick';
+
+  if (/(?:^|[./])rumble\.com(?:\/|$)/i.test(url)) return 'rumble';
+
+  if (/(?:^|[./])(?:x\.com|twitter\.com)\/i\/(?:broadcasts|spaces)(?:\/|$)/i.test(url)) return 'x-spaces';
+
+  if (/(?:^|[./])instagram\.com\/(?:live|.*\/live)(?:\/|$)/i.test(url)) return 'instagram';
 
   return 'unknown';
 }
@@ -65,10 +90,48 @@ export interface PlayableUrl {
 }
 
 /**
+ * Extract a Twitch channel name from common twitch.tv URL formats.
+ * e.g. https://www.twitch.tv/channelname → channelname
+ */
+function extractTwitchChannel(url: string): string | null {
+  try {
+    const parsed = new URL(url.trim());
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    // Skip known non-channel paths
+    if (parts.length === 0) return null;
+    const first = parts[0].toLowerCase();
+    if (['directory', 'videos', 'p', 'settings', 'search'].includes(first)) return null;
+    return parts[0];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract a Vimeo video ID from common vimeo.com URL formats.
+ * e.g. https://vimeo.com/123456789 → 123456789
+ */
+function extractVimeoId(url: string): string | null {
+  try {
+    const parsed = new URL(url.trim());
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    // Vimeo IDs are numeric
+    for (const part of parts) {
+      if (/^\d{5,}$/.test(part)) return part;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Convert a raw stream URL to a playable form.
- * - YouTube URLs are normalized to embed format.
- * - RTMP URLs trigger an advisory warning (cannot play in browser).
- * - All other URLs are returned as-is.
+ * - YouTube URLs are normalized to canonical watch URL.
+ * - Twitch URLs are normalized to the player embed format.
+ * - Vimeo URLs are normalized to player.vimeo.com embed format.
+ * - RTMP URLs carry an advisory warning (cannot play in browser).
+ * - All other URLs are returned as-is (no blocking).
  */
 export function toPlayableUrl(raw: string): PlayableUrl {
   const trimmed = raw.trim();
@@ -89,18 +152,87 @@ export function toPlayableUrl(raw: string): PlayableUrl {
     return { url: embedUrl ?? trimmed, type: 'youtube' };
   }
 
+  if (type === 'twitch') {
+    const channel = extractTwitchChannel(trimmed);
+    if (channel) {
+      const parent = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
+      return { url: `https://player.twitch.tv/?channel=${channel}&parent=${parent}`, type: 'twitch' };
+    }
+    return { url: trimmed, type: 'twitch' };
+  }
+
+  if (type === 'vimeo') {
+    const vimeoId = extractVimeoId(trimmed);
+    if (vimeoId) {
+      return { url: `https://player.vimeo.com/video/${vimeoId}`, type: 'vimeo' };
+    }
+    return { url: trimmed, type: 'vimeo' };
+  }
+
+  if (type === 'facebook') {
+    return {
+      url: trimmed,
+      type: 'facebook',
+      warning: 'Facebook embedding may be limited. Verify playback after going live.',
+    };
+  }
+
   return { url: trimmed, type };
 }
 
 /** Human-readable label for each stream URL type */
 export const STREAM_TYPE_LABELS: Record<StreamUrlType, string> = {
-  youtube: 'YouTube',
-  hls:     'HLS',
-  dash:    'DASH',
-  whep:    'WHEP',
-  mp4:     'MP4',
-  twitch:  'Twitch',
-  vimeo:   'Vimeo',
-  rtmp:    'RTMP',
-  unknown: 'Unknown',
+  youtube:    'YouTube',
+  hls:        'HLS',
+  dash:       'DASH',
+  whep:       'WHEP',
+  mp4:        'MP4',
+  twitch:     'Twitch',
+  vimeo:      'Vimeo',
+  facebook:   'Facebook',
+  kick:       'Kick',
+  rumble:     'Rumble',
+  'x-spaces': 'X Spaces',
+  instagram:  'IG Live',
+  rtmp:       'RTMP',
+  unknown:    'Stream',
 };
+
+/**
+ * Centralized advisory system for stream URL types.
+ * Returns level-coded feedback for the admin UI.
+ * NEVER blocks — only advises.
+ */
+export function getStreamTypeAdvisory(type: StreamUrlType): StreamAdvisory {
+  switch (type) {
+    case 'rtmp':
+      return { level: 'warn', message: 'RTMP cannot play in browser — use an HLS endpoint instead.' };
+    case 'facebook':
+      return { level: 'warn', message: 'Facebook embedding may be limited. Verify playback after going live.' };
+    case 'instagram':
+      return { level: 'warn', message: 'Instagram Live does not support external embedding.' };
+    case 'kick':
+      return { level: 'warn', message: 'Kick does not provide embeddable player URLs. Consider an HLS restream.' };
+    case 'rumble':
+      return { level: 'warn', message: 'Rumble embedding may be restricted. Verify playback after going live.' };
+    case 'x-spaces':
+      return { level: 'warn', message: 'X Spaces does not support external embedding.' };
+    case 'youtube':
+      return { level: 'ok', message: 'YouTube stream detected — auto-normalized.' };
+    case 'hls':
+      return { level: 'ok', message: 'HLS stream — universal browser support.' };
+    case 'dash':
+      return { level: 'ok', message: 'DASH stream detected.' };
+    case 'whep':
+      return { level: 'info', message: 'WHEP/WebRTC — ultra-low latency mode active.' };
+    case 'twitch':
+      return { level: 'ok', message: 'Twitch stream detected — auto-configured.' };
+    case 'vimeo':
+      return { level: 'ok', message: 'Vimeo stream detected — auto-configured.' };
+    case 'mp4':
+      return { level: 'ok', message: 'Direct video file detected.' };
+    case 'unknown':
+    default:
+      return { level: 'ok', message: '' };
+  }
+}

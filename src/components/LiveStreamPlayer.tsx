@@ -180,14 +180,21 @@ function StreamPlayer({
   const [playing, setPlaying] = useState(true);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(0.8);
+  // Auto-retry: allow one silent retry on transient errors before showing error UI
+  const retryCountRef = useRef(0);
+  const MAX_AUTO_RETRIES = 1;
 
   const urlType = detectStreamUrlType(url);
   const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
+  const isTwitch = urlType === 'twitch';
+  const isVimeo = urlType === 'vimeo';
   const isWhep = urlType === 'whep';
   const isRtmp = urlType === 'rtmp';
   // HLS and DASH use ReactPlayer with explicit forcing flags
   const forceHls = urlType === 'hls';
   const forceDash = urlType === 'dash';
+  // Show native controls for platform embeds that handle their own UI
+  const showNativeControls = isYoutube || isTwitch || isVimeo;
 
   const handleFullscreen = async () => {
     const host = containerRef.current;
@@ -234,7 +241,8 @@ function StreamPlayer({
     );
   }
 
-  // HLS / DASH / YouTube / direct / unknown — use ReactPlayer
+  // HLS / DASH / YouTube / Twitch / Vimeo / direct / unknown — use ReactPlayer
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
   const reactPlayerConfig = {
     youtube: {
       playerVars: {
@@ -247,6 +255,13 @@ function StreamPlayer({
         // Without this, the YT iframe tries to postMessage to youtube.com
         // instead of sbbl-hq.icu, which the browser blocks.
         origin: typeof window !== 'undefined' ? window.location.origin : 'https://sbbl-hq.icu',
+      },
+    },
+    twitch: {
+      options: {
+        // REQUIRED: Twitch embeds will not load without the parent domain.
+        // https://dev.twitch.tv/docs/embed/everything/#required-parameters
+        parent: [currentHost],
       },
     },
     file: {
@@ -262,17 +277,27 @@ function StreamPlayer({
         width="100%"
         height="100%"
         playing={playing}
-        controls={isYoutube}
+        controls={showNativeControls}
         muted={muted}
         volume={volume}
-        onReady={onReady}
-        onPlay={() => { setPlaying(true); onPlay(); }}
+        onReady={() => { retryCountRef.current = 0; onReady(); }}
+        onPlay={() => { setPlaying(true); retryCountRef.current = 0; onPlay(); }}
         onPause={() => setPlaying(false)}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onError={(err: any, data: any) => onError(parsePlayerError(err, data))}
+        onError={(err: any, data: any) => {
+          // Auto-retry: on first transient error, retry silently after 3s
+          // to avoid killing the player for 20k viewers on a single hiccup.
+          if (retryCountRef.current < MAX_AUTO_RETRIES) {
+            retryCountRef.current += 1;
+            setPlaying(false);
+            setTimeout(() => setPlaying(true), 3_000);
+            return;
+          }
+          onError(parsePlayerError(err, data));
+        }}
         config={reactPlayerConfig}
       />
-      {!isYoutube && (
+      {!showNativeControls && (
         <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm">
           <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
             aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>

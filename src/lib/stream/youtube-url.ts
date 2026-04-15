@@ -6,11 +6,6 @@ const YOUTUBE_HOSTS = new Set([
   'www.youtu.be',
 ]);
 
-// Facebook is explicitly blocked regardless of youtubeOnly setting.
-// These domains cover FB video, live, and CDN origins.
-const BLOCKED_HOSTS_RE =
-  /(?:^|\.)(?:facebook\.com|fb\.me|fbcdn\.net|facebook\.net|m\.me)$/i;
-
 const YOUTUBE_VIDEO_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/;
 
 function isValidYoutubeVideoId(id: string): boolean {
@@ -75,10 +70,6 @@ export function normalizeYoutubeUrl(
     return { ok: false, error: 'Only http(s) stream URLs are supported.' };
   }
   const host = parsed.hostname.toLowerCase();
-  // Always block Facebook domains — not a supported stream source.
-  if (BLOCKED_HOSTS_RE.test(host)) {
-    return { ok: false, error: 'Facebook is not a supported stream source.' };
-  }
   const youtubeOnly = options.youtubeOnly ?? false;
   if (youtubeOnly && !YOUTUBE_HOSTS.has(host)) {
     return { ok: false, error: 'Only YouTube Live URLs are allowed in baseline mode.' };
