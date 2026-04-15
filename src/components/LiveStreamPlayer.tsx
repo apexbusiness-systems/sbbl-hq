@@ -12,20 +12,20 @@
  * IP locking and single-use enforcement happen server-side in /api/invite/redeem.
  * No role/entitlement data is trusted from the client.
  *
- * Uses WhepPlayer (WebRTC/WHEP via MediaMTX) controlled by app-level RBAC gates.
+ * Uses ReactPlayer for live stream playback (YouTube, HLS, etc.).
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
+import { Lock, Play, Pause, Ticket, Copy, Check, KeyRound, Volume2, VolumeX, Maximize } from 'lucide-react';
+import ReactPlayer from 'react-player';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
-import { toPlayableYoutubeEmbedUrl } from '@/lib/stream/youtube-url';
+import { isYoutubeUrl, toPlayableYoutubeEmbedUrl } from '@/lib/stream/youtube-url';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { useStreamForge } from '@/hooks/use-streamforge';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
-import { WhepPlayer, type WhepPlayerStatus } from '@/components/WhepPlayer';
 import gameAction from '@/assets/game-action.svg';
 import type { Game } from '@/types';
 import type { AppRole } from '@/lib/auth/roles';
@@ -128,6 +128,110 @@ function AccessCodeRedeem({
   );
 }
 
+/** Maps YouTube IFrame API numeric error codes to human-readable messages. */
+const YOUTUBE_ERROR_MESSAGES: Partial<Record<number, string>> = {
+  2:   'Invalid stream URL — check the link in broadcast controls.',
+  5:   'This video cannot play in an embedded player.',
+  100: 'Video not found or set to private.',
+  101: 'Stream owner has disabled embedding. Try a different source URL.',
+  150: 'Stream owner has disabled embedding. Try a different source URL.',
+};
+
+function parsePlayerError(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  err: any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: any,
+): string {
+  if (data != null && typeof data.error === 'number') {
+    return (
+      YOUTUBE_ERROR_MESSAGES[data.error as number] ??
+      `Stream error (YouTube code ${data.error as number}). Try a different URL.`
+    );
+  }
+  if (err instanceof Event) {
+    const video = (err as Event & { target?: HTMLVideoElement }).target;
+    const code = video?.error?.code;
+    if (code === 2) return 'Network error while loading stream. Check your connection.';
+    if (code === 3) return 'Stream format is not supported by this browser.';
+    if (code === 4) return 'Stream source is unavailable or the URL is invalid.';
+  }
+  if (err instanceof Error) return `Stream error: ${err.message}`;
+  return 'Stream connection failed — check the URL in broadcast controls or try again.';
+}
+
+function StreamPlayer({
+  url,
+  onReady,
+  onPlay,
+  onError,
+}: Readonly<{
+  url: string;
+  onReady: () => void;
+  onPlay: () => void;
+  onError: (message: string) => void;
+}>) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [playing, setPlaying] = useState(true);
+  const [muted, setMuted] = useState(false);
+  const [volume, setVolume] = useState(0.8);
+  const isYoutube = isYoutubeUrl(url);
+
+  const handleFullscreen = async () => {
+    const host = containerRef.current;
+    if (!host) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await host.requestFullscreen();
+      }
+    } catch (err) {
+      onError(`Fullscreen unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
+      <ReactPlayer
+        url={url}
+        width="100%"
+        height="100%"
+        playing={playing}
+        controls={isYoutube}
+        muted={muted}
+        volume={volume}
+        onReady={onReady}
+        onPlay={() => { setPlaying(true); onPlay(); }}
+        onPause={() => setPlaying(false)}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        onError={(err: any, data: any) => onError(parsePlayerError(err, data))}
+        config={{ youtube: { playerVars: { rel: 0, iv_load_policy: 3 } } }}
+      />
+      {!isYoutube && (
+        <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm">
+          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
+            {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+          </button>
+          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted(v => !v)}>
+            {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+          <input aria-label="Volume" type="range" min={0} max={1} step={0.05} value={volume}
+            onChange={(e) => { const n = Number(e.target.value); setMuted(n === 0); setVolume(n); }}
+            className="w-24 accent-amber-500" />
+          <div className="flex-1" />
+          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
+            <Maximize className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const PPV_PRICE_CAD = 4.99;
 const ALBERTA_GST = 0.05;
 /** Tax-inclusive price shown to Alberta viewers */
@@ -182,8 +286,8 @@ export function LiveStreamPlayer({
 
   const [playbackUrl, setPlaybackUrl] = useState('');
   const [playbackLoading, setPlaybackLoading] = useState(false);
+  const [playerError, setPlayerError] = useState<string | null>(null);
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
-  const [streamStatus, setStreamStatus] = useState<WhepPlayerStatus>('idle');
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
 
   // ── StreamForge QoE telemetry (observational — never mutates player) ──────
@@ -236,6 +340,7 @@ export function LiveStreamPlayer({
     let sessionIdForCleanup: string | null = null;
     let consecutiveFailures = 0;
     setPlaybackLoading(true);
+    setPlayerError(null);
     setHeartbeatFailures(0);
     const deviceToken = getOrCreateDeviceToken();
     const sessionKey = `playback-${game.id}-${deviceToken}`;
@@ -249,7 +354,13 @@ export function LiveStreamPlayer({
           body: JSON.stringify({ sessionKey }),
         }, null);
         if (!active) return;
-        setPlaybackUrl(toPlayableUrl(res.playback.url));
+        // Use URL from session, fall back to game.stream_url, then env var.
+        const resolvedUrl =
+          res.playback.url ||
+          game.stream_url ||
+          (import.meta.env.VITE_STREAM_URL as string | undefined) ||
+          '';
+        setPlaybackUrl(toPlayableUrl(resolvedUrl));
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
 
@@ -367,26 +478,31 @@ export function LiveStreamPlayer({
           <div className="absolute inset-0 flex items-center justify-center bg-black">
             <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : (
-          /* Live stream — WHEP via MediaMTX on EC2 */
-          <WhepPlayer
-            whepUrl={
-              game.stream_url ??
-              (import.meta.env.VITE_WHEP_FALLBACK_URL as string | undefined) ??
-              ''
-            }
-            retryIntervalMs={12_000}
-            maxRetries={0}
-            onStatusChange={(s) => {
-              setStreamStatus(s);
-              if (s === 'live') {
-                sf.reportEvent('play');
-                sf.recordSuccess();
-              } else if (s === 'error' || s === 'offline') {
-                sf.recordFailure();
-              }
-            }}
+        ) : playerError ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black text-center px-6">
+            <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mb-3">
+              <Play className="w-6 h-6 text-red-400" />
+            </div>
+            <p className="text-sm text-white/80 font-medium mb-1">Stream Unavailable</p>
+            <p className="text-xs text-white/50 mb-4">{playerError}</p>
+            <button
+              onClick={() => setPlayerError(null)}
+              className="px-4 py-2 text-xs font-display font-bold uppercase tracking-wider bg-amber-500 text-black rounded hover:bg-amber-400 transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        ) : playbackUrl ? (
+          <StreamPlayer
+            url={playbackUrl}
+            onReady={() => { sf.reportEvent('play'); sf.recordSuccess(); }}
+            onPlay={() => sf.reportEvent('playing')}
+            onError={(message) => { setPlayerError(message); sf.recordFailure(); }}
           />
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3">
+            <p className="text-sm text-muted-foreground">Stream not configured yet.</p>
+          </div>
         )}
 
         {/* Connection lost / displaced banner — circuit breaker triggered.
@@ -496,8 +612,8 @@ export function LiveStreamPlayer({
           </div>
         )}
 
-        {/* RBAC role badge — bottom-left, visible when stream is live */}
-        {streamStatus === 'live' && !playbackLoading && (
+        {/* RBAC role badge — bottom-left, visible when stream is playing */}
+        {playbackUrl && !playerError && !playbackLoading && (
           <div className="absolute bottom-4 left-4 z-10 pointer-events-none select-none">
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest backdrop-blur-sm border ${
               isSuperAdmin
