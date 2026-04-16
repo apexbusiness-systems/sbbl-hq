@@ -9,7 +9,6 @@ import { useAuth } from '@/hooks/use-auth';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { useLiveAccess } from '@/hooks/useLiveAccess';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
-import { games, players } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
 import { CASLNudge } from '@/components/CASLNudge';

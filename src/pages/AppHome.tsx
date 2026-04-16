@@ -2,13 +2,40 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Play, ShoppingBag, ChevronRight, Trophy, Zap, Shield } from 'lucide-react';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
-import { products, playersOfTheGame } from '@/data/mock';
 import { PotgCard } from '@/components/ui/PotgCard';
 import { useBag } from '@/contexts/BagContext';
+import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { apiFetch } from '@/lib/api/client';
+import { fetchPublicPotg } from '@/lib/api/public';
+import { mapPotgPublicationRows } from '@/lib/potg';
+import type { PlayerOfTheGame, Product } from '@/types';
 
 const AppHomePage = () => {
   const { addToBag } = useBag();
-  const featuredProducts = products.filter(p => p.sale && p.price > 0).slice(0, 3);
+
+  // All home-page data comes from the public worker endpoints. No mock.
+  const productsQuery = useQuery({
+    queryKey: ['public-products'],
+    queryFn: () => apiFetch<{ ok: boolean; data: Product[] }>('/api/public/products'),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const featuredProducts = useMemo<Product[]>(() => {
+    const all = productsQuery.data?.data ?? [];
+    return all.filter((p) => p.badge === 'SALE' && p.price > 0).slice(0, 3);
+  }, [productsQuery.data]);
+
+  const potgQuery = useQuery({
+    queryKey: ['public-potg'],
+    queryFn: () => fetchPublicPotg(),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const potgList = useMemo<PlayerOfTheGame[]>(
+    () => mapPotgPublicationRows(potgQuery.data?.data as Record<string, unknown>[] | undefined),
+    [potgQuery.data],
+  );
 
   return (
     <div className="min-h-screen">
@@ -130,7 +157,7 @@ const AppHomePage = () => {
       </section>
 
       {/* ── POTG ACROSS ALL LEAGUES ────────────────────────────── */}
-      {playersOfTheGame.length > 0 && (
+      {potgList.length > 0 && (
         <section className="container py-14">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -144,7 +171,7 @@ const AppHomePage = () => {
             </Link>
           </div>
           <div className="flex gap-4 overflow-x-auto scrollbar-hidden pb-2">
-            {playersOfTheGame.map((potg, i) => (
+            {potgList.map((potg, i) => (
               <PotgCard key={potg.id} potg={potg} featured={i === 0} />
             ))}
           </div>

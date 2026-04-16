@@ -4,6 +4,38 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
+/**
+ * Data-pipeline guardrail (see docs/protocols/no-mock-in-production.md).
+ *
+ * Production UI code MUST read live data from the worker/Supabase pipeline —
+ * never from hard-coded fixtures. The fixture files under src/data/mock.ts,
+ * src/data/schedules.ts, and src/data/teams.ts exist ONLY for tests and
+ * Storybook. Importing them from src/pages/** or src/components/** hides
+ * data-pipeline regressions behind fake data and has caused repeated
+ * production incidents where users saw stale mock leaderboards/stats.
+ *
+ * The blocklist below is enforced at lint time. Tests (src/test/** and
+ * *.test.*) are allowed to import the fixtures — they are the intended
+ * consumers. If you need a static reference list (leagues, routes), use
+ * src/lib/leagues.ts (LEAGUE_REGISTRY) — the canonical source.
+ */
+const DATA_FIXTURE_PATTERNS = [
+  {
+    group: [
+      "@/data/mock",
+      "@/data/mock.*",
+      "@/data/schedules",
+      "@/data/teams",
+      "**/data/mock",
+      "**/data/mock.*",
+      "**/data/schedules",
+      "**/data/teams",
+    ],
+    message:
+      "Fixture data from src/data/{mock,schedules,teams} is test-only. Production pages/components must fetch from the worker API (see docs/protocols/no-mock-in-production.md). Use LEAGUE_REGISTRY from '@/lib/leagues' for league identity constants.",
+  },
+];
+
 export default tseslint.config(
   { ignores: ["dist", "dev-dist"] },
   {
@@ -23,6 +55,30 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
       "@typescript-eslint/no-empty-object-type": "off",
       "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+  // Hard ban on fixture imports from production code (pages, components,
+  // hooks, contexts, and non-test lib files). Tests can still import fixtures.
+  {
+    files: [
+      "src/pages/**/*.{ts,tsx}",
+      "src/components/**/*.{ts,tsx}",
+      "src/hooks/**/*.{ts,tsx}",
+      "src/contexts/**/*.{ts,tsx}",
+      "src/worker/**/*.{ts,tsx}",
+      "src/lib/**/*.{ts,tsx}",
+    ],
+    ignores: [
+      "**/*.test.{ts,tsx}",
+      "**/*.spec.{ts,tsx}",
+      "**/*.stories.{ts,tsx}",
+      "src/test/**",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: DATA_FIXTURE_PATTERNS },
+      ],
     },
   },
 );

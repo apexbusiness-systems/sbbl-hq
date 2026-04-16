@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
-import { players, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { useApp } from '@/contexts/AppContext';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
-import { Team } from '@/types';
+import { LEAGUE_REGISTRY } from '@/lib/leagues';
+import type { PlayerProfile, Team } from '@/types';
 import { Award, Lock } from 'lucide-react';
 
 // ProfileView only covers Players and Leagues.
@@ -30,8 +30,7 @@ const ProfilesPage = () => {
 
   const teams = useMemo(() => {
     const apiData = teamsQuery.data?.teams;
-    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
-    return [];
+    return Array.isArray(apiData) ? apiData : [];
   }, [teamsQuery.data]);
 
   const teamMap = useMemo(() => {
@@ -42,26 +41,40 @@ const ProfilesPage = () => {
     return map;
   }, [teams]);
 
-  // ⚡ Bolt Performance Optimization: Pre-calculate counts in a single O(N) pass
-  // instead of O(N * L) filtering inside the render loop mapping.
+  // Players come from the public stats endpoint (aggregated player_game_stats).
+  // Non-premium users never render this list, so we only fetch when premium.
+  const playersQuery = useQuery({
+    queryKey: ['public-stats-profiles'],
+    queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/public/stats'),
+    retry: 1,
+    staleTime: 60_000,
+    enabled: hasPremiumPlayerAccess,
+  });
+
+  const players = useMemo<PlayerProfile[]>(() => {
+    const apiData = playersQuery.data?.data;
+    return Array.isArray(apiData) ? apiData : [];
+  }, [playersQuery.data]);
+
   const leagueStats = useMemo(() => {
     const counts: Record<string, { teams: number; players: number }> = {};
-    leagues.forEach(l => counts[l.id] = { teams: 0, players: 0 });
+    LEAGUE_REGISTRY.forEach((l) => (counts[l.id] = { teams: 0, players: 0 }));
 
-    teams.forEach(t => {
+    teams.forEach((t) => {
       if (counts[t.leagueId]) counts[t.leagueId].teams++;
     });
 
-    players.forEach(p => {
+    players.forEach((p) => {
       if (counts[p.leagueId]) counts[p.leagueId].players++;
     });
 
     return counts;
-  }, [teams]);
+  }, [teams, players]);
 
-  const detail = useMemo(() =>
-    selectedPlayer ? players.find((p) => p.id === selectedPlayer) : null
-  , [selectedPlayer]);
+  const detail = useMemo(
+    () => (selectedPlayer ? players.find((p) => p.id === selectedPlayer) : null),
+    [selectedPlayer, players],
+  );
 
   // Both tabs are always shown. 'players' is always first and always visible.
   const views: ProfileView[] = ['players', 'leagues'];
@@ -178,18 +191,14 @@ const ProfilesPage = () => {
         {/* Leagues View */}
         {view === 'leagues' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {leagues.map((l) => (
+            {LEAGUE_REGISTRY.map((l) => (
               <div key={l.id} className="panel p-5 space-y-3">
                 <div>
                   <LeagueBadge leagueId={l.id} />
                   <h3 className="font-bold mt-2">{l.name}</h3>
-                  <p className="text-sm text-muted-foreground">{l.description}</p>
+                  <p className="text-sm text-muted-foreground">{l.shortName}</p>
                 </div>
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border">
-                  <div className="text-center">
-                    <p className="text-base font-bold">${l.fee.toLocaleString()}</p>
-                    <p className="text-xs text-muted-foreground">Season Fee</p>
-                  </div>
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
                   <div className="text-center">
                     <p className="text-base font-bold">{leagueStats[l.id]?.teams ?? 0}</p>
                     <p className="text-xs text-muted-foreground">Teams</p>
