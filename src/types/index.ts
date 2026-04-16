@@ -67,6 +67,7 @@ export interface Product {
   image: string;
   sizes?: string[];
   colors?: string[];
+  is_custom?: boolean;
   badge?: string;
   sale?: boolean;
 }
