@@ -1,5 +1,12 @@
 # Changelog
 
+## [v1.5-ci-fixes] - 2026-04-16
+### Fixed
+- Fixed strict type issues relating to `window.SpeechRecognition` casting globally.
+- Corrected imports in Broadcast and Ops UI components to import from `@/lib/supabase/client` rather than the index wrapper which doesn't exist.
+- Standardized Supabase `user_role_assignments` lookup for the `game_events` RLS policies instead of utilizing the undefined `get_user_role` function.
+- Ensured Cloudflare Worker build succeeds by mapping responses to generic `json()` handler instead of unimported wrappers.
+
 ## [v1.4-recsys-cv-endpoints] - 2026-04-16
 ### Added
 - Added `handleRecsysFeed` endpoint on `/api/feed/recsys` for stage 1 candidate generation + stage 2 engagement ranking of `potg` clips with edge caching.

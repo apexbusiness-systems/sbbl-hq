@@ -12,7 +12,12 @@ CREATE TABLE IF NOT EXISTS game_events (
 );
 ALTER TABLE game_events ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "public_read" ON game_events FOR SELECT USING (true);
-CREATE POLICY "admin_all" ON game_events FOR ALL USING (get_user_role(auth.uid()) = 'admin' OR get_user_role(auth.uid()) = 'super_admin');
+CREATE POLICY "admin_all" ON game_events FOR ALL USING (
+  EXISTS (
+    SELECT 1 FROM public.user_role_assignments
+    WHERE user_id = auth.uid() AND (role = 'league_admin' OR role = 'super_admin')
+  )
+);
 CREATE POLICY "owner_edit" ON game_events FOR UPDATE USING (auth.uid() = (SELECT captain_id FROM teams WHERE id = (SELECT team_id FROM games WHERE id = game_events.game_id)));
 
 -- player_consent_receipts (PIPA/PIPEDA lock)
@@ -27,7 +32,12 @@ CREATE TABLE IF NOT EXISTS player_consent_receipts (
 );
 ALTER TABLE player_consent_receipts ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "public_read" ON player_consent_receipts FOR SELECT USING (true);
-CREATE POLICY "admin_all" ON player_consent_receipts FOR ALL USING (get_user_role(auth.uid()) = 'admin' OR get_user_role(auth.uid()) = 'super_admin');
+CREATE POLICY "admin_all" ON player_consent_receipts FOR ALL USING (
+  EXISTS (
+    SELECT 1 FROM public.user_role_assignments
+    WHERE user_id = auth.uid() AND (role = 'league_admin' OR role = 'super_admin')
+  )
+);
 CREATE POLICY "owner_edit" ON player_consent_receipts FOR UPDATE USING (auth.uid() = (SELECT user_id FROM players WHERE id = player_consent_receipts.player_id));
 
 CREATE INDEX idx_game_events_game_ts ON game_events(game_id, event_ts);

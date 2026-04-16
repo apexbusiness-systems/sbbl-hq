@@ -5019,6 +5019,14 @@ async function handleOpsMetricsLite(_ctx: HandlerCtx) {
 }
 
 
+
+function respondJson(data: unknown, status = 200, headers: Record<string, string> = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8", ...headers },
+  });
+}
+
 async function handleGameEvents(ctx: HandlerCtx) {
   const user = await requireAuth(ctx.req, ctx.env);
   const idempotencyKey = readIdempotencyKey(ctx.req);

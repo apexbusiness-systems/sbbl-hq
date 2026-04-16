@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase/client';
 import type { GameEvent } from '@/types/game-event';
 
 // PHASE 1: OBS Browser Source Overlay MVP

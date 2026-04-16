@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { X, Maximize2, Minimize2, Video } from 'lucide-react';
-import { supabase } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase/client';
 
 // PHASE 1: Viewer App PiP + Stats Drawer
 export const PipStatsDrawer: React.FC<{ gameId: string }> = ({ gameId }) => {
