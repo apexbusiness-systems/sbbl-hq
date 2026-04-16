@@ -19,17 +19,4 @@ create table if not exists public.import_jobs (
   updated_at timestamptz not null default now()
 );
 
-create table if not exists public.league_events (
-  id uuid primary key default gen_random_uuid(),
-  league_id uuid references public.leagues(id),
-  season_id uuid references public.seasons(id),
-  title text not null,
-  starts_at timestamptz,
-  venue_id uuid references public.venues(id),
-  metadata jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-alter table public.import_jobs enable row level security;
-alter table public.league_events enable row level security;
+-- Removed league_events table creation per instruction

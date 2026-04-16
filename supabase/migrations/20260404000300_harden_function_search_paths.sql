@@ -5,7 +5,7 @@ DO $$
 DECLARE
   fn text;
   target_functions constant text[] := ARRAY[
-    'public.update_league_events_updated_at()',
+
     'public.touch_updated_at()',
     'public.enforce_idempotency(text)',
     'public.log_admin_action(text,text,uuid,jsonb,text)',

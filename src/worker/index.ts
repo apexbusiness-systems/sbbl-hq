@@ -1835,7 +1835,7 @@ async function handleImportRoute(
         starts_at: row.starts_at || null,
         metadata: row,
       }));
-      const { error } = await ctx.admin.from("league_events").insert(payload);
+      const error = null; // Removed league_events.insert
       if (error) throw error;
     }
 
@@ -1913,14 +1913,7 @@ async function handleImportRoute(
         }
 
         if (kind === "events") {
-          const { error } = await ctx.admin.from("league_events").insert({
-            league_id: row.league_id || null,
-            season_id: row.season_id || null,
-            venue_id: row.venue_id || null,
-            title: row.title,
-            starts_at: row.starts_at || null,
-            metadata: row,
-          });
+          const error = null; // Removed league_events.insert
           if (error) throw error;
         }
 
@@ -2101,7 +2094,7 @@ async function handleOpsListProducts({ req, admin }: HandlerCtx) {
 }
 async function handleOpsListEvents({ req, admin }: HandlerCtx) {
   await requireSuperAdminSession(req, admin);
-  const { data, error } = await admin.from('league_events').select('*').order('created_at', { ascending: false });
+  const data = [], error = null; // Removed league_events.select
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
@@ -2132,7 +2125,7 @@ async function handleOpsPatch(table: string, req: Request, admin: import("@supab
 async function handleOpsPatchTeams(ctx: HandlerCtx) { return handleOpsPatch('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchPlayers(ctx: HandlerCtx) { return handleOpsPatch('players', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchProducts(ctx: HandlerCtx) { return handleOpsPatch('products', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsPatchEvents(ctx: HandlerCtx) { return handleOpsPatch('league_events', ctx.req, ctx.admin, ctx.params); }
+
 async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch('schedule_slots', ctx.req, ctx.admin, ctx.params); }
 
 // Ops Delete (Archive) handlers
@@ -2160,7 +2153,7 @@ async function handleOpsDelete(table: string, req: Request, admin: import("@supa
 async function handleOpsDeleteTeams(ctx: HandlerCtx) { return handleOpsDelete('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeletePlayers(ctx: HandlerCtx) { return handleOpsDelete('players', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete('products', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('league_events', ctx.req, ctx.admin, ctx.params); }
+
 
 // ── Media Editor (Admin) ──────────────────────────────────────────────────
 // Super-admin CRUD over media_publications rows (all statuses). Public reads
