@@ -186,11 +186,11 @@ export function canonicalizeStreamSourceUrl(raw: string): { url: string; type: S
     return {
       url: trimmed,
       type: 'facebook',
-      warning: 'Facebook embedding may be limited. Verify playback after going live.',
+      canonical: true,
     };
   }
 
-  return { url: trimmed, type };
+  return { url: trimmed, type, canonical: true };
 }
 
 /**
@@ -248,6 +248,16 @@ export function toPlayableUrl(raw: string): PlayableUrl {
 
   return { url: trimmed, type };
 }
+
+/**
+ * Extract a Vimeo video ID from common vimeo.com URL formats.
+ * e.g. https://vimeo.com/123456789 → 123456789
+ */
+
+/**
+ * Extract a Vimeo video ID from common vimeo.com URL formats.
+ * e.g. https://vimeo.com/123456789 → 123456789
+ */
 
 /** Human-readable label for each stream URL type */
 export const STREAM_TYPE_LABELS: Record<StreamUrlType, string> = {
