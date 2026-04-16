@@ -80,7 +80,9 @@ const StorePage = () => {
     return products.filter(p => p.category === category && !p.is_custom);
   }, [products, category]);
 
-  const detail = selectedProduct ? products.find(p => p.id === selectedProduct) : null;
+  const detail = useMemo(() =>
+    selectedProduct ? products.find(p => p.id === selectedProduct) : null
+  , [selectedProduct, products]);
 
   const handleSelectProduct = useCallback((id: string, colors?: string[]) => {
     setSelectedProduct(id);
