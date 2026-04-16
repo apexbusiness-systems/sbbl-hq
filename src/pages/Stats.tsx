@@ -9,7 +9,11 @@ import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 
 type StatKey = keyof StatLine;
-const statKeys: StatKey[] = ['pts', 'reb', 'ast', 'stl', 'blk', 'fls', 'min'];
+// Full stat line (paid player, coach, team_manager, league_admin, super_admin).
+const FULL_STAT_KEYS: StatKey[] = ['pts', 'reb', 'ast', 'stl', 'blk', 'fls', 'min'];
+// Minimal stat line — what fans and expired players see. The worker never
+// sends the gated fields to these tiers, so we must not render their columns.
+const MINIMAL_STAT_KEYS: StatKey[] = ['pts', 'reb', 'ast'];
 const statLabels: Record<StatKey, string> = { pts: 'PTS', reb: 'REB', ast: 'AST', stl: 'STL', blk: 'BLK', fls: 'FLS', min: 'MIN' };
 
 const StatsPage = () => {
@@ -44,16 +48,24 @@ const StatsPage = () => {
     }
   }, [activeLeague, paramLeague, isValidParam]);
 
-  // Fetch live stats from the public worker endpoint (anonymous).
-  // /api/public/stats returns { ok, data: PlayerProfile[] } — never a wrapped
-  // object — so callers render directly. No mock fallback: when data is
-  // missing the UI shows an explicit empty state below.
+  // Fetch live stats from /api/stats. The worker authenticates the caller
+  // (via the Supabase JWT that apiFetch attaches automatically) and returns
+  // the tier-appropriate stat line:
+  //   • tier = 'full'    — pts/reb/ast/stl/blk/fls/min
+  //   • tier = 'minimal' — pts/reb/ast only (fan, anonymous, expired player)
+  // No mock fallback: when data is missing the UI shows an empty state.
   const statsQuery = useQuery({
-    queryKey: ['public-stats', leagueFilter],
-    queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/public/stats'),
+    queryKey: ['stats', leagueFilter],
+    queryFn: () =>
+      apiFetch<{ ok: boolean; tier: 'full' | 'minimal'; data: PlayerProfile[] }>(
+        '/api/stats',
+      ),
     retry: 1,
     staleTime: 30_000,
   });
+
+  const statTier: 'full' | 'minimal' = statsQuery.data?.tier === 'full' ? 'full' : 'minimal';
+  const statKeys = statTier === 'full' ? FULL_STAT_KEYS : MINIMAL_STAT_KEYS;
 
   const players = useMemo<PlayerProfile[]>(() => {
     const apiData = statsQuery.data?.data;
@@ -71,22 +83,23 @@ const StatsPage = () => {
     selectedPlayer ? players.find(p => p.id === selectedPlayer) : null,
   [selectedPlayer, players]);
 
-  // ⚡ Bolt Performance Optimization: Pre-calculate maximums in a single O(N) pass
-  // instead of O(K * N) where K is number of stats. Prevents array allocation from .map()
-  // and avoids call stack limits with spread operator.
+  // Pre-calculate per-stat maxima across the visible player set. We iterate
+  // only over statKeys (tier-filtered) so gated fields never contribute —
+  // their values are `undefined` for minimal-tier viewers and must not be
+  // coerced to 0 (that would break normalisation of the radial charts).
   const maxStats = useMemo(() => {
-    const maxes: Record<StatKey, number> = { pts: 0, reb: 0, ast: 0, stl: 0, blk: 0, fls: 0, min: 0 };
+    const maxes: Partial<Record<StatKey, number>> = {};
+    for (const key of statKeys) maxes[key] = 0;
     for (const p of filtered) {
-      if (p.stats.pts > maxes.pts) maxes.pts = p.stats.pts;
-      if (p.stats.reb > maxes.reb) maxes.reb = p.stats.reb;
-      if (p.stats.ast > maxes.ast) maxes.ast = p.stats.ast;
-      if (p.stats.stl > maxes.stl) maxes.stl = p.stats.stl;
-      if (p.stats.blk > maxes.blk) maxes.blk = p.stats.blk;
-      if (p.stats.fls > maxes.fls) maxes.fls = p.stats.fls;
-      if (p.stats.min > maxes.min) maxes.min = p.stats.min;
+      for (const key of statKeys) {
+        const val = p.stats[key];
+        if (typeof val === 'number' && val > (maxes[key] ?? 0)) {
+          maxes[key] = val;
+        }
+      }
     }
     return maxes;
-  }, [filtered]);
+  }, [filtered, statKeys]);
 
   const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
 
@@ -191,11 +204,14 @@ const StatsPage = () => {
                   </div>
                 </div>
 
-                {/* Circular stat visuals */}
+                {/* Circular stat visuals. Only renders keys permitted by the
+                    viewer's tier (statKeys is ['pts','reb','ast'] for minimal
+                    and full [pts..min] for paid/coach/admin viewers). */}
                 <div className="grid grid-cols-2 gap-3">
                   {statKeys.map(k => {
                     const val = detail.stats[k];
-                    const max = maxStats[k];
+                    if (typeof val !== 'number') return null;
+                    const max = maxStats[k] ?? 0;
                     const pct = max > 0 ? (val / max) * 100 : 0;
                     const circumference = 2 * Math.PI * 28;
                     const dashOffset = circumference - (pct / 100) * circumference;

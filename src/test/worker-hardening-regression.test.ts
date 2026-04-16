@@ -9,10 +9,16 @@ vi.mock('jose', () => ({
 
 vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({
+    // The worker chains .from('profiles').select().eq().maybeSingle() when
+    // computing stat-access tier for players, and .from('X').select().limit()
+    // .abortSignal() for the env readiness check. Mock both surfaces.
     from: (_table: string) => ({
       select: () => ({
         limit: () => ({
           abortSignal: async () => ({ error: null }),
+        }),
+        eq: () => ({
+          maybeSingle: async () => ({ data: null, error: null }),
         }),
       }),
     }),
@@ -36,8 +42,11 @@ describe('worker hardening regressions', () => {
   beforeEach(() => {
     rpc.mockReset();
     rpc.mockImplementation(async (fn: string) => {
+      // Handlers call get_stats_dashboard for both /api/stats and
+      // /api/leaderboards (see docs/protocols/stats-tier-gating.md). The RPC
+      // emits { ok, players: [...] }.
       if (fn === 'get_stats_dashboard' || fn === 'get_leaderboards') {
-        return { data: [{ id: 'p1' }], error: null };
+        return { data: { ok: true, players: [] }, error: null };
       }
       return { data: null, error: null };
     });
@@ -66,7 +75,10 @@ describe('worker hardening regressions', () => {
     });
   });
 
-  it('sets private no-store caching headers on authenticated stats endpoints', async () => {
+  // Stats is accessible to every tier — fans get a minimal stat line, paid
+  // players and privileged roles get the full stat line. Leaderboards is
+  // gated strictly to the 'full' tier (see handleLeaderboards).
+  it('/api/stats returns private cache headers with a tier payload for authenticated callers', async () => {
     const authHeaders = { authorization: 'Bearer token' };
 
     const statsRes = await worker.fetch(new Request('https://local/api/stats', { headers: authHeaders }), env);
@@ -74,9 +86,17 @@ describe('worker hardening regressions', () => {
     expect(statsRes.headers.get('Cache-Control')).toBe('private, no-store');
     expect(statsRes.headers.get('Vary')).toContain('Authorization');
 
+    const body = await statsRes.json();
+    // Fan role is never granted full tier — the response must be minimal.
+    expect(body.tier).toBe('minimal');
+  });
+
+  it('/api/leaderboards 403s for non-privileged authenticated callers (fan)', async () => {
+    const authHeaders = { authorization: 'Bearer token' };
+
     const leaderboardsRes = await worker.fetch(new Request('https://local/api/leaderboards', { headers: authHeaders }), env);
-    expect(leaderboardsRes.status).toBe(200);
-    expect(leaderboardsRes.headers.get('Cache-Control')).toBe('private, no-store');
-    expect(leaderboardsRes.headers.get('Vary')).toContain('Authorization');
+    expect(leaderboardsRes.status).toBe(403);
+    const body = await leaderboardsRes.json();
+    expect(body).toMatchObject({ ok: false, error: 'forbidden' });
   });
 });
