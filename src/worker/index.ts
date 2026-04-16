@@ -553,29 +553,125 @@ async function handleMutationAck(ctx: HandlerCtx) {
   });
 }
 
-async function handleStats({ req, admin }: HandlerCtx) {
-  const userId = requireAuth(req);
-  const filters = Object.fromEntries(new URL(req.url).searchParams.entries());
-  const { data, error } = await admin.rpc("get_stats_dashboard", {
+export async function handleStats(ctx: HandlerCtx) {
+  const { tier, userId } = await computeStatAccessTier(ctx);
+  const filters = Object.fromEntries(
+    new URL(ctx.req.url).searchParams.entries(),
+  );
+  const { data, error } = await ctx.admin.rpc("get_stats_dashboard", {
     p_filters: filters,
   });
   if (error) throw new Error(error.message);
+  const rows = Array.isArray((data as { players?: unknown[] })?.players)
+    ? (data as { players: Record<string, unknown>[] }).players
+    : [];
+  const players = rows.map(normalizePublicPlayerRow).map((r) =>
+    applyStatTier(r, tier),
+  );
   return json(
-    { ok: true, userId, data },
+    { ok: true, userId, tier, data: players },
     200,
-    { "Cache-Control": "private, no-store", Vary: "Authorization" },
+    userId
+      ? { "Cache-Control": "private, no-store", Vary: "Authorization" }
+      : { "Cache-Control": "public, s-maxage=30, max-age=15" },
   );
 }
 
-async function handleLeaderboards({ req, admin }: HandlerCtx) {
-  const userId = requireAuth(req);
-  const filters = Object.fromEntries(new URL(req.url).searchParams.entries());
-  const { data, error } = await admin.rpc("get_leaderboards", {
+// Stat-access tier. Central authority on WHO sees WHICH stat fields.
+//
+//   'full'    — full stat line (pts, reb, ast, stl, blk, fls, min).
+//               Granted to: super_admin, league_admin, coach, team_manager,
+//                           and player with an active subscription
+//                           (profiles.subscription_ends_at > now()).
+//   'minimal' — pts / reb / ast only. Other fields are stripped (undefined).
+//               Granted to: everyone else (anonymous, fan, paid_fan, and
+//               players whose subscription has lapsed).
+//   'denied'  — not permitted to read the endpoint at all. Used by the
+//               Leaderboards route, which is gated strictly to 'full'.
+//
+// Business rationale (CLAUDE.md § Hard Rules):
+//   Leaderboards are a premium feature — only registered paid players,
+//   coaches, admins, and super-admins may view them. The full stat line
+//   is also premium — fans and lapsed players see the free tier only.
+export type StatAccessTier = "full" | "minimal" | "denied";
+
+export const FULL_STAT_ROLES = new Set([
+  "super_admin",
+  "league_admin",
+  "coach",
+  "team_manager",
+]);
+
+export async function computeStatAccessTier(
+  ctx: HandlerCtx,
+): Promise<{ tier: "full" | "minimal"; userId: string | null }> {
+  let userId: string | null = null;
+  try {
+    userId = requireAuth(ctx.req);
+  } catch {
+    // Anonymous viewer — gets minimal tier.
+    return { tier: "minimal", userId: null };
+  }
+
+  const roles = getRolesFromVerifiedSession(ctx.req);
+
+  if (roles.some((r) => FULL_STAT_ROLES.has(r))) {
+    return { tier: "full", userId };
+  }
+
+  if (roles.includes("player")) {
+    const { data } = await ctx.admin
+      .from("profiles")
+      .select("subscription_ends_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const endsAt = (data as { subscription_ends_at?: string | null } | null)
+      ?.subscription_ends_at;
+    if (endsAt && new Date(endsAt).getTime() > Date.now()) {
+      return { tier: "full", userId };
+    }
+  }
+
+  return { tier: "minimal", userId };
+}
+
+// Strip stat fields that exceed the viewer's tier. Mutates a copy, never
+// the source. Keeping this at the boundary ensures gated fields never leak
+// to unauthorized clients even if a future caller forgets to filter.
+export function applyStatTier<T extends { stats: Record<string, number> }>(
+  row: T,
+  tier: StatAccessTier,
+): T {
+  if (tier === "full") return row;
+  const { pts, reb, ast } = row.stats;
+  return { ...row, stats: { pts, reb, ast } as T["stats"] };
+}
+
+export async function handleLeaderboards(ctx: HandlerCtx) {
+  const { tier, userId } = await computeStatAccessTier(ctx);
+  // Leaderboards are gated strictly to the 'full' tier — registered paid
+  // players, coaches, team managers, league admins, and super admins.
+  if (tier !== "full") {
+    return json({ ok: false, error: "forbidden" }, 403, {
+      "Cache-Control": "private, no-store",
+    });
+  }
+  const filters = Object.fromEntries(
+    new URL(ctx.req.url).searchParams.entries(),
+  );
+  // Use get_stats_dashboard because the UI's category tabs require the full
+  // stat line. get_leaderboards only returns pts/reb/ast and would break
+  // STL/BLK/FLS/MIN tabs.
+  const { data, error } = await ctx.admin.rpc("get_stats_dashboard", {
     p_filters: filters,
   });
   if (error) throw new Error(error.message);
+  const rows = Array.isArray((data as { players?: unknown[] })?.players)
+    ? (data as { players: Record<string, unknown>[] }).players
+    : [];
+  const players = rows.map(normalizePublicPlayerRow);
   return json(
-    { ok: true, userId, data },
+    { ok: true, userId, tier, data: players },
     200,
     { "Cache-Control": "private, no-store", Vary: "Authorization" },
   );
@@ -584,7 +680,7 @@ async function handleLeaderboards({ req, admin }: HandlerCtx) {
 // Normalize a raw RPC row (stats/leaderboards) into the PlayerProfile shape
 // the public pages (Stats.tsx, Leaderboards.tsx) already consume. The RPCs
 // return pts/reb/ast as top-level fields; the UI expects `stats.{pts,reb,...}`.
-function normalizePublicPlayerRow(row: Record<string, unknown>) {
+export function normalizePublicPlayerRow(row: Record<string, unknown>) {
   const leagueCodeRaw = String(row.league_id ?? "").toLowerCase();
   const leagueId = leagueCodeRaw === "wbl" ? "wbl"
     : leagueCodeRaw === "tgifbl" ? "tgifbl"
@@ -611,46 +707,6 @@ function normalizePublicPlayerRow(row: Record<string, unknown>) {
   };
 }
 
-// Public (anonymous) stats endpoint. Backed by the same RPC as /api/stats
-// but accessible without auth and returns `{ ok, data: Player[] }` — a flat
-// array at `.data` matching the shape Stats.tsx consumes.
-async function handlePublicStats({ req, admin }: HandlerCtx) {
-  const filters = Object.fromEntries(new URL(req.url).searchParams.entries());
-  const { data, error } = await admin.rpc("get_stats_dashboard", {
-    p_filters: filters,
-  });
-  if (error) throw new Error(error.message);
-  const rows = Array.isArray((data as { players?: unknown[] })?.players)
-    ? ((data as { players: Record<string, unknown>[] }).players)
-    : [];
-  const players = rows.map(normalizePublicPlayerRow);
-  return json({ ok: true, data: players }, 200, {
-    "Cache-Control": "public, s-maxage=30, max-age=15",
-  });
-}
-
-// Public (anonymous) leaderboards endpoint.
-//
-// IMPORTANT: we deliberately call `get_stats_dashboard` (not `get_leaderboards`)
-// because the dashboard RPC returns the FULL stat line per player (pts, reb,
-// ast, stl, blk, fls, min), whereas `get_leaderboards` only returns pts/reb/ast.
-// The Leaderboards UI lets users switch between every stat category, so
-// truncating to three would break tabs like STL/BLK/FLS/MIN (all zeros).
-// Response shape: `{ ok, data: Player[] }` — flat array consumed by Leaderboards.tsx.
-async function handlePublicLeaderboards({ req, admin }: HandlerCtx) {
-  const filters = Object.fromEntries(new URL(req.url).searchParams.entries());
-  const { data, error } = await admin.rpc("get_stats_dashboard", {
-    p_filters: filters,
-  });
-  if (error) throw new Error(error.message);
-  const rows = Array.isArray((data as { players?: unknown[] })?.players)
-    ? ((data as { players: Record<string, unknown>[] }).players)
-    : [];
-  const players = rows.map(normalizePublicPlayerRow);
-  return json({ ok: true, data: players }, 200, {
-    "Cache-Control": "public, s-maxage=30, max-age=15",
-  });
-}
 
 async function handleDraft(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
@@ -5429,8 +5485,6 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "GET", path: "/api/public/home", handler: handlePublicHome },
   { method: "GET", path: "/api/public/schedule", handler: handlePublicSchedule },
   { method: "GET", path: "/api/public/potg", handler: handlePublicPotg },
-  { method: "GET", path: "/api/public/stats", handler: handlePublicStats },
-  { method: "GET", path: "/api/public/leaderboards", handler: handlePublicLeaderboards },
   { method: "GET", path: "/api/teams", handler: handleTeamsList },
   {
     method: "GET",
