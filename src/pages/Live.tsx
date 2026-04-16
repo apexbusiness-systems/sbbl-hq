@@ -9,7 +9,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { useLiveAccess } from '@/hooks/useLiveAccess';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
-import { games, players, products } from '@/data/mock';
+import { games, players } from '@/data/mock';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
 import { CASLNudge } from '@/components/CASLNudge';
@@ -33,7 +33,7 @@ import {
   Radio, Eye, DollarSign, Settings, X, Ticket, Copy,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { Game, PlayerProfile } from '@/types';
+import type { Game, PlayerProfile, Product } from '@/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const LEAGUE_IDS = ['sbbl', 'wbl', 'tgifbl'];
@@ -654,12 +654,20 @@ const LivePage = () => {
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // ⚡ Bolt Performance Optimization: Extract expensive object creation from the render loop
-  // into useMemo to prevent recreating the featured products array on every render.
-  const featuredProducts = useMemo(() => products.filter(p => p.sale), []);
+  const storeQuery = useQuery({
+    queryKey: ['public-products'],
+    queryFn: () => apiFetch<{ ok: boolean; data: Product[] }>('/api/public/products'),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+
+  const featuredProducts = useMemo<Product[]>(() => {
+    const storeProducts = storeQuery.data?.data ?? [];
+    return storeProducts.filter(p => p.badge === 'SALE');
+  }, [storeQuery.data]);
 
   const [carouselIdx, setCarouselIdx] = useState(0);
-  const carouselProduct = featuredProducts[carouselIdx] ?? products[0];
+  const carouselProduct = featuredProducts[carouselIdx] ?? featuredProducts[0];
 
   useEffect(() => {
     if (featuredProducts.length <= 1) return;

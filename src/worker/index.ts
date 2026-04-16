@@ -4588,7 +4588,7 @@ async function handlePayOrder(ctx: HandlerCtx) {
     },
     body: new URLSearchParams({
       "payment_method_types[]": "card",
-      "line_items[0][price_data][currency]": "usd",
+      "line_items[0][price_data][currency]": "cad",
       "line_items[0][price_data][product_data][name]": "SBBL HQ Store Order",
       "line_items[0][price_data][unit_amount]": String(
         ((order as Record<string, unknown>).total_amount as number) || 100,
