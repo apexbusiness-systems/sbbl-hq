@@ -101,6 +101,7 @@ export type OpsMediaPublication = {
   publishedAt: string | null;
   scheduledAt: string | null;
   sortAt: string | null;
+  sortOrder: number | null;
   leagueId: string | null;
   leagueCode: string | null;
   leagueName: string | null;
@@ -155,6 +156,14 @@ export async function deleteOpsMediaPublication(id: string) {
       headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-media-delete-${id}`) },
     },
   );
+}
+
+export async function updateOpsMediaPublicationOrder(items: Array<{ id: string; sortOrder: number }>) {
+  return apiFetch<{ ok: boolean; updated: number }>('/ops/media/publications/order', {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-media-order-save') },
+    body: JSON.stringify({ items }),
+  });
 }
 
 export async function patchOpsEntity(entity: 'teams' | 'players' | 'products' | 'events' | 'schedules', id: string, payload: Record<string, unknown>) {
