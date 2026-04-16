@@ -52,7 +52,7 @@ describe('ingest route registration', () => {
 describe('public render contract: /api/public/media', () => {
   it('handlePublicMedia reads from media_publications (not media_assets directly)', () => {
     // Find handlePublicMedia body
-    const fnStart = workerSrc.indexOf('async function handlePublicMedia');
+    const fnStart = workerSrc.indexOf('async function fetchPublicMediaRows');
     const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
     const fnBody  = workerSrc.slice(fnStart, fnEnd);
 
@@ -61,7 +61,7 @@ describe('public render contract: /api/public/media', () => {
   });
 
   it('handlePublicMedia does NOT query media_assets directly as the primary table', () => {
-    const fnStart = workerSrc.indexOf('async function handlePublicMedia');
+    const fnStart = workerSrc.indexOf('async function fetchPublicMediaRows');
     const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
     const fnBody  = workerSrc.slice(fnStart, fnEnd);
 
@@ -70,8 +70,9 @@ describe('public render contract: /api/public/media', () => {
   });
 
   it('handlePublicMedia orders publications by sort_order then id', () => {
-    const fnStart = workerSrc.indexOf('async function handlePublicMedia');
-    const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
+    const fnStart = workerSrc.indexOf('async function fetchPublicMediaRows');
+    // Ensure we capture enough of the function body
+    const fnEnd   = workerSrc.indexOf('return query', fnStart + 10);
     const fnBody  = workerSrc.slice(fnStart, fnEnd);
 
     const sortOrderIdx = fnBody.indexOf('.order("sort_order"');

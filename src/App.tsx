@@ -32,6 +32,8 @@ const Billing = lazy(() => import('./pages/Billing'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Ops = lazy(() => import('./pages/Ops'));
 const Support = lazy(() => import('./pages/Support'));
+const BroadcastOverlayPage = lazy(() => import('./pages/BroadcastOverlayPage'));
+const HoopsTokPage = lazy(() => import('./pages/HoopsTokPage'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 const Offline = lazy(() => import('./pages/Offline'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
@@ -120,6 +122,8 @@ const AppShell = () => (
         <Routes>
           <Route path="/" element={<AppHome />} />
           <Route path="/league/:leagueId" element={<Home />} />
+          <Route path="/broadcast/:gameId" element={<BroadcastOverlayPage />} />
+          <Route path="/tok" element={<HoopsTokPage />} />
           <Route path="/live" element={<Live />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/store" element={<Store />} />

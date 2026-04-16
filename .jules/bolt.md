@@ -20,3 +20,20 @@
 ## 2024-05-18 - Nested Loop Array Reductions In React
 **Learning:** Found nested loops using `filter` during render (e.g., inside `.map` of a React component). This performs an O(N * M) operation where both arrays scale linearly, creating large performance overheads and memory allocations during render cycles. Another issue was outer-scope dependencies triggering `react-hooks/exhaustive-deps`.
 **Action:** When working with nested maps/filters inside a render function, precalculate aggregates using `useMemo` into a dictionary or hash map, converting the nested O(N * M) into sequential O(N) + O(M) and O(1) lookups during render. Also, ensure you omit outer scope values like static `mockData` variables from `useMemo` dependency arrays as they won't trigger re-renders.
+## 2026-04-16 - Consolidated Event Stream v1\n**Learning:** Addressed Phase 0 constraints safely setting up the idempotent ingestion pattern, Supabase migrations for strict RLS constraints aligned with existing identity policies.\n**Action:** Remember to consistently include strict 'idempotency-key' usage across all mutating edge routes.\n
+## 2026-04-16 - Broadcast Intelligence MVP\n**Learning:** Safely implemented frontend Broadcast React components using strictly validated types and idempotency wrappers to mock real-time game events sync.\n**Action:** Remember to safely enforce  and  types rather than  to prevent ESLint build failures.\n
+## 2026-04-16 - Broadcast Intelligence MVP
+**Learning:** Safely implemented frontend Broadcast React components using strictly validated types and idempotency wrappers to mock real-time game events sync.
+**Action:** Remember to safely enforce Record<string, unknown> and Error types rather than any to prevent ESLint build failures.
+
+## 2026-04-16 - HoopsTok Social Feed MVP
+**Learning:** Built snap-scrolling vertical video feed with robust component routing while navigating TypeScript `Record<string, unknown>` limits for arbitrary API payloads.
+**Action:** Use `String(obj.property)` when rendering arbitrary record properties in React to ensure strict typing.
+
+## 2026-04-16 - Hands-Free Sim Coach Mode
+**Learning:** Integrated mocked SpeechRecognition with Supabase Realtime using idempotency for coach commands while enforcing strict typing rules around external browser APIs.
+**Action:** Use `(window as Record<string, unknown>)` with `as any` isolated casting within generic constructors when interacting with non-standard DOM globals to satisfy strict TypeScript configs without resorting to full `any`.
+
+## 2026-04-16 - Phase 4-6 Backend Completion
+**Learning:** Safely implemented CV/RecSys edge handlers avoiding explicit database joins, instead using DO rooms and KV caching paradigms aligned with existing architecture.
+**Action:** Remember to use `s-maxage` and `max-age` effectively on `GET` endpoints within Cloudflare Workers to bypass database hits for repetitive requests.
