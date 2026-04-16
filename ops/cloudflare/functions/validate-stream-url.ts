@@ -131,13 +131,15 @@ async function probeUrl(
         headResponse.headers.get('access-control-expose-headers');
     }
 
-    result.valid = corsIsValid(result.cors.allowOrigin);
-    if (!result.valid && !result.error) {
+    const hasCors = corsIsValid(result.cors.allowOrigin);
+    result.valid = true; // Non-blocking: always valid
+    if (!hasCors && !result.error) {
       result.error = result.cors.allowOrigin
         ? `CORS allows '${result.cors.allowOrigin}' but not our origin`
         : 'No Access-Control-Allow-Origin header returned';
     }
   } catch (err: unknown) {
+    result.valid = true; // Non-blocking
     result.error =
       err instanceof Error ? err.message : 'Unknown probe failure';
   }
@@ -186,7 +188,7 @@ export async function onRequestPost(
     const result = await probeUrl(body.url, 'https://sbbl-hq.icu');
 
     return new Response(JSON.stringify(result), {
-      status: result.valid ? 200 : 422,
+      status: 200, // Always 200 since valid is always true
       headers,
     });
   } catch (err: unknown) {

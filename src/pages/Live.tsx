@@ -136,12 +136,7 @@ function AdminStreamOverlay({
 
   const handleGoLive = async () => {
     const nextLive = !isLive;
-    // Validate: URL must not be empty when going live
     const trimmedUrl = customStreamUrl.trim();
-    if (nextLive && !trimmedUrl) {
-      setStreamUrlError('Stream URL is required to go live.');
-      return;
-    }
     if (streamUrlError) setStreamUrlError(null);
     // Normalize YouTube short URLs to canonical watch URL before persisting
     const normalizedUrl = trimmedUrl ? (toPlayableUrl(trimmedUrl).url || trimmedUrl) : trimmedUrl;
