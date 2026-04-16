@@ -63,11 +63,13 @@ export interface Product {
   id: string;
   name: string;
   category: 'tees' | 'hoodies' | 'jerseys' | 'caps' | 'accessories' | 'rewards';
-  price: number;
+  price: number; // in dollars for frontend display
   image: string;
   sizes?: string[];
   colors?: string[];
+  is_custom?: boolean;
   badge?: string;
+  description?: string;
   sale?: boolean;
 }
 

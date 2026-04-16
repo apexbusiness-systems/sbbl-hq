@@ -7,7 +7,6 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Trophy, Users, Star, Calendar } from 'lucide-react';
 import { fetchScores } from '@/lib/api/scores';
-import { games as mockGames } from '@/data/mock';
 
 // ── Category config ────────────────────────────────────────────────────────
 const CATEGORIES: Array<{ id: ScoreCategory | 'all'; label: string; icon: typeof Trophy }> = [
@@ -171,24 +170,10 @@ const ScoresPage = () => {
     staleTime: 60_000,
   });
 
-  const games = useMemo(() => {
+  const games = useMemo<ScoreEntry[]>(() => {
     const apiGames = scoresQuery.data?.games;
-    if (Array.isArray(apiGames) && apiGames.length > 0) {
-      return apiGames;
-    }
-    // Fallback to mock data when API returns empty
-    return mockGames.map((g): ScoreEntry => ({
-      id: g.id,
-      category: 'league',
-      leagueId: g.leagueId,
-      homeLabel: g.homeTeam.name,
-      awayLabel: g.awayTeam.name,
-      homeScore: g.score?.home,
-      awayScore: g.score?.away,
-      status: g.status,
-      gameDate: g.date,
-      notes: `${g.venue} — ${g.court}`,
-    }));
+    if (Array.isArray(apiGames)) return apiGames;
+    return [];
   }, [scoresQuery.data?.games]);
 
   // Group by category when viewing "All"

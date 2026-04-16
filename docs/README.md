@@ -1,8 +1,8 @@
-<!-- Version: v2.3.0 | Date: 2026-04-09 | Status: Current -->
+<!-- Version: v2.4.0 | Date: 2026-04-16 | Status: Current -->
 # SBBL HQ — Documentation Hub
 
-**Version:** v2.3.0
-**Last Updated:** 2026-04-09
+**Version:** v2.4.0
+**Last Updated:** 2026-04-16
 **Maintainer:** APEX Business Systems Ltd. — Engineering Lead
 
 > Single source of truth for all SBBL HQ engineering, operational, and product documentation.
@@ -15,15 +15,16 @@
 ```
 docs/
 ├── README.md                        ← This file — master index
-├── architecture/                    ← System design & data contracts
+├── architecture/                    ← System design, codebase map, data pipeline, store contracts
 ├── security/                        ← RLS, auth model, content policies
-├── operations/                      ← Runbooks, external bindings
+├── operations/                      ← Runbooks, external bindings, monitoring
 ├── deployment/                      ← Deploy procedures per platform
 ├── features/                        ← Feature-level technical specs
 ├── quality/                         ← Audits, gate reports, workflow reviews
 ├── onboarding/                      ← New engineer setup
 ├── protocols/                       ← Debugging & incident response
 ├── status/                          ← Point-in-time production snapshots
+├── agents/                          ← APEX agent specifications
 └── internal/                        ← Proprietary APEX frameworks
 ```
 
@@ -36,6 +37,10 @@ docs/
 | [ARCHITECTURE](./architecture/ARCHITECTURE_v1.2.0.md) | v1.2.0 | Full stack overview — Vite + React + Supabase + Cloudflare + Stripe + Sentry |
 | [DB SCHEMA](./architecture/DB_SCHEMA_v1.2.0.md) | v1.2.0 | Core schema + 28 migrations — tables, indexes, matviews, RLS helpers |
 | [API REFERENCE](./architecture/API_REFERENCE_v1.2.0.md) | v1.2.0 | Worker API endpoints, JWT-only auth, idempotency, full route inventory |
+| [COMPLETE CODEBASE MAP](./architecture/COMPLETE_CODEBASE_MAP_v1.0.0.md) | v1.0.0 | Full directory structure, route inventory, schema summary, ops console |
+| [CANONICAL DATA PIPELINE](./architecture/CANONICAL_DATA_PIPELINE_v1.0.0.md) | v1.0.0 | Authoritative upload → ingest → parse → store → render flow map |
+| [STORE ARCHITECTURE](./architecture/STORE_ARCHITECTURE_v1.0.0.md) | v1.0.0 | Edge-native commerce engine — canonical schema and purchase flows |
+| [STORE API CONTRACTS](./architecture/STORE_API_CONTRACTS_v1.0.0.md) | v1.0.0 | `/api/public/products`, `/api/store/checkout`, `/api/store/quotes` contracts |
 
 ---
 
@@ -54,8 +59,8 @@ docs/
 | Document | Version | Description |
 |---|---|---|
 | [OPERATIONS RUNBOOK](./operations/OPERATIONS_RUNBOOK_v1.4.0.md) | v1.4.0 | Env setup, deployments, DB ops, CI/CD, emergency procedures, livestream ops |
+| [SUPABASE MONITORING RUNBOOK](./operations/SUPABASE_MONITORING_RUNBOOK_v1.0.0.md) | v1.0.0 | Supabase cost/health metrics, escalation, emergency cost controls |
 | [EXTERNAL BINDINGS](./operations/EXTERNAL_BINDINGS_v1.0.0.md) | v1.0.0 | Third-party secrets and service configuration checklist |
-| [OPERATIONS RUNBOOK (archived)](./operations/OPERATIONS_RUNBOOK_v1.0.0_archived.md) | v1.0.0 | Superseded — retained for historical reference |
 
 ---
 
@@ -74,17 +79,22 @@ docs/
 | Document | Version | Description |
 |---|---|---|
 | [STATS PIPELINE](./features/STATS_PIPELINE_v1.2.0.md) | v1.2.0 | 4-stage stat submission + materialized standings + react-window virtualization |
-| [STREAM GATING](./features/STREAM_GATING_v1.3.0.md) | v1.3.0 | PPV entitlement, invites, Turnstile, Stripe webhook, live chat, auth auto-refresh, circuit breaker |
-| [PIPELINE MAP](./features/PIPELINE_MAP_v1.0.0.md) | v1.0.0 | Super-Admin Ops Console data upload pipeline flowchart |
+| [STREAM GATING](./features/STREAM_GATING_v1.5.0.md) | v1.5.0 | PPV entitlement, comp codes, Facebook embed lockdown, server-derived game IDs |
+| [PIPELINE MAP](./features/PIPELINE_MAP_v1.3.0.md) | v1.3.0 | Super-Admin Ops Console data upload pipeline flowchart |
+
+---
 
 ## Quality
 
 | Document | Version | Description |
 |---|---|---|
+| [RELEASE GATE AUDIT 2026-04-11](./quality/RELEASE_GATE_AUDIT_2026-04-11_v1.4.0.md) | v1.4.0 | Comp codes + 20K chaos battery — gate decision: GO |
 | [RELEASE GATE AUDIT 2026-04-09](./quality/RELEASE_GATE_AUDIT_2026-04-09_v1.3.0.md) | v1.3.0 | Final RC gate run — lint/typecheck/tests/build all PASS; gate decision: GO |
-| [RELEASE GATE AUDIT 2026-04-06](./quality/RELEASE_GATE_AUDIT_2026-04-06_v1.2.0.md) | v1.2.0 | 20K concurrency hardening, session/device enforcement, livestream ingest validation — gate decision: PASS |
-| [RELEASE GATE AUDIT 2026-04-04](./quality/RELEASE_GATE_AUDIT_2026-04-04_v1.1.0.md) | v1.1.0 | 10K concurrency hardening + CI pipeline fixes — gate decision: PASS |
-| [LIVESTREAM WORKFLOW AUDIT 2026-04-05](./quality/LIVESTREAM_WORKFLOW_AUDIT_2026-04-04.md) | v2.0.0 | Livestream pipeline audit — 20K hardening pass complete, all gaps resolved |
+| [LIVESTREAM INTEGRITY AUDIT 2026-04-09](./quality/LIVESTREAM_INGEST_BROADCAST_SYSTEM_INTEGRITY_AUDIT_2026-04-09_v1.0.0.md) | v1.0.0 | 20K-oriented livestream/ingest/broadcast integrity audit (Rev B) |
+| [INGRESS/RENDER QA MATRIX 2026-04-07](./quality/INGRESS_RENDER_QA_MATRIX_2026-04-07_v1.3.0.md) | v1.3.0 | Endpoint-by-endpoint QA matrix — ingress, parsers, render, auto-resize |
+| [PRODUCTION ENV VERIFICATION 2026-04-15](./quality/PRODUCTION_ENV_VERIFICATION_2026-04-15_v1.0.0.md) | v1.0.0 | Livestream/broadcast production evidence — local gates PASS, prod blockers logged |
+| [MEDIA PUBLICATIONS SORT_ORDER MIGRATION 2026-04-16](./quality/MEDIA_PUBLICATIONS_SORT_ORDER_MIGRATION_2026-04-16_v1.0.0.md) | v1.0.0 | Owner-ordering schema change execution on hosted Supabase |
+| [STABILIZATION PASS 2026-04-04](./quality/STABILIZATION_PASS_2026-04-04_v1.0.0.md) | v1.0.0 | Multi-phase pre-launch stabilization summary |
 | [BUILD AUDIT 2026-03-28](./quality/BUILD_AUDIT_2026-03-28_v1.0.0.md) | v1.0.0 | End-to-end build audit — historical baseline |
 
 ---
@@ -116,6 +126,20 @@ docs/
 
 ---
 
+## APEX Agents
+
+| Document | Version | Description |
+|---|---|---|
+| [APEX DATA ARCHITECT AGENT](./agents/APEX_DATA_ARCHITECT_AGENT_2026-04-11_v1.0.0.md) | v1.0.0 | Data architect execution profile |
+| [APEX FRONTEND AGENT](./agents/APEX_FRONTEND_AGENT_2026-04-11_v1.0.0.md) | v1.0.0 | Frontend engineering execution profile |
+| [APEX MASTER DEBUG AGENT](./agents/APEX_MASTER_DEBUG_AGENT_2026-04-11_v1.0.0.md) | v1.0.0 | Predictive debugging intelligence agent |
+| [APEX OMNITEST AGENT](./agents/APEX_OMNITEST_AGENT_2026-04-11_v1.0.0.md) | v1.0.0 | Universal test orchestration agent |
+| [APEX POWER AGENT](./agents/APEX_POWER_AGENT_2026-04-11_v1.0.0.md) | v1.0.0 | Universal execution meta-skill agent |
+| [APEX QA AGENT](./agents/APEX_QA_AGENT_2026-04-11_v1.0.0.md) | v1.0.0 | Quality assurance execution profile |
+| [OMNIDEV V2 AGENT](./agents/OMNIDEV_V2_AGENT_2026-04-11_v1.0.0.md) | v1.0.0 | Omnidev v2 full-stack execution profile |
+
+---
+
 ## Internal Frameworks
 
 | Document | Version | Description |
@@ -123,6 +147,22 @@ docs/
 | [APEX DEBUG FRAMEWORK](./internal/APEX_DEBUG_FRAMEWORK_v1.0.0.md) | v1.0.0 | Proprietary APEX omniscient debugging intelligence |
 | [APEX POWER FRAMEWORK](./internal/APEX_POWER_FRAMEWORK_v1.0.0.md) | v1.0.0 | Proprietary APEX universal execution meta-skill |
 | [SBBL AGENT](./internal/SBBL_AGENT_v1.0.0.md) | v1.0.0 | Session skill profile for SBBL HQ execution contexts |
+
+---
+
+## Policy (Root-Level)
+
+These policy documents live at the repo root and are linked here for discoverability.
+
+| Document | Version | Description |
+|---|---|---|
+| [ONE_DEVICE_POLICY](../ONE_DEVICE_POLICY.md) | v1.0.0 | Single-device playback enforcement rules |
+| [PAYWALL_ENFORCEMENT_POLICY](../PAYWALL_ENFORCEMENT_POLICY.md) | v1.0.0 | Server-authoritative access enforcement rules |
+| [RESUME_POLICY](../RESUME_POLICY.md) | v1.0.0 | Session resume + heartbeat reclaim rules |
+| [STREAM_TEST_STRATEGY](../STREAM_TEST_STRATEGY.md) | v1.1.0 | Pre-live validation test strategy, 20K stress, chaos battery |
+| [CHANGELOG](../CHANGELOG.md) | — | High-level release changelog |
+
+---
 
 ## Documentation Governance
 
@@ -133,7 +173,7 @@ docs/
 | **Front-matter** | Every document opens with `<!-- Version: vX.Y.Z \| Date: YYYY-MM-DD \| Status: Current -->` |
 | **Ownership** | Engineering lead: runbooks, protocols, architecture. Release manager: quality reports, status snapshots. Product: feature specs. |
 | **Review cadence** | Architecture/security: per schema migration. Runbooks: monthly or post-incident. Quality audits: per release candidate. Onboarding: quarterly. |
-| **Deprecation** | Superseded docs renamed `*_archived.md` and retained for historical reference. Never deleted. |
+| **Deprecation** | Superseded feature specs are deleted once their successor is promoted to `Current`. Quality audits, release gates, and point-in-time status snapshots are retained as historical record. |
 
 ## Definition of "Release-Ready" State
 

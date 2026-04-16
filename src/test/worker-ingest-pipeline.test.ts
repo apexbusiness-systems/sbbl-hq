@@ -69,6 +69,18 @@ describe('public render contract: /api/public/media', () => {
     expect(fnBody).not.toMatch(/\.from\("media_assets"\)/);
   });
 
+  it('public media query orders publications by sort_order then id', () => {
+    const fnStart = workerSrc.indexOf('async function fetchPublicMediaRows');
+    const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
+    const fnBody  = workerSrc.slice(fnStart, fnEnd);
+
+    const sortOrderIdx = fnBody.indexOf('.order("sort_order"');
+    const idOrderIdx = fnBody.indexOf('.order("id"', sortOrderIdx + 1);
+
+    expect(sortOrderIdx).toBeGreaterThan(-1);
+    expect(idOrderIdx).toBeGreaterThan(sortOrderIdx);
+  });
+
   it('public media response is cached', () => {
     const fnStart = workerSrc.indexOf('async function handlePublicMedia');
     const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
