@@ -42,7 +42,7 @@ export const BagDrawer = () => {
       const existing = acc.find(i => i.name === product.name);
       if (existing) { existing.qty += 1; } else { acc.push({ id: product.id, name: product.name, price: product.price, qty: 1 }); }
       return acc;
-    }, [products]);
+    }, []);
     if (!lineItems.length) { toast.error('No purchasable items in bag.'); return; }
     setCheckingOut(true);
     try {

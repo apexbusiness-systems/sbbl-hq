@@ -1476,7 +1476,7 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
             status: "paid",
             stripe_checkout_session_id: object.id,
             stripe_payment_intent_id: typeof object.payment_intent === 'string' ? object.payment_intent : null,
-            customer_email: object.customer_details?.email,
+            customer_email: (object.customer_details as Record<string, unknown>)?.email as string | undefined,
             updated_at: new Date().toISOString()
           })
           .eq("id", metadata.order_id);
@@ -4999,6 +4999,7 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
   if (!env.STRIPE_SECRET_KEY)
     return json({ ok: false, error: "payments_not_configured" }, 503);
   const body = (await req.json().catch(() => null)) as {
+    items?: Array<{ id: string; name: string; price: number; qty?: number }>;
     successUrl?: string;
     cancelUrl?: string;
   } | null;
