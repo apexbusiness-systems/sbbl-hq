@@ -229,6 +229,77 @@ export function toPlayableUrl(raw: string): PlayableUrl {
   return { url: trimmed, type };
 }
 
+export type CanonicalizeResult =
+  | { ok: true; url: string; wasNormalized: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Canonicalize a stream source URL for persistence.
+ *
+ * Platform embed URLs (YouTube /embed/, Twitch player, Vimeo player) are
+ * converted to their canonical watch/channel forms so that toPlayableUrl()
+ * can later re-embed them correctly without double-embedding. Facebook plugin
+ * embeds are rejected outright — there is no reliable reverse mapping.
+ *
+ * All other valid URLs pass through unchanged (wasNormalized: false).
+ */
+export function canonicalizeStreamSourceUrl(raw: string): CanonicalizeResult {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, error: 'Stream URL is required.' };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { ok: false, error: 'Invalid URL.' };
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const path = parsed.pathname.toLowerCase();
+
+  // YouTube /embed/ → canonical watch URL (reuse existing validator)
+  if (
+    (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com')) &&
+    path.startsWith('/embed/')
+  ) {
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const videoId = parts[1];
+    if (videoId && /^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
+      return { ok: true, url: `https://www.youtube.com/watch?v=${videoId}`, wasNormalized: true };
+    }
+    return { ok: false, error: 'YouTube embed URL has invalid video ID.' };
+  }
+
+  // Twitch player embed → canonical channel URL
+  if (host === 'player.twitch.tv') {
+    const channel = parsed.searchParams.get('channel');
+    if (channel) {
+      return { ok: true, url: `https://www.twitch.tv/${channel}`, wasNormalized: true };
+    }
+    return { ok: false, error: 'Twitch player URL missing channel parameter.' };
+  }
+
+  // Vimeo player embed → canonical vimeo.com URL
+  if (host === 'player.vimeo.com' && path.startsWith('/video/')) {
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const videoId = parts[1];
+    if (videoId && /^\d{5,}$/.test(videoId)) {
+      return { ok: true, url: `https://vimeo.com/${videoId}`, wasNormalized: true };
+    }
+    return { ok: false, error: 'Vimeo player URL has invalid video ID.' };
+  }
+
+  // Facebook plugin embeds — no reliable reverse mapping, reject explicitly
+  if (host.endsWith('facebook.com') && path.includes('/plugins/')) {
+    return {
+      ok: false,
+      error: 'Facebook plugin embed URLs cannot be saved. Use the original video URL.',
+    };
+  }
+
+  return { ok: true, url: trimmed, wasNormalized: false };
+}
+
 /** Human-readable label for each stream URL type */
 export const STREAM_TYPE_LABELS: Record<StreamUrlType, string> = {
   youtube: 'YouTube',
