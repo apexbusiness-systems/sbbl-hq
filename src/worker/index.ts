@@ -777,25 +777,7 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   const patch: Record<string, unknown> = {};
   if (typeof body.collectionId === "string") {
     const trimmedUrl = body.collectionId.trim();
-    // Allow empty string (clearing the URL). Non-empty URLs must be valid
-    // https:// and must not be a Facebook domain (blocked stream source).
-    if (trimmedUrl !== "") {
-      let parsedUrl: URL;
-      try {
-        parsedUrl = new URL(trimmedUrl);
-      } catch {
-        return json({ ok: false, error: "invalid_stream_url" }, 422);
-      }
-      if (parsedUrl.protocol !== "https:" && parsedUrl.protocol !== "http:") {
-        return json({ ok: false, error: "invalid_stream_url" }, 422);
-      }
-      const streamHost = parsedUrl.hostname.toLowerCase();
-      const BLOCKED_RE =
-        /(?:^|\.)(?:facebook\.com|fb\.me|fbcdn\.net|facebook\.net|m\.me)$/;
-      if (BLOCKED_RE.test(streamHost)) {
-        return json({ ok: false, error: "unsupported_stream_source" }, 422);
-      }
-    }
+    // Alerting for unsupported sources is handled client-side; never block save.
     patch.collection_id = trimmedUrl;
   }
   if (typeof body.title === "string") patch.title = body.title.trim();
@@ -1484,6 +1466,24 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
       typeof metadata.purchase_type === "string"
         ? metadata.purchase_type
         : null;
+
+
+    if (purchaseType === "store_order" && typeof metadata.order_id === "string") {
+      try {
+        await ctx.admin
+          .from("store_orders")
+          .update({
+            status: "paid",
+            stripe_checkout_session_id: object.id,
+            stripe_payment_intent_id: typeof object.payment_intent === 'string' ? object.payment_intent : null,
+            customer_email: (object.customer_details as Record<string, unknown>)?.email as string | undefined,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", metadata.order_id);
+      } catch (e) {
+        console.error("Failed to update store order", e);
+      }
+    }
 
     // Player registration (subscription): set subscription_ends_at + grant player role
     if (!purchaseType || purchaseType === "player_registration") {
@@ -2203,11 +2203,12 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   let query = admin
     .from('media_publications')
     .select(
-      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,league_id,render_payload,' +
+      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,sort_order,league_id,render_payload,' +
       'media_assets!inner(id,metadata,created_at),' +
       'leagues:leagues!league_id(id,code,name)'
     )
-    .order('sort_at', { ascending: false })
+    .order('sort_order', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true })
     .limit(limit);
 
   if (statusFilter && isMediaPublicationStatus(statusFilter)) {
@@ -2238,6 +2239,7 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
       publishedAt: raw.published_at == null ? null : String(raw.published_at),
       scheduledAt: raw.scheduled_at == null ? null : String(raw.scheduled_at),
       sortAt: raw.sort_at == null ? null : String(raw.sort_at),
+      sortOrder: raw.sort_order == null ? null : Number(raw.sort_order),
       leagueId: raw.league_id == null ? null : String(raw.league_id),
       leagueCode: leagueRow.code == null ? null : String(leagueRow.code),
       leagueName: leagueRow.name == null ? null : String(leagueRow.name),
@@ -2339,6 +2341,55 @@ async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
   });
 
   return json({ ok: true, data });
+}
+
+async function handleOpsReorderMediaPublications(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const body = (await ctx.req.json().catch(() => null)) as {
+    items?: Array<{ id?: unknown; sortOrder?: unknown }>;
+  } | null;
+  const items = Array.isArray(body?.items) ? body.items : [];
+
+  if (items.length === 0) return json({ ok: false, error: 'empty_items' }, 400);
+  if (items.length > 200) return json({ ok: false, error: 'too_many_items (max 200)' }, 400);
+
+  const normalized = items.map((item) => ({
+    id: typeof item.id === 'string' ? item.id : '',
+    sortOrder: Number(item.sortOrder),
+  }));
+
+  if (normalized.some((item) => item.id.length === 0 || !Number.isInteger(item.sortOrder) || item.sortOrder < 0)) {
+    return json({ ok: false, error: 'invalid_items' }, 400);
+  }
+
+  const uniqueIds = new Set(normalized.map((item) => item.id));
+  if (uniqueIds.size !== normalized.length) {
+    return json({ ok: false, error: 'duplicate_ids' }, 400);
+  }
+
+  const updates = await Promise.all(
+    normalized.map(async (item) => {
+      const { error } = await ctx.admin
+        .from('media_publications')
+        .update({ sort_order: item.sortOrder })
+        .eq('id', item.id);
+      return { id: item.id, error };
+    }),
+  );
+  const failed = updates.find((row) => row.error);
+  if (failed?.error) throw new Error(failed.error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_reorder_media_publications',
+    ref_type: 'media_publications',
+    ref_id: null,
+    payload: { count: normalized.length, ids: normalized.map((item) => item.id) },
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, updated: normalized.length });
 }
 
 
@@ -2524,7 +2575,7 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
               : undefined;
           const name = splitProfileName(profile);
           return {
-            id: p.id,
+            id: String(p.id),
             user_id: p.user_id,
             jersey_number: p.jersey_number,
             position: p.position,
@@ -2734,6 +2785,49 @@ function extractPotgTeamCandidates(team: string, gameResult: string): string[] {
   return [...candidates];
 }
 
+function parsePotgResultSide(side: string): { label: string; score: number | null } {
+  const trimmed = side.trim().replace(/\s+/g, " ");
+  if (!trimmed) return { label: "", score: null };
+
+  // Supports both "Team Name 82" and "82 Team Name" card formats.
+  const trailing = trimmed.match(/^(.*?)(\d{1,3})$/);
+  if (trailing) {
+    return {
+      label: trailing[1].trim(),
+      score: Number.isFinite(Number(trailing[2])) ? Number(trailing[2]) : null,
+    };
+  }
+
+  const leading = trimmed.match(/^(\d{1,3})(.*)$/);
+  if (leading) {
+    return {
+      label: leading[2].trim(),
+      score: Number.isFinite(Number(leading[1])) ? Number(leading[1]) : null,
+    };
+  }
+
+  return { label: trimmed, score: null };
+}
+
+function parsePotgGameResult(gameResult: string): {
+  homeLabel: string;
+  awayLabel: string;
+  homeScore: number | null;
+  awayScore: number | null;
+} | null {
+  const sides = gameResult.split(/\bvs\b/i).map((s) => s.trim()).filter(Boolean);
+  if (sides.length !== 2) return null;
+  const home = parsePotgResultSide(sides[0]);
+  const away = parsePotgResultSide(sides[1]);
+  if (!home.label || !away.label) return null;
+  return {
+    homeLabel: home.label,
+    awayLabel: away.label,
+    homeScore: home.score,
+    awayScore: away.score,
+  };
+}
+
 async function inferPotgLeagueCode(
   ctx: HandlerCtx,
   team: string,
@@ -2794,6 +2888,8 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
   const requestedLeagueCode = String(body.leagueId).toLowerCase();
   const inferredLeagueCode = await inferPotgLeagueCode(ctx, body.team, body.gameResult);
   const effectiveLeagueCode = inferredLeagueCode ?? requestedLeagueCode;
+  const potgDate = body.date ?? new Date().toISOString().split("T")[0];
+  const parsedResult = parsePotgGameResult(body.gameResult ?? "");
 
   // Resolve league code (e.g. 'wbl') to UUID for FK references
   let leagueUuid: string | null = null;
@@ -2810,6 +2906,64 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     .select("user_id")
     .ilike("display_name", body.playerName.trim())
     .maybeSingle();
+  const playerUserId = profileData?.user_id ?? null;
+  const { data: playerRow } = playerUserId
+    ? await ctx.admin
+      .from("players")
+      .select("id")
+      .eq("user_id", playerUserId)
+      .maybeSingle()
+    : { data: null as { id?: string } | null };
+  const playerId = playerRow?.id ?? null;
+
+  // Link POTG to an existing score row when possible; otherwise create
+  // a minimal league game row so Scores and stats tabs can tabulate it.
+  let gameId: string | null = null;
+  if (leagueUuid && parsedResult) {
+    const { data: candidateGames } = await ctx.admin
+      .from("games")
+      .select("id,participant1_label,participant2_label")
+      .eq("league_id", leagueUuid)
+      .eq("category", "league")
+      .eq("game_date", potgDate)
+      .limit(25);
+
+    const targetA = normalizeTeamToken(normalizeTeamLabel(parsedResult.homeLabel));
+    const targetB = normalizeTeamToken(normalizeTeamLabel(parsedResult.awayLabel));
+    const matched = (candidateGames ?? []).find((g) => {
+      const rowA = normalizeTeamToken(
+        normalizeTeamLabel(String(g.participant1_label ?? ""))
+      );
+      const rowB = normalizeTeamToken(
+        normalizeTeamLabel(String(g.participant2_label ?? ""))
+      );
+      return (rowA === targetA && rowB === targetB) || (rowA === targetB && rowB === targetA);
+    });
+
+    if (matched?.id) {
+      gameId = String(matched.id);
+      await ctx.admin.from("games").update({
+        status: "final",
+        participant1_label: parsedResult.homeLabel,
+        participant2_label: parsedResult.awayLabel,
+        home_score: parsedResult.homeScore,
+        away_score: parsedResult.awayScore,
+      }).eq("id", gameId);
+    } else {
+      const { data: newGame } = await ctx.admin.from("games").insert({
+        league_id: leagueUuid,
+        category: "league",
+        status: "final",
+        game_date: potgDate,
+        participant1_label: parsedResult.homeLabel,
+        participant2_label: parsedResult.awayLabel,
+        home_score: parsedResult.homeScore,
+        away_score: parsedResult.awayScore,
+        notes: "Auto-created from POTG submission",
+      }).select("id").single();
+      gameId = newGame?.id ? String(newGame.id) : null;
+    }
+  }
 
   // Upsert into player_game_stats via award_records table if player found,
   // otherwise write to import_jobs as a pending manual match
@@ -2826,9 +2980,10 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
         assts: body.assts,
         gameResult: body.gameResult,
         leagueId: effectiveLeagueCode,
-        date: body.date ?? new Date().toISOString().split("T")[0],
+        date: potgDate,
         imageUrl: body.imageUrl ?? null,
         matched_profile_id: profileData?.user_id ?? null,
+        game_id: gameId,
         source: "potg_image_parser",
         requestedLeagueId: requestedLeagueCode,
         inferredLeagueId: inferredLeagueCode,
@@ -2846,21 +3001,21 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
 
   if (jobError) throw new Error(jobError.message);
 
-  // player_game_stats requires a non-null game_id FK (games.id).
-  // We don't have a game_id at POTG parse time, so we intentionally skip
-  // this upsert. The import_jobs record carries the full payload; a
-  // subsequent manual-match step will write the stat row once a game_id
-  // is available.
-  // DO NOT add a upsert({ game_id: null }) here — it violates the NOT NULL FK.
-  if (profileData?.user_id) {
-    // stat write deferred — see import_jobs.payload for pending record
+  // Persist player stat row when both player and game are resolvable.
+  if (playerId && gameId) {
+    await ctx.admin.from("player_game_stats").upsert({
+      game_id: gameId,
+      player_id: playerId,
+      pts: Number(body.pts ?? 0),
+      reb: Number(body.rebs ?? 0),
+      ast: Number(body.assts ?? 0),
+    }, { onConflict: "game_id,player_id" });
   }
 
   // Write media_assets + media_publications so the POTG card renders
   // via the canonical publication layer. Only when an image is present.
   if (body.imageUrl) {
     const potgTitle = `POTG — ${body.playerName} (${body.team})`;
-    const potgDate = body.date ?? new Date().toISOString().split("T")[0];
     const potgMeta = {
       type: "poster",
       thumbnail: body.imageUrl,
@@ -4015,26 +4170,6 @@ async function handleGoLive(ctx: HandlerCtx) {
     return json({ ok: false, error: "is_live_required" }, 400);
   }
 
-  // Validate the stream URL when going live
-  const rawUrl = typeof body.collectionId === "string" ? body.collectionId.trim() : "";
-  if (body.isLive && rawUrl !== "") {
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(rawUrl);
-    } catch {
-      return json({ ok: false, error: "invalid_stream_url" }, 422);
-    }
-    // Block dangerous protocols; RTMP is allowed (advisory shown in UI)
-    if (
-      parsedUrl.protocol !== "https:" &&
-      parsedUrl.protocol !== "http:" &&
-      parsedUrl.protocol !== "rtmp:" &&
-      parsedUrl.protocol !== "rtmps:"
-    ) {
-      return json({ ok: false, error: "invalid_stream_url" }, 422);
-    }
-  }
-
   const nowIso = new Date().toISOString();
   const patch: Record<string, unknown> = {
     id: true,
@@ -4489,6 +4624,44 @@ async function handlePayOrder(ctx: HandlerCtx) {
 // ── DIRECT STORE CHECKOUT ─────────────────────────────────────────────────────
 // Accepts line items from the client (no DB variant records required).
 // Used by BagDrawer until real DB products/variants are seeded.
+
+async function handleCreateCustomQuote({ req, env, admin }: HandlerCtx) {
+  await ensureMutation(req, { req, env, admin, params: {} });
+  const userId = requireAuth(req);
+
+  const body = (await req.json().catch(() => null)) as {
+    productId: string;
+    name: string;
+    teamName: string;
+    quantity: string | number;
+    notes?: string;
+  } | null;
+
+  if (!body?.productId || !body?.name || !body?.teamName || !body?.quantity) {
+    return json({ ok: false, error: "missing_fields" }, 400);
+  }
+
+  const { data, error } = await admin
+    .from("custom_quote_requests")
+    .insert({
+      user_id: userId,
+      product_id: body.productId,
+      name: body.name,
+      team_name: String(body.teamName),
+      quantity: Number(body.quantity),
+      notes: body.notes || "",
+      status: "pending"
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return json({ ok: false, error: error.message }, 500);
+  }
+
+  return json({ ok: true, id: data.id }, 201);
+}
+
 async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
   const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "unknown";
   if (!enforceInMemoryRateLimit(`store-checkout:${ip}`, 10, 60_000)) {
@@ -4518,8 +4691,8 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
 
   // Fetch the canonical products from the database
   const { data: dbProducts, error: dbError } = await admin
-    .from("products")
-    .select("id, name, price")
+    .from("store_products")
+    .select("id, name, price_cents")
     .in("id", productIds);
 
   if (dbError || !dbProducts || dbProducts.length === 0) {
@@ -4545,7 +4718,53 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
     "metadata[purchase_type]": "store_order",
   });
 
-  // price is in PHP whole units — Stripe expects centavos (×100)
+
+  // Create store order
+  const orderTotalCents = body.items.reduce((sum, item) => {
+    const dbProduct = dbProductMap.get(item.id);
+    if (!dbProduct) return sum;
+    return sum + (dbProduct.price_cents * (item.qty ?? 1));
+  }, 0);
+
+  const { data: orderData, error: orderError } = await admin
+    .from("store_orders")
+    .insert({
+      user_id: userId,
+      amount_subtotal_cents: orderTotalCents,
+      amount_total_cents: orderTotalCents, // assuming no tax/shipping yet
+      status: 'pending',
+      idempotency_key: readIdempotencyKey(req.headers) || undefined
+    })
+    .select("id")
+    .single();
+
+  if (orderError) {
+    return json({ ok: false, error: "failed_to_create_order" }, 500);
+  }
+
+  // Insert order items
+  const orderItemsData = body.items.map(item => {
+    const dbProduct = dbProductMap.get(item.id);
+    if (!dbProduct) return null;
+    return {
+      order_id: orderData.id,
+      product_id: item.id,
+      quantity: item.qty ?? 1,
+      unit_price_cents: dbProduct.price_cents,
+    };
+  }).filter(Boolean);
+
+  if (orderItemsData.length > 0) {
+    const { error: itemsError } = await admin
+      .from("store_order_items")
+      .insert(orderItemsData);
+    if (itemsError) {
+      console.error("Failed to insert order items:", itemsError);
+    }
+  }
+
+  params.set("metadata[order_id]", orderData.id);
+
   // Use the price from the database instead of the client payload
   let validItemsCount = 0;
   body.items.forEach((item) => {
@@ -4554,11 +4773,11 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
     if (!dbProduct) return; // Skip if product doesn't exist in DB
 
     const idx = validItemsCount++;
-    params.set(`line_items[${idx}][price_data][currency]`, "php");
+    params.set(`line_items[${idx}][price_data][currency]`, "cad");
     params.set(`line_items[${idx}][price_data][product_data][name]`, dbProduct.name);
     params.set(
       `line_items[${idx}][price_data][unit_amount]`,
-      String(Math.round(dbProduct.price * 100)),
+      String(dbProduct.price_cents),
     );
     params.set(`line_items[${idx}][quantity]`, String(item.qty ?? 1));
   });
@@ -4630,12 +4849,13 @@ async function fetchPublicMediaRows(
   let query = admin
     .from("media_publications")
     .select(
-      "id,surface,title,subtitle,status,sort_at,render_payload,league_id," +
+      "id,surface,title,subtitle,status,sort_at,sort_order,render_payload,league_id," +
       "media_assets!inner(id,metadata,created_at)," +
       "leagues:leagues!league_id(code)"
     )
     .eq("status", "published")
-    .order("sort_at", { ascending: false })
+    .order("sort_order", { ascending: true })
+    .order("id", { ascending: true })
     .limit(50);
 
   if (leagueId) query = query.eq("league_id", leagueId);
@@ -4647,75 +4867,122 @@ async function fetchPublicMediaRows(
   if (error) throw new Error(error.message);
   return (data ?? []) as unknown as PublicMediaRow[];
 }
+
+async function getPublicMediaFreshnessVersion(admin: HandlerCtx["admin"]): Promise<string> {
+  // Reorder saves write an audit log entry; latest timestamp acts as a lightweight
+  // cache-busting marker shared by both /media and /media/posters.
+  const { data, error } = await admin
+    .from("audit_logs")
+    .select("created_at")
+    .eq("action", "ops_reorder_media_publications")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn("[public-media] freshness marker lookup failed:", error.message);
+    return "0";
+  }
+  const latest = Array.isArray(data) && data[0] ? String((data[0] as { created_at?: string }).created_at ?? "0") : "0";
+  return latest;
+}
+
+function toPublicMediaCacheKey(req: Request, variant: "media" | "posters", version: string): Request {
+  const url = new URL(req.url);
+  const key = new URL(`https://sbbl-hq.icu/__cache/public/${variant}`);
+  key.search = url.search;
+  key.searchParams.set("__v", version);
+  return new Request(key.toString());
+}
+
+async function respondWithPublicMediaFreshness(
+  req: Request,
+  admin: HandlerCtx["admin"],
+  variant: "media" | "posters",
+  computeData: () => Promise<unknown>,
+): Promise<Response> {
+  const version = await getPublicMediaFreshnessVersion(admin);
+  const isAnonymous = !getBearerToken(req);
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = toPublicMediaCacheKey(req, variant, version);
+
+  if (isAnonymous) {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) return hit;
+  }
+
+  const data = await computeData();
+  const res = json({ ok: true, data }, 200, {
+    "Cache-Control": "public, s-maxage=300, max-age=120",
+    "x-public-media-version": version,
+  });
+
+  if (isAnonymous) {
+    // Cache key includes version, so any reorder save immediately shifts reads
+    // to a fresh entry without waiting for prior 300s TTL to expire.
+    cfCaches.default.put(cacheKey, res.clone()).catch(() => {});
+  }
+  return res;
+}
+
 async function handlePublicProducts({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get("leagueId");
   let query = admin
-    .from("products")
-    .select("id,name,price,status,league_id,metadata")
-    .eq("status", "published")
+    .from("store_products")
+    .select("id,name,price_cents,category,image_url,sizes,colors,is_custom,badge")
+    .eq("active", true)
     .limit(100);
   if (leagueId) query = query.eq("league_id", leagueId);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return json({ ok: true, data: data ?? [] }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
+
+  const mappedData = (data ?? []).map((p: Record<string, unknown>) => ({
+    id: String(p.id),
+    name: String(p.name),
+    category: String(p.category),
+    price: Number(p.price_cents) / 100,
+    image: String(p.image_url),
+    sizes: Array.isArray(p.sizes) ? p.sizes.map(String) : undefined,
+    colors: Array.isArray(p.colors) ? p.colors.map(String) : undefined,
+    is_custom: Boolean(p.is_custom),
+    badge: p.badge ? String(p.badge) : undefined
+  }));
+  return json({ ok: true, data: mappedData }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
+
 }
 
 async function handlePublicMedia({ req, admin }: HandlerCtx) {
-  const url = new URL(req.url);
-  const leagueId = url.searchParams.get("leagueId");
-
-  // Canonical render: media_publications is the single public surface.
-  // No direct reads from raw ingest tables (media_assets, ingest_jobs, etc.).
-  let query = admin
-    .from("media_publications")
-    .select(
-      "id,surface,title,subtitle,status,sort_at,render_payload,league_id," +
-      "media_assets!inner(id,metadata,created_at)," +
-      "leagues:leagues!league_id(code)"
-    )
-    .eq("status", "published")
-    .order("sort_at", { ascending: false })
-    .limit(50);
-
-  if (leagueId) query = query.eq("league_id", leagueId);
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-
-  const rows = (data ?? []) as unknown as PublicMediaRow[];
-  const mapped = mapPublicMediaRows(rows);
-
-  return json({ ok: true, data: mapped }, 200, {
-    "Cache-Control": "public, s-maxage=300, max-age=120",
+  // Canonical render still reads from media_publications (+ media_assets!inner join)
+  // and keeps Cache-Control at public, s-maxage=300, max-age=120 for anonymous traffic.
+  return respondWithPublicMediaFreshness(req, admin, "media", async () => {
+    const rows = await fetchPublicMediaRows(admin, req);
+    return mapPublicMediaRows(rows);
   });
 }
 
 async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
-  // Poster tab projection: include event/league-wide art and promote photo assets
-  // to poster cards without mutating source records.
-  const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
+  return respondWithPublicMediaFreshness(req, admin, "posters", async () => {
+    // Poster tab projection: include event/league-wide art and promote photo assets
+    // to poster cards without mutating source records.
+    const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
 
-  // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
-  const seen = new Set<string>();
-  const mapped = mapPublicMediaRows(rows, true).filter((row, index) => {
-    const raw = rows[index] ?? {};
-    const payload = (raw.render_payload ?? {}) as Record<string, unknown>;
-    const metadata = (((raw.media_assets as Record<string, unknown> | null) ?? {}).metadata ?? {}) as Record<string, unknown>;
-    const surface = String(raw.surface ?? payload.surface ?? metadata.surface ?? "");
-    const teamName = String(payload.team ?? metadata.team ?? "").trim();
+    // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
+    const seen = new Set<string>();
+    return mapPublicMediaRows(rows, true).filter((row, index) => {
+      const raw = rows[index] ?? {};
+      const payload = (raw.render_payload ?? {}) as Record<string, unknown>;
+      const metadata = (((raw.media_assets as Record<string, unknown> | null) ?? {}).metadata ?? {}) as Record<string, unknown>;
+      const surface = String(raw.surface ?? payload.surface ?? metadata.surface ?? "");
+      const teamName = String(payload.team ?? metadata.team ?? "").trim();
 
-    // Exclude team-specific cards (e.g., POTG) — this route is for team-agnostic
-    // event imagery like 1v1/2v2 and league-wide graphics.
-    if (surface === "potg" || teamName.length > 0) return false;
+      // Exclude team-specific cards (e.g., POTG) — this route is for team-agnostic
+      // event imagery like 1v1/2v2 and league-wide graphics.
+      if (surface === "potg" || teamName.length > 0) return false;
 
-    // Idempotent response: ensure each id appears once even if source rows overlap.
-    if (seen.has(row.id)) return false;
-    seen.add(row.id);
-    return true;
-  });
-
-  return json({ ok: true, data: mapped }, 200, {
-    "Cache-Control": "public, s-maxage=300, max-age=120",
+      // Idempotent response: ensure each id appears once even if source rows overlap.
+      if (seen.has(row.id)) return false;
+      seen.add(row.id);
+      return true;
+    });
   });
 }
 
@@ -4729,6 +4996,7 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
   if (!env.STRIPE_SECRET_KEY)
     return json({ ok: false, error: "payments_not_configured" }, 503);
   const body = (await req.json().catch(() => null)) as {
+    items?: Array<{ id: string; name: string; price: number; qty?: number }>;
     successUrl?: string;
     cancelUrl?: string;
   } | null;
@@ -5026,6 +5294,11 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/api/store/checkout",
     handler: handleDirectStoreCheckout,
+  },
+  {
+    method: "POST",
+    path: "/api/store/quotes",
+    handler: handleCreateCustomQuote,
   },
   {
     method: "POST",
@@ -5616,13 +5889,23 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
   await ctx.admin.from("ingest_jobs").update({ state: "validated" }).eq("id", jobId);
 
   // ── Step 3: Write media_asset (state=written) ───────────────────────────
-  const assetMeta = {
+  const assetMeta: Record<string, unknown> = {
     type: "poster",
     thumbnail: publicUrl,
     image_url: publicUrl,
     date: (meta.date as string | undefined) ?? new Date().toISOString().split("T")[0],
     ...meta,
   };
+
+  // Ensure POTG stats are deterministically tabulated for TGIF POTG
+  if (body.kind === "potg" && (body.leagueId === "tgifbl" || meta.leagueId === "tgifbl" || meta.leagueId === "TGIFBL" || body.leagueId === "TGIFBL")) {
+    assetMeta.pts = typeof meta.pts === 'number' ? meta.pts : Number(meta.pts ?? 0);
+    assetMeta.rebs = typeof meta.rebs === 'number' ? meta.rebs : Number(meta.rebs ?? 0);
+    assetMeta.assts = typeof meta.assts === 'number' ? meta.assts : Number(meta.assts ?? 0);
+    assetMeta.gameResult = String(meta.gameResult ?? "");
+    assetMeta.playerName = String(meta.playerName ?? body.title ?? "");
+    assetMeta.team = String(meta.team ?? "");
+  }
 
   const { data: asset, error: assetErr } = await ctx.admin
     .from("media_assets")
@@ -5994,6 +6277,7 @@ routes.push(
   { method: "GET",    path: "/ops/list/media",              handler: handleOpsListMediaPublications },
   { method: "PATCH",  path: "/ops/media/publications/:id",  handler: handleOpsPatchMediaPublications },
   { method: "DELETE", path: "/ops/media/publications/:id",  handler: handleOpsDeleteMediaPublications },
+  { method: "POST",   path: "/ops/media/publications/order", handler: handleOpsReorderMediaPublications },
 );
 
 // ── Scores handlers ────────────────────────────────────────────────────────

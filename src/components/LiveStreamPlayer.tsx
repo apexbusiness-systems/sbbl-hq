@@ -180,8 +180,12 @@ function StreamPlayer({
   const [playing, setPlaying] = useState(true);
   const [muted, setMuted] = useState(false);
   const [volume, setVolume] = useState(0.8);
+  const [playedFraction, setPlayedFraction] = useState(0);
+  const [playedSeconds, setPlayedSeconds] = useState(0);
+  const [durationSeconds, setDurationSeconds] = useState(0);
   // Auto-retry: allow one silent retry on transient errors before showing error UI
   const retryCountRef = useRef(0);
+  const reactPlayerRef = useRef<ReactPlayer | null>(null);
   const MAX_AUTO_RETRIES = 1;
 
   const urlType = detectStreamUrlType(url);
@@ -193,8 +197,19 @@ function StreamPlayer({
   // HLS and DASH use ReactPlayer with explicit forcing flags
   const forceHls = urlType === 'hls';
   const forceDash = urlType === 'dash';
-  // Show native controls for platform embeds that handle their own UI
-  const showNativeControls = isYoutube || isTwitch || isVimeo;
+  // Force unified in-app controls for all providers.
+  const showNativeControls = false;
+  const canSeek = Number.isFinite(durationSeconds) && durationSeconds > 0 && !isWhep && !isRtmp;
+
+  const formatClock = (total: number) => {
+    const safe = Number.isFinite(total) && total > 0 ? Math.floor(total) : 0;
+    const h = Math.floor(safe / 3600);
+    const m = Math.floor((safe % 3600) / 60);
+    const s = safe % 60;
+    return h > 0
+      ? `${String(h)}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
 
   const handleFullscreen = async () => {
     const host = containerRef.current;
@@ -249,7 +264,9 @@ function StreamPlayer({
         rel: 0,
         iv_load_policy: 3,
         modestbranding: 1,
-        controls: 1,
+        controls: 0,
+        disablekb: 1,
+        fs: 0,
         // FIX: origin must match the host to prevent YouTube iframe API
         // postMessage cross-origin errors that crash the embed entirely.
         // Without this, the YT iframe tries to postMessage to youtube.com
@@ -283,6 +300,7 @@ function StreamPlayer({
   return (
     <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
       <ReactPlayer
+        ref={(instance) => { reactPlayerRef.current = instance; }}
         url={url}
         width="100%"
         height="100%"
@@ -291,6 +309,11 @@ function StreamPlayer({
         muted={muted}
         volume={volume}
         onReady={() => { retryCountRef.current = 0; onReady(); }}
+        onDuration={(seconds) => setDurationSeconds(seconds)}
+        onProgress={({ played, playedSeconds: elapsed }) => {
+          setPlayedFraction(played);
+          setPlayedSeconds(elapsed);
+        }}
         onPlay={() => { setPlaying(true); retryCountRef.current = 0; onPlay(); }}
         onPause={() => setPlaying(false)}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -306,9 +329,19 @@ function StreamPlayer({
           onError(parsePlayerError(err, data));
         }}
         config={reactPlayerConfig}
-      />
-      {!showNativeControls && (
-        <div className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm">
+    />
+      {/* Block iframe click-through to provider pages and prevent source copying via context menu. */}
+      {(isYoutube || isTwitch || isVimeo) && (
+        <div
+          className="absolute inset-0 z-10"
+          aria-hidden="true"
+          onContextMenu={(e) => e.preventDefault()}
+        />
+      )}
+      <div
+        className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm"
+        onContextMenu={(e) => e.preventDefault()}
+      >
           <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
             aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
             {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
@@ -320,13 +353,30 @@ function StreamPlayer({
           <input aria-label="Volume" type="range" min={0} max={1} step={0.05} value={volume}
             onChange={(e) => { const n = Number(e.target.value); setMuted(n === 0); setVolume(n); }}
             className="w-24 accent-amber-500" />
-          <div className="flex-1" />
+          <input
+            aria-label="Seek"
+            type="range"
+            min={0}
+            max={1}
+            step={0.001}
+            value={playedFraction}
+            disabled={!canSeek}
+            onChange={(e) => {
+              const nextFraction = Number(e.target.value);
+              setPlayedFraction(nextFraction);
+              const player = reactPlayerRef.current;
+              if (player && canSeek) player.seekTo(nextFraction, 'fraction');
+            }}
+            className="flex-1 accent-amber-500 disabled:opacity-40"
+          />
+          <span className="text-[10px] text-white/70 tabular-nums min-w-[82px] text-right">
+            {formatClock(playedSeconds)} / {formatClock(durationSeconds)}
+          </span>
           <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
             aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
             <Maximize className="w-4 h-4" />
           </button>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

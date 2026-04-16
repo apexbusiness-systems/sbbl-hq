@@ -53,13 +53,17 @@ const TeamsPage = () => {
       list = apiTeams;
     } else {
       // Fallback to mock data when API returns empty
+      const mockLeagueMap = mockLeagues.reduce<Record<string, string>>((acc, l) => {
+        acc[l.id] = l.name;
+        return acc;
+      }, {});
       list = mockTeams.map((t): TeamCard => {
         const gp = t.record.wins + t.record.losses;
         return {
           id: t.id,
           name: t.name,
           league_code: t.leagueId.toUpperCase(),
-          league_name: mockLeagues.find(l => l.id === t.leagueId)?.name ?? t.leagueId.toUpperCase(),
+          league_name: mockLeagueMap[t.leagueId] ?? t.leagueId.toUpperCase(),
           season_name: getLeagueSeasonLabel(t.leagueId),
           division_name: t.division,
           roster_count: 0,
