@@ -69,8 +69,8 @@ describe('public render contract: /api/public/media', () => {
     expect(fnBody).not.toMatch(/\.from\("media_assets"\)/);
   });
 
-  it('handlePublicMedia orders publications by sort_order then id', () => {
-    const fnStart = workerSrc.indexOf('async function handlePublicMedia');
+  it('public media query orders publications by sort_order then id', () => {
+    const fnStart = workerSrc.indexOf('async function fetchPublicMediaRows');
     const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
     const fnBody  = workerSrc.slice(fnStart, fnEnd);
 

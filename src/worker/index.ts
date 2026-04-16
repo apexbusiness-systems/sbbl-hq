@@ -4752,7 +4752,7 @@ async function fetchPublicMediaRows(
       "leagues:leagues!league_id(code)"
     )
     .eq("status", "published")
-    .order("sort_order", { ascending: true, nullsFirst: false })
+    .order("sort_order", { ascending: true })
     .order("id", { ascending: true })
     .limit(50);
 
