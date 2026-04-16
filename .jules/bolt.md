@@ -1,22 +1,3 @@
-## BOLT JOURNAL
-
-## 2024-05-18 - [Missing useMemo for Expensive Transformations]
-**Learning:** Found an instance in React components (like `Schedules.tsx`) where raw arrays coming from APIs or mock data were being processed (`reduce`, `map`, `filter`) on every single re-render. Since React re-renders can happen frequently due to URL query param changes or nested contexts updates, leaving transformations outside of `useMemo` can lead to degraded performance, particularly with larger data sets.
-**Action:** Always wrap `filter()`, `reduce()`, and `map()` chains in `useMemo` when they are inside a React component's main rendering scope and do not need to be recomputed unless their dependencies change.
-
-## 2024-05-18 - [Missing useMemo for Expensive Array Sorting]
-**Learning:** Found an instance in React components (like `Teams.tsx`) where raw arrays coming from APIs or mock data were being processed (like `sort()` with mathematical divisions nested inside) directly inside the JSX render loop. This leads to `O(N log N)` work being performed on every re-render.
-**Action:** Always wrap `filter()`, `reduce()`, and `map()` chains or `sort()` operations in `useMemo` when they are inside a React component's main rendering scope and do not need to be recomputed unless their dependencies change.
-## 2024-04-09 - Supabase Migration column rename
-**Learning:** `media_publications` table had its `created_at` column renamed to `sort_at` during the `20260407103137_media_publications.sql` migration, but the subsequent `20260407200000_ingest_pipeline.sql` migration was still referencing `created_at` in the `v_ingest_reconciliation` view definition, causing Supabase Preview CI failures with "ERROR: column mp.created_at does not exist (SQLSTATE 42703)".
-**Action:** Always ensure that subsequent migrations are updated to reflect column renames or schema changes made in previous migrations.
-## 2026-04-11 - [Missing useMemo for Top-Level Array Lookups]
-**Learning:** Found an instance in `Leaderboards.tsx` where  was being executed inside a `.map()` render loop, which results in expensive O(N) recalculations on every render. The  array and `categories` are not state or props, so `[]` is used as the dependency array for `useMemo`, but to be fully future-proof they should be explicitly defined as dependencies.
-**Action:** When pre-computing a lookup map using `useMemo` to prevent expensive O(N) operations inside a React render loop, always verify and include any outer variables (even module-level arrays or statics) in the dependency array to ensure robustness and avoid future stale closure bugs.
-## 2026-04-11 - [Missing useMemo for Top-Level Array Lookups]
-**Learning:** Found an instance in Leaderboards.tsx where .find() was being executed inside a .map() render loop, which results in expensive O(N) recalculations on every render. The teams array and categories are not state or props, so [] is used as the dependency array for useMemo, but to be fully future-proof they should be explicitly defined as dependencies.
-**Action:** When pre-computing a lookup map using useMemo to prevent expensive O(N) operations inside a React render loop, always verify and include any outer variables (even module-level arrays or statics) in the dependency array to ensure robustness and avoid future stale closure bugs.
-## 2024-05-18 - [O(N^2) Array Deduplication]\n**Learning:** Found an instance in React components (like `Media.tsx`) and the Cloudflare worker (`index.ts`) where arrays were being deduplicated using `.filter()` combined with `.findIndex()`. This results in O(N^2) complexity, leading to performance bottlenecks when processing large data sets.\n**Action:** Replace `array.filter((item, index, self) => self.findIndex(i => i.id === item.id) === index)` with an O(N) `Set` implementation tracking seen IDs.
-## 2024-05-18 - Nested Loop Array Reductions In React
-**Learning:** Found nested loops using `filter` during render (e.g., inside `.map` of a React component). This performs an O(N * M) operation where both arrays scale linearly, creating large performance overheads and memory allocations during render cycles. Another issue was outer-scope dependencies triggering `react-hooks/exhaustive-deps`.
-**Action:** When working with nested maps/filters inside a render function, precalculate aggregates using `useMemo` into a dictionary or hash map, converting the nested O(N * M) into sequential O(N) + O(M) and O(1) lookups during render. Also, ensure you omit outer scope values like static `mockData` variables from `useMemo` dependency arrays as they won't trigger re-renders.
+## 2026-04-16 - Store Architecture Hardening
+**Learning:** Migrating from ad-hoc JSON carts to explicit structured tables like `store_orders` and `custom_quote_requests` simplifies Worker webhook handling.
+**Action:** Ensure that new commerce features build against the canonical `store_*` namespace directly to preserve idempotency and referential integrity.

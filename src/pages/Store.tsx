@@ -1,6 +1,6 @@
 import { useState, useMemo, memo, useCallback } from 'react';
-import { products as mockProducts } from '@/data/mock';
 import { useBag } from '@/contexts/BagContext';
+import { useAuth } from '@/hooks/use-auth';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 import { Product } from '@/types';
@@ -70,8 +70,8 @@ const StorePage = () => {
 
   const products = useMemo<Product[]>(() => {
     const apiData = productsQuery.data?.data;
-    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
-    return mockProducts;
+    if (Array.isArray(apiData)) return apiData;
+    return [];
   }, [productsQuery.data]);
 
   const filtered = useMemo(() => {
@@ -90,21 +90,42 @@ const StorePage = () => {
     }
   }, []);
 
+  const { session, user } = useAuth();
+
   const handleQuoteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!detail) return;
 
+    if (!session && !localStorage.getItem('sb-zofpeqwrmxemymvtdwct-auth-token')) {
+      console.log("NOT SIGNED IN"); toast.error("Please sign in to submit a quote request.");
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      // Endpoint to be built in Day 2, mock success for Day 1 frontend flow
-      // Fallback directly to DB or mock delay
-      await new Promise(resolve => setTimeout(resolve, 800));
+      const res = await apiFetch<{ ok: boolean; error?: string }>('/api/store/quote', {
+        method: 'POST',
+        headers: {
+          'idempotency-key': crypto.randomUUID()
+        },
+        body: JSON.stringify({
+          productId: detail.id,
+          name: quoteForm.name,
+          teamName: quoteForm.team,
+          quantity: parseInt(quoteForm.qty, 10),
+          notes: quoteForm.notes
+        })
+      }, session?.access_token ?? 'eyMock');
 
-      toast.success('Quote request sent! The SBBL sales team will contact you shortly.');
-      setIsQuoteDialogOpen(false);
-      setQuoteForm({ name: '', team: '', qty: '10', notes: '' });
+      if (res.ok) {
+        toast.success('Quote request sent! The SBBL sales team will contact you shortly.');
+        setIsQuoteDialogOpen(false);
+        setQuoteForm({ name: '', team: '', qty: '10', notes: '' });
+      } else {
+        toast.error(res.error ?? 'Failed to submit quote request.');
+      }
     } catch (err) {
-      toast.error('Failed to submit quote request. Please try again.');
+      console.error(err); toast.error('Could not reach the server. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
