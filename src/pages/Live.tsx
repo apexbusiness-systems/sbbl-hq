@@ -26,7 +26,7 @@ import {
   setStreamLive,
   updateStreamConfig,
 } from '@/lib/api/stream';
-import { detectStreamUrlType, getStreamTypeAdvisory, STREAM_TYPE_LABELS, toPlayableUrl } from '@/lib/stream/url-detector';
+import { canonicalizeStreamSourceUrl, detectStreamUrlType, getStreamTypeAdvisory, STREAM_TYPE_LABELS, toPlayableUrl } from '@/lib/stream/url-detector';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
@@ -138,8 +138,26 @@ function AdminStreamOverlay({
     const nextLive = !isLive;
     const trimmedUrl = customStreamUrl.trim();
     if (streamUrlError) setStreamUrlError(null);
-    // Normalize YouTube short URLs to canonical watch URL before persisting
-    const normalizedUrl = trimmedUrl ? (toPlayableUrl(trimmedUrl).url || trimmedUrl) : trimmedUrl;
+
+    // Canonical Persistence Law: Always persist raw canonical stream URL, never embeds
+    let normalizedUrl = trimmedUrl;
+    if (trimmedUrl) {
+      const { url, canonical } = canonicalizeStreamSourceUrl(trimmedUrl);
+      if (canonical && url !== trimmedUrl) {
+         // Auto-rewritten from embed (e.g., player.twitch.tv -> twitch.tv)
+         normalizedUrl = url;
+         setCustomStreamUrl(url);
+      } else {
+         normalizedUrl = url || trimmedUrl;
+      }
+
+      // Guardrail: Explicitly block any player.twitch.tv URLs that failed to canonicalize
+      if (normalizedUrl.toLowerCase().includes('player.twitch.tv')) {
+         setStreamUrlError('Twitch embed URLs are not allowed. Please use the raw channel URL (e.g. https://www.twitch.tv/channelname)');
+         return;
+      }
+    }
+
     setSaving(true);
     try {
       const token = await getAuthToken();

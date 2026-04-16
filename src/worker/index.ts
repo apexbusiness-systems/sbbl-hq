@@ -776,8 +776,32 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   if (!body) return json({ ok: false, error: "invalid_body" }, 400);
   const patch: Record<string, unknown> = {};
   if (typeof body.collectionId === "string") {
-    const trimmedUrl = body.collectionId.trim();
-    // Alerting for unsupported sources is handled client-side; never block save.
+    let trimmedUrl = body.collectionId.trim();
+    if (trimmedUrl.toLowerCase().includes('player.twitch.tv')) {
+      try {
+        const parsed = new URL(trimmedUrl);
+        const channel = parsed.searchParams.get('channel');
+        if (channel) {
+           console.warn(JSON.stringify({ event: 'stream_url_autorewritten', original: trimmedUrl, rewritten: `https://www.twitch.tv/${channel}` }));
+           trimmedUrl = `https://www.twitch.tv/${channel}`;
+        } else {
+           console.error(JSON.stringify({ event: 'stream_url_rejected', url: trimmedUrl, reason: 'unrecoverable_twitch_embed' }));
+           return json({ ok: false, error: 'Twitch embed URLs are not allowed.' }, 400);
+        }
+      } catch (e) {
+         return json({ ok: false, error: 'Invalid URL format.' }, 400);
+      }
+    } else if (trimmedUrl.toLowerCase().includes('twitch.tv')) {
+      try {
+        const parsed = new URL(trimmedUrl);
+        if (parsed.hostname !== 'www.twitch.tv' && parsed.hostname !== 'twitch.tv') {
+          console.warn(JSON.stringify({ event: 'stream_url_noncanonical_detected', url: trimmedUrl }));
+        }
+      } catch (e) {
+         // ignore parsing errors for telemetry
+      }
+    }
+    // Alerting for unsupported sources is handled client-side; never block save unless strictly invalid.
     patch.collection_id = trimmedUrl;
   }
   if (typeof body.title === "string") patch.title = body.title.trim();
@@ -4178,7 +4202,32 @@ async function handleGoLive(ctx: HandlerCtx) {
     updated_at: nowIso,
   };
   if (typeof body.collectionId === "string") {
-    patch.collection_id = body.collectionId.trim();
+    let url = body.collectionId.trim();
+    if (url.toLowerCase().includes('player.twitch.tv')) {
+      try {
+        const parsed = new URL(url);
+        const channel = parsed.searchParams.get('channel');
+        if (channel) {
+           console.warn(JSON.stringify({ event: 'stream_url_autorewritten', original: url, rewritten: `https://www.twitch.tv/${channel}` }));
+           url = `https://www.twitch.tv/${channel}`;
+        } else {
+           console.error(JSON.stringify({ event: 'stream_url_rejected', url, reason: 'unrecoverable_twitch_embed' }));
+           return json({ ok: false, error: 'Twitch embed URLs are not allowed.' }, 400);
+        }
+      } catch (e) {
+        return json({ ok: false, error: 'Invalid URL format.' }, 400);
+      }
+    } else if (url.toLowerCase().includes('twitch.tv')) {
+      try {
+        const parsed = new URL(url);
+        if (parsed.hostname !== 'www.twitch.tv' && parsed.hostname !== 'twitch.tv') {
+          console.warn(JSON.stringify({ event: 'stream_url_noncanonical_detected', url }));
+        }
+      } catch (e) {
+        // ignore parsing errors for telemetry
+      }
+    }
+    patch.collection_id = url;
   }
   if (typeof body.title === "string" && body.title.trim()) {
     patch.title = body.title.trim();

@@ -127,9 +127,15 @@ export interface PlayableUrl {
  * Extract a Twitch channel name from common twitch.tv URL formats.
  * e.g. https://www.twitch.tv/channelname → channelname
  */
-function extractTwitchChannel(url: string): string | null {
+export function extractTwitchChannel(url: string): string | null {
   try {
     const parsed = new URL(url.trim());
+
+    // Handle embed URLs: player.twitch.tv/?channel=name
+    if (parsed.hostname.toLowerCase() === 'player.twitch.tv') {
+      return parsed.searchParams.get('channel') || null;
+    }
+
     const parts = parsed.pathname.split('/').filter(Boolean);
     // Skip known non-channel paths
     if (parts.length === 0) return null;
@@ -142,65 +148,38 @@ function extractTwitchChannel(url: string): string | null {
 }
 
 /**
- * Extract a Vimeo video ID from common vimeo.com URL formats.
- * e.g. https://vimeo.com/123456789 → 123456789
+ * Normalizes any stream source URL into its canonical raw format for persistence.
+ * This guarantees we never persist embed/iframe URLs (Canonical Persistence Law).
  */
-function extractVimeoId(url: string): string | null {
-  try {
-    const parsed = new URL(url.trim());
-    const parts = parsed.pathname.split('/').filter(Boolean);
-    // Vimeo IDs are numeric
-    for (const part of parts) {
-      if (/^\d{5,}$/.test(part)) return part;
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Convert a raw stream URL to a playable form.
- * - YouTube URLs are normalized to canonical watch URL.
- * - Twitch URLs are normalized to the player embed format.
- * - Vimeo URLs are normalized to player.vimeo.com embed format.
- * - RTMP URLs carry an advisory warning (cannot play in browser).
- * - All other URLs are returned as-is (no blocking).
- */
-export function toPlayableUrl(raw: string): PlayableUrl {
+export function canonicalizeStreamSourceUrl(raw: string): { url: string; type: StreamUrlType; canonical: boolean } {
   const trimmed = raw.trim();
-  if (!trimmed) return { url: '', type: 'unknown' };
+  if (!trimmed) return { url: '', type: 'unknown', canonical: false };
 
   const type = detectStreamUrlType(trimmed);
 
-  if (type === 'rtmp') {
-    return {
-      url: trimmed,
-      type: 'rtmp',
-      warning: 'RTMP cannot play in browser. Use an HLS endpoint instead.',
-    };
-  }
-
   if (type === 'youtube') {
     const embedUrl = toPlayableYoutubeEmbedUrl(trimmed);
-    return { url: embedUrl ?? trimmed, type: 'youtube' };
+    return {
+      url: embedUrl ?? trimmed,
+      type: 'youtube',
+      canonical: !!embedUrl
+    };
   }
 
   if (type === 'twitch') {
     const channel = extractTwitchChannel(trimmed);
     if (channel) {
-      const parent = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
-      return { url: `https://player.twitch.tv/?channel=${channel}&parent=${parent}`, type: 'twitch' };
+      const canonicalUrl = `https://www.twitch.tv/${channel}`;
+      return { url: canonicalUrl, type: 'twitch', canonical: true };
     }
-    return { url: trimmed, type: 'twitch' };
   }
 
   if (type === 'vimeo') {
     const vimeoId = extractVimeoId(trimmed);
     if (vimeoId) {
-      return { url: `https://player.vimeo.com/video/${vimeoId}`, type: 'vimeo' };
+       const canonicalUrl = `https://vimeo.com/${vimeoId}`;
+       return { url: canonicalUrl, type: 'vimeo', canonical: true };
     }
-    return { url: trimmed, type: 'vimeo' };
   }
 
   if (type === 'facebook') {

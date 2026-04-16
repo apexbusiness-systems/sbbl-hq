@@ -114,4 +114,30 @@ describe('Live page YouTube baseline validation', () => {
       expect(setStreamLiveMock).toHaveBeenCalledWith(true, null);
     });
   });
+
+  it('normalizes and saves raw Twitch URLs without converting to embed URLs', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <LivePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Stream controls')).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTitle('Stream controls'));
+    const input = await screen.findByPlaceholderText('YouTube, Twitch, HLS, WHEP, or any stream URL…');
+    fireEvent.change(input, { target: { value: 'https://www.twitch.tv/sbblhq' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Go Live' }));
+
+    await waitFor(() => {
+      expect(updateStreamConfigMock).toHaveBeenCalledWith(
+        { collectionId: 'https://www.twitch.tv/sbblhq', title: 'Camera Feed' },
+        null,
+      );
+      expect(setStreamLiveMock).toHaveBeenCalledWith(true, null);
+    });
+  });
 });
