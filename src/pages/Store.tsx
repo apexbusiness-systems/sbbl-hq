@@ -1,5 +1,4 @@
 import { useState, useMemo, memo, useCallback } from 'react';
-import { products as mockProducts } from '@/data/mock';
 import { useBag } from '@/contexts/BagContext';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
@@ -70,8 +69,8 @@ const StorePage = () => {
 
   const products = useMemo<Product[]>(() => {
     const apiData = productsQuery.data?.data;
-    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
-    return mockProducts;
+    if (Array.isArray(apiData)) return apiData;
+    return [];
   }, [productsQuery.data]);
 
   const filtered = useMemo(() => {
@@ -96,9 +95,18 @@ const StorePage = () => {
 
     setIsSubmitting(true);
     try {
-      // Endpoint to be built in Day 2, mock success for Day 1 frontend flow
-      // Fallback directly to DB or mock delay
-      await new Promise(resolve => setTimeout(resolve, 800));
+      const res = await apiFetch<{ ok: boolean; error?: string }>('/api/store/quotes', {
+        method: 'POST',
+        body: JSON.stringify({
+          productId: detail.id,
+          name: quoteForm.name,
+          teamName: quoteForm.team,
+          quantity: quoteForm.qty,
+          notes: quoteForm.notes,
+        })
+      });
+
+      if (!res.ok) throw new Error(res.error || 'Failed to submit quote');
 
       toast.success('Quote request sent! The SBBL sales team will contact you shortly.');
       setIsQuoteDialogOpen(false);
@@ -120,6 +128,16 @@ const StorePage = () => {
 
         {/* PIPA/PIPEDA Consent Banner will go here (Day 3) */}
 
+        {productsQuery.isLoading ? (
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        ) : productsQuery.isError ? (
+          <div className="text-center text-red-500 py-12">Failed to load store products.</div>
+        ) : products.length === 0 ? (
+          <div className="text-center text-muted-foreground py-12">No products found.</div>
+        ) : (
+          <>
         {/* Categories */}
         <div className="flex gap-2 mb-8 overflow-x-auto scrollbar-hidden pb-2">
           {(['all', 'custom', 'jerseys', 'hoodies', 'tees', 'caps', 'accessories', 'rewards'] as Category[]).map(c => (
@@ -209,6 +227,8 @@ const StorePage = () => {
             )}
           </div>
         </div>
+          </>
+        )}
       </div>
 
       {/* Quote Request Dialog */}

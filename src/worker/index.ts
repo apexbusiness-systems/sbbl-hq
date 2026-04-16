@@ -1467,6 +1467,24 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
         ? metadata.purchase_type
         : null;
 
+
+    if (purchaseType === "store_order" && typeof metadata.order_id === "string") {
+      try {
+        await ctx.admin
+          .from("store_orders")
+          .update({
+            status: "paid",
+            stripe_checkout_session_id: object.id,
+            stripe_payment_intent_id: typeof object.payment_intent === 'string' ? object.payment_intent : null,
+            customer_email: (object.customer_details as Record<string, unknown>)?.email as string | undefined,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", metadata.order_id);
+      } catch (e) {
+        console.error("Failed to update store order", e);
+      }
+    }
+
     // Player registration (subscription): set subscription_ends_at + grant player role
     if (!purchaseType || purchaseType === "player_registration") {
       try {
@@ -2557,7 +2575,7 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
               : undefined;
           const name = splitProfileName(profile);
           return {
-            id: p.id,
+            id: String(p.id),
             user_id: p.user_id,
             jersey_number: p.jersey_number,
             position: p.position,
@@ -4606,6 +4624,44 @@ async function handlePayOrder(ctx: HandlerCtx) {
 // ── DIRECT STORE CHECKOUT ─────────────────────────────────────────────────────
 // Accepts line items from the client (no DB variant records required).
 // Used by BagDrawer until real DB products/variants are seeded.
+
+async function handleCreateCustomQuote({ req, env, admin }: HandlerCtx) {
+  await ensureMutation(req, { req, env, admin, params: {} });
+  const userId = requireAuth(req);
+
+  const body = (await req.json().catch(() => null)) as {
+    productId: string;
+    name: string;
+    teamName: string;
+    quantity: string | number;
+    notes?: string;
+  } | null;
+
+  if (!body?.productId || !body?.name || !body?.teamName || !body?.quantity) {
+    return json({ ok: false, error: "missing_fields" }, 400);
+  }
+
+  const { data, error } = await admin
+    .from("custom_quote_requests")
+    .insert({
+      user_id: userId,
+      product_id: body.productId,
+      name: body.name,
+      team_name: String(body.teamName),
+      quantity: Number(body.quantity),
+      notes: body.notes || "",
+      status: "pending"
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return json({ ok: false, error: error.message }, 500);
+  }
+
+  return json({ ok: true, id: data.id }, 201);
+}
+
 async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
   const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "unknown";
   if (!enforceInMemoryRateLimit(`store-checkout:${ip}`, 10, 60_000)) {
@@ -4635,8 +4691,8 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
 
   // Fetch the canonical products from the database
   const { data: dbProducts, error: dbError } = await admin
-    .from("products")
-    .select("id, name, price")
+    .from("store_products")
+    .select("id, name, price_cents")
     .in("id", productIds);
 
   if (dbError || !dbProducts || dbProducts.length === 0) {
@@ -4662,7 +4718,53 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
     "metadata[purchase_type]": "store_order",
   });
 
-  // price is in PHP whole units — Stripe expects centavos (×100)
+
+  // Create store order
+  const orderTotalCents = body.items.reduce((sum, item) => {
+    const dbProduct = dbProductMap.get(item.id);
+    if (!dbProduct) return sum;
+    return sum + (dbProduct.price_cents * (item.qty ?? 1));
+  }, 0);
+
+  const { data: orderData, error: orderError } = await admin
+    .from("store_orders")
+    .insert({
+      user_id: userId,
+      amount_subtotal_cents: orderTotalCents,
+      amount_total_cents: orderTotalCents, // assuming no tax/shipping yet
+      status: 'pending',
+      idempotency_key: readIdempotencyKey(req.headers) || undefined
+    })
+    .select("id")
+    .single();
+
+  if (orderError) {
+    return json({ ok: false, error: "failed_to_create_order" }, 500);
+  }
+
+  // Insert order items
+  const orderItemsData = body.items.map(item => {
+    const dbProduct = dbProductMap.get(item.id);
+    if (!dbProduct) return null;
+    return {
+      order_id: orderData.id,
+      product_id: item.id,
+      quantity: item.qty ?? 1,
+      unit_price_cents: dbProduct.price_cents,
+    };
+  }).filter(Boolean);
+
+  if (orderItemsData.length > 0) {
+    const { error: itemsError } = await admin
+      .from("store_order_items")
+      .insert(orderItemsData);
+    if (itemsError) {
+      console.error("Failed to insert order items:", itemsError);
+    }
+  }
+
+  params.set("metadata[order_id]", orderData.id);
+
   // Use the price from the database instead of the client payload
   let validItemsCount = 0;
   body.items.forEach((item) => {
@@ -4671,11 +4773,11 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
     if (!dbProduct) return; // Skip if product doesn't exist in DB
 
     const idx = validItemsCount++;
-    params.set(`line_items[${idx}][price_data][currency]`, "php");
+    params.set(`line_items[${idx}][price_data][currency]`, "cad");
     params.set(`line_items[${idx}][price_data][product_data][name]`, dbProduct.name);
     params.set(
       `line_items[${idx}][price_data][unit_amount]`,
-      String(Math.round(dbProduct.price * 100)),
+      String(dbProduct.price_cents),
     );
     params.set(`line_items[${idx}][quantity]`, String(item.qty ?? 1));
   });
@@ -4825,14 +4927,27 @@ async function handlePublicProducts({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get("leagueId");
   let query = admin
-    .from("products")
-    .select("id,name,price,status,league_id,metadata")
-    .eq("status", "published")
+    .from("store_products")
+    .select("id,name,price_cents,category,image_url,sizes,colors,is_custom,badge")
+    .eq("active", true)
     .limit(100);
   if (leagueId) query = query.eq("league_id", leagueId);
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return json({ ok: true, data: data ?? [] }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
+
+  const mappedData = (data ?? []).map((p: Record<string, unknown>) => ({
+    id: String(p.id),
+    name: String(p.name),
+    category: String(p.category),
+    price: Number(p.price_cents) / 100,
+    image: String(p.image_url),
+    sizes: Array.isArray(p.sizes) ? p.sizes.map(String) : undefined,
+    colors: Array.isArray(p.colors) ? p.colors.map(String) : undefined,
+    is_custom: Boolean(p.is_custom),
+    badge: p.badge ? String(p.badge) : undefined
+  }));
+  return json({ ok: true, data: mappedData }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
+
 }
 
 async function handlePublicMedia({ req, admin }: HandlerCtx) {
@@ -4881,6 +4996,7 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
   if (!env.STRIPE_SECRET_KEY)
     return json({ ok: false, error: "payments_not_configured" }, 503);
   const body = (await req.json().catch(() => null)) as {
+    items?: Array<{ id: string; name: string; price: number; qty?: number }>;
     successUrl?: string;
     cancelUrl?: string;
   } | null;
@@ -5178,6 +5294,11 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/api/store/checkout",
     handler: handleDirectStoreCheckout,
+  },
+  {
+    method: "POST",
+    path: "/api/store/quotes",
+    handler: handleCreateCustomQuote,
   },
   {
     method: "POST",
