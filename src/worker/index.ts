@@ -1570,26 +1570,8 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
           p_payment_ref: providerRef,
           p_idempotency_key: event.id ?? crypto.randomUUID(),
         });
-        // Also close the cart
-        const { data: orderRow } = await ctx.admin
-          .from("orders")
-          .select("metadata")
-          .eq("id", metadata.order_id)
-          .maybeSingle();
-        const cartId = (orderRow as Record<string, unknown> | null)?.metadata
-          ? (
-              (orderRow as Record<string, unknown>).metadata as Record<
-                string,
-                unknown
-              >
-            )?.cart_id
-          : null;
-        if (typeof cartId === "string") {
-          await ctx.admin
-            .from("carts")
-            .update({ status: "completed" })
-            .eq("id", cartId);
-        }
+        // Note: mark_order_paid now targets store_orders.
+        // We no longer rely on legacy 'orders' and 'carts' tables here.
       } catch {
         /* non-critical */
       }
@@ -4621,11 +4603,13 @@ async function handlePayOrder(ctx: HandlerCtx) {
   return json({ ok: true, url: checkout.url, sessionId: checkout.id });
 }
 
-// ── DIRECT STORE CHECKOUT ─────────────────────────────────────────────────────
-// Accepts line items from the client (no DB variant records required).
-// Used by BagDrawer until real DB products/variants are seeded.
 
-async function handleCreateCustomQuote({ req, env, admin }: HandlerCtx) {
+// ── STORE QUOTE ─────────────────────────────────────────────────────────────
+async function handleStoreQuote({ req, env, admin }: HandlerCtx) {
+  const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "unknown";
+  if (!enforceInMemoryRateLimit(`store-quote:${ip}`, 5, 60_000)) {
+    return json({ ok: false, error: "rate_limit_exceeded" }, 429);
+  }
   await ensureMutation(req, { req, env, admin, params: {} });
   const userId = requireAuth(req);
 
@@ -4633,35 +4617,36 @@ async function handleCreateCustomQuote({ req, env, admin }: HandlerCtx) {
     productId: string;
     name: string;
     teamName: string;
-    quantity: string | number;
+    quantity: number;
     notes?: string;
   } | null;
 
-  if (!body?.productId || !body?.name || !body?.teamName || !body?.quantity) {
-    return json({ ok: false, error: "missing_fields" }, 400);
+  if (!body || !body.productId || !body.name || !body.teamName || !body.quantity) {
+    return json({ ok: false, error: "invalid_payload" }, 400);
   }
 
-  const { data, error } = await admin
+  // Idempotency check handled by ensureMutation middleware using idempotency-key header
+
+  const { error } = await admin
     .from("custom_quote_requests")
     .insert({
       user_id: userId,
       product_id: body.productId,
       name: body.name,
-      team_name: String(body.teamName),
-      quantity: Number(body.quantity),
-      notes: body.notes || "",
+      team_name: body.teamName,
+      quantity: body.quantity,
+      notes: body.notes ?? null,
       status: "pending"
-    })
-    .select("id")
-    .single();
+    });
 
   if (error) {
-    return json({ ok: false, error: error.message }, 500);
+    return json({ ok: false, error: "failed_to_submit_quote" }, 500);
   }
 
-  return json({ ok: true, id: data.id }, 201);
+  return json({ ok: true });
 }
 
+// ── DIRECT STORE CHECKOUT ─────────────────────────────────────────────────────
 async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
   const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "unknown";
   if (!enforceInMemoryRateLimit(`store-checkout:${ip}`, 10, 60_000)) {
@@ -4693,13 +4678,37 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
   const { data: dbProducts, error: dbError } = await admin
     .from("store_products")
     .select("id, name, price_cents")
-    .in("id", productIds);
+    .in("id", productIds)
+    .eq("active", true)
+    .eq("_deleted", false);
 
   if (dbError || !dbProducts || dbProducts.length === 0) {
     return json({ ok: false, error: "products_not_found" }, 404);
   }
 
   const dbProductMap = new Map(dbProducts.map(p => [p.id, p]));
+
+  let amountSubtotalCents = 0;
+  let validItemsCount = 0;
+
+  // Create an order in store_orders pending payment
+  const { data: orderData, error: orderError } = await admin
+    .from("store_orders")
+    .insert({
+      user_id: userId,
+      amount_subtotal_cents: 0,
+      amount_total_cents: 0,
+      status: "pending"
+    })
+    .select("id")
+    .single();
+
+  if (orderError || !orderData) {
+    return json({ ok: false, error: "failed_to_create_order" }, 500);
+  }
+
+  const orderId = orderData.id;
+  const orderItemsData = [];
 
   const params = new URLSearchParams({
     "payment_method_types[]": "card",
@@ -4715,76 +4724,42 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
       reqUrlStr,
     ),
     "metadata[user_id]": userId,
+    "metadata[order_id]": orderId,
     "metadata[purchase_type]": "store_order",
   });
 
-
-  // Create store order
-  const orderTotalCents = body.items.reduce((sum, item) => {
-    const dbProduct = dbProductMap.get(item.id);
-    if (!dbProduct) return sum;
-    return sum + (dbProduct.price_cents * (item.qty ?? 1));
-  }, 0);
-
-  const { data: orderData, error: orderError } = await admin
-    .from("store_orders")
-    .insert({
-      user_id: userId,
-      amount_subtotal_cents: orderTotalCents,
-      amount_total_cents: orderTotalCents, // assuming no tax/shipping yet
-      status: 'pending',
-      idempotency_key: readIdempotencyKey(req.headers) || undefined
-    })
-    .select("id")
-    .single();
-
-  if (orderError) {
-    return json({ ok: false, error: "failed_to_create_order" }, 500);
-  }
-
-  // Insert order items
-  const orderItemsData = body.items.map(item => {
-    const dbProduct = dbProductMap.get(item.id);
-    if (!dbProduct) return null;
-    return {
-      order_id: orderData.id,
-      product_id: item.id,
-      quantity: item.qty ?? 1,
-      unit_price_cents: dbProduct.price_cents,
-    };
-  }).filter(Boolean);
-
-  if (orderItemsData.length > 0) {
-    const { error: itemsError } = await admin
-      .from("store_order_items")
-      .insert(orderItemsData);
-    if (itemsError) {
-      console.error("Failed to insert order items:", itemsError);
-    }
-  }
-
-  params.set("metadata[order_id]", orderData.id);
-
-  // Use the price from the database instead of the client payload
-  let validItemsCount = 0;
   body.items.forEach((item) => {
     if (!item.id) return;
     const dbProduct = dbProductMap.get(item.id);
     if (!dbProduct) return; // Skip if product doesn't exist in DB
 
+    const qty = item.qty ?? 1;
+    const lineTotalCents = dbProduct.price_cents * qty;
+    amountSubtotalCents += lineTotalCents;
+
+    orderItemsData.push({
+      order_id: orderId,
+      product_id: dbProduct.id,
+      quantity: qty,
+      unit_price_cents: dbProduct.price_cents
+    });
+
     const idx = validItemsCount++;
+    // Stripe expects CAD centavos for our store
     params.set(`line_items[${idx}][price_data][currency]`, "cad");
     params.set(`line_items[${idx}][price_data][product_data][name]`, dbProduct.name);
-    params.set(
-      `line_items[${idx}][price_data][unit_amount]`,
-      String(dbProduct.price_cents),
-    );
-    params.set(`line_items[${idx}][quantity]`, String(item.qty ?? 1));
+    params.set(`line_items[${idx}][price_data][unit_amount]`, String(dbProduct.price_cents));
+    params.set(`line_items[${idx}][quantity]`, String(qty));
   });
 
   if (validItemsCount === 0) {
+    // Cleanup pending order
+    await admin.from("store_orders").delete().eq("id", orderId);
     return json({ ok: false, error: "no_valid_items_for_checkout" }, 400);
   }
+
+  // Bulk insert order items
+  await admin.from("store_order_items").insert(orderItemsData);
 
   const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
     method: "POST",
@@ -4802,6 +4777,14 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
     );
   }
   const session = (await stripeRes.json()) as { url: string; id: string };
+
+  // Update order with session details and total
+  await admin.from("store_orders").update({
+    stripe_checkout_session_id: session.id,
+    amount_subtotal_cents: amountSubtotalCents,
+    amount_total_cents: amountSubtotalCents // Add taxes/shipping here if applicable
+  }).eq("id", orderId);
+
   return json({ ok: true, url: session.url, sessionId: session.id });
 }
 
@@ -4925,29 +4908,35 @@ async function respondWithPublicMediaFreshness(
 
 async function handlePublicProducts({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
+  // Optional leagueId filter - keep it in signature for backwards compat, though store_products is global.
   const leagueId = url.searchParams.get("leagueId");
-  let query = admin
+
+  const query = admin
     .from("store_products")
-    .select("id,name,price_cents,category,image_url,sizes,colors,is_custom,badge")
+    .select("id,name,description,category,price_cents,image_url,sizes,colors,badge,is_custom")
     .eq("active", true)
+    .eq("_deleted", false)
+    .order("name", { ascending: true })
     .limit(100);
-  if (leagueId) query = query.eq("league_id", leagueId);
+
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  const mappedData = (data ?? []).map((p: Record<string, unknown>) => ({
+  // Transform response to match frontend expectations (or map to frontend Product type)
+  const mapped = (data ?? []).map((p: Record<string, unknown>) => ({
     id: String(p.id),
     name: String(p.name),
     category: String(p.category),
-    price: Number(p.price_cents) / 100,
+    price: Number(p.price_cents) / 100, // Frontend expects dollars, backend stores cents
     image: String(p.image_url),
-    sizes: Array.isArray(p.sizes) ? p.sizes.map(String) : undefined,
-    colors: Array.isArray(p.colors) ? p.colors.map(String) : undefined,
+    sizes: (p.sizes as string[]) ?? [],
+    colors: (p.colors as string[]) ?? [],
+    badge: p.badge ? String(p.badge) : undefined,
     is_custom: Boolean(p.is_custom),
-    badge: p.badge ? String(p.badge) : undefined
+    description: p.description ? String(p.description) : undefined
   }));
-  return json({ ok: true, data: mappedData }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
 
+  return json({ ok: true, data: mapped }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
 }
 
 async function handlePublicMedia({ req, admin }: HandlerCtx) {
@@ -5297,8 +5286,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "POST",
-    path: "/api/store/quotes",
-    handler: handleCreateCustomQuote,
+    path: "/api/store/quote",
+    handler: handleStoreQuote,
   },
   {
     method: "POST",

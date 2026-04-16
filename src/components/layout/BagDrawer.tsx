@@ -3,7 +3,7 @@ import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { apiFetch } from '@/lib/api/client';
 import { useQuery } from '@tanstack/react-query';
-import type { Product } from '@/types';
+import { Product } from '@/types';
 import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -18,13 +18,13 @@ export const BagDrawer = () => {
     staleTime: 60_000,
   });
 
-  const products = useMemo(() => productsQuery.data?.data || [], [productsQuery.data?.data]);
+  const products = useMemo(() => productsQuery.data?.data ?? [], [productsQuery.data]);
 
   const productMap = useMemo(() => {
     return products.reduce((acc, p) => {
       acc[p.id] = p;
       return acc;
-    }, {} as Record<string, Product>);
+    }, {} as Record<string, typeof products[0]>);
   }, [products]);
 
   if (!bagOpen) return null;
