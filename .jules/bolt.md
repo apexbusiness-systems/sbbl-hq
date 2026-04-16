@@ -20,3 +20,7 @@
 ## 2024-05-18 - Nested Loop Array Reductions In React
 **Learning:** Found nested loops using `filter` during render (e.g., inside `.map` of a React component). This performs an O(N * M) operation where both arrays scale linearly, creating large performance overheads and memory allocations during render cycles. Another issue was outer-scope dependencies triggering `react-hooks/exhaustive-deps`.
 **Action:** When working with nested maps/filters inside a render function, precalculate aggregates using `useMemo` into a dictionary or hash map, converting the nested O(N * M) into sequential O(N) + O(M) and O(1) lookups during render. Also, ensure you omit outer scope values like static `mockData` variables from `useMemo` dependency arrays as they won't trigger re-renders.
+
+## 2026-04-16 - Store Hardening
+**Learning:** Legacy mock products mixed with the live Stripe process breaks single-source-of-truth. Converting direct arrays to useReactQuery fetching requires careful mapping of snake_case to camelCase inside worker edges.
+**Action:** In future, extract `mappedData` translations directly at the edge boundary. Also, handle React hook memoization for dynamically fetched elements (like `productsQuery.data?.data`) immediately on retrieval to avoid React exhaustion depth issues downstream.

@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react';
 import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { apiFetch } from '@/lib/api/client';
-import { products } from '@/data/mock';
+import { useQuery } from '@tanstack/react-query';
+import type { Product } from '@/types';
 import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -11,12 +12,20 @@ export const BagDrawer = () => {
   const { session } = useAuth();
   const [checkingOut, setCheckingOut] = useState(false);
 
+  const productsQuery = useQuery({
+    queryKey: ['public-products'],
+    queryFn: () => apiFetch<{ ok: boolean; data: Product[] }>('/api/public/products'),
+    staleTime: 60_000,
+  });
+
+  const products = useMemo(() => productsQuery.data?.data || [], [productsQuery.data?.data]);
+
   const productMap = useMemo(() => {
     return products.reduce((acc, p) => {
       acc[p.id] = p;
       return acc;
-    }, {} as Record<string, typeof products[0]>);
-  }, []);
+    }, {} as Record<string, Product>);
+  }, [products]);
 
   if (!bagOpen) return null;
 
@@ -33,7 +42,7 @@ export const BagDrawer = () => {
       const existing = acc.find(i => i.name === product.name);
       if (existing) { existing.qty += 1; } else { acc.push({ id: product.id, name: product.name, price: product.price, qty: 1 }); }
       return acc;
-    }, []);
+    }, [products]);
     if (!lineItems.length) { toast.error('No purchasable items in bag.'); return; }
     setCheckingOut(true);
     try {
