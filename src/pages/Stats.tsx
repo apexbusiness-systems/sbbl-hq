@@ -5,7 +5,6 @@ import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
 import { BarChart3 } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
-import { players as mockPlayers } from '@/data/mock';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
 
@@ -45,20 +44,20 @@ const StatsPage = () => {
     }
   }, [activeLeague, paramLeague, isValidParam]);
 
-  // Fetch live stats from the worker
+  // Fetch live stats from the public worker endpoint (anonymous).
+  // /api/public/stats returns { ok, data: PlayerProfile[] } — never a wrapped
+  // object — so callers render directly. No mock fallback: when data is
+  // missing the UI shows an explicit empty state below.
   const statsQuery = useQuery({
-    queryKey: ['stats', leagueFilter],
-    queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/stats'),
+    queryKey: ['public-stats', leagueFilter],
+    queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/public/stats'),
     retry: 1,
     staleTime: 30_000,
   });
 
   const players = useMemo<PlayerProfile[]>(() => {
     const apiData = statsQuery.data?.data;
-    if (Array.isArray(apiData) && apiData.length > 0) {
-      return apiData;
-    }
-    return mockPlayers;
+    return Array.isArray(apiData) ? apiData : [];
   }, [statsQuery.data]);
 
   const filtered = useMemo(() => {

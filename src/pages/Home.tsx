@@ -1,14 +1,15 @@
 import { useApp } from '@/contexts/AppContext';
 import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY } from '@/lib/leagues';
-import { fetchPublicHome, type PublicHomeData} from '@/lib/api/public';
+import { fetchPublicHome, fetchPublicPotg, type PublicHomeData } from '@/lib/api/public';
 
 import { PotgCard } from '@/components/ui/PotgCard';
-import { playersOfTheGame } from '@/data/mock';
 import { motion } from 'framer-motion';
 import { Play, Clock, Trophy, ChevronRight, Users, Calendar, BarChart3, ShoppingBag, Video } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import type { LeagueId } from '@/types';
+import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import type { LeagueId, PlayerOfTheGame } from '@/types';
+import { mapPotgPublicationRows } from '@/lib/potg';
 
 type LoadState = 'loading' | 'loaded' | 'error';
 
@@ -45,6 +46,18 @@ const HomePage = () => {
   const upcomingGames = data?.upcomingGames ?? [];
   const recentGames = data?.recentGames ?? [];
   const hasLive = liveGames.length > 0;
+
+  // Fetch published POTG publications from the worker (never mock).
+  const potgQuery = useQuery({
+    queryKey: ['public-potg'],
+    queryFn: () => fetchPublicPotg(),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const potgAll = useMemo<PlayerOfTheGame[]>(
+    () => mapPotgPublicationRows(potgQuery.data?.data as Record<string, unknown>[] | undefined),
+    [potgQuery.data],
+  );
 
   const isSeasonEmpty =
     state === 'loaded' &&
@@ -262,7 +275,7 @@ const HomePage = () => {
 
         {/* Players of the Game — always rendered; empty state when no data for this league yet */}
         {(() => {
-          const potgList = playersOfTheGame.filter(p => p.leagueId === resolvedLeague);
+          const potgList = potgAll.filter(p => p.leagueId === resolvedLeague);
           const leagueInfo = getLeagueConfig(resolvedLeague);
           return (
             <section>

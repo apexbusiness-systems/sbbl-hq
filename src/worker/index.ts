@@ -581,6 +581,77 @@ async function handleLeaderboards({ req, admin }: HandlerCtx) {
   );
 }
 
+// Normalize a raw RPC row (stats/leaderboards) into the PlayerProfile shape
+// the public pages (Stats.tsx, Leaderboards.tsx) already consume. The RPCs
+// return pts/reb/ast as top-level fields; the UI expects `stats.{pts,reb,...}`.
+function normalizePublicPlayerRow(row: Record<string, unknown>) {
+  const leagueCodeRaw = String(row.league_id ?? "").toLowerCase();
+  const leagueId = leagueCodeRaw === "wbl" ? "wbl"
+    : leagueCodeRaw === "tgifbl" ? "tgifbl"
+    : "sbbl";
+  return {
+    id: String(row.id ?? ""),
+    name: String(row.name ?? "Unknown"),
+    number: Number(row.number ?? 0),
+    position: String(row.position ?? ""),
+    teamId: String(row.team_id ?? ""),
+    teamName: row.team_name ? String(row.team_name) : null,
+    leagueId,
+    avatar: "",
+    badges: [] as string[],
+    stats: {
+      pts: Number(row.pts ?? 0),
+      reb: Number(row.reb ?? 0),
+      ast: Number(row.ast ?? 0),
+      stl: Number(row.stl ?? 0),
+      blk: Number(row.blk ?? 0),
+      fls: Number(row.fls ?? 0),
+      min: Number(row.min ?? 0),
+    },
+  };
+}
+
+// Public (anonymous) stats endpoint. Backed by the same RPC as /api/stats
+// but accessible without auth and returns `{ ok, data: Player[] }` — a flat
+// array at `.data` matching the shape Stats.tsx consumes.
+async function handlePublicStats({ req, admin }: HandlerCtx) {
+  const filters = Object.fromEntries(new URL(req.url).searchParams.entries());
+  const { data, error } = await admin.rpc("get_stats_dashboard", {
+    p_filters: filters,
+  });
+  if (error) throw new Error(error.message);
+  const rows = Array.isArray((data as { players?: unknown[] })?.players)
+    ? ((data as { players: Record<string, unknown>[] }).players)
+    : [];
+  const players = rows.map(normalizePublicPlayerRow);
+  return json({ ok: true, data: players }, 200, {
+    "Cache-Control": "public, s-maxage=30, max-age=15",
+  });
+}
+
+// Public (anonymous) leaderboards endpoint.
+//
+// IMPORTANT: we deliberately call `get_stats_dashboard` (not `get_leaderboards`)
+// because the dashboard RPC returns the FULL stat line per player (pts, reb,
+// ast, stl, blk, fls, min), whereas `get_leaderboards` only returns pts/reb/ast.
+// The Leaderboards UI lets users switch between every stat category, so
+// truncating to three would break tabs like STL/BLK/FLS/MIN (all zeros).
+// Response shape: `{ ok, data: Player[] }` — flat array consumed by Leaderboards.tsx.
+async function handlePublicLeaderboards({ req, admin }: HandlerCtx) {
+  const filters = Object.fromEntries(new URL(req.url).searchParams.entries());
+  const { data, error } = await admin.rpc("get_stats_dashboard", {
+    p_filters: filters,
+  });
+  if (error) throw new Error(error.message);
+  const rows = Array.isArray((data as { players?: unknown[] })?.players)
+    ? ((data as { players: Record<string, unknown>[] }).players)
+    : [];
+  const players = rows.map(normalizePublicPlayerRow);
+  return json({ ok: true, data: players }, 200, {
+    "Cache-Control": "public, s-maxage=30, max-age=15",
+  });
+}
+
 async function handleDraft(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
@@ -5358,6 +5429,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "GET", path: "/api/public/home", handler: handlePublicHome },
   { method: "GET", path: "/api/public/schedule", handler: handlePublicSchedule },
   { method: "GET", path: "/api/public/potg", handler: handlePublicPotg },
+  { method: "GET", path: "/api/public/stats", handler: handlePublicStats },
+  { method: "GET", path: "/api/public/leaderboards", handler: handlePublicLeaderboards },
   { method: "GET", path: "/api/teams", handler: handleTeamsList },
   {
     method: "GET",

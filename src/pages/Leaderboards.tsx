@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { teams } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
@@ -51,10 +50,12 @@ const LeaderboardsPage = () => {
     }
   }, [activeLeague, paramLeague, isValidParam]);
 
-  // Fetch live leaderboard data from the worker.
+  // Fetch live leaderboard data from the PUBLIC worker endpoint. This page is
+  // anonymous-accessible, so we must not hit the auth-gated /api/leaderboards
+  // variant (it would 401 for unauthenticated visitors and leave the UI blank).
   const leaderboardsQuery = useQuery({
-    queryKey: ['leaderboards', leagueFilter],
-    queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/leaderboards'),
+    queryKey: ['public-leaderboards', leagueFilter],
+    queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/public/leaderboards'),
     retry: 1,
     staleTime: 30_000,
   });
@@ -79,15 +80,6 @@ const LeaderboardsPage = () => {
   };
 
   const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
-
-  // ⚡ Bolt Performance Optimization: Replace O(N) lookup loops with O(1) dictionary lookups
-  // This prevents expensive `.find()` array traversals on every rendered item in the leaderboard.
-  const teamMap = useMemo(() => {
-    return teams.reduce<Record<string, string>>((acc, t) => {
-      acc[t.id] = t.name;
-      return acc;
-    }, {});
-  }, []);
 
   const activeCategoryLabel = useMemo(() => {
     return categories.find(c => c.key === activeCategory)?.label || '';
@@ -186,7 +178,7 @@ const LeaderboardsPage = () => {
                   <p className="text-sm font-medium">{p.name}</p>
                   <div className="flex items-center gap-2">
                     <LeagueBadge leagueId={p.leagueId} />
-                    <span className="text-[10px] text-muted-foreground">{p.position} · {teamMap[p.teamId]}</span>
+                    <span className="text-[10px] text-muted-foreground">{p.position}{(p as { teamName?: string | null }).teamName ? ` · ${(p as { teamName?: string | null }).teamName}` : ''}</span>
                   </div>
                 </div>
                 <div className="text-right">
