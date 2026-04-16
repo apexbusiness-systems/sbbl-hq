@@ -12,8 +12,8 @@ describe('normalizeYoutubeUrl', () => {
     expect(result).toEqual({ ok: true, url: 'https://player.twitch.tv/?channel=sbblhq&parent=sbbl-hq.icu' });
   });
 
-  it('rejects non-http(s) protocols', () => {
+  it('accepts non-http(s) protocols natively', () => {
     const result = normalizeYoutubeUrl('rtmp://ingest.example/live/key');
-    expect(result).toEqual({ ok: false, error: 'Only http(s) stream URLs are supported.' });
+    expect(result).toEqual({ ok: true, url: 'rtmp://ingest.example/live/key' });
   });
 });
