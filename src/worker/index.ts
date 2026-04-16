@@ -4294,55 +4294,6 @@ export async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
     reqUrlStr,
   );
 
-  // Create store order
-  const orderTotalCents = body.items.reduce((sum, item) => {
-    const dbProduct = dbProductMap.get(item.id);
-    if (!dbProduct) return sum;
-    return sum + (dbProduct.price_cents * (item.qty ?? 1));
-  }, 0);
-
-  const { data: orderData, error: orderError } = await admin
-    .from("store_orders")
-    .insert({
-      user_id: userId,
-      amount_subtotal_cents: orderTotalCents,
-      amount_total_cents: orderTotalCents, // assuming no tax/shipping yet
-      status: 'pending',
-      idempotency_key: readIdempotencyKey(req.headers) || undefined
-    })
-    .select("id")
-    .single();
-
-  if (orderError) {
-    return json({ ok: false, error: "failed_to_create_order" }, 500);
-  }
-
-  // Insert order items
-  const orderItemsData = body.items.map(item => {
-    const dbProduct = dbProductMap.get(item.id);
-    if (!dbProduct) return null;
-    return {
-      order_id: orderData.id,
-      product_id: item.id,
-      quantity: item.qty ?? 1,
-      unit_price_cents: dbProduct.price_cents,
-      // size: item.size, // if available in body.items
-      // color: item.color // if available in body.items
-    };
-  }).filter(Boolean);
-
-  if (orderItemsData.length > 0) {
-    const { error: itemsError } = await admin
-      .from("store_order_items")
-      .insert(orderItemsData);
-    if (itemsError) {
-      // Best effort cleanup or log
-      console.error("Failed to insert order items:", itemsError);
-    }
-  }
-
-  params.set("metadata[order_id]", orderData.id);
-
   const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
     method: "POST",
     headers: {
@@ -4767,7 +4718,53 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
     "metadata[purchase_type]": "store_order",
   });
 
-  // price is in PHP whole units — Stripe expects centavos (×100)
+
+  // Create store order
+  const orderTotalCents = body.items.reduce((sum, item) => {
+    const dbProduct = dbProductMap.get(item.id);
+    if (!dbProduct) return sum;
+    return sum + (dbProduct.price_cents * (item.qty ?? 1));
+  }, 0);
+
+  const { data: orderData, error: orderError } = await admin
+    .from("store_orders")
+    .insert({
+      user_id: userId,
+      amount_subtotal_cents: orderTotalCents,
+      amount_total_cents: orderTotalCents, // assuming no tax/shipping yet
+      status: 'pending',
+      idempotency_key: readIdempotencyKey(req.headers) || undefined
+    })
+    .select("id")
+    .single();
+
+  if (orderError) {
+    return json({ ok: false, error: "failed_to_create_order" }, 500);
+  }
+
+  // Insert order items
+  const orderItemsData = body.items.map(item => {
+    const dbProduct = dbProductMap.get(item.id);
+    if (!dbProduct) return null;
+    return {
+      order_id: orderData.id,
+      product_id: item.id,
+      quantity: item.qty ?? 1,
+      unit_price_cents: dbProduct.price_cents,
+    };
+  }).filter(Boolean);
+
+  if (orderItemsData.length > 0) {
+    const { error: itemsError } = await admin
+      .from("store_order_items")
+      .insert(orderItemsData);
+    if (itemsError) {
+      console.error("Failed to insert order items:", itemsError);
+    }
+  }
+
+  params.set("metadata[order_id]", orderData.id);
+
   // Use the price from the database instead of the client payload
   let validItemsCount = 0;
   body.items.forEach((item) => {
