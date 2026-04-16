@@ -2185,11 +2185,12 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   let query = admin
     .from('media_publications')
     .select(
-      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,league_id,render_payload,' +
+      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,sort_order,league_id,render_payload,' +
       'media_assets!inner(id,metadata,created_at),' +
       'leagues:leagues!league_id(id,code,name)'
     )
-    .order('sort_at', { ascending: false })
+    .order('sort_order', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true })
     .limit(limit);
 
   if (statusFilter && isMediaPublicationStatus(statusFilter)) {
@@ -2220,6 +2221,7 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
       publishedAt: raw.published_at == null ? null : String(raw.published_at),
       scheduledAt: raw.scheduled_at == null ? null : String(raw.scheduled_at),
       sortAt: raw.sort_at == null ? null : String(raw.sort_at),
+      sortOrder: raw.sort_order == null ? null : Number(raw.sort_order),
       leagueId: raw.league_id == null ? null : String(raw.league_id),
       leagueCode: leagueRow.code == null ? null : String(leagueRow.code),
       leagueName: leagueRow.name == null ? null : String(leagueRow.name),
@@ -2321,6 +2323,55 @@ async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
   });
 
   return json({ ok: true, data });
+}
+
+async function handleOpsReorderMediaPublications(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const body = (await ctx.req.json().catch(() => null)) as {
+    items?: Array<{ id?: unknown; sortOrder?: unknown }>;
+  } | null;
+  const items = Array.isArray(body?.items) ? body.items : [];
+
+  if (items.length === 0) return json({ ok: false, error: 'empty_items' }, 400);
+  if (items.length > 200) return json({ ok: false, error: 'too_many_items (max 200)' }, 400);
+
+  const normalized = items.map((item) => ({
+    id: typeof item.id === 'string' ? item.id : '',
+    sortOrder: Number(item.sortOrder),
+  }));
+
+  if (normalized.some((item) => item.id.length === 0 || !Number.isInteger(item.sortOrder) || item.sortOrder < 0)) {
+    return json({ ok: false, error: 'invalid_items' }, 400);
+  }
+
+  const uniqueIds = new Set(normalized.map((item) => item.id));
+  if (uniqueIds.size !== normalized.length) {
+    return json({ ok: false, error: 'duplicate_ids' }, 400);
+  }
+
+  const updates = await Promise.all(
+    normalized.map(async (item) => {
+      const { error } = await ctx.admin
+        .from('media_publications')
+        .update({ sort_order: item.sortOrder })
+        .eq('id', item.id);
+      return { id: item.id, error };
+    }),
+  );
+  const failed = updates.find((row) => row.error);
+  if (failed?.error) throw new Error(failed.error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_reorder_media_publications',
+    ref_type: 'media_publications',
+    ref_id: null,
+    payload: { count: normalized.length, ids: normalized.map((item) => item.id) },
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, updated: normalized.length });
 }
 
 
@@ -4696,12 +4747,13 @@ async function fetchPublicMediaRows(
   let query = admin
     .from("media_publications")
     .select(
-      "id,surface,title,subtitle,status,sort_at,render_payload,league_id," +
+      "id,surface,title,subtitle,status,sort_at,sort_order,render_payload,league_id," +
       "media_assets!inner(id,metadata,created_at)," +
       "leagues:leagues!league_id(code)"
     )
     .eq("status", "published")
-    .order("sort_at", { ascending: false })
+    .order("sort_order", { ascending: true, nullsFirst: false })
+    .order("id", { ascending: true })
     .limit(50);
 
   if (leagueId) query = query.eq("league_id", leagueId);
@@ -4736,12 +4788,13 @@ async function handlePublicMedia({ req, admin }: HandlerCtx) {
   let query = admin
     .from("media_publications")
     .select(
-      "id,surface,title,subtitle,status,sort_at,render_payload,league_id," +
+      "id,surface,title,subtitle,status,sort_at,sort_order,render_payload,league_id," +
       "media_assets!inner(id,metadata,created_at)," +
       "leagues:leagues!league_id(code)"
     )
     .eq("status", "published")
-    .order("sort_at", { ascending: false })
+    .order("sort_order", { ascending: true, nullsFirst: false })
+    .order("id", { ascending: true })
     .limit(50);
 
   if (leagueId) query = query.eq("league_id", leagueId);
@@ -6069,6 +6122,7 @@ routes.push(
   { method: "GET",    path: "/ops/list/media",              handler: handleOpsListMediaPublications },
   { method: "PATCH",  path: "/ops/media/publications/:id",  handler: handleOpsPatchMediaPublications },
   { method: "DELETE", path: "/ops/media/publications/:id",  handler: handleOpsDeleteMediaPublications },
+  { method: "POST",   path: "/ops/media/publications/order", handler: handleOpsReorderMediaPublications },
 );
 
 // ── Scores handlers ────────────────────────────────────────────────────────

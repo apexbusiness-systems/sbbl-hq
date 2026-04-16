@@ -2,14 +2,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { parseCsv } from '@/lib/parseCsv';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy, Image as ImageIcon, Save, Trash2 } from 'lucide-react';
+import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy, Image as ImageIcon, Save, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
 import {
   fetchOpsBootstrap, fetchImportHistory, submitCsvImport,
   parseEventImage, parsePotgImage, manualOpsAction,
   ingestPresign, ingestSubmit, ingestApprove, ingestReject,
-  fetchOpsMediaList, patchOpsMediaPublication, deleteOpsMediaPublication,
+  fetchOpsMediaList, patchOpsMediaPublication, deleteOpsMediaPublication, updateOpsMediaPublicationOrder,
   type MediaPublicationStatus, type OpsMediaPublication,
 } from '@/lib/api/ops';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
@@ -144,6 +144,7 @@ const OpsPage = () => {
     leagueId: string;
   }>>({});
   const [mediaEditingId, setMediaEditingId] = useState<string | null>(null);
+  const [mediaOrderIds, setMediaOrderIds] = useState<string[]>([]);
 
   const updateStoreBatchItem = (i: number, field: string, value: string) =>
     setStoreBatchItems(prev => prev.map((item, idx) => idx === i ? { ...item, [field]: value } : item));
@@ -488,6 +489,27 @@ const OpsPage = () => {
     [mediaListQuery.data?.data],
   );
 
+  useEffect(() => {
+    setMediaOrderIds(mediaPublications.map((pub) => pub.id));
+  }, [mediaPublications]);
+
+  const orderedMediaPublications = useMemo<OpsMediaPublication[]>(() => {
+    if (mediaOrderIds.length === 0) return mediaPublications;
+    const byId = new Map(mediaPublications.map((pub) => [pub.id, pub]));
+    const ordered: OpsMediaPublication[] = [];
+    mediaOrderIds.forEach((id) => {
+      const row = byId.get(id);
+      if (row) ordered.push(row);
+      byId.delete(id);
+    });
+    return [...ordered, ...byId.values()];
+  }, [mediaOrderIds, mediaPublications]);
+
+  const hasPendingMediaOrderChanges = useMemo(() => {
+    if (mediaOrderIds.length !== mediaPublications.length) return false;
+    return mediaOrderIds.some((id, index) => id !== mediaPublications[index]?.id);
+  }, [mediaOrderIds, mediaPublications]);
+
   const mediaPatchMutation = useMutation({
     mutationFn: async ({ id, payload }: { id: string; payload: Parameters<typeof patchOpsMediaPublication>[1] }) => {
       ensureOpsAccess();
@@ -511,6 +533,18 @@ const OpsPage = () => {
     mutationFn: async (id: string) => {
       ensureOpsAccess();
       return deleteOpsMediaPublication(id);
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['ops-media-list'] });
+      await queryClient.invalidateQueries({ queryKey: ['public-media'] });
+      await queryClient.invalidateQueries({ queryKey: ['public-media-posters'] });
+    },
+  });
+
+  const mediaOrderMutation = useMutation({
+    mutationFn: async (items: Array<{ id: string; sortOrder: number }>) => {
+      ensureOpsAccess();
+      return updateOpsMediaPublicationOrder(items);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['ops-media-list'] });
@@ -555,6 +589,23 @@ const OpsPage = () => {
       return;
     }
     mediaPatchMutation.mutate({ id: pub.id, payload });
+  };
+
+  const moveMediaRow = (id: string, direction: 'up' | 'down') => {
+    setMediaOrderIds((prev) => {
+      const index = prev.indexOf(id);
+      if (index < 0) return prev;
+      const nextIndex = direction === 'up' ? index - 1 : index + 1;
+      if (nextIndex < 0 || nextIndex >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+      return next;
+    });
+  };
+
+  const saveMediaOrder = () => {
+    if (!hasPendingMediaOrderChanges) return;
+    mediaOrderMutation.mutate(mediaOrderIds.map((id, index) => ({ id, sortOrder: index })));
   };
 
 
@@ -640,6 +691,7 @@ const OpsPage = () => {
         mediaListQuery.error,
         mediaPatchMutation.error,
         mediaDeleteMutation.error,
+        mediaOrderMutation.error,
       ].some((error) => isOpsAuthError(error)),
     [
       bootstrapQuery.error,
@@ -650,6 +702,7 @@ const OpsPage = () => {
       mediaListQuery.error,
       mediaPatchMutation.error,
       mediaDeleteMutation.error,
+      mediaOrderMutation.error,
     ],
   );
 
@@ -1641,8 +1694,17 @@ const OpsPage = () => {
               Reset
             </button>
             <div className="ml-auto text-[10px] text-muted-foreground">
-              {mediaListQuery.isFetching ? 'Refreshing…' : `${mediaPublications.length} rows`}
+              {mediaListQuery.isFetching ? 'Refreshing…' : `${orderedMediaPublications.length} rows`}
             </div>
+            <button
+              type="button"
+              onClick={saveMediaOrder}
+              disabled={!hasPendingMediaOrderChanges || mediaOrderMutation.isPending}
+              className="flex items-center gap-1 text-xs border border-border rounded-sm px-3 py-1.5 hover:bg-secondary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {mediaOrderMutation.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+              Save Order
+            </button>
           </div>
 
           {/* ── Status messaging ────────────────────────────── */}
@@ -1662,7 +1724,7 @@ const OpsPage = () => {
 
           {/* ── Publication rows ────────────────────────────── */}
           <div className="space-y-2">
-            {mediaPublications.map((pub) => {
+            {orderedMediaPublications.map((pub, index) => {
               const isEditing = mediaEditingId === pub.id;
               const draft = mediaEdits[pub.id];
               const patching = mediaPatchMutation.isPending && mediaPatchMutation.variables?.id === pub.id;
@@ -1708,6 +1770,26 @@ const OpsPage = () => {
                       <p className="text-[10px] text-muted-foreground font-mono truncate">id: {pub.id}</p>
                     </div>
                     <div className="flex-shrink-0 flex flex-col items-end gap-2">
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => moveMediaRow(pub.id, 'up')}
+                          disabled={index === 0 || mediaOrderMutation.isPending}
+                          className="p-1 rounded-sm border border-border text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+                          aria-label={`Move ${pub.title || pub.id} up`}
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveMediaRow(pub.id, 'down')}
+                          disabled={index === orderedMediaPublications.length - 1 || mediaOrderMutation.isPending}
+                          className="p-1 rounded-sm border border-border text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed"
+                          aria-label={`Move ${pub.title || pub.id} down`}
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                       {isEditing && draft ? (
                         <>
                           <select
@@ -1811,6 +1893,11 @@ const OpsPage = () => {
           {mediaDeleteMutation.isError && (
             <p className="text-xs text-destructive">
               Archive failed: {(mediaDeleteMutation.error as Error).message}
+            </p>
+          )}
+          {mediaOrderMutation.isError && (
+            <p className="text-xs text-destructive">
+              Save order failed: {(mediaOrderMutation.error as Error).message}
             </p>
           )}
         </div>
