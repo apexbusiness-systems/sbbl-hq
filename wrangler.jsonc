@@ -1,12 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  // ┌─────────────────────────────────────────────────────────────────────────┐
+  // ┌────────────────────────────────────────────────────────┐
   // │ CRITICAL: Worker name MUST be "sbbl-hq-worker" — the custom domains     │
   // │ (sbbl-hq.icu, www.sbbl-hq.icu) and ALL Cloudflare secrets               │
   // │ (SUPABASE_SERVICE_ROLE_KEY, STRIPE_SECRET_KEY, etc.) are bound to       │
   // │ this name. Changing it deploys to a DIFFERENT worker, breaking the      │
   // │ live site. DO NOT rename without migrating domains AND secrets.         │
-  // └─────────────────────────────────────────────────────────────────────────┘
+  // └────────────────────────────────────────────────────────┘
   "name": "sbbl-hq-worker",
   "main": "src/worker/validation-contract-wrapper.ts",
   "compatibility_date": "2026-03-27",
@@ -37,9 +37,8 @@
   "vars": {
     "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
     "SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo",
-    // Sentry DSN for the Worker — fill in after creating sbbl-hq-worker project in Sentry.
-    // Worker Sentry project: Sentry Dashboard → sbbl-hq-worker → Settings → Client Keys (DSN)
-    "SENTRY_DSN": "",
+    // SENTRY_DSN is a secret — set via: npx wrangler secret put SENTRY_DSN --env=""
+    // Do NOT add it here as a var; secrets and vars cannot share the same binding name.
     "ENABLE_STREAM_VALIDATION": "false",
     "VITE_STREAM_URL": ""
   },
@@ -48,8 +47,8 @@
       "name": "sbbl-hq-staging",
       "vars": {
         "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
-        "SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo",
-        "SENTRY_DSN": ""
+        "SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo"
+        // SENTRY_DSN for staging: npx wrangler secret put SENTRY_DSN --env staging
       }
     }
   }

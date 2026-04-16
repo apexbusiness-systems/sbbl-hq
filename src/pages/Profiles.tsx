@@ -59,7 +59,9 @@ const ProfilesPage = () => {
     return counts;
   }, [teams]);
 
-  const detail = selectedPlayer ? players.find((p) => p.id === selectedPlayer) : null;
+  const detail = useMemo(() =>
+    selectedPlayer ? players.find((p) => p.id === selectedPlayer) : null
+  , [selectedPlayer]);
 
   // Both tabs are always shown. 'players' is always first and always visible.
   const views: ProfileView[] = ['players', 'leagues'];

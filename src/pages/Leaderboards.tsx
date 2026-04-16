@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { teams, players as mockPlayers } from '@/data/mock';
+import { teams } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
@@ -51,7 +51,7 @@ const LeaderboardsPage = () => {
     }
   }, [activeLeague, paramLeague, isValidParam]);
 
-  // Fetch live leaderboard data from the worker; fall back to mock if API unavailable
+  // Fetch live leaderboard data from the worker.
   const leaderboardsQuery = useQuery({
     queryKey: ['leaderboards', leagueFilter],
     queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/leaderboards'),
@@ -61,10 +61,8 @@ const LeaderboardsPage = () => {
 
   const players = useMemo<PlayerProfile[]>(() => {
     const apiData = leaderboardsQuery.data?.data;
-    if (Array.isArray(apiData) && apiData.length > 0) {
-      return apiData;
-    }
-    return mockPlayers;
+    if (Array.isArray(apiData)) return apiData;
+    return [];
   }, [leaderboardsQuery.data]);
 
   const filtered = useMemo(() => {
@@ -145,6 +143,23 @@ const LeaderboardsPage = () => {
 
         {/* Leaderboard */}
         <div className="max-w-3xl">
+          {leaderboardsQuery.isLoading && (
+            <div className="py-20 text-center">
+              <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+              <p className="text-sm text-muted-foreground">Loading leaderboards…</p>
+            </div>
+          )}
+
+          {!leaderboardsQuery.isLoading && visible.length === 0 && (
+            <div className="panel p-12 text-center">
+              <Trophy className="w-10 h-10 text-muted-foreground mx-auto mb-4" />
+              <p className="text-lg font-semibold mb-1">No leaders yet</p>
+              <p className="text-sm text-muted-foreground">
+                Stats will appear once games have been played.
+              </p>
+            </div>
+          )}
+
           {/* Top 3 Spotlight */}
           {visible.length >= 3 && (
             <div className="grid grid-cols-3 gap-4 mb-8">

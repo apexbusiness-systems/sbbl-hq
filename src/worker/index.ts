@@ -11,7 +11,7 @@ import {
   toHealthReport,
   type AggregatedHealth,
 } from "@/lib/stream/streamforge";
-import { getStreamDeliveryClass } from "@/lib/stream/url-detector";
+import { getStreamDeliveryClass, canonicalizeStreamSourceUrl } from "@/lib/stream/url-detector";
 import {
   handlePublicConfig as _handlePublicConfig,
   handlePublicHome as _handlePublicHome,
@@ -776,9 +776,9 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   if (!body) return json({ ok: false, error: "invalid_body" }, 400);
   const patch: Record<string, unknown> = {};
   if (typeof body.collectionId === "string") {
-    const trimmedUrl = body.collectionId.trim();
-    // Alerting for unsupported sources is handled client-side; never block save.
-    patch.collection_id = trimmedUrl;
+    const canonical = canonicalizeStreamSourceUrl(body.collectionId);
+    if (canonical.ok === false) return json({ ok: false, error: canonical.error }, 400);
+    patch.collection_id = canonical.url;
   }
   if (typeof body.title === "string") patch.title = body.title.trim();
   if (typeof body.source === "string") patch.source = body.source;
@@ -1466,6 +1466,24 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
       typeof metadata.purchase_type === "string"
         ? metadata.purchase_type
         : null;
+
+
+    if (purchaseType === "store_order" && typeof metadata.order_id === "string") {
+      try {
+        await ctx.admin
+          .from("store_orders")
+          .update({
+            status: "paid",
+            stripe_checkout_session_id: object.id,
+            stripe_payment_intent_id: typeof object.payment_intent === 'string' ? object.payment_intent : null,
+            customer_email: (object.customer_details as Record<string, unknown>)?.email as string | undefined,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", metadata.order_id);
+      } catch (e) {
+        console.error("Failed to update store order", e);
+      }
+    }
 
     // Player registration (subscription): set subscription_ends_at + grant player role
     if (!purchaseType || purchaseType === "player_registration") {
@@ -2539,7 +2557,7 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
               : undefined;
           const name = splitProfileName(profile);
           return {
-            id: p.id,
+            id: String(p.id),
             user_id: p.user_id,
             jersey_number: p.jersey_number,
             position: p.position,
@@ -4552,7 +4570,7 @@ async function handlePayOrder(ctx: HandlerCtx) {
     },
     body: new URLSearchParams({
       "payment_method_types[]": "card",
-      "line_items[0][price_data][currency]": "usd",
+      "line_items[0][price_data][currency]": "cad",
       "line_items[0][price_data][product_data][name]": "SBBL HQ Store Order",
       "line_items[0][price_data][unit_amount]": String(
         ((order as Record<string, unknown>).total_amount as number) || 100,
@@ -4967,6 +4985,7 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
   if (!env.STRIPE_SECRET_KEY)
     return json({ ok: false, error: "payments_not_configured" }, 503);
   const body = (await req.json().catch(() => null)) as {
+    items?: Array<{ id: string; name: string; price: number; qty?: number }>;
     successUrl?: string;
     cancelUrl?: string;
   } | null;

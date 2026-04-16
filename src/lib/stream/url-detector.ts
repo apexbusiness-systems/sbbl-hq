@@ -8,8 +8,11 @@
  *
  * Supports 13 stream source types. Advisory system provides level-coded
  * feedback (ok / warn / info) without ever hard-blocking a URL.
+ *
+ * FIX #2: getStreamDeliveryClass() now correctly classifies:
+ *   - All *.sbbl-hq.icu subdomains (not just stream.sbbl-hq.icu)
+ *   - Any URL with a /whep/ path segment
  */
-
 import { isYoutubeUrl, toPlayableYoutubeEmbedUrl } from '@/lib/stream/youtube-url';
 
 export type StreamUrlType =
@@ -36,10 +39,24 @@ export interface StreamAdvisory {
   message: string;
 }
 
+/**
+ * FIX #2 — getStreamDeliveryClass
+ *
+ * Classify a URL into the delivery class the SBBL HQ player should use.
+ *
+ * Previous bug: only `stream.sbbl-hq.icu` was matched, so
+ * `live.sbbl-hq.icu/whep/stream` fell through to 'unsupported',
+ * causing routing logic to reject or misroute valid WHEP endpoints.
+ *
+ * Fix:
+ *   1. Match ALL *.sbbl-hq.icu subdomains (not just the `stream.` subdomain).
+ *   2. Match any URL whose path contains a standalone /whep/ segment.
+ */
 export function getStreamDeliveryClass(url: string): StreamDeliveryClass {
   const normalized = url.trim().toLowerCase();
   if (!normalized) return 'unsupported';
 
+  // Embed platforms — served via iframe/player SDK.
   if (
     normalized.includes('youtube.com') ||
     normalized.includes('youtu.be') ||
@@ -50,11 +67,15 @@ export function getStreamDeliveryClass(url: string): StreamDeliveryClass {
     return 'embed';
   }
 
+  // Proxy/direct playback — HLS, DASH, MP4, or SBBL infrastructure.
   if (
     normalized.endsWith('.m3u8') ||
     normalized.endsWith('.mp4') ||
     normalized.endsWith('.mpd') ||
-    normalized.includes('stream.sbbl-hq.icu')
+    // FIX #2a — catch ALL sbbl-hq.icu subdomains (was: only stream.sbbl-hq.icu)
+    normalized.includes('sbbl-hq.icu') ||
+    // FIX #2b — catch any URL with a standalone /whep/ path segment
+    /(?:^|\/)whep(?:\/|$)/i.test(url)
   ) {
     return 'proxy';
   }
@@ -76,12 +97,12 @@ export function detectStreamUrlType(url: string): StreamUrlType {
   // WHEP — WebRTC-HTTP Egress Protocol
   // Match a /whep segment as a standalone path component (not a substring of
   // a longer segment), or an explicit ?whep= / &whep= query parameter.
-  // Examples that match:  /whep/live  /live/whep  /api/whep
+  // Examples that match: /whep/live  /live/whep  /api/whep
   // Examples that DON'T: /badwhep/stream  /whepfoo/bar
   if (
-    /(?:^|\/)whep(?:\/|$)/i.test(url) ||    // path segment: /whep/ or /whep$
-    /[?&]whep[=&]/i.test(url) ||             // query param: ?whep= or &whep=
-    /[?&]whep$/i.test(url)                   // query param at end: ?whep
+    /(?:^|\/)whep(?:\/|$)/i.test(url) ||   // path segment: /whep/ or /whep$
+    /[?&]whep[=&]/i.test(url) ||            // query param: ?whep= or &whep=
+    /[?&]whep$/i.test(url)                  // query param at end: ?whep
   ) {
     return 'whep';
   }
@@ -99,19 +120,12 @@ export function detectStreamUrlType(url: string): StreamUrlType {
 
   // Platform detection — order by expected usage frequency
   if (isYoutubeUrl(url)) return 'youtube';
-
   if (/(?:^|[./])twitch\.tv(?:\/|$)/i.test(url)) return 'twitch';
-
   if (/(?:^|[./])vimeo\.com(?:\/|$)/i.test(url)) return 'vimeo';
-
   if (/(?:^|[./])(?:facebook\.com|fb\.me|fbcdn\.net)(?:\/|$)/i.test(url)) return 'facebook';
-
   if (/(?:^|[./])kick\.com(?:\/|$)/i.test(url)) return 'kick';
-
   if (/(?:^|[./])rumble\.com(?:\/|$)/i.test(url)) return 'rumble';
-
   if (/(?:^|[./])(?:x\.com|twitter\.com)\/i\/(?:broadcasts|spaces)(?:\/|$)/i.test(url)) return 'x-spaces';
-
   if (/(?:^|[./])instagram\.com\/(?:live|.*\/live)(?:\/|$)/i.test(url)) return 'instagram';
 
   return 'unknown';
@@ -131,7 +145,6 @@ function extractTwitchChannel(url: string): string | null {
   try {
     const parsed = new URL(url.trim());
     const parts = parsed.pathname.split('/').filter(Boolean);
-    // Skip known non-channel paths
     if (parts.length === 0) return null;
     const first = parts[0].toLowerCase();
     if (['directory', 'videos', 'p', 'settings', 'search'].includes(first)) return null;
@@ -149,7 +162,6 @@ function extractVimeoId(url: string): string | null {
   try {
     const parsed = new URL(url.trim());
     const parts = parsed.pathname.split('/').filter(Boolean);
-    // Vimeo IDs are numeric
     for (const part of parts) {
       if (/^\d{5,}$/.test(part)) return part;
     }
@@ -190,7 +202,10 @@ export function toPlayableUrl(raw: string): PlayableUrl {
     const channel = extractTwitchChannel(trimmed);
     if (channel) {
       const parent = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
-      return { url: `https://player.twitch.tv/?channel=${channel}&parent=${parent}`, type: 'twitch' };
+      return {
+        url: `https://player.twitch.tv/?channel=${channel}&parent=${parent}`,
+        type: 'twitch',
+      };
     }
     return { url: trimmed, type: 'twitch' };
   }
@@ -214,22 +229,93 @@ export function toPlayableUrl(raw: string): PlayableUrl {
   return { url: trimmed, type };
 }
 
+export type CanonicalizeResult =
+  | { ok: true; url: string; wasNormalized: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Canonicalize a stream source URL for persistence.
+ *
+ * Platform embed URLs (YouTube /embed/, Twitch player, Vimeo player) are
+ * converted to their canonical watch/channel forms so that toPlayableUrl()
+ * can later re-embed them correctly without double-embedding. Facebook plugin
+ * embeds are rejected outright — there is no reliable reverse mapping.
+ *
+ * All other valid URLs pass through unchanged (wasNormalized: false).
+ */
+export function canonicalizeStreamSourceUrl(raw: string): CanonicalizeResult {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, error: 'Stream URL is required.' };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { ok: false, error: 'Invalid URL.' };
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const path = parsed.pathname.toLowerCase();
+
+  // YouTube /embed/ → canonical watch URL (reuse existing validator)
+  if (
+    (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com')) &&
+    path.startsWith('/embed/')
+  ) {
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const videoId = parts[1];
+    if (videoId && /^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
+      return { ok: true, url: `https://www.youtube.com/watch?v=${videoId}`, wasNormalized: true };
+    }
+    return { ok: false, error: 'YouTube embed URL has invalid video ID.' };
+  }
+
+  // Twitch player embed → canonical channel URL
+  if (host === 'player.twitch.tv') {
+    const channel = parsed.searchParams.get('channel');
+    if (channel) {
+      return { ok: true, url: `https://www.twitch.tv/${channel}`, wasNormalized: true };
+    }
+    return { ok: false, error: 'Twitch player URL missing channel parameter.' };
+  }
+
+  // Vimeo player embed → canonical vimeo.com URL
+  if (host === 'player.vimeo.com' && path.startsWith('/video/')) {
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const videoId = parts[1];
+    if (videoId && /^\d{5,}$/.test(videoId)) {
+      return { ok: true, url: `https://vimeo.com/${videoId}`, wasNormalized: true };
+    }
+    return { ok: false, error: 'Vimeo player URL has invalid video ID.' };
+  }
+
+  // Facebook plugin embeds — no reliable reverse mapping, reject explicitly
+  if (host.endsWith('facebook.com') && path.includes('/plugins/')) {
+    return {
+      ok: false,
+      error: 'Facebook plugin embed URLs cannot be saved. Use the original video URL.',
+    };
+  }
+
+  return { ok: true, url: trimmed, wasNormalized: false };
+}
+
 /** Human-readable label for each stream URL type */
 export const STREAM_TYPE_LABELS: Record<StreamUrlType, string> = {
-  youtube:    'YouTube',
-  hls:        'HLS',
-  dash:       'DASH',
-  whep:       'WHEP',
-  mp4:        'MP4',
-  twitch:     'Twitch',
-  vimeo:      'Vimeo',
-  facebook:   'Facebook',
-  kick:       'Kick',
-  rumble:     'Rumble',
+  youtube: 'YouTube',
+  hls: 'HLS',
+  dash: 'DASH',
+  whep: 'WHEP',
+  mp4: 'MP4',
+  twitch: 'Twitch',
+  vimeo: 'Vimeo',
+  facebook: 'Facebook',
+  kick: 'Kick',
+  rumble: 'Rumble',
   'x-spaces': 'X Spaces',
-  instagram:  'IG Live',
-  rtmp:       'RTMP',
-  unknown:    'Stream',
+  instagram: 'IG Live',
+  rtmp: 'RTMP',
+  unknown: 'Stream',
 };
 
 /**

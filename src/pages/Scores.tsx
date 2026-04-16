@@ -7,7 +7,6 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Trophy, Users, Star, Calendar } from 'lucide-react';
 import { fetchScores } from '@/lib/api/scores';
-import { games as mockGames } from '@/data/mock';
 
 // ── Category config ────────────────────────────────────────────────────────
 const CATEGORIES: Array<{ id: ScoreCategory | 'all'; label: string; icon: typeof Trophy }> = [
@@ -171,34 +170,11 @@ const ScoresPage = () => {
     staleTime: 60_000,
   });
 
-  const games = useMemo(() => {
+  const games = useMemo<ScoreEntry[]>(() => {
     const apiGames = scoresQuery.data?.games;
-    if (Array.isArray(apiGames) && apiGames.length > 0) {
-      return apiGames;
-    }
-    // Fallback to mock data when API returns empty.
-    // Keep fallback filters aligned with active UI filters to avoid
-    // showing unrelated categories (e.g. league cards under 1v1).
-    const fallback = mockGames.map((g): ScoreEntry => ({
-      id: g.id,
-      category: 'league',
-      leagueId: g.leagueId,
-      homeLabel: g.homeTeam.name,
-      awayLabel: g.awayTeam.name,
-      homeScore: g.score?.home,
-      awayScore: g.score?.away,
-      status: g.status,
-      gameDate: g.date,
-      notes: `${g.venue} — ${g.court}`,
-    }));
-    return fallback.filter((entry) => {
-      if (category !== 'all' && entry.category !== category) return false;
-      if (leagueFilter !== 'all' && entry.leagueId !== leagueFilter) return false;
-      if (statusFilter === 'recent' && entry.status !== 'final') return false;
-      if (statusFilter === 'upcoming' && entry.status !== 'upcoming') return false;
-      return true;
-    });
-  }, [scoresQuery.data?.games, category, leagueFilter, statusFilter]);
+    if (Array.isArray(apiGames)) return apiGames;
+    return [];
+  }, [scoresQuery.data?.games]);
 
   // Group by category when viewing "All"
   const grouped = useMemo(() => {

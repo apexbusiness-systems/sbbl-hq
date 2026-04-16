@@ -81,7 +81,9 @@ const StorePage = () => {
     return products.filter(p => p.category === category && !p.is_custom);
   }, [products, category]);
 
-  const detail = selectedProduct ? products.find(p => p.id === selectedProduct) : null;
+  const detail = useMemo(() =>
+    selectedProduct ? products.find(p => p.id === selectedProduct) : null
+  , [selectedProduct, products]);
 
   const handleSelectProduct = useCallback((id: string, colors?: string[]) => {
     setSelectedProduct(id);
@@ -141,6 +143,16 @@ const StorePage = () => {
 
         {/* PIPA/PIPEDA Consent Banner will go here (Day 3) */}
 
+        {productsQuery.isLoading ? (
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          </div>
+        ) : productsQuery.isError ? (
+          <div className="text-center text-red-500 py-12">Failed to load store products.</div>
+        ) : products.length === 0 ? (
+          <div className="text-center text-muted-foreground py-12">No products found.</div>
+        ) : (
+          <>
         {/* Categories */}
         <div className="flex gap-2 mb-8 overflow-x-auto scrollbar-hidden pb-2">
           {(['all', 'custom', 'jerseys', 'hoodies', 'tees', 'caps', 'accessories', 'rewards'] as Category[]).map(c => (
@@ -230,6 +242,8 @@ const StorePage = () => {
             )}
           </div>
         </div>
+          </>
+        )}
       </div>
 
       {/* Quote Request Dialog */}
