@@ -776,9 +776,24 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   if (!body) return json({ ok: false, error: "invalid_body" }, 400);
   const patch: Record<string, unknown> = {};
   if (typeof body.collectionId === "string") {
-    const canonical = canonicalizeStreamSourceUrl(body.collectionId);
-    if (canonical.ok === false) return json({ ok: false, error: canonical.error }, 400);
-    patch.collection_id = canonical.url;
+    const trimmedUrl = body.collectionId.trim();
+    let safeUrl = trimmedUrl;
+    if (safeUrl !== "") {
+      try {
+        const parsedUrl = new URL(safeUrl);
+        if (!["https:", "http:", "rtmp:", "rtmps:"].includes(parsedUrl.protocol)) {
+          if (["javascript:", "data:", "file:", "vbscript:"].includes(parsedUrl.protocol)) {
+            safeUrl = "";
+          }
+        }
+      } catch {
+        try {
+          const fallbackUrl = new URL("https://" + safeUrl);
+          safeUrl = fallbackUrl.href;
+        } catch {}
+      }
+    }
+    patch.collection_id = safeUrl;
   }
   if (typeof body.title === "string") patch.title = body.title.trim();
   if (typeof body.source === "string") patch.source = body.source;
@@ -4152,6 +4167,24 @@ async function handleGoLive(ctx: HandlerCtx) {
     return json({ ok: false, error: "is_live_required" }, 400);
   }
 
+  let safeUrl = typeof body.collectionId === "string" ? body.collectionId.trim() : "";
+  if (safeUrl !== "") {
+    try {
+      const parsedUrl = new URL(safeUrl);
+      if (!["https:", "http:", "rtmp:", "rtmps:"].includes(parsedUrl.protocol)) {
+        if (["javascript:", "data:", "file:", "vbscript:"].includes(parsedUrl.protocol)) {
+          safeUrl = "";
+        }
+      }
+    } catch {
+      try {
+        const fallbackUrl = new URL("https://" + safeUrl);
+        safeUrl = fallbackUrl.href;
+      } catch {
+        // Unparseable, leave verbatim in permissive mode
+      }
+    }
+  }
   const nowIso = new Date().toISOString();
   const patch: Record<string, unknown> = {
     id: true,
@@ -4160,7 +4193,7 @@ async function handleGoLive(ctx: HandlerCtx) {
     updated_at: nowIso,
   };
   if (typeof body.collectionId === "string") {
-    patch.collection_id = body.collectionId.trim();
+    patch.collection_id = safeUrl;
   }
   if (typeof body.title === "string" && body.title.trim()) {
     patch.title = body.title.trim();
