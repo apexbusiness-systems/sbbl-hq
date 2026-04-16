@@ -1,4 +1,9 @@
+<!-- Version: v1.0.0 | Date: 2026-04-16 | Status: Current -->
 # Media Publications `sort_order` Migration Execution — 2026-04-16
+
+**Version:** v1.0.0
+**Migration Date (UTC):** 2026-04-16
+**Owner:** APEX Business Systems Ltd. — Engineering Lead
 
 ## Scope
 Applied the owner-ordering schema change directly to hosted Supabase project `ezanilxygnpucwkwpsoc`.

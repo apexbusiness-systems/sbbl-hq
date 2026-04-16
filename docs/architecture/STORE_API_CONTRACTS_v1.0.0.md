@@ -1,6 +1,9 @@
+<!-- Version: v1.0.0 | Date: 2026-04-16 | Status: Current -->
 # Store API Contracts
-Date: 2026-04-16
-Version: v1.0-store-canonicalization-hardening
+
+**Version:** v1.0.0 (store-canonicalization-hardening)
+**Last Updated:** 2026-04-16
+**Owner:** APEX Business Systems Ltd. — Engineering Lead
 
 ## `GET /api/public/products`
 Returns a catalog of active products from `store_products`. Heavily cached on Cloudflare.
