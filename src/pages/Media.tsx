@@ -89,7 +89,10 @@ const MediaPage = () => {
     });
   }, [allMedia, posterProjection, leagueFilter, typeFilter]);
 
-  const shareAsset = shareModal ? [...allMedia, ...posterProjection].find(m => m.id === shareModal) : null;
+  const shareAsset = useMemo(() =>
+    shareModal ? [...allMedia, ...posterProjection].find(m => m.id === shareModal) : null
+  , [shareModal, allMedia, posterProjection]);
+
   const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
 
   const resolveAspectRatio = (id: string, mediaType: MediaAsset['type']) => {
