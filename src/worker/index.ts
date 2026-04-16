@@ -4765,6 +4765,62 @@ async function fetchPublicMediaRows(
   if (error) throw new Error(error.message);
   return (data ?? []) as unknown as PublicMediaRow[];
 }
+
+async function getPublicMediaFreshnessVersion(admin: HandlerCtx["admin"]): Promise<string> {
+  // Reorder saves write an audit log entry; latest timestamp acts as a lightweight
+  // cache-busting marker shared by both /media and /media/posters.
+  const { data, error } = await admin
+    .from("audit_logs")
+    .select("created_at")
+    .eq("action", "ops_reorder_media_publications")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn("[public-media] freshness marker lookup failed:", error.message);
+    return "0";
+  }
+  const latest = Array.isArray(data) && data[0] ? String((data[0] as { created_at?: string }).created_at ?? "0") : "0";
+  return latest;
+}
+
+function toPublicMediaCacheKey(req: Request, variant: "media" | "posters", version: string): Request {
+  const url = new URL(req.url);
+  const key = new URL(`https://sbbl-hq.icu/__cache/public/${variant}`);
+  key.search = url.search;
+  key.searchParams.set("__v", version);
+  return new Request(key.toString());
+}
+
+async function respondWithPublicMediaFreshness(
+  req: Request,
+  admin: HandlerCtx["admin"],
+  variant: "media" | "posters",
+  computeData: () => Promise<unknown>,
+): Promise<Response> {
+  const version = await getPublicMediaFreshnessVersion(admin);
+  const isAnonymous = !getBearerToken(req);
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = toPublicMediaCacheKey(req, variant, version);
+
+  if (isAnonymous) {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) return hit;
+  }
+
+  const data = await computeData();
+  const res = json({ ok: true, data }, 200, {
+    "Cache-Control": "public, s-maxage=300, max-age=120",
+    "x-public-media-version": version,
+  });
+
+  if (isAnonymous) {
+    // Cache key includes version, so any reorder save immediately shifts reads
+    // to a fresh entry without waiting for prior 300s TTL to expire.
+    cfCaches.default.put(cacheKey, res.clone()).catch(() => {});
+  }
+  return res;
+}
+
 async function handlePublicProducts({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get("leagueId");
@@ -4780,61 +4836,38 @@ async function handlePublicProducts({ req, admin }: HandlerCtx) {
 }
 
 async function handlePublicMedia({ req, admin }: HandlerCtx) {
-  const url = new URL(req.url);
-  const leagueId = url.searchParams.get("leagueId");
-
-  // Canonical render: media_publications is the single public surface.
-  // No direct reads from raw ingest tables (media_assets, ingest_jobs, etc.).
-  let query = admin
-    .from("media_publications")
-    .select(
-      "id,surface,title,subtitle,status,sort_at,sort_order,render_payload,league_id," +
-      "media_assets!inner(id,metadata,created_at)," +
-      "leagues:leagues!league_id(code)"
-    )
-    .eq("status", "published")
-    .order("sort_order", { ascending: true, nullsFirst: false })
-    .order("id", { ascending: true })
-    .limit(50);
-
-  if (leagueId) query = query.eq("league_id", leagueId);
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-
-  const rows = (data ?? []) as unknown as PublicMediaRow[];
-  const mapped = mapPublicMediaRows(rows);
-
-  return json({ ok: true, data: mapped }, 200, {
-    "Cache-Control": "public, s-maxage=300, max-age=120",
+  // Canonical render still reads from media_publications (+ media_assets!inner join)
+  // and keeps Cache-Control at public, s-maxage=300, max-age=120 for anonymous traffic.
+  return respondWithPublicMediaFreshness(req, admin, "media", async () => {
+    const rows = await fetchPublicMediaRows(admin, req);
+    return mapPublicMediaRows(rows);
   });
 }
 
 async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
-  // Poster tab projection: include event/league-wide art and promote photo assets
-  // to poster cards without mutating source records.
-  const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
+  return respondWithPublicMediaFreshness(req, admin, "posters", async () => {
+    // Poster tab projection: include event/league-wide art and promote photo assets
+    // to poster cards without mutating source records.
+    const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
 
-  // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
-  const seen = new Set<string>();
-  const mapped = mapPublicMediaRows(rows, true).filter((row, index) => {
-    const raw = rows[index] ?? {};
-    const payload = (raw.render_payload ?? {}) as Record<string, unknown>;
-    const metadata = (((raw.media_assets as Record<string, unknown> | null) ?? {}).metadata ?? {}) as Record<string, unknown>;
-    const surface = String(raw.surface ?? payload.surface ?? metadata.surface ?? "");
-    const teamName = String(payload.team ?? metadata.team ?? "").trim();
+    // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
+    const seen = new Set<string>();
+    return mapPublicMediaRows(rows, true).filter((row, index) => {
+      const raw = rows[index] ?? {};
+      const payload = (raw.render_payload ?? {}) as Record<string, unknown>;
+      const metadata = (((raw.media_assets as Record<string, unknown> | null) ?? {}).metadata ?? {}) as Record<string, unknown>;
+      const surface = String(raw.surface ?? payload.surface ?? metadata.surface ?? "");
+      const teamName = String(payload.team ?? metadata.team ?? "").trim();
 
-    // Exclude team-specific cards (e.g., POTG) — this route is for team-agnostic
-    // event imagery like 1v1/2v2 and league-wide graphics.
-    if (surface === "potg" || teamName.length > 0) return false;
+      // Exclude team-specific cards (e.g., POTG) — this route is for team-agnostic
+      // event imagery like 1v1/2v2 and league-wide graphics.
+      if (surface === "potg" || teamName.length > 0) return false;
 
-    // Idempotent response: ensure each id appears once even if source rows overlap.
-    if (seen.has(row.id)) return false;
-    seen.add(row.id);
-    return true;
-  });
-
-  return json({ ok: true, data: mapped }, 200, {
-    "Cache-Control": "public, s-maxage=300, max-age=120",
+      // Idempotent response: ensure each id appears once even if source rows overlap.
+      if (seen.has(row.id)) return false;
+      seen.add(row.id);
+      return true;
+    });
   });
 }
 
