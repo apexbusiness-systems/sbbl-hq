@@ -1,6 +1,9 @@
-# Store Architecture v1.0
-Date: 2026-04-16
-Version: v1.0-store-canonicalization-hardening
+<!-- Version: v1.0.0 | Date: 2026-04-16 | Status: Current -->
+# Store Architecture
+
+**Version:** v1.0.0 (store-canonicalization-hardening)
+**Last Updated:** 2026-04-16
+**Owner:** APEX Business Systems Ltd. — Engineering Lead
 
 ## Overview
 The Store module is designed as an edge-native commerce engine built on Cloudflare Workers and Stripe, backed by Supabase.

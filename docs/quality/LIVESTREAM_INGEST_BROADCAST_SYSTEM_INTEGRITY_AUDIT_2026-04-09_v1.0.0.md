@@ -1,4 +1,9 @@
+<!-- Version: v1.0.0 | Date: 2026-04-09 | Status: Current -->
 # Livestream + Link Ingest + Broadcast System Integrity Audit — 2026-04-09 (Rev B)
+
+**Version:** v1.0.0
+**Audit Date (UTC):** 2026-04-09
+**Owner:** APEX Business Systems Ltd. — Engineering Lead
 
 ## Scope
 
@@ -26,7 +31,7 @@ Primary artifacts reviewed:
 - `supabase/migrations/20260406000100_heartbeat_batch_upsert_function.sql`
 - `supabase/migrations/20260407200000_ingest_pipeline.sql`
 - `supabase/migrations/20260407103137_media_publications.sql`
-- `docs/features/STREAM_GATING_v1.4.0.md`
+- `docs/features/STREAM_GATING_v1.5.0.md`
 - `docs/features/PIPELINE_MAP_v1.3.0.md`
 
 ## System map (20K-oriented)

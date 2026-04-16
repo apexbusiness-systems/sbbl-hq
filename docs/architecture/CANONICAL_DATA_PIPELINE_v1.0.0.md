@@ -1,6 +1,9 @@
-# CANONICAL DATA PIPELINE - SBBL-HQ
+<!-- Version: v1.0.0 | Date: 2026-04-15 | Status: Current -->
+# CANONICAL DATA PIPELINE — SBBL-HQ
 
-**Last Updated:** April 15, 2026  
+**Version:** v1.0.0
+**Last Updated:** 2026-04-15
+**Owner:** JR (full and absolute control)  
 **App Name:** SBBL-HQ (Sierra Boy Bravo Lima - Headquarters)  
 **Owner:** JR (full and absolute control)  
 **Purpose:** This is the single, authoritative, never-to-be-ignored map of every data upload → ingest → parse → store → render path in SBBL-HQ.  

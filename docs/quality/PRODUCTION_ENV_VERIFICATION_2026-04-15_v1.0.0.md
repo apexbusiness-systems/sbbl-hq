@@ -1,5 +1,10 @@
-<!-- Date: 2026-04-15 | Owner: APEX Codex | Scope: livestream production release evidence -->
+<!-- Version: v1.0.0 | Date: 2026-04-15 | Status: Current -->
 # Production Environment Verification — Livestream/Broadcast (2026-04-15)
+
+**Version:** v1.0.0
+**Verification Date (UTC):** 2026-04-15
+**Owner:** APEX Codex
+**Scope:** livestream production release evidence
 
 ## Verification intent
 

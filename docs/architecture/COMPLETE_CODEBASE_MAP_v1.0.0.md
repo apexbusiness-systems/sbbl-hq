@@ -1,5 +1,11 @@
-SBBL HQ — Complete Codebase Map
-Overview
+<!-- Version: v1.0.0 | Date: 2026-04-16 | Status: Current -->
+# SBBL HQ — Complete Codebase Map
+
+**Version:** v1.0.0
+**Last Updated:** 2026-04-16
+**Owner:** APEX Business Systems Ltd. — Engineering Lead
+
+## Overview
 SBBL HQ is a three-league basketball super app built by APEX Business Systems Ltd. (Edmonton, Alberta). It serves as a unified platform for the WBL (Weekend Basketball League), TGIF (Thank God It's Friday Basketball League), and SBBL (Sunday's Best Basketball League) — covering live game streaming, schedules, stats, scores, media, a merch store, and full admin operations.
 
 Live at: sbbl-hq.icu
