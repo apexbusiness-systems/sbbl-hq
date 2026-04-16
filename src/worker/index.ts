@@ -11,7 +11,7 @@ import {
   toHealthReport,
   type AggregatedHealth,
 } from "@/lib/stream/streamforge";
-import { getStreamDeliveryClass } from "@/lib/stream/url-detector";
+import { getStreamDeliveryClass, canonicalizeStreamSourceUrl } from "@/lib/stream/url-detector";
 import {
   handlePublicConfig as _handlePublicConfig,
   handlePublicHome as _handlePublicHome,
@@ -776,9 +776,9 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   if (!body) return json({ ok: false, error: "invalid_body" }, 400);
   const patch: Record<string, unknown> = {};
   if (typeof body.collectionId === "string") {
-    const trimmedUrl = body.collectionId.trim();
-    // Alerting for unsupported sources is handled client-side; never block save.
-    patch.collection_id = trimmedUrl;
+    const result = canonicalizeStreamSourceUrl(body.collectionId);
+    if (!result.ok) return json({ ok: false, error: result.error }, 400);
+    patch.collection_id = result.url;
   }
   if (typeof body.title === "string") patch.title = body.title.trim();
   if (typeof body.source === "string") patch.source = body.source;

@@ -7,9 +7,9 @@
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { WebRTCPlayer } from '@eyevinn/webrtc-player';
-import { Loader2, WifiOff, RefreshCw } from 'lucide-react';
+import { Loader2, WifiOff, RefreshCw, ShieldAlert } from 'lucide-react';
 
-export type WhepPlayerStatus = 'idle' | 'connecting' | 'live' | 'offline' | 'error';
+export type WhepPlayerStatus = 'idle' | 'connecting' | 'live' | 'offline' | 'error' | 'cors-blocked';
 
 interface WhepPlayerProps {
   /** Full WHEP endpoint URL */
@@ -20,6 +20,30 @@ interface WhepPlayerProps {
   maxRetries?: number;
   /** Called when status changes */
   onStatusChange?: (status: WhepPlayerStatus) => void;
+}
+
+const CORS_PROBE_TIMEOUT_MS = 5_000;
+
+/** Lightweight CORS probe — fail fast before WebRTC negotiation. */
+export async function probeWhepCors(url: string): Promise<{ ok: boolean; detail?: string }> {
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), CORS_PROBE_TIMEOUT_MS);
+    const res = await fetch(url, {
+      method: 'OPTIONS',
+      mode: 'cors',
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    // Any HTTP response (including 405) means CORS headers are present
+    if (res.ok || res.status === 204 || res.status === 405) return { ok: true };
+    return { ok: true, detail: `probe status ${res.status}` };
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      return { ok: false, detail: 'WHEP endpoint timed out — check network or CORS config.' };
+    }
+    return { ok: false, detail: 'WHEP endpoint unreachable or CORS not configured.' };
+  }
 }
 
 export function WhepPlayer({
@@ -72,13 +96,10 @@ export function WhepPlayer({
 
   const connect = useCallback(async () => {
     if (!videoRef.current || !whepUrl) return;
-    // Clear any pending retry timer before starting a fresh connection
     if (retryTimer.current) {
       clearTimeout(retryTimer.current);
       retryTimer.current = null;
     }
-    // Tear down previous player instance without clearing the retry timer
-    // (destroy() would also clear it, but we already did above)
     if (playerRef.current) {
       try { playerRef.current.destroy(); } catch { /* noop */ }
       playerRef.current = null;
@@ -87,6 +108,14 @@ export function WhepPlayer({
       videoRef.current.srcObject = null;
     }
     updateStatus('connecting');
+
+    // CORS probe — fail fast before expensive WebRTC negotiation
+    const probe = await probeWhepCors(whepUrl);
+    if (!probe.ok) {
+      console.warn('[WhepPlayer] CORS probe failed:', probe.detail);
+      updateStatus('cors-blocked');
+      return;
+    }
 
     try {
       const player = new WebRTCPlayer({
@@ -98,13 +127,7 @@ export function WhepPlayer({
 
       player.on('no-media', () => {
         updateStatus('offline');
-        if (retryIntervalMs <= 0) return;
-        if (maxRetries > 0 && retryCount.current >= maxRetries) {
-          updateStatus('offline');
-          return;
-        }
-        retryCount.current += 1;
-        retryTimer.current = setTimeout(() => void connect(), retryIntervalMs);
+        scheduleRetry();
       });
 
       player.on('media-recovered', () => {
@@ -113,21 +136,34 @@ export function WhepPlayer({
       });
 
       await player.load(new URL(whepUrl));
+
+      // ICE connection state monitoring via underlying RTCPeerConnection
+      const pc = (player as unknown as { peer?: RTCPeerConnection }).peer;
+      if (pc) {
+        pc.addEventListener('iceconnectionstatechange', () => {
+          const state = pc.iceConnectionState;
+          if (state === 'failed') {
+            console.warn('[WhepPlayer] ICE failed — scheduling retry');
+            updateStatus('error');
+            scheduleRetry();
+          } else if (state === 'disconnected') {
+            updateStatus('offline');
+            scheduleRetry();
+          } else if (state === 'connected' || state === 'completed') {
+            retryCount.current = 0;
+            updateStatus('live');
+          }
+        });
+      }
+
       retryCount.current = 0;
       updateStatus('live');
     } catch (err) {
       console.error('[WhepPlayer] connection failed:', err);
       updateStatus('error');
-      if (retryIntervalMs <= 0) return;
-      if (maxRetries > 0 && retryCount.current >= maxRetries) {
-        updateStatus('offline');
-        return;
-      }
-      retryCount.current += 1;
-      retryTimer.current = setTimeout(() => void connect(), retryIntervalMs);
+      scheduleRetry();
     }
-  // connect references itself via the retry timers; deps are the external inputs only
-  }, [whepUrl, updateStatus, retryIntervalMs, maxRetries]);
+  }, [whepUrl, updateStatus, scheduleRetry]);
 
   useEffect(() => {
     reconnectRef.current = () => {
@@ -161,6 +197,27 @@ export function WhepPlayer({
         </div>
       )}
 
+      {/* CORS-blocked overlay */}
+      {status === 'cors-blocked' && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/90 gap-4">
+          <ShieldAlert className="w-10 h-10 text-red-500" />
+          <div className="text-center max-w-xs">
+            <p className="text-base font-semibold text-zinc-300">WHEP Endpoint Blocked</p>
+            <p className="text-xs text-zinc-500 mt-1">
+              The stream server is unreachable or missing CORS headers. Contact the broadcast operator.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { retryCount.current = 0; void connect(); }}
+            className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black text-sm font-bold rounded-lg transition-colors"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Offline / Error overlay */}
       {(status === 'offline' || status === 'error') && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950/90 gap-4">
@@ -175,13 +232,12 @@ export function WhepPlayer({
           </div>
           <button
             type="button"
-            onClick={() => { retryCount.current = 0; void connect(); /* manual retry: reset counter before connect */ }}
+            onClick={() => { retryCount.current = 0; void connect(); }}
             className="flex items-center gap-2 px-4 py-2 bg-amber-500 hover:bg-amber-400 text-black text-sm font-bold rounded-lg transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
             Retry
           </button>
-          {/* retryCount reset is handled inside connect() on manual trigger */}
         </div>
       )}
 
