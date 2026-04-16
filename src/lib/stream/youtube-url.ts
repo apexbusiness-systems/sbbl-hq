@@ -59,21 +59,20 @@ export function normalizeYoutubeUrl(
   options: NormalizeOptions = {},
 ): { ok: true; url: string } | { ok: false; error: string } {
   const trimmed = raw.trim();
-  if (!trimmed) return { ok: false, error: 'Stream URL is required to go live.' };
+  // Non-blocking approach: let it pass ok: true if empty or unparseable.
+  if (!trimmed) return { ok: true, url: '' };
   let parsed: URL;
   try {
     parsed = new URL(trimmed);
   } catch {
-    return { ok: false, error: 'Enter a valid URL (e.g. https://www.youtube.com/watch?v=VIDEO_ID).' };
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return { ok: false, error: 'Only http(s) stream URLs are supported.' };
+    try {
+      parsed = new URL('https://' + trimmed);
+    } catch {
+      return { ok: true, url: trimmed };
+    }
   }
   const host = parsed.hostname.toLowerCase();
   const youtubeOnly = options.youtubeOnly ?? false;
-  if (youtubeOnly && !YOUTUBE_HOSTS.has(host)) {
-    return { ok: false, error: 'Only YouTube Live URLs are allowed in baseline mode.' };
-  }
   if (YOUTUBE_HOSTS.has(host)) {
     const videoId = extractYoutubeVideoId(parsed);
     if (!videoId) {
