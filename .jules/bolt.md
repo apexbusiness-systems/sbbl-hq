@@ -24,3 +24,6 @@
 ## 2026-04-16 - Store Hardening
 **Learning:** Legacy mock products mixed with the live Stripe process breaks single-source-of-truth. Converting direct arrays to useReactQuery fetching requires careful mapping of snake_case to camelCase inside worker edges.
 **Action:** In future, extract `mappedData` translations directly at the edge boundary. Also, handle React hook memoization for dynamically fetched elements (like `productsQuery.data?.data`) immediately on retrieval to avoid React exhaustion depth issues downstream.
+## 2024-05-18 - [Missing useMemo for Top-Level Array Lookups (.find)]
+**Learning:** Found multiple instances where `.find()` was used to perform lookups on large arrays inside the render function of React components (e.g., `Media.tsx`, `Profiles.tsx`, `Store.tsx`, `Stats.tsx`, `Leaderboards.tsx`, `Settings.tsx`). This resulted in O(N) traversal on every re-render, which is detrimental to performance, especially when there are rapid state updates.
+**Action:** Always wrap `.find()` operations in `useMemo` when they are inside a React component's main rendering scope. For arrays that are iterated inside `.map()` rendering loops, replace O(N) `.find()` operations with O(1) dictionary lookups precomputed using `useMemo` (e.g., `mockLeagues` inside `filteredTeams` useMemo in `Teams.tsx`).
