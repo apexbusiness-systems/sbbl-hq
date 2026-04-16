@@ -5380,7 +5380,7 @@ export default Sentry.withSentry(
 
     const url = new URL(req.url);
     if (
-      !parsed.ok &&
+      !parsed.ok && url.pathname !== "/ops/health" && url.pathname !== "/ops/metrics-lite" &&
       (url.pathname.startsWith("/api") ||
         url.pathname.startsWith("/auth") ||
         url.pathname.startsWith("/ops") ||
