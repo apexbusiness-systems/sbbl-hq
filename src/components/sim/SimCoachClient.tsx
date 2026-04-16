@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { supabase } from '@/lib/supabase/client';
+import { requireSupabaseClient } from '@/lib/supabase/client';
 import { Button } from '@/components/ui/button';
 
 // PHASE 3: Hands-Free Sim Coach Mode

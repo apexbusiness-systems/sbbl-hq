@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase/client';
+import { requireSupabaseClient } from '@/lib/supabase/client';
 
 // PHASE 2: HoopsTok Vertical Social Feed MVP
 export const HoopsTokFeed: React.FC = () => {
@@ -7,6 +7,7 @@ export const HoopsTokFeed: React.FC = () => {
 
   useEffect(() => {
     // RecSys v0: simple fetch of recent auto-clips
+    const supabase = requireSupabaseClient();
     supabase
       .from('media_publications')
       .select('*')

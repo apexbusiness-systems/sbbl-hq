@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
-import { supabase } from '@/lib/supabase/client';
+import { requireSupabaseClient } from '@/lib/supabase/client';
 import type { GameEventType } from '@/types/game-event';
 
 // PHASE 1: Operator Tagging UI
@@ -17,6 +17,7 @@ export const OperatorTaggingUI: React.FC<{ gameId: string }> = ({ gameId }) => {
       const payload: Record<string, unknown> = { team };
       if (points) payload.points = points;
 
+      const supabase = requireSupabaseClient();
       const { error } = await supabase.from('game_events').insert({
         game_id: gameId,
         event_ts: new Date().toISOString(),

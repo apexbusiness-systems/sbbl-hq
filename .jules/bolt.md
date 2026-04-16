@@ -37,3 +37,7 @@
 ## 2026-04-16 - Phase 4-6 Backend Completion
 **Learning:** Safely implemented CV/RecSys edge handlers avoiding explicit database joins, instead using DO rooms and KV caching paradigms aligned with existing architecture.
 **Action:** Remember to use `s-maxage` and `max-age` effectively on `GET` endpoints within Cloudflare Workers to bypass database hits for repetitive requests.
+
+## 2026-04-16 - Vite Build Failures with Supabase
+**Learning:** Found an instance in React components (like `BroadcastOverlay.tsx`, `SimCoachClient.tsx`, `OperatorTaggingUI.tsx`, and `HoopsTokFeed.tsx`) where `supabase` was directly imported from `@/lib/supabase/client` instead of using the `requireSupabaseClient` function, causing Vite build runtime errors.
+**Action:** Always import `requireSupabaseClient` and invoke it to grab the client instance during component execution rather than relying on a top-level un-exported `supabase` variable when building components interacting with the API to prevent production build failures.

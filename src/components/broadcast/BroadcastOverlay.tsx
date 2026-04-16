@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { supabase } from '@/lib/supabase/client';
+import { requireSupabaseClient } from '@/lib/supabase/client';
 import type { GameEvent } from '@/types/game-event';
 
 // PHASE 1: OBS Browser Source Overlay MVP
@@ -10,6 +10,7 @@ export const BroadcastOverlay: React.FC<{ gameId: string }> = ({ gameId }) => {
 
   useEffect(() => {
     // Subscribe to realtime game events for this broadcast
+    const supabase = requireSupabaseClient();
     const channel = supabase
       .channel(`broadcast-${gameId}`)
       .on(

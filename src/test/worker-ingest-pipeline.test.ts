@@ -72,10 +72,11 @@ describe('public render contract: /api/public/media', () => {
   it('handlePublicMedia orders publications by sort_order then id', () => {
     const fnStart = workerSrc.indexOf('async function fetchPublicMediaRows');
     // Ensure we capture enough of the function body
-    const fnEnd   = workerSrc.indexOf('return query', fnStart + 10);
+    let fnEnd = workerSrc.indexOf('async function', fnStart + 10); if (fnEnd === -1) fnEnd = workerSrc.length;
     const fnBody  = workerSrc.slice(fnStart, fnEnd);
 
     const sortOrderIdx = fnBody.indexOf('.order("sort_order"');
+    // we need to find the id order after sort_order
     const idOrderIdx = fnBody.indexOf('.order("id"', sortOrderIdx + 1);
 
     expect(sortOrderIdx).toBeGreaterThan(-1);
