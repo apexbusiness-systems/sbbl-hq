@@ -790,7 +790,7 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
         try {
           const fallbackUrl = new URL("https://" + safeUrl);
           safeUrl = fallbackUrl.href;
-        } catch {}
+        } catch { /* ignore parsing failure */ }
       }
     }
     patch.collection_id = safeUrl;
