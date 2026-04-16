@@ -55,6 +55,8 @@ vi.mock('@/lib/api/stream', () => ({
   generateCompCode: vi.fn(async () => ({ ok: true, code: 'CODE', expiresAt: new Date().toISOString() })),
 }));
 
+
+const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 describe('Live page YouTube baseline validation', () => {
   beforeEach(() => {
     updateStreamConfigMock.mockClear();
@@ -86,6 +88,7 @@ describe('Live page YouTube baseline validation', () => {
       );
       expect(setStreamLiveMock).toHaveBeenCalledWith(true, null);
     });
+    await delay(600);
     expect(screen.queryByText('Facebook is not a supported stream source.')).not.toBeInTheDocument();
   });
 

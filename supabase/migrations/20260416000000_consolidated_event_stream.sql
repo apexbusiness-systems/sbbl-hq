@@ -18,7 +18,19 @@ CREATE POLICY "admin_all" ON game_events FOR ALL USING (
     WHERE user_id = auth.uid() AND (role = 'league_admin' OR role = 'super_admin')
   )
 );
-CREATE POLICY "owner_edit" ON game_events FOR UPDATE USING (auth.uid() = (SELECT captain_id FROM teams WHERE id = (SELECT team_id FROM games WHERE id = game_events.game_id)));
+CREATE POLICY "owner_edit" ON game_events FOR UPDATE USING (
+  EXISTS (
+    SELECT 1 FROM games
+    WHERE games.id = game_events.game_id AND (
+      EXISTS (
+        SELECT 1 FROM public.user_role_assignments ura
+        WHERE ura.user_id = auth.uid()
+          AND ura.role = 'team_manager'
+          AND (ura.entity_id = games.home_team_id OR ura.entity_id = games.away_team_id)
+      )
+    )
+  )
+);
 
 -- player_consent_receipts (PIPA/PIPEDA lock)
 CREATE TABLE IF NOT EXISTS player_consent_receipts (
