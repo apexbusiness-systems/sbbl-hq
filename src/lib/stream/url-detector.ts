@@ -193,6 +193,62 @@ export function canonicalizeStreamSourceUrl(raw: string): { url: string; type: S
   return { url: trimmed, type };
 }
 
+/**
+ * Convert a raw stream URL to a playable form.
+ * - YouTube URLs are normalized to canonical watch URL.
+ * - Twitch URLs are kept RAW (Render-Layer Isolation Law).
+ * - Vimeo URLs are normalized to player.vimeo.com embed format.
+ * - RTMP URLs carry an advisory warning (cannot play in browser).
+ * - All other URLs are returned as-is (no blocking).
+ */
+export function toPlayableUrl(raw: string): PlayableUrl {
+  const trimmed = raw.trim();
+  if (!trimmed) return { url: '', type: 'unknown' };
+
+  const type = detectStreamUrlType(trimmed);
+
+  if (type === 'rtmp') {
+    return {
+      url: trimmed,
+      type: 'rtmp',
+      warning: 'RTMP cannot play in browser. Use an HLS endpoint instead.',
+    };
+  }
+
+  if (type === 'youtube') {
+    const embedUrl = toPlayableYoutubeEmbedUrl(trimmed);
+    return { url: embedUrl ?? trimmed, type: 'youtube' };
+  }
+
+  if (type === 'twitch') {
+    // Render-Layer Isolation Law: We no longer rewrite Twitch URLs into player.twitch.tv here.
+    // ReactPlayer in LiveStreamPlayer handles the parent/embed logic independently.
+    const channel = extractTwitchChannel(trimmed);
+    if (channel) {
+      return { url: `https://www.twitch.tv/${channel}`, type: 'twitch' };
+    }
+    return { url: trimmed, type: 'twitch' };
+  }
+
+  if (type === 'vimeo') {
+    const vimeoId = extractVimeoId(trimmed);
+    if (vimeoId) {
+      return { url: `https://player.vimeo.com/video/${vimeoId}`, type: 'vimeo' };
+    }
+    return { url: trimmed, type: 'vimeo' };
+  }
+
+  if (type === 'facebook') {
+    return {
+      url: trimmed,
+      type: 'facebook',
+      warning: 'Facebook embedding may be limited. Verify playback after going live.',
+    };
+  }
+
+  return { url: trimmed, type };
+}
+
 /** Human-readable label for each stream URL type */
 export const STREAM_TYPE_LABELS: Record<StreamUrlType, string> = {
   youtube:    'YouTube',

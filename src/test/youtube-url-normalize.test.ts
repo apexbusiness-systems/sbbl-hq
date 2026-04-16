@@ -19,6 +19,8 @@ describe('normalizeYoutubeUrl', () => {
   });
 });
 
+
+
 describe('canonicalizeStreamSourceUrl', () => {
   it('detects Twitch URLs correctly', () => {
     expect(detectStreamUrlType('https://www.twitch.tv/sbblhq')).toBe('twitch');
