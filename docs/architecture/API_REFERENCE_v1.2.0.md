@@ -34,6 +34,13 @@ All mutating methods (`POST/PUT/PATCH/DELETE`) require a valid idempotency key v
 - `GET /api/scores` — Public scores with filtering.
 - `GET /api/streams/status?gameId=<id>` — Public stream state `{ isLive, title, viewerCount, gameId }`. No playback URL. Edge-cached (10s TTL).
 - `GET /api/streams/:gameId/reactions` — Reaction counts.
+- `GET /api/public/overlay/:gameId` — Live scoreboard overlay state + active sponsor. `Cache-Control: no-store` (live state). Consumed by `/overlay/:gameId` chromeless OBS page.
+- `GET /api/public/engagement/polls?gameId=<id>` — Open/locked/closed polls, predictions, trivia.
+- `GET /api/public/engagement/polls/:id/results` — Live vote tallies per option.
+- `GET /api/public/engagement/leaderboard` — Top 25 fans by gamification points (via `get_gamification_leaderboard`).
+- `GET /api/public/sponsors?leagueId=<uuid>` — Active sponsors (edge-cached 30 s).
+- `POST /api/public/sponsors/:id/track` — Record `impression` or `click` (fire-and-forget).
+- `GET /api/public/digest?league=<code>` — AI-generated weekly recap. Cached per `(league, week_start)`; falls back to deterministic template when `GROQ_API_KEY` is absent. Edge-cached 5 min.
 
 ### Session & Profile
 - `GET /auth/session` — `{ ok, userId, roles }` or `401`.
@@ -92,6 +99,17 @@ Require `league_admin`, `super_admin`, or `team_manager` role.
 - `POST /api/coach/request` — Coach approval request.
 - `GET /ops/coach/requests` — List coach requests.
 - `POST /ops/coach/:id/resolve` — Resolve coach request.
+- `POST /api/ops/overlay/:gameId/{state,clock,score,foul,period,reset}` — Scoreboard overlay mutations (super_admin / league_admin / team_manager / media_operator). Score/reset mirror to `games.home_score` / `games.away_score`.
+- `POST /api/ops/engagement/polls` — Create poll/prediction/trivia. `POST /api/ops/engagement/polls/:id` updates status/correct option. `POST /api/ops/engagement/polls/:id/grade` awards points idempotently.
+- `GET /api/ops/sponsors` · `POST /api/ops/sponsors` · `POST /api/ops/sponsors/:id` · `POST /api/ops/sponsors/:id/delete` — Sponsor CRUD (super_admin / league_admin).
+- `POST /api/ops/obs/commands` · `GET /api/ops/obs/commands` — Enqueue / list OBS commands (super_admin / league_admin / media_operator).
+- `GET /api/ops/obs/commands/pending` · `POST /api/ops/obs/commands/:id/ack` — On-site `obs-agent` endpoints, auth'd by `Bearer $OBS_AGENT_TOKEN` (not Supabase JWT).
+- `POST /api/ops/digest/:leagueCode/regenerate` — Force-rebuild weekly digest (super_admin / league_admin / media_operator).
+
+Authenticated fan endpoints (non-admin):
+- `POST /api/engagement/polls/:id/vote` — One vote per (poll, user) enforced by unique constraint.
+- `GET /api/engagement/me/points` — Personal points + award history.
+- `POST /api/engagement/watch-parties` · `GET /api/engagement/watch-parties?gameId=<id>` · `POST /api/engagement/watch-parties/:id/join` · `POST /api/engagement/watch-parties/join-by-code` — Watch-party lifecycle.
 
 ### Webhooks
 - `POST /webhooks/stripe` — Stripe webhook (HMAC-SHA256 verified).
