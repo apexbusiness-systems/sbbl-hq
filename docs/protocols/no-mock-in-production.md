@@ -2,7 +2,7 @@
 
 **Status**: MANDATORY — enforced by ESLint + vitest + CI.
 **Owner**: Data Pipeline (SBBL-HQ).
-**Last updated**: 2026-04-16.
+**Last updated**: 2026-04-17.
 
 ## TL;DR
 
@@ -80,6 +80,11 @@ is cached at the edge.
 | Home snapshot | `GET /api/public/home`         | `{ ok, teams, liveGames, … }`     | multiple tables              |
 | Teams         | `GET /api/teams`               | `{ ok, teams: TeamCard[] }`       | `teams` + `mvw_standings`    |
 | Products      | `GET /api/public/products`     | `{ ok, data: Product[] }`         | `store_products`             |
+| Overlay       | `GET /api/public/overlay/:gameId` | `{ ok, game, overlay, sponsor }` | `overlay_game_state` + joins |
+| Polls         | `GET /api/public/engagement/polls` | `{ ok, data: Poll[] }`         | `engagement_polls`           |
+| Fan leaderboard | `GET /api/public/engagement/leaderboard` | `{ ok, data: Row[] }`     | RPC `get_gamification_leaderboard` |
+| Sponsors      | `GET /api/public/sponsors`     | `{ ok, data: Sponsor[] }`         | `sponsor_slots`              |
+| AI digest     | `GET /api/public/digest`       | `{ ok, digest: Digest }`          | `ai_weekly_digest`           |
 
 † Leaderboards uses the dashboard RPC because it returns the full stat
 line per player; `get_leaderboards` only returns pts/reb/ast and would
