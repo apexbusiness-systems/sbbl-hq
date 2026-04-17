@@ -14,5 +14,6 @@ interface Env {
   GROQ_API_KEY?: string;
   ENABLE_STREAM_VALIDATION?: string;
   VITE_STREAM_URL?: string;
+  OBS_AGENT_TOKEN?: string;
   ASSETS: { fetch: (req: Request) => Promise<Response> };
 }

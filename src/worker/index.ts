@@ -22,6 +22,44 @@ import {
   handleQoeIngest,
   handleQoeHealthReport,
 } from "./routes/stream-qoe";
+import {
+  handlePublicOverlay,
+  handleOverlayPatch,
+  handleOverlayClock,
+  handleOverlayScore,
+  handleOverlayFoul,
+  handleOverlayPeriod,
+  handleOverlayReset,
+} from "./routes/overlay";
+import {
+  handlePublicPollsList,
+  handlePublicPollResults,
+  handlePublicEngagementLeaderboard,
+  handleCastVote,
+  handleCreatePoll,
+  handleUpdatePoll,
+  handleGradePoll,
+  handleMyPoints,
+  handleCreateWatchParty,
+  handleListWatchParties,
+  handleJoinWatchParty,
+  handleJoinByCode,
+} from "./routes/engagement";
+import {
+  handlePublicSponsors,
+  handleTrackSponsorEvent,
+  handleAdminListSponsors,
+  handleCreateSponsor,
+  handleUpdateSponsor,
+  handleDeleteSponsor,
+} from "./routes/sponsors";
+import {
+  handleEnqueueObsCommand,
+  handleListObsCommands,
+  handleAgentPending,
+  handleAgentAck,
+} from "./routes/obs";
+import { handlePublicDigest, handleRegenerateDigest } from "./routes/digest";
 
 type HandlerCtx = {
   req: Request;
@@ -962,9 +1000,24 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   if (!body) return json({ ok: false, error: "invalid_body" }, 400);
   const patch: Record<string, unknown> = {};
   if (typeof body.collectionId === "string") {
-    const canonical = canonicalizeStreamSourceUrl(body.collectionId);
-    if (canonical.ok === false) return json({ ok: false, error: canonical.error }, 400);
-    patch.collection_id = canonical.url;
+    const trimmedUrl = body.collectionId.trim();
+    let safeUrl = trimmedUrl;
+    if (safeUrl !== "") {
+      try {
+        const parsedUrl = new URL(safeUrl);
+        if (!["https:", "http:", "rtmp:", "rtmps:"].includes(parsedUrl.protocol)) {
+          if (["javascript:", "data:", "file:", "vbscript:"].includes(parsedUrl.protocol)) {
+            safeUrl = "";
+          }
+        }
+      } catch {
+        try {
+          const fallbackUrl = new URL("https://" + safeUrl);
+          safeUrl = fallbackUrl.href;
+        } catch { /* ignore parsing failure */ }
+      }
+    }
+    patch.collection_id = safeUrl;
   }
   if (typeof body.title === "string") patch.title = body.title.trim();
   if (typeof body.source === "string") patch.source = body.source;
@@ -4338,6 +4391,24 @@ async function handleGoLive(ctx: HandlerCtx) {
     return json({ ok: false, error: "is_live_required" }, 400);
   }
 
+  let safeUrl = typeof body.collectionId === "string" ? body.collectionId.trim() : "";
+  if (safeUrl !== "") {
+    try {
+      const parsedUrl = new URL(safeUrl);
+      if (!["https:", "http:", "rtmp:", "rtmps:"].includes(parsedUrl.protocol)) {
+        if (["javascript:", "data:", "file:", "vbscript:"].includes(parsedUrl.protocol)) {
+          safeUrl = "";
+        }
+      }
+    } catch {
+      try {
+        const fallbackUrl = new URL("https://" + safeUrl);
+        safeUrl = fallbackUrl.href;
+      } catch {
+        // Unparseable, leave verbatim in permissive mode
+      }
+    }
+  }
   const nowIso = new Date().toISOString();
   const patch: Record<string, unknown> = {
     id: true,
@@ -4346,7 +4417,7 @@ async function handleGoLive(ctx: HandlerCtx) {
     updated_at: nowIso,
   };
   if (typeof body.collectionId === "string") {
-    patch.collection_id = body.collectionId.trim();
+    patch.collection_id = safeUrl;
   }
   if (typeof body.title === "string" && body.title.trim()) {
     patch.title = body.title.trim();
@@ -5607,6 +5678,47 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/api/coach/request", handler: handleCoachApprovalRequest },
   { method: "GET", path: "/ops/coach/requests", handler: handleListCoachRequests },
   { method: "POST", path: "/ops/coach/:id/resolve", handler: handleResolveCoachRequest },
+
+  // ── Overlay (scoreboard / OBS browser source) ────────────────────────
+  { method: "GET",  path: "/api/public/overlay/:gameId",         handler: handlePublicOverlay },
+  { method: "POST", path: "/api/ops/overlay/:gameId/state",      handler: handleOverlayPatch },
+  { method: "POST", path: "/api/ops/overlay/:gameId/clock",      handler: handleOverlayClock },
+  { method: "POST", path: "/api/ops/overlay/:gameId/score",      handler: handleOverlayScore },
+  { method: "POST", path: "/api/ops/overlay/:gameId/foul",       handler: handleOverlayFoul },
+  { method: "POST", path: "/api/ops/overlay/:gameId/period",     handler: handleOverlayPeriod },
+  { method: "POST", path: "/api/ops/overlay/:gameId/reset",      handler: handleOverlayReset },
+
+  // ── Engagement (polls, predictions, trivia, gamification) ────────────
+  { method: "GET",  path: "/api/public/engagement/polls",            handler: handlePublicPollsList },
+  { method: "GET",  path: "/api/public/engagement/polls/:id/results", handler: handlePublicPollResults },
+  { method: "GET",  path: "/api/public/engagement/leaderboard",     handler: handlePublicEngagementLeaderboard },
+  { method: "POST", path: "/api/engagement/polls/:id/vote",         handler: handleCastVote },
+  { method: "GET",  path: "/api/engagement/me/points",              handler: handleMyPoints },
+  { method: "POST", path: "/api/engagement/watch-parties",          handler: handleCreateWatchParty },
+  { method: "GET",  path: "/api/engagement/watch-parties",          handler: handleListWatchParties },
+  { method: "POST", path: "/api/engagement/watch-parties/:id/join", handler: handleJoinWatchParty },
+  { method: "POST", path: "/api/engagement/watch-parties/join-by-code", handler: handleJoinByCode },
+  { method: "POST", path: "/api/ops/engagement/polls",              handler: handleCreatePoll },
+  { method: "POST", path: "/api/ops/engagement/polls/:id",          handler: handleUpdatePoll },
+  { method: "POST", path: "/api/ops/engagement/polls/:id/grade",    handler: handleGradePoll },
+
+  // ── Sponsors ────────────────────────────────────────────────────────
+  { method: "GET",  path: "/api/public/sponsors",                handler: handlePublicSponsors },
+  { method: "POST", path: "/api/public/sponsors/:id/track",      handler: handleTrackSponsorEvent },
+  { method: "GET",  path: "/api/ops/sponsors",                   handler: handleAdminListSponsors },
+  { method: "POST", path: "/api/ops/sponsors",                   handler: handleCreateSponsor },
+  { method: "POST", path: "/api/ops/sponsors/:id",               handler: handleUpdateSponsor },
+  { method: "POST", path: "/api/ops/sponsors/:id/delete",        handler: handleDeleteSponsor },
+
+  // ── OBS control ─────────────────────────────────────────────────────
+  { method: "POST", path: "/api/ops/obs/commands",               handler: handleEnqueueObsCommand },
+  { method: "GET",  path: "/api/ops/obs/commands",               handler: handleListObsCommands },
+  { method: "GET",  path: "/api/ops/obs/commands/pending",       handler: handleAgentPending },
+  { method: "POST", path: "/api/ops/obs/commands/:id/ack",       handler: handleAgentAck },
+
+  // ── AI weekly digest ────────────────────────────────────────────────
+  { method: "GET",  path: "/api/public/digest",                  handler: handlePublicDigest },
+  { method: "POST", path: "/api/ops/digest/:leagueCode/regenerate", handler: handleRegenerateDigest },
 ];
 
 // Lazy-compile: routes are registered via push() throughout the module,
