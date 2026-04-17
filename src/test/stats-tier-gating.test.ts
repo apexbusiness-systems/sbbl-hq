@@ -128,6 +128,38 @@ describe('normalizePublicPlayerRow', () => {
       pts: 22.4, reb: 5.1, ast: 7.2, stl: 2.3, blk: 0.8, fls: 2.0, min: 31.1,
     });
   });
+
+  it('passes through avatar_url when the RPC provides one', () => {
+    const row = normalizePublicPlayerRow({
+      ...RPC_ROW,
+      avatar_url: 'https://cdn.sbbl.icu/avatars/u1.jpg',
+    } as unknown as Record<string, unknown>);
+    expect(row.avatar).toBe('https://cdn.sbbl.icu/avatars/u1.jpg');
+  });
+
+  it('returns an empty avatar string when the RPC returns null', () => {
+    // Null is the common case today — no headshots uploaded yet. The UI
+    // must receive an empty string (not "null"/"undefined") so the
+    // PlayerAvatar component can show the initials fallback.
+    const row = normalizePublicPlayerRow({
+      ...RPC_ROW,
+      avatar_url: null,
+    } as unknown as Record<string, unknown>);
+    expect(row.avatar).toBe('');
+  });
+
+  it('returns empty avatar when the field is missing entirely', () => {
+    const row = normalizePublicPlayerRow(RPC_ROW as unknown as Record<string, unknown>);
+    expect(row.avatar).toBe('');
+  });
+
+  it('trims whitespace-only avatar_url to empty', () => {
+    const row = normalizePublicPlayerRow({
+      ...RPC_ROW,
+      avatar_url: '   ',
+    } as unknown as Record<string, unknown>);
+    expect(row.avatar).toBe('');
+  });
 });
 
 describe('applyStatTier', () => {
