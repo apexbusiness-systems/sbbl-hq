@@ -6,7 +6,7 @@
  * canonical URLs pass through unchanged so toPlayableUrl() never double-embeds.
  */
 import { describe, it, expect } from 'vitest';
-import { canonicalizeStreamSourceUrl } from '@/lib/stream/url-detector';
+import { canonicalizeStreamSourceUrl, toPlayableUrl } from '@/lib/stream/url-detector';
 
 describe('canonicalizeStreamSourceUrl — YouTube', () => {
   it('converts /embed/ to watch URL', () => {
@@ -58,6 +58,30 @@ describe('canonicalizeStreamSourceUrl — Twitch', () => {
   it('passes through canonical twitch.tv channel URL unchanged', () => {
     const url = 'https://www.twitch.tv/sbblhq';
     expect(canonicalizeStreamSourceUrl(url)).toEqual({ ok: true, url, wasNormalized: false });
+  });
+});
+
+// Regression: toPlayableUrl() must NOT return player.twitch.tv URLs.
+// ReactPlayer's Twitch provider only recognises www.twitch.tv/channel.
+// Returning player.twitch.tv causes ReactPlayer to fall through to the file
+// player, which issues a direct fetch → CORS failure in the browser.
+describe('toPlayableUrl — Twitch CORS regression', () => {
+  it('returns canonical twitch.tv URL (not player.twitch.tv) for channel URLs', () => {
+    const r = toPlayableUrl('https://www.twitch.tv/sbblhq');
+    expect(r.type).toBe('twitch');
+    expect(r.url).toBe('https://www.twitch.tv/sbblhq');
+    expect(r.url).not.toContain('player.twitch.tv');
+  });
+
+  it('also canonicalizes legacy stored player.twitch.tv embed URLs', () => {
+    const r = toPlayableUrl('https://player.twitch.tv/?channel=sbblhq&parent=sbbl-hq.icu');
+    expect(r.type).toBe('twitch');
+    expect(r.url).toBe('https://www.twitch.tv/sbblhq');
+  });
+
+  it('preserves channel casing from canonical URL', () => {
+    const r = toPlayableUrl('https://www.twitch.tv/SBBLhq');
+    expect(r.url).toBe('https://www.twitch.tv/SBBLhq');
   });
 });
 

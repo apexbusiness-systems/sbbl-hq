@@ -139,11 +139,17 @@ export interface PlayableUrl {
 
 /**
  * Extract a Twitch channel name from common twitch.tv URL formats.
- * e.g. https://www.twitch.tv/channelname → channelname
+ * Handles both canonical (twitch.tv/channel) and embed (player.twitch.tv/?channel=)
+ * forms so that legacy stored embed URLs still resolve correctly.
  */
 function extractTwitchChannel(url: string): string | null {
   try {
     const parsed = new URL(url.trim());
+    // player.twitch.tv/?channel=name — embed URL format
+    if (parsed.hostname === 'player.twitch.tv') {
+      return parsed.searchParams.get('channel');
+    }
+    // www.twitch.tv/channelname — canonical URL format
     const parts = parsed.pathname.split('/').filter(Boolean);
     if (parts.length === 0) return null;
     const first = parts[0].toLowerCase();
@@ -201,11 +207,11 @@ export function toPlayableUrl(raw: string): PlayableUrl {
   if (type === 'twitch') {
     const channel = extractTwitchChannel(trimmed);
     if (channel) {
-      const parent = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
-      return {
-        url: `https://player.twitch.tv/?channel=${channel}&parent=${parent}`,
-        type: 'twitch',
-      };
+      // Return the canonical twitch.tv URL — ReactPlayer's Twitch provider
+      // only recognises www.twitch.tv/channel, not player.twitch.tv.
+      // The embed parent parameter is configured via ReactPlayer's
+      // config.twitch.options.parent in LiveStreamPlayer.tsx.
+      return { url: `https://www.twitch.tv/${channel}`, type: 'twitch' };
     }
     return { url: trimmed, type: 'twitch' };
   }
