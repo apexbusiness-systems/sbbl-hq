@@ -137,10 +137,20 @@ describe('toPlayableUrl', () => {
     expect(r.url).toMatch(/watch\?v=dQw4w9WgXcQ/);
   });
 
-  it('normalises Twitch URLs to player embed', () => {
+  it('keeps Twitch URLs in canonical twitch.tv/<channel> form so ReactPlayer\'s Twitch wrapper matches', () => {
+    // Regression shield for /live Twitch CORS outage: rewriting to
+    // player.twitch.tv/?channel=… caused ReactPlayer to fall through to
+    // FilePlayer (<video src>) and the browser to CORS-block the media fetch.
     const r = toPlayableUrl('https://www.twitch.tv/channelname');
     expect(r.type).toBe('twitch');
-    expect(r.url).toMatch(/player\.twitch\.tv\/\?channel=channelname/);
+    expect(r.url).toBe('https://www.twitch.tv/channelname');
+    expect(r.url).not.toMatch(/player\.twitch\.tv/);
+  });
+
+  it('recovers channel from legacy player.twitch.tv/?channel=… URLs persisted by earlier builds', () => {
+    const r = toPlayableUrl('https://player.twitch.tv/?channel=sbblhq&parent=sbbl-hq.icu');
+    expect(r.type).toBe('twitch');
+    expect(r.url).toBe('https://www.twitch.tv/sbblhq');
   });
 
   it('passes HLS URLs through unchanged', () => {
