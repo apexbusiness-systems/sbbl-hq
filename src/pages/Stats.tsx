@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
+import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
 import { BarChart3 } from 'lucide-react';
@@ -167,7 +168,7 @@ const StatsPage = () => {
                       <tr key={p.id} onClick={() => setSelectedPlayer(p.id)} className={`border-b border-border cursor-pointer transition-colors hover:bg-secondary/50 ${selectedPlayer === p.id ? 'bg-secondary' : ''}`}>
                         <td className="p-3">
                           <div className="flex items-center gap-2">
-                            <img src={p.avatar} alt={p.name} className="w-8 h-8 rounded-full object-cover" loading="lazy" />
+                            <PlayerAvatar src={p.avatar || null} alt={p.name} className="w-8 h-8" />
                             <div>
                               <p className="text-sm font-medium">{p.name}</p>
                               <div className="flex items-center gap-1">
@@ -196,7 +197,7 @@ const StatsPage = () => {
             {detail ? (
               <div className="panel p-4 sticky top-24 space-y-4">
                 <div className="flex items-center gap-3">
-                  <img src={detail.avatar} alt={detail.name} className="w-16 h-16 rounded-full object-cover" loading="lazy" />
+                  <PlayerAvatar src={detail.avatar || null} alt={detail.name} className="w-16 h-16" />
                   <div>
                     <h3 className="font-display font-bold">{detail.name}</h3>
                     <p className="text-xs text-muted-foreground">{detail.position} · #{detail.number}</p>

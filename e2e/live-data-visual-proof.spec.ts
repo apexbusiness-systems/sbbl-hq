@@ -18,8 +18,8 @@
  *
  * NOTE: These tests are skipped in CI because they hit the live production
  * API at https://sbbl-hq.icu, which is not accessible from GitHub Actions
- * runners (Cloudflare blocks non-allowlisted IPs). Run manually after merge
- * to verify production data availability end-to-end.
+ * runners (Cloudflare blocks non-allowlisted IPs with a 403). Run manually
+ * after merge to verify production data availability end-to-end.
  */
 import { test, expect } from '@playwright/test';
 
@@ -36,7 +36,7 @@ test.describe('production public APIs return populated live data', () => {
     'Production API proof — GitHub Actions cannot reach sbbl-hq.icu. Run manually after merge.',
   );
 
-  test('GET /api/public/products returns the seeded catalog (\u226510 items)', async ({ request }) => {
+  test('GET /api/public/products returns the seeded catalog (≥10 items)', async ({ request }) => {
     const res = await request.get(`${API_BASE}/api/public/products`);
     expect(res.status()).toBe(200);
     const body = await res.json();

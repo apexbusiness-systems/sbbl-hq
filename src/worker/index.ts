@@ -459,6 +459,57 @@ async function verifyTurnstileToken(
 // header is ignored. If JWT verification fails, session is null (unauthenticated).
 let jwksClient: ReturnType<typeof createRemoteJWKSet> | null = null;
 
+// Resolve the roles granted to a verified user.
+//
+// Why this exists as its own function:
+//   Supabase Auth's default JWT does NOT embed our custom `user_role` claim
+//   (it only appears when a Custom Access Token hook writes it, which this
+//   project does not configure). Reading `payload.user_role` alone silently
+//   downgrades every admin / coach / team_manager to the `fan` fallback —
+//   locking them out of Leaderboards and the full stat tier. The source of
+//   truth is `public.user_role_assignments`; every privileged role lives
+//   there. We merge whatever the JWT supplied with what the DB says so
+//   future claim hooks continue to work.
+//
+// Semantics:
+//   - JWT value may be a string ("super_admin") or an array.
+//   - DB lookup may fail (network/DB hiccup) — in that case we fall back to
+//     the JWT value. We deliberately do NOT throw; the user is still
+//     authenticated, they just don't get elevated privileges on this request.
+//   - If both JWT and DB produce no roles, caller gets `["fan"]`.
+export async function resolveUserRoles(
+  admin: SupabaseClient,
+  userId: string,
+  jwtUserRole: unknown,
+): Promise<string[]> {
+  const jwtRoles: string[] = [];
+  if (typeof jwtUserRole === "string" && jwtUserRole.trim()) {
+    jwtRoles.push(jwtUserRole.trim());
+  } else if (Array.isArray(jwtUserRole)) {
+    for (const r of jwtUserRole) {
+      if (typeof r === "string" && r.trim()) jwtRoles.push(r.trim());
+    }
+  }
+
+  let dbRoles: string[] = [];
+  try {
+    const { data, error } = await admin
+      .from("user_role_assignments")
+      .select("role")
+      .eq("user_id", userId);
+    if (!error && Array.isArray(data)) {
+      dbRoles = data
+        .map((row) => (row as { role?: unknown }).role)
+        .filter((r): r is string => typeof r === "string" && r.length > 0);
+    }
+  } catch (lookupErr) {
+    console.error("Role assignment lookup failed:", lookupErr);
+  }
+
+  const merged = new Set<string>([...jwtRoles, ...dbRoles]);
+  return merged.size > 0 ? Array.from(merged) : ["fan"];
+}
+
 async function getSession(req: Request, env: Env) {
   const token = getBearerToken(req);
   if (!token || !env.SUPABASE_URL) return null;
@@ -475,10 +526,13 @@ async function getSession(req: Request, env: Env) {
     });
 
     if (payload && payload.sub) {
-      return {
-        userId: payload.sub,
-        roles: (payload.user_role ? [payload.user_role] : ["fan"]) as string[],
-      };
+      const userId = String(payload.sub);
+      const roles = await resolveUserRoles(
+        getAdminClient(env),
+        userId,
+        payload.user_role,
+      );
+      return { userId, roles };
     }
   } catch (error) {
     console.error("JWT Verification failed:", error);
@@ -723,6 +777,11 @@ export function normalizePublicPlayerRow(row: Record<string, unknown>) {
   const leagueId = leagueCodeRaw === "wbl" ? "wbl"
     : leagueCodeRaw === "tgifbl" ? "tgifbl"
     : "sbbl";
+  const avatarRaw = row.avatar_url;
+  const avatar =
+    typeof avatarRaw === "string" && avatarRaw.trim().length > 0
+      ? avatarRaw.trim()
+      : "";
   return {
     id: String(row.id ?? ""),
     name: String(row.name ?? "Unknown"),
@@ -731,7 +790,7 @@ export function normalizePublicPlayerRow(row: Record<string, unknown>) {
     teamId: String(row.team_id ?? ""),
     teamName: row.team_name ? String(row.team_name) : null,
     leagueId,
-    avatar: "",
+    avatar,
     badges: [] as string[],
     stats: {
       pts: Number(row.pts ?? 0),
