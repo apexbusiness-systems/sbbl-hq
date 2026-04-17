@@ -199,13 +199,27 @@ export function toPlayableUrl(raw: string): PlayableUrl {
   }
 
   if (type === 'twitch') {
-    const channel = extractTwitchChannel(trimmed);
+    // WHY: ReactPlayer's Twitch wrapper only matches canonical twitch.tv/<channel>
+    // URLs. Returning the player.twitch.tv embed form defeats that matcher, so the
+    // URL falls through to FilePlayer and is loaded as <video src>, triggering the
+    // cross-origin CORS block + "no supported sources" error on /live. The parent=
+    // requirement is fulfilled by the Twitch JS SDK from config.twitch.options.parent
+    // (see LiveStreamPlayer.tsx), not by query params we inject here.
+    let channel = extractTwitchChannel(trimmed);
+    if (!channel) {
+      // Recover channel from legacy player.twitch.tv/?channel=… URLs written by
+      // earlier builds, so stored rows self-heal without a migration.
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.hostname.toLowerCase() === 'player.twitch.tv') {
+          channel = parsed.searchParams.get('channel');
+        }
+      } catch {
+        /* non-parseable URL: fall through */
+      }
+    }
     if (channel) {
-      const parent = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
-      return {
-        url: `https://player.twitch.tv/?channel=${channel}&parent=${parent}`,
-        type: 'twitch',
-      };
+      return { url: `https://www.twitch.tv/${channel}`, type: 'twitch' };
     }
     return { url: trimmed, type: 'twitch' };
   }
