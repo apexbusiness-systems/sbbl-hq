@@ -9,3 +9,7 @@ OMNIHUB_SIGNING_SECRET=__SET_IN_ENV_ONLY__
 OMNIHUB_VERIFY_KEY=__SET_IN_ENV_ONLY__
 OPTIONAL_SOCIAL_API_KEYS=__SET_IN_ENV_ONLY__
 OPTIONAL_TURNSTILE_SECRET_KEY=__SET_IN_ENV_ONLY__
+# Optional: enables AI-generated weekly digest (otherwise deterministic fallback template)
+GROQ_API_KEY=__SET_IN_ENV_ONLY__
+# Optional: shared secret between the worker and the on-site obs-agent process
+OBS_AGENT_TOKEN=__SET_IN_ENV_ONLY__
