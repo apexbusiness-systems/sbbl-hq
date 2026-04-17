@@ -29,6 +29,9 @@ const API_BASE = process.env.E2E_API_BASE ?? 'https://sbbl-hq.icu';
 test.use({ ignoreHTTPSErrors: true });
 
 test.describe('production public APIs return populated live data', () => {
+  // Retry up to 2 times to tolerate transient Cloudflare/Supabase 503s.
+  test.describe.configure({ retries: 2 });
+
   // Skip in CI: these tests call https://sbbl-hq.icu directly which is not
   // reachable from GitHub Actions runners. Run manually post-merge.
   test.skip(
