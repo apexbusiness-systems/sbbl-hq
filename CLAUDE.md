@@ -65,6 +65,51 @@ Before wiring a page to a new endpoint, grep the worker for
 `requireAuth(req)` in the handler. If present and the page is public,
 use or add a `/api/public/*` variant instead.
 
+### 4. Stream Independence Contract — streams are not games
+
+**NEVER** couple `streams`, `stream_assignments`, or
+`stream_entitlements` to a NOT-NULL `game_id`. Streams are first-class
+addressable media resources; a game MAY have zero, one, or many streams
+via `stream_assignments`. Entitlements gate `stream_id`; `game_id` is a
+nullable legacy column retained for backward compatibility only.
+
+Forbidden patterns (CI will block):
+
+```sql
+-- ❌ BANNED — cements the coupling we removed.
+ALTER TABLE streams ADD COLUMN game_id uuid NOT NULL;
+ALTER TABLE stream_entitlements ALTER COLUMN game_id SET NOT NULL;
+ALTER TABLE stream_assignments ALTER COLUMN game_id SET NOT NULL;
+```
+
+```ts
+// ❌ BANNED — reading games.stream_url from worker/frontend paths.
+const url = game.stream_url;
+```
+
+Do instead:
+
+```ts
+// ✅ CORRECT — resolve via stream_assignments / streams.
+const { data } = await admin
+  .from("stream_assignments")
+  .select("streams(stream_url, source_platform)")
+  .eq("game_id", gameId)
+  .eq("is_active", true)
+  .maybeSingle();
+```
+
+Before modifying any stream/ppv/entitlement code, **read**
+[`docs/architecture/STREAM_INDEPENDENCE_CONTRACT.md`](docs/architecture/STREAM_INDEPENDENCE_CONTRACT.md).
+
+This rule is enforced by:
+
+- **CI AST gate** (`.github/workflows/stream-contract-gate.yml`) — pglast
+  parser scans migration diffs for forbidden `NOT NULL` on `game_id`.
+- **Armageddon test battery** (`src/test/armageddon-stream-invariants.test.ts`).
+- **Vitest stage tests** (`src/test/stream-independence-stage*.test.ts`).
+- **Sentry alert** on `stream.access.v2` error rate > 0.1%.
+
 ## Architecture at a glance
 
 ```
