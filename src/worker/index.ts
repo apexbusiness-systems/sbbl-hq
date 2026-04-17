@@ -60,6 +60,13 @@ import {
   handleAgentAck,
 } from "./routes/obs";
 import { handlePublicDigest, handleRegenerateDigest } from "./routes/digest";
+import {
+  handlePublicHighlights,
+  handleMarkHighlight,
+  handleDeleteHighlight,
+  handleUpdateHighlight,
+  handleReactionAggregate,
+} from "./routes/highlights";
 
 type HandlerCtx = {
   req: Request;
@@ -5719,6 +5726,13 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   // ── AI weekly digest ────────────────────────────────────────────────
   { method: "GET",  path: "/api/public/digest",                  handler: handlePublicDigest },
   { method: "POST", path: "/api/ops/digest/:leagueCode/regenerate", handler: handleRegenerateDigest },
+
+  // ── Highlights + reaction aggregate ─────────────────────────────────
+  { method: "GET",  path: "/api/public/highlights/:gameId",                  handler: handlePublicHighlights },
+  { method: "GET",  path: "/api/public/streams/:gameId/reactions/aggregate", handler: handleReactionAggregate },
+  { method: "POST", path: "/api/ops/highlights/mark",                        handler: handleMarkHighlight },
+  { method: "POST", path: "/api/ops/highlights/:id",                         handler: handleUpdateHighlight },
+  { method: "POST", path: "/api/ops/highlights/:id/delete",                  handler: handleDeleteHighlight },
 ];
 
 // Lazy-compile: routes are registered via push() throughout the module,

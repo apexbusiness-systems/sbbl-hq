@@ -38,6 +38,7 @@ const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('./pages/TermsOfService'));
 const Overlay = lazy(() => import('./pages/Overlay'));
 const OverlayControl = lazy(() => import('./pages/OverlayControl'));
+const Scorekeeper = lazy(() => import('./pages/Scorekeeper'));
 const Engage = lazy(() => import('./pages/Engage'));
 const Digest = lazy(() => import('./pages/Digest'));
 
@@ -155,6 +156,7 @@ const AppShell = () => (
           <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
           <Route path="/ops" element={<RequireAdmin><Ops /></RequireAdmin>} />
           <Route path="/overlay-control/:gameId" element={<RequireAdmin><OverlayControl /></RequireAdmin>} />
+          <Route path="/scorekeeper/:gameId" element={<RequireAdmin><Scorekeeper /></RequireAdmin>} />
           <Route path="/support" element={<Support />} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<TermsOfService />} />

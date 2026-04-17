@@ -20,6 +20,7 @@ import {
   type OverlayPayload,
 } from '@/lib/api/overlay';
 import { enqueueObsCommand } from '@/lib/api/digest';
+import HighlightMarker from '@/components/HighlightMarker';
 
 function fmt(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -269,6 +270,14 @@ export default function OverlayControlPage() {
           current={overlay}
           onRefresh={() => query.refetch()}
         />
+      </div>
+
+      {/* Highlight marker */}
+      <div className="mt-6 panel p-4">
+        <h2 className="font-semibold uppercase tracking-wider text-xs text-muted-foreground mb-2">
+          Highlights
+        </h2>
+        <HighlightMarker gameId={gameId} />
       </div>
 
       {/* OBS control */}
