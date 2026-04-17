@@ -11,6 +11,7 @@ import { useLiveAccess } from '@/hooks/useLiveAccess';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
+import CheerMeter from '@/components/CheerMeter';
 import { CASLNudge } from '@/components/CASLNudge';
 import { fetchPublicHome } from '@/lib/api/public';
 import {
@@ -695,10 +696,35 @@ const LivePage = () => {
       }
     };
     void fetchComments();
-    const id = setInterval(fetchComments, 5000);
+
+    // Realtime push for new chat messages + moderation updates.
+    // The periodic refetch below is a 30 s correction pass, not a primary
+    // delivery channel — instant messages arrive via this subscription.
+    const client = getSupabaseClient();
+    const channel = client
+      ? client
+          .channel(`stream-chat-${liveGame.id}`)
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'stream_chat_messages',
+              filter: `game_id=eq.${liveGame.id}`,
+            },
+            () => {
+              if (!active) return;
+              void fetchComments();
+            },
+          )
+          .subscribe()
+      : null;
+
+    const id = setInterval(fetchComments, 30_000);
     return () => {
       active = false;
       clearInterval(id);
+      if (channel) void client?.removeChannel(channel);
     };
   }, [canModerateLive, liveGame?.id, session?.access_token]);
 
@@ -964,6 +990,11 @@ const LivePage = () => {
                   <Share2 className="w-3.5 h-3.5" /> Share
                 </button>
               </div>
+
+              {/* Aggregate cheer meter — last 30 s across all viewers */}
+              {activeGameId && activeGameId !== 'broadcast' && (
+                <CheerMeter gameId={activeGameId} variant="inline" />
+              )}
 
               {/* Live Chat */}
               <div className="panel">

@@ -14,6 +14,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { fetchOverlay, type OverlayPayload } from '@/lib/api/overlay';
 import { trackSponsorEvent } from '@/lib/api/sponsors';
+import { getSupabaseClient } from '@/lib/supabase/client';
+import CheerMeter from '@/components/CheerMeter';
 
 function formatClock(seconds: number): string {
   const safe = Math.max(0, Math.floor(seconds));
@@ -62,7 +64,11 @@ export default function OverlayPage() {
     };
   }, []);
 
-  // Poll every 1 s.
+  // Load initial overlay + game + sponsor payload, then refresh every 5 s
+  // to rotate the sponsor slot (server-side rotation key is 15 s) and to
+  // pick up any metadata changes to the games row. Score/clock/event fields
+  // are pushed via the Realtime subscription below — the poll is intentionally
+  // slow, it's no longer the primary update channel.
   useEffect(() => {
     if (!gameId) return;
     let cancelled = false;
@@ -78,12 +84,39 @@ export default function OverlayPage() {
       }
     };
     void load();
-    const id = window.setInterval(load, 1000);
+    const id = window.setInterval(load, 5000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
   }, [gameId, theme]);
+
+  // Realtime push for overlay_game_state changes — sub-100 ms score/clock.
+  useEffect(() => {
+    if (!gameId) return;
+    const client = getSupabaseClient();
+    if (!client) return;
+    const channel = client
+      .channel(`overlay-state-${gameId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'overlay_game_state',
+          filter: `game_id=eq.${gameId}`,
+        },
+        (evt) => {
+          const nextOverlay = evt.new as OverlayPayload['overlay'];
+          if (!nextOverlay) return;
+          setPayload((prev) => (prev ? { ...prev, overlay: nextOverlay } : prev));
+        },
+      )
+      .subscribe();
+    return () => {
+      void client.removeChannel(channel);
+    };
+  }, [gameId]);
 
   // Local animation tick — keeps the clock smooth between polls.
   useEffect(() => {
@@ -306,6 +339,17 @@ export default function OverlayPage() {
           )}
         </div>
       )}
+
+      {/* Cheer meter — top left (mirror of sponsor bug) */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 32,
+          left: 32,
+        }}
+      >
+        <CheerMeter gameId={gameId} variant="overlay" />
+      </div>
 
       {/* Sponsor bug — top right */}
       {overlay?.show_sponsor_bug && sponsor && (
