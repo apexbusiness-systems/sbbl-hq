@@ -135,9 +135,9 @@ const SchedulesPage = () => {
         {mappedLiveSchedules.length === 0 && !isLoading && (
           <div className="panel p-8 text-center">
             <Calendar className="w-8 h-8 text-primary/40 mx-auto mb-3" />
-            <h2 className="font-display text-lg font-bold">No Schedules Yet</h2>
+            <h2 className="font-display text-lg font-bold">No games scheduled</h2>
             <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-              Game schedules will appear here as leagues publish their fixtures.
+              Fixtures will appear here as leagues publish their schedules.
             </p>
           </div>
         )}
