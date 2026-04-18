@@ -178,7 +178,11 @@ function StreamPlayer({
 }>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [playing, setPlaying] = useState(true);
-  const [muted, setMuted] = useState(false);
+  // WHY: must start muted so Chrome/Edge/Safari/Firefox AND Twitch's own
+  // autoplay gate ("style visibility, size, viewport visibility") allow
+  // playback without a user gesture. The visible volume button lets the
+  // viewer unmute immediately. Audible autoplay is universally blocked.
+  const [muted, setMuted] = useState(true);
   const [volume, setVolume] = useState(0.8);
   const [playedFraction, setPlayedFraction] = useState(0);
   const [playedSeconds, setPlayedSeconds] = useState(0);
@@ -307,6 +311,9 @@ function StreamPlayer({
         playing={playing}
         controls={showNativeControls}
         muted={muted}
+        // WHY: iOS Safari otherwise hijacks <video> into native fullscreen
+        // and Twitch's SDK refuses to autoplay outside an inline context.
+        playsinline={true}
         volume={volume}
         onReady={() => { retryCountRef.current = 0; onReady(); }}
         onDuration={(seconds) => setDurationSeconds(seconds)}

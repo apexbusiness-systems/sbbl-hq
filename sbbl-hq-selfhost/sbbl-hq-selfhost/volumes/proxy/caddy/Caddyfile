@@ -36,7 +36,7 @@ sbbl-hq.icu {
         X-Frame-Options "SAMEORIGIN"
         X-XSS-Protection "1; mode=block"
         Referrer-Policy "strict-origin-when-cross-origin"
-        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), autoplay=(self \"https://player.twitch.tv\" \"https://embed.twitch.tv\" \"https://www.youtube.com\" \"https://www.youtube-nocookie.com\" \"https://player.vimeo.com\"), fullscreen=(self \"https://player.twitch.tv\" \"https://embed.twitch.tv\" \"https://www.youtube.com\" \"https://www.youtube-nocookie.com\" \"https://player.vimeo.com\"), picture-in-picture=(self \"https://player.twitch.tv\" \"https://embed.twitch.tv\" \"https://www.youtube.com\" \"https://www.youtube-nocookie.com\" \"https://player.vimeo.com\"), encrypted-media=(self \"https://player.twitch.tv\" \"https://embed.twitch.tv\" \"https://www.youtube.com\" \"https://www.youtube-nocookie.com\" \"https://player.vimeo.com\")"
     }
 
     # ── Compression ───────────────────────────────────────

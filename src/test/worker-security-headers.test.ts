@@ -19,7 +19,20 @@ describe('Worker security headers', () => {
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(res.headers.get('X-Frame-Options')).toBe('DENY');
     expect(res.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
-    expect(res.headers.get('Permissions-Policy')).toBe('camera=(), microphone=(), geolocation=()');
+    const permissionsPolicy = res.headers.get('Permissions-Policy') ?? '';
+    // Hardware capabilities we never use — must remain locked off.
+    expect(permissionsPolicy).toContain('camera=()');
+    expect(permissionsPolicy).toContain('microphone=()');
+    expect(permissionsPolicy).toContain('geolocation=()');
+    // Stream embeds (Twitch / YouTube / Vimeo) MUST be allowed to autoplay,
+    // go fullscreen, do PIP, and decrypt media — otherwise /live stays black.
+    // Regression shield for the 2026-04-18 Twitch autoplay outage.
+    for (const directive of ['autoplay', 'fullscreen', 'picture-in-picture', 'encrypted-media']) {
+      expect(permissionsPolicy).toContain(`${directive}=(`);
+      expect(permissionsPolicy).toMatch(new RegExp(`${directive}=\\([^)]*"https://player\\.twitch\\.tv"`));
+      expect(permissionsPolicy).toMatch(new RegExp(`${directive}=\\([^)]*"https://www\\.youtube\\.com"`));
+      expect(permissionsPolicy).toMatch(new RegExp(`${directive}=\\([^)]*"https://player\\.vimeo\\.com"`));
+    }
     expect(res.headers.get('Strict-Transport-Security')).toBe('max-age=63072000; includeSubDomains; preload');
     expect(csp).toContain("default-src 'self'");
     // YouTube iframe API dynamically loads from s.ytimg.com.

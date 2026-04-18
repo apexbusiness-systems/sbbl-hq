@@ -5818,7 +5818,27 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('X-Frame-Options', 'DENY');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // WHY: Permissions-Policy default for autoplay/fullscreen/picture-in-picture/
+  // encrypted-media is `self`-only. Cross-origin iframes (Twitch, YouTube,
+  // Vimeo) are denied even when their iframe carries `allow="autoplay …"`.
+  // Without these grants the Twitch SDK reports "Autoplay disabled … style
+  // visibility, size, viewport visibility" and the player stays black on /live.
+  // Camera/microphone/geolocation remain disabled — we never use them.
+  const STREAM_EMBED_ORIGINS =
+    'self ' +
+    '"https://player.twitch.tv" ' +
+    '"https://embed.twitch.tv" ' +
+    '"https://www.youtube.com" ' +
+    '"https://www.youtube-nocookie.com" ' +
+    '"https://player.vimeo.com"';
+  headers.set(
+    'Permissions-Policy',
+    `camera=(), microphone=(), geolocation=(), ` +
+      `autoplay=(${STREAM_EMBED_ORIGINS}), ` +
+      `fullscreen=(${STREAM_EMBED_ORIGINS}), ` +
+      `picture-in-picture=(${STREAM_EMBED_ORIGINS}), ` +
+      `encrypted-media=(${STREAM_EMBED_ORIGINS})`,
+  );
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
