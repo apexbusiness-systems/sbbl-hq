@@ -101,8 +101,8 @@ jobs:
 
           put_required_secret SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
 
-          put_optional_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
-          put_optional_secret STRIPE_WEBHOOK_SECRET "$STRIPE_WEBHOOK_SECRET"
+          put_required_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
+          put_required_secret STRIPE_WEBHOOK_SECRET "$STRIPE_WEBHOOK_SECRET"
           put_optional_secret RESEND_API_KEY "$RESEND_API_KEY"
           put_optional_secret OMNIHUB_SYNC_URL "$OMNIHUB_SYNC_URL"
           put_optional_secret OMNIHUB_SIGNING_SECRET "$OMNIHUB_SIGNING_SECRET"
