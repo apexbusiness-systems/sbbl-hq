@@ -124,23 +124,27 @@ jobs:
           TURNSTILE_SECRET_KEY: ${{ secrets.VITE_TURNSTILE_SECRET_KEY }}
 
       - name: Post-deploy health gate
-        # Target the workers.dev URL directly to bypass Cloudflare Bot Management
-        # rules that are applied only to the custom domain (sbbl-hq.icu). The
-        # workers.dev subdomain routes straight to the Worker runtime and is not
-        # subject to per-zone bot management challenges, so the CI runner IP is
-        # never presented with a JS challenge page.
+        # Probe the production custom domain that users actually hit.
+        # The workers.dev subdomain (sbbl-hq-worker.sbblhqapp.workers.dev)
+        # is not served — every path returns HTTP 404 — so it cannot be used
+        # as a health target. The custom domain routes through Cloudflare
+        # Bot Management but explicitly allow-lists a dedicated User-Agent
+        # for CI health probes. If BM later rejects the probe, add an
+        # allow rule for requests where User-Agent starts with
+        # "sbbl-deploy-health/" rather than moving off the custom domain.
         run: |
+          HEALTH_URL="https://sbbl-hq.icu/ops/health"
           for attempt in {1..8}; do
-            echo "Health check attempt $attempt..."
+            echo "Health check attempt $attempt against $HEALTH_URL ..."
 
             response=$(curl -sf --max-time 10 \
               -A "sbbl-deploy-health/1.0 (+https://github.com/$GITHUB_REPOSITORY)" \
-              https://sbbl-hq-worker.sbblhqapp.workers.dev/ops/health || true)
+              "$HEALTH_URL" || true)
 
             echo "$response"
 
-            if echo "$response" | jq -e '.ok == true' > /dev/null 2>&1; then
-              echo "✅ Health check passed"
+            if echo "$response" | jq -e '.ok == true and .db_ok == true' > /dev/null 2>&1; then
+              echo "✅ Health check passed (ok && db_ok)"
               exit 0
             fi
 
