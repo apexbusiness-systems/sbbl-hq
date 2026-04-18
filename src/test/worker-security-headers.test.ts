@@ -19,7 +19,20 @@ describe('Worker security headers', () => {
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(res.headers.get('X-Frame-Options')).toBe('DENY');
     expect(res.headers.get('Referrer-Policy')).toBe('strict-origin-when-cross-origin');
-    expect(res.headers.get('Permissions-Policy')).toBe('camera=(), microphone=(), geolocation=()');
+    const perms = res.headers.get('Permissions-Policy') ?? '';
+    // Sensitive hardware stays denied.
+    expect(perms).toContain('camera=()');
+    expect(perms).toContain('microphone=()');
+    expect(perms).toContain('geolocation=()');
+    // Autoplay / fullscreen / picture-in-picture MUST be delegated to our
+    // embed providers — without this, Chrome's default `self` policy blocks
+    // embed.twitch.tv from autoplaying even when the SDK passes autoplay=true.
+    expect(perms).toMatch(/autoplay=\(self [^)]*"https:\/\/embed\.twitch\.tv"[^)]*\)/);
+    expect(perms).toMatch(/autoplay=\(self [^)]*"https:\/\/player\.twitch\.tv"[^)]*\)/);
+    expect(perms).toMatch(/autoplay=\(self [^)]*"https:\/\/www\.youtube\.com"[^)]*\)/);
+    expect(perms).toMatch(/autoplay=\(self [^)]*"https:\/\/player\.vimeo\.com"[^)]*\)/);
+    expect(perms).toMatch(/fullscreen=\(self [^)]*"https:\/\/embed\.twitch\.tv"[^)]*\)/);
+    expect(perms).toMatch(/picture-in-picture=\(self [^)]*"https:\/\/player\.twitch\.tv"[^)]*\)/);
     expect(res.headers.get('Strict-Transport-Security')).toBe('max-age=63072000; includeSubDomains; preload');
     expect(csp).toContain("default-src 'self'");
     // YouTube iframe API dynamically loads from s.ytimg.com.
@@ -74,7 +87,10 @@ describe('Worker security headers', () => {
     expect(res.headers.get('content-type')).toContain('text/html');
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
     expect(res.headers.get('X-Frame-Options')).toBe('DENY');
-    expect(res.headers.get('Permissions-Policy')).toBe('camera=(), microphone=(), geolocation=()');
+    const livePerms = res.headers.get('Permissions-Policy') ?? '';
+    expect(livePerms).toContain('camera=()');
+    expect(livePerms).toMatch(/autoplay=\(self [^)]*"https:\/\/embed\.twitch\.tv"[^)]*\)/);
+    expect(livePerms).toMatch(/autoplay=\(self [^)]*"https:\/\/player\.twitch\.tv"[^)]*\)/);
     expect(res.headers.get('Strict-Transport-Security')).toBe('max-age=63072000; includeSubDomains; preload');
     const csp = res.headers.get('Content-Security-Policy') ?? '';
     expect(csp).toContain('frame-src');
@@ -98,7 +114,9 @@ describe('Worker security headers', () => {
     for (const path of ['/scores', '/store', '/leaderboards', '/teams', '/schedules']) {
       const res = await worker.fetch(new Request(`https://local${path}`), htmlEnv);
       expect(res.status, path).toBe(200);
-      expect(res.headers.get('Permissions-Policy'), path).toBe('camera=(), microphone=(), geolocation=()');
+      const pp = res.headers.get('Permissions-Policy') ?? '';
+      expect(pp, path).toContain('camera=()');
+      expect(pp, path).toMatch(/autoplay=\(self [^)]*"https:\/\/embed\.twitch\.tv"[^)]*\)/);
       expect(res.headers.get('Content-Security-Policy'), path).toContain("default-src 'self'");
     }
   });

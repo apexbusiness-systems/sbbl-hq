@@ -5818,7 +5818,29 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('X-Frame-Options', 'DENY');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // Permissions-Policy: deny sensitive hardware by default, BUT delegate
+  // autoplay / fullscreen / picture-in-picture to our embed providers.
+  // Chrome's default `autoplay` policy is `self` — cross-origin iframes
+  // (like embed.twitch.tv) cannot autoplay even when they pass autoplay=true
+  // to their SDK unless the parent document explicitly delegates the feature
+  // to their origin. Without this delegation, the Twitch embed throws:
+  //   "Autoplay disabled. style visibility, size, viewport visibility"
+  // Keep camera / microphone / geolocation denied — passive playback needs
+  // none of them.
+  const embedOrigins = [
+    '"https://player.twitch.tv"',
+    '"https://embed.twitch.tv"',
+    '"https://www.youtube.com"',
+    '"https://www.youtube-nocookie.com"',
+    '"https://player.vimeo.com"',
+  ].join(' ');
+  headers.set(
+    'Permissions-Policy',
+    `camera=(), microphone=(), geolocation=(), ` +
+      `autoplay=(self ${embedOrigins}), ` +
+      `fullscreen=(self ${embedOrigins}), ` +
+      `picture-in-picture=(self ${embedOrigins})`,
+  );
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
