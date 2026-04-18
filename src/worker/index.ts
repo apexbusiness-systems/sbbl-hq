@@ -5,6 +5,8 @@ import { readIdempotencyKey } from "@/lib/api/idempotency";
 import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
 import { signSyncPacket, type SyncPacket } from "@/lib/sync-packets";
 import { ENTITLEMENT, ENTITLEMENT_MS } from "@/lib/constants/ENTITLEMENT_CONSTANTS";
+import { selectPlaybackProvider } from "@/lib/playback/selectProvider";
+import { verifyPlaybackToken } from "@/lib/playback/signed-token";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   mergeBeaconIntoAggregate,
@@ -4105,7 +4107,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     userId,
     body.sessionKey,
   );
-  const deliveryClass = getStreamDeliveryClass(playbackUrl);
+  let deliveryClass = getStreamDeliveryClass(playbackUrl);
   const cookieHeaders: Record<string, string> = {};
   let clientPlaybackUrl = playbackUrl;
   if (deliveryClass === "proxy" && gameId) {
@@ -4119,6 +4121,86 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       `${PROXY_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=70`;
     clientPlaybackUrl = `/api/streams/${gameId}/proxy/master.m3u8`;
   }
+
+  // ── Playback provider override (signed playback) ──────────────────────
+  // Flag-gated + per-game opt-in. When every condition in
+  // selectPlaybackProvider() is met, the signed URL from NativeHlsProvider
+  // replaces clientPlaybackUrl and a token row is inserted into
+  // stream_playback_tokens for server-side revocation / audit. If any
+  // part of this path fails, we silently fall through to the legacy
+  // clientPlaybackUrl — the feature is strictly additive. Invariant:
+  // the legacy embed URL (playbackUrl) is NEVER returned once the
+  // signed path is selected, per STREAM_GATING_v1.6.0.md.
+  let gameSignedRow: {
+    require_signed_url?: boolean | null;
+    playback_provider?: string | null;
+    playback_asset_id?: string | null;
+    latency_mode?: string | null;
+    replay_quality_tier?: string | null;
+  } | null = null;
+  if (gameId) {
+    const gRes = await ctx.admin
+      .from("games")
+      .select("require_signed_url,playback_provider,playback_asset_id,latency_mode,replay_quality_tier")
+      .eq("id", gameId)
+      .maybeSingle();
+    gameSignedRow = (gRes.data as typeof gameSignedRow) ?? null;
+  }
+  if (gameId && gameSignedRow) {
+    const workerOrigin = new URL(ctx.req.url).origin;
+    const provider = selectPlaybackProvider({
+      game: {
+        require_signed_url: gameSignedRow.require_signed_url ?? null,
+        playback_provider: gameSignedRow.playback_provider ?? null,
+        playback_asset_id: gameSignedRow.playback_asset_id ?? null,
+      },
+      flags: {
+        FEATURE_SIGNED_PLAYBACK_ENABLED: ctx.env.FEATURE_SIGNED_PLAYBACK_ENABLED,
+        FEATURE_NATIVE_HLS_PROVIDER: ctx.env.FEATURE_NATIVE_HLS_PROVIDER,
+      },
+      playbackTokenSecret: ctx.env.PLAYBACK_TOKEN_SECRET,
+      workerOrigin,
+    });
+    if (provider.name === "native_hls") {
+      try {
+        const payload = await provider.resolve({
+          gameId,
+          userId,
+          sessionId: session.id,
+          mode: "live",
+          expiresAt: session.expiresAt,
+          maxExpiresAt: session.maxExpiresAt,
+          game: {
+            id: gameId,
+            playback_asset_id: gameSignedRow.playback_asset_id,
+            require_signed_url: gameSignedRow.require_signed_url,
+            latency_mode: (gameSignedRow.latency_mode as "standard" | "low") ?? "standard",
+            replay_quality_tier: (gameSignedRow.replay_quality_tier as "raw" | "edited") ?? "raw",
+          },
+        });
+        if (payload.signedPlaybackUrl) {
+          await ctx.admin.from("stream_playback_tokens").insert({
+            session_id: session.id,
+            user_id: userId,
+            game_id: gameId,
+            provider: "native_hls",
+            signed_token: payload.signedPlaybackUrl.split("?t=")[1] ?? "",
+            expires_at: session.expiresAt,
+            max_expires_at: session.maxExpiresAt,
+            playback_mode: "live",
+          });
+          clientPlaybackUrl = payload.signedPlaybackUrl;
+          deliveryClass = "hls";
+        }
+      } catch (err) {
+        // Signed-path failure → fall through to legacy. Logged but does
+        // not surface as a user-visible error; the legacy URL is a safe
+        // superset of behavior.
+        Sentry.captureException?.(err);
+      }
+    }
+  }
+
   return json({
     ok: true,
     playback: {
@@ -4135,6 +4217,77 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       maxExpiresAt: session.maxExpiresAt,
     },
   }, 200, cookieHeaders);
+}
+
+/**
+ * GET /api/streams/:gameId/playback-token/verify?t=<token>
+ *
+ * Stateless-ish verification endpoint for signed playback tokens. Public
+ * read — a verification response leaks nothing beyond ok/reason. Returns
+ * 200 on success, 401 with reason on any failure. Used by internal
+ * tooling, the native HLS proxy (future PR), and the on-call runbook.
+ *
+ * Verification order:
+ *   1. HMAC signature valid (constant-time).
+ *   2. Token not expired (clock check vs. now).
+ *   3. Session row still `active` and the session's `max_expires_at`
+ *      has not elapsed.
+ *   4. Token row not revoked in stream_playback_tokens.
+ *   5. Token's gameId matches the URL path param.
+ */
+export async function handlePlaybackTokenVerify(ctx: HandlerCtx) {
+  const urlGameId = ctx.params.gameId ?? null;
+  const url = new URL(ctx.req.url);
+  const token = url.searchParams.get("t");
+  if (!token) return json({ ok: false, reason: "token_required" }, 400);
+
+  const secret = ctx.env.PLAYBACK_TOKEN_SECRET ?? "";
+  const result = await verifyPlaybackToken(token, secret);
+  if (!result.ok) return json({ ok: false, reason: result.reason }, 401);
+
+  if (urlGameId && result.claims.gameId && urlGameId !== result.claims.gameId) {
+    return json({ ok: false, reason: "game_mismatch" }, 401);
+  }
+
+  const sessRes = await ctx.admin
+    .from("stream_access_sessions")
+    .select("id,status,max_expires_at")
+    .eq("id", result.claims.sessionId)
+    .maybeSingle();
+  const sess = sessRes.data as {
+    id: string;
+    status: string | null;
+    max_expires_at: string | null;
+  } | null;
+  if (!sess) return json({ ok: false, reason: "session_not_found" }, 401);
+  if (sess.status !== "active") return json({ ok: false, reason: "session_inactive" }, 401);
+  if (sess.max_expires_at && new Date(sess.max_expires_at).getTime() <= Date.now()) {
+    return json({ ok: false, reason: "session_expired" }, 401);
+  }
+
+  const tokenRes = await ctx.admin
+    .from("stream_playback_tokens")
+    .select("id,revoked_at")
+    .eq("session_id", result.claims.sessionId)
+    .is("revoked_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (!tokenRes.data) {
+    return json({ ok: false, reason: "token_revoked" }, 401);
+  }
+
+  return json({
+    ok: true,
+    claims: {
+      userId: result.claims.userId,
+      gameId: result.claims.gameId,
+      sessionId: result.claims.sessionId,
+      assetId: result.claims.assetId,
+      playbackMode: result.claims.playbackMode,
+      exp: result.claims.exp,
+      mex: result.claims.mex,
+    },
+  });
 }
 
 export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
@@ -5575,6 +5728,11 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/api/streams/:gameId/session/end",
     handler: handleStreamSessionEnd,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/playback-token/verify",
+    handler: handlePlaybackTokenVerify,
   },
   {
     method: "GET",
