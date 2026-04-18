@@ -5933,7 +5933,7 @@ function addSecurityHeaders(res: Response): Response {
     "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://static.cloudflareinsights.com; " +
     // fonts.googleapis.com serves the @font-face CSS (style-src).
     // fonts.gstatic.com serves the actual .woff2 files (font-src).
-    // Both are required for Bebas Neue + Space Grotesk loaded in index.html.
+    // Both are required for Space Grotesk loaded in index.html (canonical brand font).
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
     "img-src 'self' data: blob: https:; " +
     "font-src 'self' data: https://fonts.gstatic.com; " +

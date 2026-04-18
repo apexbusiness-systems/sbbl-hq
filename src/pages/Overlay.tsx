@@ -249,9 +249,10 @@ export default function OverlayPage() {
         >
           <div
             style={{
-              fontFamily: 'Bebas Neue, Impact, monospace',
+              fontFamily: "'Space Grotesk', ui-monospace, monospace",
               fontSize: 40,
               lineHeight: 1,
+              fontWeight: 600,
               letterSpacing: '0.04em',
               fontVariantNumeric: 'tabular-nums',
               color: overlay?.clock_running ? '#fff' : '#ffb020',
@@ -472,9 +473,10 @@ function TeamBlock({
       <span
         style={{
           marginLeft: 'auto',
-          fontFamily: 'Bebas Neue, Impact, monospace',
+          fontFamily: "'Space Grotesk', ui-monospace, monospace",
           fontSize: 40,
           lineHeight: 1,
+          fontWeight: 600,
           fontVariantNumeric: 'tabular-nums',
         }}
       >
