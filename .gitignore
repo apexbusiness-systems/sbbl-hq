@@ -50,3 +50,7 @@ apex-*.md
 omnidev-*.md
 supabase/.temp/
 ops/event-hardening-2026-04/selfhost/.env
+
+# Migration drift repair artifacts (scripts/repair-migration-drift.sh)
+supabase/migrations.backup-*/
+supabase/migrations.remote-snapshot-*.sql
