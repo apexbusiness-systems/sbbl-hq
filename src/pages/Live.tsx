@@ -38,6 +38,15 @@ import type { Game, PlayerProfile, Product } from '@/types';
 // ── Helpers ───────────────────────────────────────────────────────────────
 const LEAGUE_IDS = ['sbbl', 'wbl', 'tgifbl'];
 
+interface LeaderboardLeader {
+  id: string;
+  name: string;
+  avatar: string | null;
+  position: string;
+  pts: number;
+  league_id: string;
+}
+
 function mapHomeGameToUi(row: Record<string, unknown>): Game {
   const homeTeam = (row.home_team as Record<string, unknown> | null) ?? {};
   const awayTeam = (row.away_team as Record<string, unknown> | null) ?? {};
@@ -440,7 +449,6 @@ const LivePage = () => {
   const { addToBag } = useBag();
 
   // --- Top Performers Carousel Logic ---
-  /* eslint-disable @typescript-eslint/no-explicit-any */
 
   const [activeLeagueIdx, setActiveLeagueIdx] = useState(0);
   // leagueIds is moved outside to avoid dependency array issues
@@ -462,7 +470,7 @@ const LivePage = () => {
       const supabase = getSupabaseClient();
       const { data, error } = await supabase.rpc('get_leaderboards', { p_filters: { league: LEAGUE_IDS[activeLeagueIdx] } });
       if (error) throw new Error(error.message);
-      return (data as { leaders?: unknown[] } | null)?.leaders ?? [];
+      return (data as { leaders?: LeaderboardLeader[] } | null)?.leaders ?? [];
     },
     staleTime: 1000 * 60 * 5, // 5 min
     retry: 1,
@@ -470,7 +478,7 @@ const LivePage = () => {
 
   const topPerformers = useMemo(() => {
     // leaderboardsData is already sorted by points descending from the RPC.
-    return leaderboardsData.slice(0, 3).map((p: any) => ({
+    return leaderboardsData.slice(0, 3).map((p) => ({
       id: p.id,
       name: p.name,
       avatar: p.avatar, // the RPC does not currently return avatar_url, but we map what we have or let fallback handle it
@@ -889,7 +897,7 @@ const LivePage = () => {
           </div>
         ) : performersError ? (
           <p className="text-xs text-muted-foreground py-4 text-center">Could not load top performers.</p>
-        ) : topPerformers.length > 0 ? topPerformers.map((p: PlayerProfile | any) => (
+        ) : topPerformers.length > 0 ? topPerformers.map((p) => (
           <div key={p.id} className="flex items-center gap-3 py-2 border-b border-border last:border-0">
             <PlayerAvatar src={p.avatar} alt={p.name} className="w-8 h-8" />
             <div className="flex-1 min-w-0">
