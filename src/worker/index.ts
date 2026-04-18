@@ -6621,14 +6621,18 @@ async function handleOpsBatchProducts(ctx: HandlerCtx) {
   if (!Array.isArray(items) || items.length === 0) {
     return json({ ok: false, error: "items_required" }, 400);
   }
-  for (const item of items.slice(0, 4)) {
-    if (!item.title || !item.price) continue;
-    const { error } = await ctx.admin.from("products").insert({
+  const productsToInsert = items
+    .slice(0, 4)
+    .filter((item) => item.title && item.price)
+    .map((item) => ({
       name: String(item.title),
       price: Number(item.price),
       status: "draft",
       league_id: item.leagueId ?? null,
-    });
+    }));
+
+  if (productsToInsert.length > 0) {
+    const { error } = await ctx.admin.from("products").insert(productsToInsert);
     if (error) throw new Error(error.message);
   }
   await ctx.admin.from("audit_logs").insert({
