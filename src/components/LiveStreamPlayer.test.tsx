@@ -76,6 +76,20 @@ const baseGame = {
   score: { home: 0, away: 0 },
 } as Game;
 
+type MockReactPlayerProps = {
+  url?: string;
+  muted?: boolean;
+  controls?: boolean;
+  config: {
+    twitch: {
+      options: {
+        muted?: boolean;
+        parent?: string[];
+      };
+    };
+  };
+};
+
 function mockPlaybackSession(url: string) {
   apiFetchMock.mockImplementation(async (path: string) => {
     if (path.endsWith('/session')) {
@@ -94,9 +108,9 @@ function mockPlaybackSession(url: string) {
   });
 }
 
-function getLastReactPlayerProps() {
+function getLastReactPlayerProps(): MockReactPlayerProps {
   const lastCall = reactPlayerRenderSpy.mock.calls[reactPlayerRenderSpy.mock.calls.length - 1];
-  return (lastCall?.[0] ?? {}) as Record<string, any>;
+  return (lastCall?.[0] ?? {}) as MockReactPlayerProps;
 }
 
 describe('LiveStreamPlayer provider behavior', () => {
