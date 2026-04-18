@@ -322,6 +322,93 @@ describe('ingest state machine', () => {
   });
 });
 
+// ── 9b. POTG publisher guard (no-orphan-leaderboard rule) ───────────────────
+// Regression coverage for incident 2026-04-18: 12 WBL POTG posters were
+// published with no stat data and no rostered player, leaving the leaderboard
+// with a single visible player. Both publish paths (/ops/potg/submit and
+// /ops/ingest/submit kind='potg') must reject incomplete submissions.
+describe('POTG publisher guard', () => {
+  it('validatePotgStatFields helper exists', () => {
+    expect(workerSrc).toMatch(/function validatePotgStatFields\b/);
+  });
+
+  it('resolvePotgPlayer helper exists', () => {
+    expect(workerSrc).toMatch(/async function resolvePotgPlayer\b/);
+  });
+
+  it('resolvePotgPlayer checks the player\'s league matches the publication\'s league', () => {
+    const fnStart = workerSrc.indexOf('async function resolvePotgPlayer');
+    const fnEnd   = workerSrc.indexOf('\n}', fnStart) + 2;
+    const fnBody  = workerSrc.slice(fnStart, fnEnd);
+    expect(fnBody).toContain('potg_player_not_in_profiles');
+    expect(fnBody).toContain('potg_player_not_rostered');
+    expect(fnBody).toContain('potg_player_league_mismatch');
+  });
+
+  describe('handleSubmitPotg (path A: /ops/potg/submit)', () => {
+    const fnStart = workerSrc.indexOf('async function handleSubmitPotg');
+    const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
+    const fnBody  = workerSrc.slice(fnStart, fnEnd);
+
+    it('validates stat fields before any DB write', () => {
+      const validateIdx = fnBody.indexOf('validatePotgStatFields');
+      const insertIdx   = fnBody.indexOf('media_publications');
+      expect(validateIdx).toBeGreaterThan(-1);
+      expect(insertIdx).toBeGreaterThan(validateIdx);
+    });
+
+    it('resolves the rostered player before publishing', () => {
+      const resolveIdx = fnBody.indexOf('resolvePotgPlayer');
+      const insertIdx  = fnBody.indexOf('media_publications');
+      expect(resolveIdx).toBeGreaterThan(-1);
+      expect(insertIdx).toBeGreaterThan(resolveIdx);
+    });
+
+    it('returns 409 when the resolver reports an error', () => {
+      // Multi-line json(payload, 409) — match the bare `409` argument.
+      expect(fnBody).toMatch(/\b409[,)\s]/);
+    });
+
+    it('legacy "pending_match" branch is gone (player is now guaranteed)', () => {
+      expect(fnBody).not.toContain('pending_match');
+    });
+  });
+
+  describe('handleIngestSubmit (path B: /ops/ingest/submit kind=potg)', () => {
+    const fnStart = workerSrc.indexOf('async function handleIngestSubmit');
+    const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
+    const fnBody  = workerSrc.slice(fnStart, fnEnd);
+
+    it('validates POTG stat fields before opening an ingest_jobs row', () => {
+      const validateIdx = fnBody.indexOf('validatePotgStatFields');
+      const insertJobIdx = fnBody.indexOf('.from("ingest_jobs")');
+      expect(validateIdx).toBeGreaterThan(-1);
+      expect(insertJobIdx).toBeGreaterThan(validateIdx);
+    });
+
+    it('resolves the rostered player for POTG before publishing', () => {
+      const resolveIdx = fnBody.indexOf('resolvePotgPlayer');
+      const insertPubIdx = fnBody.indexOf('.from("media_publications")');
+      expect(resolveIdx).toBeGreaterThan(-1);
+      expect(insertPubIdx).toBeGreaterThan(resolveIdx);
+    });
+
+    it('copies stat fields into render_payload for ALL leagues, not just TGIFBL', () => {
+      // Regression guard: the pre-fix block was gated by `body.leagueId === "tgifbl"`.
+      // After the fix the gate is just `body.kind === "potg"`.
+      expect(fnBody).not.toMatch(/body\.leagueId\s*===\s*["']tgifbl["']/i);
+      expect(fnBody).not.toMatch(/meta\.leagueId\s*===\s*["']tgifbl["']/i);
+      // The unconditional POTG copy block must exist.
+      expect(fnBody).toMatch(/if\s*\(\s*body\.kind\s*===\s*["']potg["']\s*\)\s*{[\s\S]*?assetMeta\.pts/);
+    });
+
+    it('returns 400 with a descriptive error code on missing stat fields', () => {
+      expect(fnBody).toContain('missing_potg_league');
+      expect(fnBody).toContain('potg_unknown_league');
+    });
+  });
+});
+
 // ── 9. Security boundaries ────────────────────────────────────────────────────
 describe('security: super_admin gating', () => {
   it('all ingest handlers call requireSuperAdmin', () => {
