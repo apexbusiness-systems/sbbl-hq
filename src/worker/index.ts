@@ -3094,6 +3094,78 @@ async function inferPotgLeagueCode(
   return winner === "wbl" || winner === "tgifbl" || winner === "sbbl" ? winner : null;
 }
 
+// POTG publisher guards. Both /ops/potg/submit and /ops/ingest/submit (kind='potg')
+// must refuse to publish when the payload lacks the stat fields the leaderboard
+// pipeline depends on, or when the player isn't rostered to the publication's
+// league. Without these checks, posters land in media_publications with no
+// matching player_game_stats row, leaving the leaderboard with an empty roster
+// (incident 2026-04-18: 12 orphan WBL POTG posters; only Robert Ocampo visible).
+type PotgStatPayload = {
+  playerName?: unknown;
+  team?: unknown;
+  pts?: unknown;
+  rebs?: unknown;
+  assts?: unknown;
+  gameResult?: unknown;
+};
+
+function validatePotgStatFields(meta: PotgStatPayload): string | null {
+  if (!String(meta.playerName ?? "").trim()) return "missing_potg_player_name";
+  if (!String(meta.team ?? "").trim()) return "missing_potg_team";
+  if (!String(meta.gameResult ?? "").trim()) return "missing_potg_game_result";
+  for (const key of ["pts", "rebs", "assts"] as const) {
+    const v = meta[key];
+    if (v === undefined || v === null || v === "") return `missing_potg_${key}`;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return `invalid_potg_${key}`;
+  }
+  return null;
+}
+
+type PotgPlayerResolution =
+  | { ok: true; playerId: string; userId: string }
+  | { ok: false; error: string; details: Record<string, unknown> };
+
+async function resolvePotgPlayer(
+  admin: SupabaseClient,
+  playerName: string,
+  leagueUuid: string,
+): Promise<PotgPlayerResolution> {
+  const trimmed = playerName.trim();
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("user_id")
+    .ilike("display_name", trimmed)
+    .maybeSingle();
+  if (!profile?.user_id) {
+    return { ok: false, error: "potg_player_not_in_profiles", details: { playerName: trimmed } };
+  }
+  const { data: player } = await admin
+    .from("players")
+    .select("id, league_id")
+    .eq("user_id", profile.user_id)
+    .maybeSingle();
+  if (!player?.id) {
+    return {
+      ok: false,
+      error: "potg_player_not_rostered",
+      details: { playerName: trimmed, profileUserId: profile.user_id },
+    };
+  }
+  if (player.league_id !== leagueUuid) {
+    return {
+      ok: false,
+      error: "potg_player_league_mismatch",
+      details: {
+        playerName: trimmed,
+        expectedLeague: leagueUuid,
+        rosteredLeague: player.league_id,
+      },
+    };
+  }
+  return { ok: true, playerId: String(player.id), userId: String(profile.user_id) };
+}
+
 async function handleSubmitPotg(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireAdminSession(ctx.req, ctx.admin);
@@ -3113,6 +3185,11 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     return json({ ok: false, error: "missing_required_fields" }, 400);
   }
 
+  const statErr = validatePotgStatFields(body);
+  if (statErr) {
+    return json({ ok: false, error: statErr }, 400);
+  }
+
   const requestedLeagueCode = String(body.leagueId).toLowerCase();
   const inferredLeagueCode = await inferPotgLeagueCode(ctx, body.team, body.gameResult);
   const effectiveLeagueCode = inferredLeagueCode ?? requestedLeagueCode;
@@ -3128,21 +3205,26 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     .maybeSingle();
   leagueUuid = leagueLookup?.id ?? null;
 
-  // Upsert player profile by display name + team within league
-  const { data: profileData } = await ctx.admin
-    .from("profiles")
-    .select("user_id")
-    .ilike("display_name", body.playerName.trim())
-    .maybeSingle();
-  const playerUserId = profileData?.user_id ?? null;
-  const { data: playerRow } = playerUserId
-    ? await ctx.admin
-      .from("players")
-      .select("id")
-      .eq("user_id", playerUserId)
-      .maybeSingle()
-    : { data: null as { id?: string } | null };
-  const playerId = playerRow?.id ?? null;
+  if (!leagueUuid) {
+    return json(
+      { ok: false, error: "potg_unknown_league", leagueId: effectiveLeagueCode },
+      400,
+    );
+  }
+
+  // Refuse to publish a POTG for a player who isn't rostered to this league.
+  // Without a matching `players` row the leaderboard has nothing to surface
+  // and the poster becomes an orphan (see incident 2026-04-18).
+  const playerResolution = await resolvePotgPlayer(ctx.admin, body.playerName, leagueUuid);
+  if (playerResolution.ok === false) {
+    return json(
+      { ok: false, error: playerResolution.error, details: playerResolution.details },
+      409,
+    );
+  }
+  const playerUserId = playerResolution.userId;
+  const playerId = playerResolution.playerId;
+  const profileData = { user_id: playerUserId };
 
   // Link POTG to an existing score row when possible; otherwise create
   // a minimal league game row so Scores and stats tabs can tabulate it.
@@ -3193,8 +3275,8 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     }
   }
 
-  // Upsert into player_game_stats via award_records table if player found,
-  // otherwise write to import_jobs as a pending manual match
+  // Audit row in import_jobs. The player is guaranteed rostered at this point
+  // (resolvePotgPlayer above), so the legacy unmatched-fallback branch is gone.
   const { data: jobData, error: jobError } = await ctx.admin
     .from("import_jobs")
     .insert({
@@ -3210,19 +3292,17 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
         leagueId: effectiveLeagueCode,
         date: potgDate,
         imageUrl: body.imageUrl ?? null,
-        matched_profile_id: profileData?.user_id ?? null,
+        matched_profile_id: profileData.user_id,
         game_id: gameId,
         source: "potg_image_parser",
         requestedLeagueId: requestedLeagueCode,
         inferredLeagueId: inferredLeagueCode,
       },
-      status: profileData ? "completed" : "pending_match",
+      status: "completed",
       total_rows: 1,
-      inserted_rows: profileData ? 1 : 0,
-      failed_rows: profileData ? 0 : 0,
-      error_summary: profileData
-        ? null
-        : "Player profile not yet in system — award queued for manual match",
+      inserted_rows: 1,
+      failed_rows: 0,
+      error_summary: null,
     })
     .select("id")
     .single();
@@ -3270,8 +3350,8 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
       .single();
     if (assetErr) throw new Error(assetErr.message);
 
-    // Project into publication layer — low-confidence POTG is matched=true
-    // if profileData was found; otherwise goes to needs_review via ingest_jobs.
+    // Project into publication layer. The guards above ensure both stat fields
+    // and a rostered player exist, so this is always a fully-formed publication.
     await ctx.admin.from("media_publications").insert({
       media_asset_id: assetData.id,
       surface: "potg",
@@ -3297,7 +3377,7 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     /* non-critical audit log — suppress */
   }
 
-  return json({ ok: true, jobId: jobData.id, matched: !!profileData });
+  return json({ ok: true, jobId: jobData.id, matched: true });
 }
 
 // ── PPV INVITE SYSTEM ────────────────────────────────────────────────────────
@@ -6143,6 +6223,35 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     return json({ ok: false, error: "invalid_kind" }, 400);
   }
 
+  // POTG-specific guards. Block before opening an ingest_jobs row so we don't
+  // leave half-finished rows behind on rejection. See incident 2026-04-18.
+  if (body.kind === "potg") {
+    const meta = body.meta ?? {};
+    const statErr = validatePotgStatFields(meta as PotgStatPayload);
+    if (statErr) {
+      return json({ ok: false, error: statErr }, 400);
+    }
+    if (!body.leagueId) {
+      return json({ ok: false, error: "missing_potg_league" }, 400);
+    }
+    const { data: lg } = await ctx.admin
+      .from("leagues").select("id").ilike("code", body.leagueId).maybeSingle();
+    if (!lg?.id) {
+      return json({ ok: false, error: "potg_unknown_league", leagueId: body.leagueId }, 400);
+    }
+    const playerResolution = await resolvePotgPlayer(
+      ctx.admin,
+      String(meta.playerName ?? ""),
+      String(lg.id),
+    );
+    if (playerResolution.ok === false) {
+      return json(
+        { ok: false, error: playerResolution.error, details: playerResolution.details },
+        409,
+      );
+    }
+  }
+
   const idempotencyKey = body.idempotencyKey ?? readIdempotencyKey(ctx.req.headers) ?? null;
 
   // Dedup: if this key was already processed, return the existing job.
@@ -6219,11 +6328,14 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     ...meta,
   };
 
-  // Ensure POTG stats are deterministically tabulated for TGIF POTG
-  if (body.kind === "potg" && (body.leagueId === "tgifbl" || meta.leagueId === "tgifbl" || meta.leagueId === "TGIFBL" || body.leagueId === "TGIFBL")) {
-    assetMeta.pts = typeof meta.pts === 'number' ? meta.pts : Number(meta.pts ?? 0);
-    assetMeta.rebs = typeof meta.rebs === 'number' ? meta.rebs : Number(meta.rebs ?? 0);
-    assetMeta.assts = typeof meta.assts === 'number' ? meta.assts : Number(meta.assts ?? 0);
+  // Copy POTG stat fields into the publication's render_payload for ALL
+  // leagues. Pre-2026-04-18 this block was guarded to TGIFBL only, so WBL
+  // and SBBL POTG submissions silently lost their stats and produced
+  // orphan posters that broke the leaderboards.
+  if (body.kind === "potg") {
+    assetMeta.pts = Number(meta.pts ?? 0);
+    assetMeta.rebs = Number(meta.rebs ?? 0);
+    assetMeta.assts = Number(meta.assts ?? 0);
     assetMeta.gameResult = String(meta.gameResult ?? "");
     assetMeta.playerName = String(meta.playerName ?? body.title ?? "");
     assetMeta.team = String(meta.team ?? "");
