@@ -22,7 +22,15 @@
   "assets": {
     "directory": "dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/auth/*", "/webhooks/*", "/ops/*"]
+    // MUST be `true` (not a path allowlist). The Worker's addSecurityHeaders()
+    // wraps every response — including the SPA HTML shell fetched from the
+    // ASSETS binding fallback — so Permissions-Policy, CSP, HSTS, and
+    // X-Frame-Options reach the browser on page loads (e.g. /live).
+    // A path-list value (["/api/*", ...]) routes non-matching requests
+    // directly to ASSETS, bypassing the Worker entirely and stripping all
+    // security headers from the HTML response. That silently breaks Twitch
+    // embed autoplay on /live and any future per-page header contract.
+    "run_worker_first": true
   },
   "routes": [
     {
