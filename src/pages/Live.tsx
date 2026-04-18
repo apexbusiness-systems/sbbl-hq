@@ -827,7 +827,9 @@ const LivePage = () => {
               key={carouselProduct.id}
               src={carouselProduct.image}
               alt={carouselProduct.name}
-              className="w-full h-full object-contain animate-fade-in"
+              width={512}
+              height={512}
+              className="w-full h-full object-contain"
               loading="eager"
               decoding="async"
               fetchPriority="high"

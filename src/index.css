@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -87,8 +87,8 @@
   }
 
   h1, h2, h3, h4, h5, h6 {
-    font-family: 'Bebas Neue', Impact, 'Arial Narrow', sans-serif;
-    @apply tracking-wide font-normal uppercase;
+    font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+    @apply tracking-wide font-semibold uppercase;
   }
 }
 
@@ -105,8 +105,8 @@
   }
 
   .stat-numeral {
-    font-family: 'Bebas Neue', Impact, monospace;
-    @apply font-normal tracking-tight tabular-nums;
+    font-family: 'Space Grotesk', ui-monospace, SFMono-Regular, Menlo, monospace;
+    @apply font-semibold tracking-tight tabular-nums;
   }
 
   .league-badge {

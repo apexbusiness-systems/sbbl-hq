@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PLAYBACK_ARTIFACT_TTL_MS,
+  ENTITLEMENT_VALIDITY_MS,
   SIX_HOURS_MS,
   computeActiveEntitledViewerCount,
   computeEntitlementExpiry,
@@ -26,7 +27,7 @@ describe("stream validation policy", () => {
     const now = Date.now();
     const decision = decideOneDeviceAccess({
       now,
-      entitlementExpiresAt: now + SIX_HOURS_MS,
+      entitlementExpiresAt: now + ENTITLEMENT_VALIDITY_MS,
       existingSession: null,
       candidateFingerprint: fp(),
     });
@@ -44,7 +45,7 @@ describe("stream validation policy", () => {
 
     const same = decideOneDeviceAccess({
       now,
-      entitlementExpiresAt: now + SIX_HOURS_MS,
+      entitlementExpiresAt: now + ENTITLEMENT_VALIDITY_MS,
       existingSession: existing,
       candidateFingerprint: fp(),
     });
@@ -52,7 +53,7 @@ describe("stream validation policy", () => {
 
     const changedIp = decideOneDeviceAccess({
       now,
-      entitlementExpiresAt: now + SIX_HOURS_MS,
+      entitlementExpiresAt: now + ENTITLEMENT_VALIDITY_MS,
       existingSession: existing,
       candidateFingerprint: fp({ ipHash: "ip-b" }),
     });
@@ -61,7 +62,7 @@ describe("stream validation policy", () => {
 
     const changedDevice = decideOneDeviceAccess({
       now,
-      entitlementExpiresAt: now + SIX_HOURS_MS,
+      entitlementExpiresAt: now + ENTITLEMENT_VALIDITY_MS,
       existingSession: existing,
       candidateFingerprint: fp({ deviceTokenHash: "device-b" }),
     });
@@ -69,8 +70,8 @@ describe("stream validation policy", () => {
     expect(changedDevice.reason).toBe("device_changed");
   });
 
-  it("denies access after six-hour entitlement window", () => {
-    const issuedAt = Date.now() - SIX_HOURS_MS - 1;
+  it("denies access after the 48-hour entitlement window", () => {
+    const issuedAt = Date.now() - ENTITLEMENT_VALIDITY_MS - 1;
     const expiresAt = computeEntitlementExpiry(issuedAt);
 
     const decision = decideOneDeviceAccess({
@@ -86,7 +87,7 @@ describe("stream validation policy", () => {
 
   it("enforces playback artifact ttl shorter than entitlement", () => {
     const issuedAt = Date.now();
-    const entitlementExpiresAt = issuedAt + SIX_HOURS_MS;
+    const entitlementExpiresAt = issuedAt + ENTITLEMENT_VALIDITY_MS;
 
     expect(
       isPlaybackArtifactValid({
@@ -101,7 +102,7 @@ describe("stream validation policy", () => {
       isPlaybackArtifactValid({
         now: issuedAt + 1_000,
         issuedAt,
-        artifactTtlMs: SIX_HOURS_MS + 1,
+        artifactTtlMs: ENTITLEMENT_VALIDITY_MS + 1,
         entitlementExpiresAt,
       }),
     ).toBe(false);

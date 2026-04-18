@@ -4,6 +4,7 @@ import { safeServerEnv } from "@/lib/env";
 import { readIdempotencyKey } from "@/lib/api/idempotency";
 import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
 import { signSyncPacket, type SyncPacket } from "@/lib/sync-packets";
+import { ENTITLEMENT, ENTITLEMENT_MS } from "@/lib/constants/ENTITLEMENT_CONSTANTS";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   mergeBeaconIntoAggregate,
@@ -1757,13 +1758,14 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
       }
     }
 
-    // PPV purchase: create stream entitlement (6h access window) +
-    // auto-complete onboarding as a free "fan" member so the buyer can
-    // immediately watch without being blocked by the onboarding gate.
+    // PPV purchase: create stream entitlement (48h validity window to
+    // tolerate game-day delays) + auto-complete onboarding as a free "fan"
+    // member so the buyer can immediately watch without being blocked by
+    // the onboarding gate. The session itself remains hard-capped at 6h
+    // once the buyer actually starts watching.
     if (purchaseType === "ppv" && typeof metadata.game_id === "string") {
       try {
-        const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + 6);
+        const expiresAt = new Date(Date.now() + ENTITLEMENT_MS.ENTITLEMENT_VALIDITY);
         await ctx.admin.rpc("create_stream_entitlement", {
           p_game_id: metadata.game_id,
           p_user_id: userId,
@@ -3507,14 +3509,15 @@ async function handleSuperAdminCompCode(ctx: HandlerCtx) {
   const gameId = body?.gameId?.trim();
   if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
 
-  // Clamp expiry window to [1, 168] hours (1 hour to 7 days). Default 24h
-  // matches the regular invite system. This is the REDEMPTION window — once
-  // redeemed, the playback session is still hard-capped at 6 hours by
-  // createOrRefreshPlaybackSession.
+  // Clamp expiry window to [1, 168] hours (1 hour to 7 days). Default is
+  // ENTITLEMENT.MANUAL_COMP_VALIDITY_HOURS (48h) — the canonical comp-grant
+  // window. This is the REDEMPTION window — once redeemed, the playback
+  // session is still hard-capped at ENTITLEMENT.VIEWING_SESSION_MAX_SECONDS
+  // (6 hours) by createOrRefreshPlaybackSession.
   const rawHours = Number(body?.expiresInHours);
   const hours = Number.isFinite(rawHours) && rawHours > 0
     ? Math.min(168, Math.max(1, rawHours))
-    : 24;
+    : ENTITLEMENT.MANUAL_COMP_VALIDITY_HOURS;
   const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 
   const note = typeof body?.note === "string" ? body.note.trim().slice(0, 200) : null;
@@ -3916,7 +3919,7 @@ function parseCommentLimit(url: URL): number {
   return Math.min(100, Math.max(1, Math.floor(raw)));
 }
 
-const SESSION_MAX_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours hard cap
+const SESSION_MAX_DURATION_MS = ENTITLEMENT_MS.VIEWING_SESSION_MAX; // 6-hour session cap (canonical)
 
 async function createOrRefreshPlaybackSession(
   ctx: HandlerCtx,
@@ -5933,7 +5936,7 @@ function addSecurityHeaders(res: Response): Response {
     "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://static.cloudflareinsights.com; " +
     // fonts.googleapis.com serves the @font-face CSS (style-src).
     // fonts.gstatic.com serves the actual .woff2 files (font-src).
-    // Both are required for Bebas Neue + Space Grotesk loaded in index.html.
+    // Both are required for Space Grotesk loaded in index.html (canonical brand font).
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
     "img-src 'self' data: blob: https:; " +
     "font-src 'self' data: https://fonts.gstatic.com; " +

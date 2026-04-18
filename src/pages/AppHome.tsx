@@ -42,25 +42,23 @@ const AppHomePage = () => {
 
       {/* ── BRAND HERO ─────────────────────────────────────────── */}
       <section className="relative overflow-hidden bg-[#0A0A0A]" style={{ minHeight: '560px' }}>
-        {/* Photo background — LCP element. Served as AVIF → WebP → PNG, with
-            a separate <source> per viewport so mobile never pulls the 1536px
-            desktop asset. */}
-        <picture className="absolute inset-0 w-full h-full">
-          <source type="image/avif" media="(min-width: 768px)" srcSet="/assets/hero-desktop.avif" />
-          <source type="image/webp" media="(min-width: 768px)" srcSet="/assets/hero-desktop.webp" />
-          <source type="image/png"  media="(min-width: 768px)" srcSet="/assets/hero-desktop.png" />
-          <source type="image/avif" srcSet="/assets/hero-mobile.avif" />
-          <source type="image/webp" srcSet="/assets/hero-mobile.webp" />
-          <img
-            src="/assets/hero-mobile.png"
-            alt=""
-            className="w-full h-full object-contain object-center"
-            draggable={false}
-            fetchPriority="high"
-            decoding="sync"
-            loading="eager"
-          />
-        </picture>
+        {/* Photo background — LCP candidate on `/`, so explicit dimensions,
+            responsive srcset, high fetch priority, and async decode keep
+            first paint unblocked while still letting the browser treat this
+            as the largest-content element. */}
+        <img
+          src="/assets/hero-mobile.png"
+          srcSet="/assets/hero-mobile.png 768w, /assets/hero-desktop.png 1920w"
+          sizes="100vw"
+          alt=""
+          width={1920}
+          height={1080}
+          className="absolute inset-0 w-full h-full object-contain object-center"
+          draggable={false}
+          fetchPriority="high"
+          decoding="async"
+          loading="eager"
+        />
         <div className="absolute inset-0 bg-black/45" />
         <div className="absolute inset-0 [background:linear-gradient(to_right,rgba(10,10,10,0.85)_0%,rgba(10,10,10,0.3)_55%,transparent_100%)]" />
         <div className="absolute inset-0 [background:radial-gradient(ellipse_at_20%_65%,rgba(201,168,76,0.18)_0%,transparent_50%)]" />

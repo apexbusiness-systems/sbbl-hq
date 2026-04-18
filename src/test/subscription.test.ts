@@ -5,6 +5,7 @@ import {
   PLAYER_REGISTRATION_PRICE_CAD,
   PPV_PRICE_CAD,
   PPV_ACCESS_HOURS,
+  PPV_SESSION_CAP_HOURS,
   PLAYER_STORE_DISCOUNT_PERCENT,
   shouldShowMinimalStats,
 } from '@/lib/auth/subscription';
@@ -14,9 +15,10 @@ describe('player subscription access', () => {
     expect(PLAYER_REGISTRATION_PRICE_CAD).toBe(6.99);
   });
 
-  it('PPV is $4.99 CAD with 6-hour access window', () => {
+  it('PPV is $4.99 CAD with 48-hour entitlement window and 6-hour session cap', () => {
     expect(PPV_PRICE_CAD).toBe(4.99);
-    expect(PPV_ACCESS_HOURS).toBe(6);
+    expect(PPV_ACCESS_HOURS).toBe(48);
+    expect(PPV_SESSION_CAP_HOURS).toBe(6);
   });
 
   it('player store discount is 10%', () => {
