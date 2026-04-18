@@ -209,6 +209,20 @@ media-src:  'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net
 | playback_mode   | text        | `live` \| `replay`                                    |
 | revoked_at      | timestamptz | Non-null = token invalidated                          |
 
+## Worker Routes (v1.6.0 addition)
+
+| Method | Path                                               | Auth   | Handler                    |
+|--------|----------------------------------------------------|--------|----------------------------|
+| GET    | `/api/streams/:gameId/playback-token/verify?t=<token>` | public | `handlePlaybackTokenVerify` |
+
+Returns 200 `{ ok: true, claims: {...} }` when the token signature is
+valid, the session is still `active`, `max_expires_at` has not elapsed,
+the token row is not revoked, and the URL `gameId` matches the claim.
+Returns 401 with a `reason` on every failure class
+(`malformed` / `header_mismatch` / `bad_signature` / `expired` /
+`unsupported_version` / `session_not_found` / `session_inactive` /
+`session_expired` / `token_revoked` / `game_mismatch`).
+
 ## Worker Routes (v1.5.0 additions, retained)
 
 | Method | Path                      | Auth       | Handler                       |

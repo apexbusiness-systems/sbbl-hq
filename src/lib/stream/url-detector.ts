@@ -32,7 +32,7 @@ export type StreamUrlType =
   | 'unknown';
 
 export type StreamAdvisoryLevel = 'ok' | 'warn' | 'info';
-export type StreamDeliveryClass = 'embed' | 'proxy' | 'unsupported';
+export type StreamDeliveryClass = 'embed' | 'proxy' | 'unsupported' | 'hls';
 
 export interface StreamAdvisory {
   level: StreamAdvisoryLevel;
