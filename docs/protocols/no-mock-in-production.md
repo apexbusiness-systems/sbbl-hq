@@ -53,7 +53,7 @@ the response is empty or errored. Never silently substitute fixtures.
 // ✅ CORRECT — read from the live API; empty state on no data.
 const statsQuery = useQuery({
   queryKey: ['public-stats', leagueFilter],
-  queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/public/stats'),
+  queryFn: () => apiFetch<{ ok: boolean; data: PlayerProfile[] }>('/api/stats'),
 });
 
 const players = useMemo<PlayerProfile[]>(() => {
@@ -70,20 +70,25 @@ Anonymous-accessible endpoints that back the public pages. Each returns
 `{ ok: boolean, data: <array> }` or the documented shape. The response
 is cached at the edge.
 
-| Surface       | Endpoint                     | Shape                             | Source table/RPC             |
-| ------------- | ---------------------------- | --------------------------------- | ---------------------------- |
-| Stats         | `GET /api/public/stats`        | `{ ok, data: PlayerProfile[] }`   | RPC `get_stats_dashboard`    |
-| Leaderboards  | `GET /api/public/leaderboards` | `{ ok, data: PlayerProfile[] }`   | RPC `get_stats_dashboard`†   |
-| Scores        | `GET /api/scores`              | `{ ok, games: ScoreEntry[] }`     | `games` + joins              |
-| Schedules     | `GET /api/public/schedule`     | `{ ok, data: Slot[] }`            | `schedule_slots`             |
-| POTG          | `GET /api/public/potg`         | `{ ok, data: Publication[] }`     | `media_publications`         |
-| Home snapshot | `GET /api/public/home`         | `{ ok, teams, liveGames, … }`     | multiple tables              |
-| Teams         | `GET /api/teams`               | `{ ok, teams: TeamCard[] }`       | `teams` + `mvw_standings`    |
-| Products      | `GET /api/public/products`     | `{ ok, data: Product[] }`         | `store_products`             |
+| Surface       | Endpoint                     | Shape                             | Auth                         | Source table/RPC             |
+| ------------- | ---------------------------- | --------------------------------- | ---------------------------- | ---------------------------- |
+| Stats         | `GET /api/stats`               | `{ ok, tier, data: PlayerProfile[] }` | Optional — tier-aware   | RPC `get_stats_dashboard`    |
+| Leaderboards  | `GET /api/leaderboards`        | `{ ok, data: PlayerProfile[] }`   | Required — full tier only†   | RPC `get_stats_dashboard`    |
+| Scores        | `GET /api/scores`              | `{ ok, games: ScoreEntry[] }`     | None                         | `games` + joins              |
+| Schedules     | `GET /api/public/schedule`     | `{ ok, data: Slot[] }`            | None                         | `schedule_slots`             |
+| POTG          | `GET /api/public/potg`         | `{ ok, data: Publication[] }`     | None                         | `media_publications`         |
+| Home snapshot | `GET /api/public/home`         | `{ ok, teams, liveGames, … }`     | None                         | multiple tables              |
+| Teams         | `GET /api/teams`               | `{ ok, teams: TeamCard[] }`       | None                         | `teams` + `mvw_standings`    |
+| Products      | `GET /api/public/products`     | `{ ok, data: Product[] }`         | None                         | `store_products`             |
 
-† Leaderboards uses the dashboard RPC because it returns the full stat
-line per player; `get_leaderboards` only returns pts/reb/ast and would
-break STL/BLK/FLS/MIN tabs.
+† `/api/stats` is tier-aware: anonymous callers receive a limited stat line
+(pts/reb/ast only). Authenticated paid players/coaches/admins get the full
+line. The endpoint returns `Cache-Control: public` for anonymous requests
+and `private, no-store` for authenticated ones.
+
+† `/api/leaderboards` requires full-tier access (paid player, coach, team
+manager, league_admin, super_admin). Anonymous and basic-fan callers receive
+a 403; the Leaderboards page shows a login gate in response.
 
 ## Reference data (always allowed)
 
@@ -111,7 +116,9 @@ kept out of production code, update:
 ## Incident history
 
 - **2026-04-16** — Store/Leaderboards/Scores/Stats/Live showed mock data
-  because `/api/stats` and `/api/leaderboards` require auth but the
-  public pages called them anonymously. Worker gained
-  `/api/public/stats` + `/api/public/leaderboards`; all mock fallbacks
-  purged; ESLint + vitest guardrails installed (this doc).
+  because every page had a `|| mockX` fallback that silently activated
+  when the API returned an error or empty result. Fix: purged all mock
+  fallbacks from production pages; made `/api/stats` tier-aware so
+  anonymous callers receive a limited (non-empty) stat line instead of
+  a 401; added explicit login-gate UI in Leaderboards for unauthenticated
+  visitors; installed ESLint + vitest guardrails (this doc).
