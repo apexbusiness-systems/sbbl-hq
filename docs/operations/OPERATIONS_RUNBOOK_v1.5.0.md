@@ -1,10 +1,43 @@
-<!-- Version: v1.4.0 | Date: 2026-04-05 | Status: Current -->
+<!-- Version: v1.5.0 | Date: 2026-04-18 | Status: Current -->
 # SBBL HQ — Operations Runbook
 
-> Last updated: 2026-04-05
+> Last updated: 2026-04-18
 > Owner: APEX Business Systems Ltd
 
 This document is the canonical reference for all operational tasks, deployment procedures, emergency recovery steps, and script/tooling inventory for the SBBL HQ platform.
+
+## Entitlement Windows (canonical)
+
+These values are defined in `src/lib/constants/ENTITLEMENT_CONSTANTS.ts`
+and are the SINGLE SOURCE OF TRUTH. Ops scripts, manual grants, and
+support tooling must read from that file; ad-hoc literals in runbook
+commands are banned and caught by the CI guard.
+
+| Constant | Value | Meaning |
+|----------|-------|---------|
+| `VIEWING_SESSION_MAX_SECONDS` | 21600 (6 h) | Hard cap on a single playback session. |
+| `ENTITLEMENT_VALIDITY_HOURS` | 48 | Validity post-Stripe-confirmation. Not the session cap. |
+| `MANUAL_COMP_VALIDITY_HOURS` | 48 | Default for super-admin comp grants (clamped `[1,168]`). |
+| `REPLAY_EMBARGO_DAYS` | 7 | Minimum embargo before replay is purchasable. |
+| `REPLAY_RAW_PRICE_CAD` | $1.50 | Raw replay price. |
+| `REPLAY_EDITED_PRICE_CAD` | $5.00 | Edited replay price. |
+
+See `docs/features/STREAM_GATING_v1.6.0.md` for the full semantic model.
+
+## Changelog (v1.5.0)
+
+- Entitlement validity raised 6h → 48h. Aligns with the canonical
+  `ENTITLEMENT_VALIDITY_HOURS` constant. Session cap unchanged.
+- Manual comp / invite default raised 24h → 48h
+  (`MANUAL_COMP_VALIDITY_HOURS`).
+- New worker env flags wired (default off): `FEATURE_SIGNED_PLAYBACK_ENABLED`,
+  `FEATURE_NATIVE_HLS_PROVIDER`, `FEATURE_SHOW_VIEWER_PREFLIGHT`,
+  `FEATURE_FAN_TOKEN_SYSTEM`, `FEATURE_BIOMETRIC_OVERLAY`,
+  `FEATURE_MIC_UP_SERIES`, plus `PLAYBACK_TOKEN_SECRET` secret.
+- Additive migration `20260418120000_playback_provider_abstraction.sql`
+  adds `stream_playback_providers`, `stream_playback_tokens`,
+  `overlay_event_log`, and extends `games` with provider / replay /
+  event-type columns. No drops, no backfill required.
 
 ---
 
@@ -235,7 +268,7 @@ This soft-expires the `stream_entitlements` row and writes an `audit_logs` entry
 
 ### Grant manual PPV access
 
-Same endpoint, `"action": "grant"`. The entitlement is created with the standard 24-hour window.
+Same endpoint, `"action": "grant"`. The entitlement is created with the canonical 48-hour validity window (`ENTITLEMENT.ENTITLEMENT_VALIDITY_HOURS`). Session cap on any resulting playback session is independently 6 hours.
 
 ### Roll back a bad worker deploy
 
@@ -298,7 +331,7 @@ Client heartbeat → POST /api/streams/:gameId/session/heartbeat every ~25s
     ↓
 Client teardown → POST /api/streams/:gameId/session/end (on component unmount)
     ↓
-Stripe webhook → Worker POST /webhooks/stripe → create_stream_entitlement RPC (24h window)
+Stripe webhook → Worker POST /webhooks/stripe → create_stream_entitlement RPC (48h validity window — ENTITLEMENT.ENTITLEMENT_VALIDITY_HOURS)
 ```
 
 ### Stream URL (collection_id)

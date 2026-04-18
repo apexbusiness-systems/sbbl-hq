@@ -1,4 +1,9 @@
-export const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+import { ENTITLEMENT_MS } from "@/lib/constants/ENTITLEMENT_CONSTANTS";
+
+/** Hard ceiling for a single playback session (6h). */
+export const SIX_HOURS_MS = ENTITLEMENT_MS.VIEWING_SESSION_MAX;
+/** Canonical entitlement validity post-purchase (48h). */
+export const ENTITLEMENT_VALIDITY_MS = ENTITLEMENT_MS.ENTITLEMENT_VALIDITY;
 export const DEFAULT_PLAYBACK_ARTIFACT_TTL_MS = 10 * 60 * 1000;
 
 export type SessionStatus = "active" | "resumable" | "expired" | "revoked" | "denied";
@@ -45,7 +50,7 @@ export interface PlaybackArtifactInput {
 }
 
 export function computeEntitlementExpiry(issuedAt: number): number {
-  return issuedAt + SIX_HOURS_MS;
+  return issuedAt + ENTITLEMENT_VALIDITY_MS;
 }
 
 export function isEntitlementActive(now: number, entitlementExpiresAt: number): boolean {

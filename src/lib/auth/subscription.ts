@@ -1,4 +1,5 @@
 import { AppRole } from '@/lib/auth/roles';
+import { ENTITLEMENT } from '@/lib/constants/ENTITLEMENT_CONSTANTS';
 
 /** Player membership: $6.99 CAD / month recurring subscription (before tax) */
 export const PLAYER_REGISTRATION_PRICE_CAD = 6.99;
@@ -14,9 +15,15 @@ export function priceWithTax(baseCAD: number): number {
   return Math.round(baseCAD * (1 + ALBERTA_GST_RATE) * 100) / 100;
 }
 
-/** PPV single-stream access: $4.99 CAD, token valid for 6 hours from first use */
+/**
+ * PPV single-stream access: $4.99 CAD.
+ * Entitlement is valid for 48 hours from purchase (tolerates game delays,
+ * avoids chargebacks when tipoff slips). Once the buyer actually starts
+ * watching, the session is independently hard-capped at 6 hours.
+ */
 export const PPV_PRICE_CAD = 4.99;
-export const PPV_ACCESS_HOURS = 6;
+export const PPV_ACCESS_HOURS = ENTITLEMENT.ENTITLEMENT_VALIDITY_HOURS;
+export const PPV_SESSION_CAP_HOURS = ENTITLEMENT.VIEWING_SESSION_MAX_SECONDS / 3600;
 
 export function isPlayerSubscriptionActive(subscriptionEndsAt: string | null, now = new Date()): boolean {
   if (!subscriptionEndsAt) return false;

@@ -67,7 +67,7 @@ All mutating methods (`POST/PUT/PATCH/DELETE`) require a valid idempotency key v
 
 ### Invites
 - `POST /api/invite/generate` — Generate single-use fan invite. Eligible: player, paid_fan, super_admin.
-- `POST /api/invite/redeem` — Redeem invite code. IP-locked, 24h expiry. Turnstile-protected.
+- `POST /api/invite/redeem` — Redeem invite code. IP-locked, 48h default expiry (canonical `ENTITLEMENT.MANUAL_COMP_VALIDITY_HOURS`, clamped `[1,168]`). Turnstile-protected.
 
 ### Commerce
 - `GET /api/cart` — User's cart.
