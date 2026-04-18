@@ -8,14 +8,30 @@
 #   caddy reload --config /etc/caddy/Caddyfile
 
 stream.sbbl-hq.icu {
-  # ── CORS preflight for WHEP ───────────────────────────────────────────
+  # -- CORS origin validation for WHEP ---------------------------------
+  # Allow both bare domain and www subdomain. The @whep_origin matcher
+  # validates the request Origin header against the allowlist and the
+  # header directive echoes it back. This prevents CORS failures for
+  # viewers who access via https://www.sbbl-hq.icu while remaining
+  # strict (no wildcard).
+  @whep_origin_bare {
+    path /whep/*
+    header Origin "https://sbbl-hq.icu"
+  }
+  @whep_origin_www {
+    path /whep/*
+    header Origin "https://www.sbbl-hq.icu"
+  }
+
+  # -- CORS preflight for WHEP -------------------------------------------
   @whep_options {
     method OPTIONS
     path /whep/*
   }
   respond @whep_options 204
 
-  header /whep/* {
+  # Echo the validated origin back -- covers both sbbl-hq.icu and www.sbbl-hq.icu
+  header @whep_origin_bare /whep/* {
     Access-Control-Allow-Origin "https://sbbl-hq.icu"
     Access-Control-Allow-Methods "POST, PATCH, DELETE, OPTIONS"
     Access-Control-Allow-Headers "Content-Type, Authorization, If-Match"
@@ -24,10 +40,18 @@ stream.sbbl-hq.icu {
     # Prevent caching of CORS preflight responses
     -Cache-Control
   }
+  header @whep_origin_www /whep/* {
+    Access-Control-Allow-Origin "https://www.sbbl-hq.icu"
+    Access-Control-Allow-Methods "POST, PATCH, DELETE, OPTIONS"
+    Access-Control-Allow-Headers "Content-Type, Authorization, If-Match"
+    Access-Control-Expose-Headers "Location, ETag, Link"
+    Access-Control-Max-Age "86400"
+    -Cache-Control
+  }
 
-  # ── Proxy to MediaMTX WebRTC/WHEP server (default port 8889) ─────────
+  # -- Proxy to MediaMTX WebRTC/WHEP server (default port 8889) ---------
   reverse_proxy /whep/* localhost:8889
 
-  # ── MediaMTX API (optional — restrict to loopback in production) ──────
+  # -- MediaMTX API (optional -- restrict to loopback in production) ------
   reverse_proxy /api/* localhost:9997
 }
