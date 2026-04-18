@@ -49,7 +49,7 @@ describe('signPlaybackToken / verifyPlaybackToken', () => {
     const tok = await signPlaybackToken(claims(), SECRET);
     const r = await verifyPlaybackToken(tok, 'different-secret-entirely');
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('bad_signature');
+    if (r.ok === false) expect(r.reason).toBe('bad_signature');
   });
 
   it('rejects a tampered payload', async () => {
@@ -61,7 +61,7 @@ describe('signPlaybackToken / verifyPlaybackToken', () => {
     const tampered = `${parts[0]}.${badPayload}.${parts[2]}`;
     const r = await verifyPlaybackToken(tampered, SECRET);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('bad_signature');
+    if (r.ok === false) expect(r.reason).toBe('bad_signature');
   });
 
   it('rejects a tampered signature', async () => {
@@ -70,7 +70,7 @@ describe('signPlaybackToken / verifyPlaybackToken', () => {
     const tampered = `${parts[0]}.${parts[1]}.AAAA${parts[2].slice(4)}`;
     const r = await verifyPlaybackToken(tampered, SECRET);
     expect(r.ok).toBe(false);
-    if (!r.ok) {
+    if (r.ok === false) {
       expect(['bad_signature', 'malformed']).toContain(r.reason);
     }
   });
@@ -78,7 +78,7 @@ describe('signPlaybackToken / verifyPlaybackToken', () => {
   it('rejects a malformed token', async () => {
     const r = await verifyPlaybackToken('not-a-jwt', SECRET);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('malformed');
+    if (r.ok === false) expect(r.reason).toBe('malformed');
   });
 
   it('rejects an expired token at verify time', async () => {
@@ -86,7 +86,7 @@ describe('signPlaybackToken / verifyPlaybackToken', () => {
     const tok = await signPlaybackToken(claims({ exp: past }), SECRET);
     const r = await verifyPlaybackToken(tok, SECRET);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('expired');
+    if (r.ok === false) expect(r.reason).toBe('expired');
   });
 
   it('rejects a future-dated "now" that has not yet reached exp', async () => {
@@ -103,7 +103,7 @@ describe('signPlaybackToken / verifyPlaybackToken', () => {
     const tok = await signPlaybackToken(forged, SECRET);
     const r = await verifyPlaybackToken(tok, SECRET);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('unsupported_version');
+    if (r.ok === false) expect(r.reason).toBe('unsupported_version');
   });
 
   it('sign throws when secret is empty', async () => {
@@ -113,6 +113,6 @@ describe('signPlaybackToken / verifyPlaybackToken', () => {
   it('verify rejects with bad_signature when secret is empty', async () => {
     const r = await verifyPlaybackToken('a.b.c', '');
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe('bad_signature');
+    if (r.ok === false) expect(r.reason).toBe('bad_signature');
   });
 });

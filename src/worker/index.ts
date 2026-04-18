@@ -4243,7 +4243,7 @@ export async function handlePlaybackTokenVerify(ctx: HandlerCtx) {
 
   const secret = ctx.env.PLAYBACK_TOKEN_SECRET ?? "";
   const result = await verifyPlaybackToken(token, secret);
-  if (!result.ok) return json({ ok: false, reason: result.reason }, 401);
+  if (result.ok === false) return json({ ok: false, reason: result.reason }, 401);
 
   if (urlGameId && result.claims.gameId && urlGameId !== result.claims.gameId) {
     return json({ ok: false, reason: "game_mismatch" }, 401);
