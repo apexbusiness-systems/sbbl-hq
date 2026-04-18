@@ -178,7 +178,14 @@ function StreamPlayer({
 }>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [playing, setPlaying] = useState(true);
-  const [muted, setMuted] = useState(false);
+  // Start muted so cross-origin autoplay is permitted by Chrome.
+  // Unmuted autoplay is blocked for cross-origin iframes (embed.twitch.tv,
+  // YouTube, Vimeo) regardless of Permissions-Policy — the browser requires
+  // a user gesture. Twitch's SDK misreports this block as "style visibility,
+  // size, viewport visibility" and shows the blank player. Starting muted
+  // lets the stream play immediately; the user unmutes with the toggle
+  // already wired at the controls bar below.
+  const [muted, setMuted] = useState(true);
   const [volume, setVolume] = useState(0.8);
   const [playedFraction, setPlayedFraction] = useState(0);
   const [playedSeconds, setPlayedSeconds] = useState(0);
