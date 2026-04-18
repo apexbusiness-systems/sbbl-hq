@@ -42,9 +42,15 @@ const AppHomePage = () => {
 
       {/* ── BRAND HERO ─────────────────────────────────────────── */}
       <section className="relative overflow-hidden bg-[#0A0A0A]" style={{ minHeight: '560px' }}>
-        {/* Photo background */}
+        {/* Photo background — LCP element. Served as AVIF → WebP → PNG, with
+            a separate <source> per viewport so mobile never pulls the 1536px
+            desktop asset. */}
         <picture className="absolute inset-0 w-full h-full">
-          <source media="(min-width: 768px)" srcSet="/assets/hero-desktop.png" />
+          <source type="image/avif" media="(min-width: 768px)" srcSet="/assets/hero-desktop.avif" />
+          <source type="image/webp" media="(min-width: 768px)" srcSet="/assets/hero-desktop.webp" />
+          <source type="image/png"  media="(min-width: 768px)" srcSet="/assets/hero-desktop.png" />
+          <source type="image/avif" srcSet="/assets/hero-mobile.avif" />
+          <source type="image/webp" srcSet="/assets/hero-mobile.webp" />
           <img
             src="/assets/hero-mobile.png"
             alt=""

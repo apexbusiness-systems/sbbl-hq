@@ -6111,8 +6111,22 @@ export default Sentry.withSentry(
         if (isHtml) {
           // HTML shell: cache 60s at edge, stale-while-revalidate for viral traffic resilience
           cacheHeaders.set("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=600");
+        } else {
+          // Non-HTML static assets (images/fonts/icons/media from /public).
+          // Vite-hashed JS/CSS under /assets/ already carry immutable cache
+          // headers; for un-hashed public files (hero-*, icons, logos, svgs)
+          // we force a 30-day browser cache + 1-year edge cache so the LCP
+          // hero is served from CDN + disk cache on repeat views.
+          const url = new URL(req.url);
+          const path = url.pathname;
+          const isHashedViteAsset = /\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/.test(path);
+          if (!isHashedViteAsset && !cacheHeaders.has("Cache-Control")) {
+            cacheHeaders.set(
+              "Cache-Control",
+              "public, max-age=2592000, s-maxage=31536000, stale-while-revalidate=86400",
+            );
+          }
         }
-        // Hashed assets already have immutable cache headers from Vite build
         return addSecurityHeaders(new Response(assetRes.body, {
           status: assetRes.status,
           statusText: assetRes.statusText,
