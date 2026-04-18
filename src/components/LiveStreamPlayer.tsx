@@ -165,7 +165,7 @@ function parsePlayerError(
 
 function StreamPlayer({
   url,
-  isSuperAdmin: _isSuperAdmin,
+  isSuperAdmin,
   onReady,
   onPlay,
   onError,
@@ -177,8 +177,20 @@ function StreamPlayer({
   onError: (message: string) => void;
 }>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const urlType = detectStreamUrlType(url);
+  const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
+  const isTwitch = urlType === 'twitch';
+  const isFacebook = urlType === 'facebook';
+  const isWhep = urlType === 'whep';
+  const isRtmp = urlType === 'rtmp';
+  // HLS and DASH use ReactPlayer with explicit forcing flags.
+  const forceHls = urlType === 'hls';
+  const forceDash = urlType === 'dash';
+  // Twitch embeds must keep their own chrome visible and unobscured.
+  const useNativeTwitchControls = isTwitch;
+
   const [playing, setPlaying] = useState(true);
-  const [muted, setMuted] = useState(false);
+  const [muted, setMuted] = useState(isTwitch || isYoutube);
   const [volume, setVolume] = useState(0.8);
   const [playedFraction, setPlayedFraction] = useState(0);
   const [playedSeconds, setPlayedSeconds] = useState(0);
@@ -187,19 +199,13 @@ function StreamPlayer({
   const retryCountRef = useRef(0);
   const reactPlayerRef = useRef<ReactPlayer | null>(null);
   const MAX_AUTO_RETRIES = 1;
+  // Native Twitch chrome handles playback, fullscreen, and timeline affordances.
+  const showNativeControls = useNativeTwitchControls;
+  const canSeek = Number.isFinite(durationSeconds) && durationSeconds > 0 && !isWhep && !isRtmp && !useNativeTwitchControls;
 
-  const urlType = detectStreamUrlType(url);
-  const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
-  const isTwitch = urlType === 'twitch';
-  const isVimeo = urlType === 'vimeo';
-  const isWhep = urlType === 'whep';
-  const isRtmp = urlType === 'rtmp';
-  // HLS and DASH use ReactPlayer with explicit forcing flags
-  const forceHls = urlType === 'hls';
-  const forceDash = urlType === 'dash';
-  // Force unified in-app controls for all providers.
-  const showNativeControls = false;
-  const canSeek = Number.isFinite(durationSeconds) && durationSeconds > 0 && !isWhep && !isRtmp;
+  useEffect(() => {
+    setMuted(isTwitch || isYoutube);
+  }, [isTwitch, isYoutube]);
 
   const formatClock = (total: number) => {
     const safe = Number.isFinite(total) && total > 0 ? Math.floor(total) : 0;
@@ -256,8 +262,14 @@ function StreamPlayer({
     );
   }
 
-  // HLS / DASH / YouTube / Twitch / Vimeo / direct / unknown — use ReactPlayer
+  // HLS / DASH / YouTube / Twitch / Vimeo / Facebook / direct / unknown — use ReactPlayer
   const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
+  const twitchParents = Array.from(new Set([
+    currentHost,
+    'sbbl-hq.icu',
+    'www.sbbl-hq.icu',
+    'localhost',
+  ].filter(Boolean)));
   const reactPlayerConfig = {
     youtube: {
       playerVars: {
@@ -267,6 +279,7 @@ function StreamPlayer({
         controls: 0,
         disablekb: 1,
         fs: 0,
+        mute: 1,
         // FIX: origin must match the host to prevent YouTube iframe API
         // postMessage cross-origin errors that crash the embed entirely.
         // Without this, the YT iframe tries to postMessage to youtube.com
@@ -276,9 +289,10 @@ function StreamPlayer({
     },
     twitch: {
       options: {
-        // REQUIRED: Twitch embeds will not load without the parent domain.
+        // REQUIRED: Twitch embeds will not load without every allowed parent domain.
         // https://dev.twitch.tv/docs/embed/everything/#required-parameters
-        parent: [currentHost],
+        parent: twitchParents,
+        muted: true,
       },
     },
     file: {
@@ -329,19 +343,22 @@ function StreamPlayer({
           onError(parsePlayerError(err, data));
         }}
         config={reactPlayerConfig}
-    />
-      {/* Block iframe click-through to provider pages and prevent source copying via context menu. */}
-      {(isYoutube || isTwitch || isVimeo) && (
+      />
+      {/* Facebook's embed should not leak clicks through to the provider page for viewers. */}
+      {isFacebook && !isSuperAdmin && (
         <div
+          data-testid="provider-click-shield"
           className="absolute inset-0 z-10"
           aria-hidden="true"
           onContextMenu={(e) => e.preventDefault()}
         />
       )}
-      <div
-        className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm"
-        onContextMenu={(e) => e.preventDefault()}
-      >
+      {!useNativeTwitchControls && (
+        <div
+          data-testid="stream-custom-controls"
+          className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm"
+          onContextMenu={(e) => e.preventDefault()}
+        >
           <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
             aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
             {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
@@ -376,7 +393,8 @@ function StreamPlayer({
             aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
             <Maximize className="w-4 h-4" />
           </button>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -431,7 +449,7 @@ export function LiveStreamPlayer({
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
 
-  // ── StreamForge QoE telemetry (observational — never mutates player) ──────
+  // ── StreamForge QoE telemetry (observational — never mutates player) ───────
   const sessionSeed = useMemo(
     () => (userId ? `${userId}-${getOrCreateDeviceToken()}` : getOrCreateDeviceToken()),
     [userId],
@@ -442,7 +460,7 @@ export function LiveStreamPlayer({
     sessionSeed,
   });
 
-  // ── Role classification ──────────────────────────────────────────────────
+  // ── Role classification ───────────────────────────────────────────────────
   const isPlayer    = roles.includes('player');
   const isPaidFan   = roles.includes('paid_fan');
   const isSuperAdmin = roles.includes('super_admin');
@@ -611,7 +629,7 @@ export function LiveStreamPlayer({
     // the session start without a full page reload.
   }, [hasAccess, userId, game.id, isSuperAdmin, game.stream_url, retryKey]);
 
-  // ── Gate 1: Unregistered ─────────────────────────────────────────────────
+  // ── Gate 1: Unregistered ──────────────────────────────────────────────────
   if (!userId) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center bg-background px-6 text-center gap-4 overflow-y-auto py-6">
@@ -637,7 +655,7 @@ export function LiveStreamPlayer({
     );
   }
 
-  // ── Loading: waiting for server-side entitlement check ───────────────────
+  // ── Loading: waiting for server-side entitlement check ────────────────────
   if (!accessChecked && !hasRoleAccess) {
     return (
       <div className="absolute inset-0 flex items-center justify-center bg-background">
@@ -646,7 +664,7 @@ export function LiveStreamPlayer({
     );
   }
 
-  // ── Gate 2: Access granted → Player ──────────────────────
+  // ── Gate 2: Access granted → Player ──────────────────────────────────────
   if (hasAccess) {
     return (
       <div className="absolute inset-0 flex flex-col relative z-0">
@@ -809,7 +827,7 @@ export function LiveStreamPlayer({
     );
   }
 
-  // ── Gate 3: Preview — registered fan with no access ───────────────────────
+  // ── Gate 3: Preview — registered fan with no access ──────────────────────
   return (
     <div className="absolute inset-0">
       {/* Hidden Turnstile widget — executed before PPV purchase or invite redeem */}
