@@ -192,6 +192,17 @@ function StreamPlayer({
   const reactPlayerRef = useRef<ReactPlayer | null>(null);
   const MAX_AUTO_RETRIES = 1;
 
+  // WHY: Twitch SDK checks container visibility (size, display, viewport) at the
+  // exact moment new Twitch.Player() is called. If ReactPlayer mounts in the same
+  // JS microtask as the parent render, the container's layout hasn't been painted
+  // yet and getBoundingClientRect() returns 0×0 → autoplay check fails permanently.
+  // Waiting one animation frame guarantees the browser has painted the container.
+  const [readyToRender, setReadyToRender] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setReadyToRender(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   const urlType = detectStreamUrlType(url);
   const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
   const isTwitch = urlType === 'twitch';
@@ -303,6 +314,7 @@ function StreamPlayer({
 
   return (
     <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
+      {readyToRender && (
       <ReactPlayer
         ref={(instance) => { reactPlayerRef.current = instance; }}
         url={url}
@@ -336,7 +348,8 @@ function StreamPlayer({
           onError(parsePlayerError(err, data));
         }}
         config={reactPlayerConfig}
-    />
+      />
+      )}
       {/* Block iframe click-through to provider pages and prevent source copying via context menu. */}
       {(isYoutube || isTwitch || isVimeo) && (
         <div

@@ -913,7 +913,7 @@ const LivePage = () => {
           <div className="lg:col-span-2 flex flex-col">
 
             {/* Broadcast Area — admin overlay + access-gate player */}
-            <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
+            <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm min-h-[300px]">
               {/* Admin stream overlay — inside the video wrapper, super_admin only */}
               {isSuperAdmin && (
                   <AdminStreamOverlay

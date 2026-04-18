@@ -22,7 +22,16 @@
   "assets": {
     "directory": "dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/auth/*", "/webhooks/*", "/ops/*"]
+    // WHY: must be `true` (not a path list) so EVERY request flows through the
+    // Worker, including SPA HTML like /live. Before this change the list form
+    // ["/api/*", "/auth/*", "/webhooks/*", "/ops/*"] caused Cloudflare to serve
+    // /live straight from the asset binding, bypassing addSecurityHeaders() —
+    // so CSP, Permissions-Policy, X-Frame-Options etc. never reached the
+    // browser for SPA pages. That killed the Twitch autoplay fix: browsers
+    // read Permissions-Policy off the top-level HTML response, not off API
+    // JSON. The Worker already calls env.ASSETS.fetch() at its tail and wraps
+    // the result with addSecurityHeaders, so flipping this on is the whole fix.
+    "run_worker_first": true
   },
   "routes": [
     {

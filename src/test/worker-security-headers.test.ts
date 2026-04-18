@@ -61,4 +61,50 @@ describe('Worker security headers', () => {
     expect(res.status).toBe(401);
     expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
   });
+
+  // Regression shield for 2026-04-18: wrangler.jsonc had
+  // `run_worker_first: ["/api/*", "/auth/*", "/webhooks/*", "/ops/*"]`, which
+  // caused Cloudflare to serve SPA HTML (/live, /, /stats, etc.) directly
+  // from the static-asset binding — bypassing this Worker entirely. Result:
+  // CSP, Permissions-Policy, X-Frame-Options never reached the browser on the
+  // pages that actually needed them, and the Twitch embed autoplay fix could
+  // not take effect. This test simulates a SPA HTML request and asserts the
+  // Worker handler itself produces the required headers — so even if wrangler
+  // is misconfigured again, the Worker will still add them once traffic reaches it.
+  it('sets security headers on SPA HTML responses served via ASSETS fallback', async () => {
+    const htmlEnv = {
+      ...env,
+      ASSETS: {
+        fetch: () =>
+          Promise.resolve(
+            new Response('<!doctype html><html><body>/live</body></html>', {
+              status: 200,
+              headers: { 'content-type': 'text/html; charset=utf-8' },
+            }),
+          ),
+      },
+    } as unknown as Env;
+
+    const res = await worker.fetch(new Request('https://local/live'), htmlEnv);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type') ?? '').toContain('text/html');
+
+    // Browsers read Permissions-Policy off the top-level HTML response only.
+    // If this header is absent on SPA pages, cross-origin iframes (Twitch,
+    // YouTube, Vimeo) cannot autoplay even with `allow="autoplay"`.
+    const permissionsPolicy = res.headers.get('Permissions-Policy') ?? '';
+    expect(permissionsPolicy).toContain('autoplay=(');
+    expect(permissionsPolicy).toMatch(/autoplay=\([^)]*"https:\/\/player\.twitch\.tv"/);
+
+    // CSP must be attached to HTML too, not only to /api/*.
+    const csp = res.headers.get('Content-Security-Policy') ?? '';
+    expect(csp).toContain('frame-src');
+    expect(csp).toContain('https://player.twitch.tv');
+
+    expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+    expect(res.headers.get('X-Frame-Options')).toBe('DENY');
+    expect(res.headers.get('Strict-Transport-Security')).toBe(
+      'max-age=63072000; includeSubDomains; preload',
+    );
+  });
 });
