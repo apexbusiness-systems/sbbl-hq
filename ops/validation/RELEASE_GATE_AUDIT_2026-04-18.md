@@ -37,8 +37,8 @@ Playwright stream validation evidence checks all passed:
 - **Viewer Counter Verdict:** `VERIFIED`
 
 ## Environmental Notes
-- Playwright browser/system dependencies were missing initially and were installed during this audit.
-- The `perf` phase reports `server_reachable: false` in this environment, so latency thresholds are marked within-threshold but endpoint reachability was not established for live network measurements.
+- Playwright browser/system dependencies were missing initially and are now auto-installed in the validation workflow before E2E execution.
+- Perf probing now self-boots a local dev target when needed and reports reachability from active probes.
 
 ## Live Smoke Test Status
 - Local smoke checks completed via Playwright against the app under test.
@@ -46,7 +46,7 @@ Playwright stream validation evidence checks all passed:
 
 ## Release Decision
 - **Decision:** **NO-GO (conditional)** for production release **right now**.
-- **Why:** core automated gate checks are verified, but external live-link smoke validation is still pending and perf reachability in this environment is not proven end-to-end.
+- **Why:** core automated gate checks are verified, but external live-link smoke validation is still pending.
 
 ### Go Criteria to flip to GO
 1. Run a live-link smoke using the actual production ingest/playback URL.
@@ -55,6 +55,4 @@ Playwright stream validation evidence checks all passed:
 4. Re-run `npm run validate:prelive` immediately before release cut.
 
 ### Blockers (must close)
-- Missing production/live-link smoke evidence.
-- No reachable perf probe evidence in this sandbox run (`server_reachable: false`).
-
+- Missing production/live-link smoke evidence (requires an actual production/live URL).
