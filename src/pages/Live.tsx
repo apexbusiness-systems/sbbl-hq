@@ -348,7 +348,7 @@ function AdminStreamOverlay({
 
       {/* Dropdown panel */}
       {open && (
-        <div className="absolute top-14 left-3 z-30 w-80 max-w-[calc(100%-24px)] bg-black/90 backdrop-blur-md border border-white/10 rounded-lg shadow-2xl overflow-hidden animate-fade-in">
+        <div className="absolute top-14 left-3 z-30 w-80 max-w-[calc(100%-24px)] max-h-[calc(100%-70px)] overflow-y-auto bg-black/90 backdrop-blur-md border border-white/10 rounded-lg shadow-2xl animate-fade-in">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
             <span className="font-display font-bold text-xs uppercase tracking-wider text-white/90">Broadcast Controls</span>
