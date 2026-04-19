@@ -4236,16 +4236,34 @@ export async function handlePlaybackTokenVerify(ctx: HandlerCtx) {
 
   const secret = ctx.env.PLAYBACK_TOKEN_SECRET ?? "";
   const result = await verifyPlaybackToken(token, secret);
-  if (!result.ok) return json({ ok: false, reason: result.reason }, 401);
+  // strictNullChecks is off in tsconfig; discriminated-union narrowing on
+  // `result.ok` is unreliable. Runtime shape is authoritative — the
+  // verifier already enforces correctness. We access fields through
+  // typed casts to satisfy the compiler without fighting TS here.
+  if (!result.ok) {
+    const reason = (result as { reason?: string }).reason ?? "bad_signature";
+    return json({ ok: false, reason }, 401);
+  }
+  const claims = (result as {
+    claims: {
+      userId: string;
+      gameId: string | null;
+      sessionId: string;
+      assetId: string;
+      playbackMode: string;
+      exp: number;
+      mex: number;
+    };
+  }).claims;
 
-  if (urlGameId && result.claims.gameId && urlGameId !== result.claims.gameId) {
+  if (urlGameId && claims.gameId && urlGameId !== claims.gameId) {
     return json({ ok: false, reason: "game_mismatch" }, 401);
   }
 
   const sessRes = await ctx.admin
     .from("stream_access_sessions")
     .select("id,status,max_expires_at")
-    .eq("id", result.claims.sessionId)
+    .eq("id", claims.sessionId)
     .maybeSingle();
   const sess = sessRes.data as {
     id: string;
@@ -4261,7 +4279,7 @@ export async function handlePlaybackTokenVerify(ctx: HandlerCtx) {
   const tokenRes = await ctx.admin
     .from("stream_playback_tokens")
     .select("id,revoked_at")
-    .eq("session_id", result.claims.sessionId)
+    .eq("session_id", claims.sessionId)
     .is("revoked_at", null)
     .limit(1)
     .maybeSingle();
@@ -4272,13 +4290,13 @@ export async function handlePlaybackTokenVerify(ctx: HandlerCtx) {
   return json({
     ok: true,
     claims: {
-      userId: result.claims.userId,
-      gameId: result.claims.gameId,
-      sessionId: result.claims.sessionId,
-      assetId: result.claims.assetId,
-      playbackMode: result.claims.playbackMode,
-      exp: result.claims.exp,
-      mex: result.claims.mex,
+      userId: claims.userId,
+      gameId: claims.gameId,
+      sessionId: claims.sessionId,
+      assetId: claims.assetId,
+      playbackMode: claims.playbackMode,
+      exp: claims.exp,
+      mex: claims.mex,
     },
   });
 }
