@@ -559,6 +559,15 @@ function requireAuth(req: Request) {
   return userId;
 }
 
+/**
+ * Non-throwing auth reader for read-only public endpoints that can
+ * render richer responses for signed-in callers (e.g. the preflight
+ * snapshot includes entitlement status when known, omits when anon).
+ */
+function optionalAuth(req: Request): string | null {
+  return req.headers.get("x-sbbl-user-id-verified") || null;
+}
+
 async function ensureMutation(req: Request, ctx: HandlerCtx) {
   if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return;
   const key = readIdempotencyKey(req.headers);
@@ -4290,6 +4299,143 @@ export async function handlePlaybackTokenVerify(ctx: HandlerCtx) {
   });
 }
 
+/**
+ * GET /api/streams/:gameId/preflight
+ *
+ * Read-only public snapshot used by ViewerPreflight. Designed as a
+ * single round-trip so the UI does not fan out to multiple endpoints
+ * mid-check. Anonymous callers get the skeleton (entitlement=absent,
+ * no session conflict); signed-in callers get real entitlement /
+ * session-conflict data.
+ *
+ * This endpoint is intentionally side-effect-free (no session row
+ * created, no token minted, no counter incremented) so it is safe to
+ * call on every page mount without inflating DB load.
+ *
+ * Shape is kept stable + versioned via the `ok: true` literal; additive
+ * fields may be added in future WS work but never re-typed.
+ */
+export async function handlePlaybackPreflight(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId ?? null;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+
+  const userId = optionalAuth(ctx.req);
+
+  const gRes = await ctx.admin
+    .from("games")
+    .select(
+      "id, status, starts_at, ended_at, replay_mode, replay_monetization_enabled_at, replay_quality_tier, replay_price, is_halftime",
+    )
+    .eq("id", gameId)
+    .maybeSingle();
+  const game = gRes.data as
+    | {
+        id: string;
+        status: string | null;
+        starts_at: string | null;
+        ended_at: string | null;
+        replay_mode: "none" | "raw" | "edited" | null;
+        replay_monetization_enabled_at: string | null;
+        replay_quality_tier: "raw" | "edited" | null;
+        replay_price: number | null;
+        is_halftime?: boolean | null;
+      }
+    | null;
+  if (!game) return json({ ok: false, error: "game_not_found" }, 404);
+
+  const now = Date.now();
+  const replayMode = (game.replay_mode ?? "none") as "none" | "raw" | "edited";
+  let state: "upcoming" | "live" | "halftime" | "ended_replay" | "ended_no_replay" | "unavailable";
+  if (game.ended_at) {
+    state = replayMode === "none" ? "ended_no_replay" : "ended_replay";
+  } else if (game.is_halftime) {
+    state = "halftime";
+  } else if (game.starts_at && new Date(game.starts_at).getTime() > now) {
+    state = "upcoming";
+  } else if (game.starts_at) {
+    state = "live";
+  } else {
+    state = "unavailable";
+  }
+
+  let entitlementStatus: "active" | "absent" | "expired" = "absent";
+  let entitlementExpiresAt: string | null = null;
+  let hasConflict = false;
+  let conflictDeviceLabel: string | null = null;
+  let conflictStartedAt: string | null = null;
+  let replayEntitled = false;
+
+  if (userId) {
+    const eRes = await ctx.admin
+      .from("stream_entitlements")
+      .select("status, expires_at")
+      .eq("game_id", gameId)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const ent = eRes.data as { status: string | null; expires_at: string | null } | null;
+    if (ent) {
+      entitlementExpiresAt = ent.expires_at ?? null;
+      if (ent.status === "active" && (!ent.expires_at || new Date(ent.expires_at).getTime() > now)) {
+        entitlementStatus = "active";
+      } else {
+        entitlementStatus = "expired";
+      }
+    }
+
+    // Session conflict — any `active` row for this user on THIS game
+    // on a different session key indicates another device is streaming.
+    const sRes = await ctx.admin
+      .from("stream_access_sessions")
+      .select("id, created_at, idempotency_key")
+      .eq("user_id", userId)
+      .eq("game_id", gameId)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const sess = sRes.data as
+      | { id: string; created_at: string | null; idempotency_key: string | null }
+      | null;
+    if (sess) {
+      hasConflict = true;
+      conflictDeviceLabel = sess.idempotency_key ? sess.idempotency_key.slice(0, 8) : null;
+      conflictStartedAt = sess.created_at;
+    }
+
+    if (state === "ended_replay") {
+      // Treat a live entitlement as NOT sufficient for replay — the
+      // replay is a separate purchase product. A dedicated replay
+      // entitlement row would be stored via a future replay checkout.
+      replayEntitled = false;
+    }
+  }
+
+  return json(
+    {
+      ok: true,
+      userId,
+      entitlement: { status: entitlementStatus, expiresAt: entitlementExpiresAt },
+      activeSession: { hasConflict, conflictDeviceLabel, conflictStartedAt },
+      game: {
+        id: game.id,
+        state,
+        tipoffAt: game.starts_at,
+        ppvPriceCad: 4.99, // matches handleStreamPurchase hardcoded price
+        replay: {
+          embargoEndsAt: game.replay_monetization_enabled_at ?? null,
+          qualityTier: game.replay_quality_tier ?? null,
+          priceCad: game.replay_price != null ? Number(game.replay_price) : null,
+          entitled: replayEntitled,
+        },
+      },
+    },
+    200,
+    { "Cache-Control": "private, max-age=5" },
+  );
+}
+
 export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
@@ -5733,6 +5879,11 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "GET",
     path: "/api/streams/:gameId/playback-token/verify",
     handler: handlePlaybackTokenVerify,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/preflight",
+    handler: handlePlaybackPreflight,
   },
   {
     method: "GET",
