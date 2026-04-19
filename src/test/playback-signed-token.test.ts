@@ -6,6 +6,12 @@
  *   - Wrong secret fails verification.
  *   - Expired tokens fail at the `exp` clock check.
  *   - Version-0 (future-old) payloads fail the version gate.
+ *
+ * Note on type access: the project's tsconfig runs with
+ * `strictNullChecks: false`, which defeats discriminated-union
+ * narrowing on `ok: true | false`. Tests therefore avoid relying on
+ * narrowing and instead use Vitest `toMatchObject` matchers, which
+ * assert on runtime shape without requiring TS narrowing.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -37,31 +43,26 @@ describe('signPlaybackToken / verifyPlaybackToken', () => {
   it('round-trips a valid token', async () => {
     const tok = await signPlaybackToken(claims(), SECRET);
     const r = await verifyPlaybackToken(tok, SECRET);
-    expect(r.ok).toBe(true);
-    if (r.ok) {
-      expect(r.claims.userId).toBe('u1');
-      expect(r.claims.assetId).toBe('asset-123');
-      expect(r.claims.playbackMode).toBe('live');
-    }
+    expect(r).toMatchObject({
+      ok: true,
+      claims: { userId: 'u1', assetId: 'asset-123', playbackMode: 'live' },
+    });
   });
 
   it('rejects a token signed with a different secret', async () => {
     const tok = await signPlaybackToken(claims(), SECRET);
     const r = await verifyPlaybackToken(tok, 'different-secret-entirely');
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect(r.reason).toBe('bad_signature');
+    expect(r).toMatchObject({ ok: false, reason: 'bad_signature' });
   });
 
   it('rejects a tampered payload', async () => {
     const tok = await signPlaybackToken(claims(), SECRET);
     const parts = tok.split('.');
-    // Swap userId in the payload by re-encoding a different claim set
     const badPayload = btoa(JSON.stringify({ ...claims(), userId: 'attacker' }))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
     const tampered = `${parts[0]}.${badPayload}.${parts[2]}`;
     const r = await verifyPlaybackToken(tampered, SECRET);
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect(r.reason).toBe('bad_signature');
+    expect(r).toMatchObject({ ok: false, reason: 'bad_signature' });
   });
 
   it('rejects a tampered signature', async () => {
@@ -70,40 +71,35 @@ describe('signPlaybackToken / verifyPlaybackToken', () => {
     const tampered = `${parts[0]}.${parts[1]}.AAAA${parts[2].slice(4)}`;
     const r = await verifyPlaybackToken(tampered, SECRET);
     expect(r.ok).toBe(false);
-    if (r.ok === false) {
-      expect(['bad_signature', 'malformed']).toContain(r.reason);
-    }
+    expect(['bad_signature', 'malformed']).toContain(
+      (r as { reason?: string }).reason,
+    );
   });
 
   it('rejects a malformed token', async () => {
     const r = await verifyPlaybackToken('not-a-jwt', SECRET);
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect(r.reason).toBe('malformed');
+    expect(r).toMatchObject({ ok: false, reason: 'malformed' });
   });
 
   it('rejects an expired token at verify time', async () => {
     const past = Math.floor(Date.now() / 1000) - 10;
     const tok = await signPlaybackToken(claims({ exp: past }), SECRET);
     const r = await verifyPlaybackToken(tok, SECRET);
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect(r.reason).toBe('expired');
+    expect(r).toMatchObject({ ok: false, reason: 'expired' });
   });
 
-  it('rejects a future-dated "now" that has not yet reached exp', async () => {
+  it('accepts a token verified before its exp', async () => {
     const now = Math.floor(Date.now() / 1000);
     const tok = await signPlaybackToken(claims({ exp: now + 60 }), SECRET);
-    // Verify as if we are BEFORE exp → still ok
     const r = await verifyPlaybackToken(tok, SECRET, now);
-    expect(r.ok).toBe(true);
+    expect(r).toMatchObject({ ok: true, claims: { exp: now + 60 } });
   });
 
   it('rejects a token with unknown version', async () => {
-    // Manually forge a v2 payload with valid HMAC → still rejected by version gate
     const forged = { ...claims(), v: 2 as unknown as 1 };
     const tok = await signPlaybackToken(forged, SECRET);
     const r = await verifyPlaybackToken(tok, SECRET);
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect(r.reason).toBe('unsupported_version');
+    expect(r).toMatchObject({ ok: false, reason: 'unsupported_version' });
   });
 
   it('sign throws when secret is empty', async () => {
@@ -112,7 +108,6 @@ describe('signPlaybackToken / verifyPlaybackToken', () => {
 
   it('verify rejects with bad_signature when secret is empty', async () => {
     const r = await verifyPlaybackToken('a.b.c', '');
-    expect(r.ok).toBe(false);
-    if (r.ok === false) expect(r.reason).toBe('bad_signature');
+    expect(r).toMatchObject({ ok: false, reason: 'bad_signature' });
   });
 });

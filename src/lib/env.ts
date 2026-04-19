@@ -11,6 +11,14 @@ const clientEnvSchema = z.object({
   // Backward-compatible alias used by many Supabase/Vite templates.
   VITE_SUPABASE_ANON_KEY: z.string().min(10).optional(),
   VITE_WORKER_API_BASE: z.string().optional(),
+  // ── Phase 1+2 client feature flags ───────────────────────────────────
+  // Every flag defaults off. Accepts any string so unexpected values
+  // (e.g. 'yes', 'TRUE', empty) don't crash env parsing on boot;
+  // src/lib/feature-flags.ts is the sole authority on truthiness.
+  VITE_FEATURE_SHOW_VIEWER_PREFLIGHT: z.string().optional().default('false'),
+  VITE_FEATURE_FAN_TOKEN_SYSTEM: z.string().optional().default('false'),
+  VITE_FEATURE_BIOMETRIC_OVERLAY: z.string().optional().default('false'),
+  VITE_FEATURE_MIC_UP_SERIES: z.string().optional().default('false'),
 });
 
 // Normalize empty secrets from runtime env/deploy systems.

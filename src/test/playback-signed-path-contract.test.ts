@@ -59,11 +59,12 @@ describe('signed-path contract', () => {
       });
       expect(payload.embedUrl).toBeUndefined();
       expect(payload.signedPlaybackUrl).toBeDefined();
-      // Only check source URL exclusion when a real third-party URL exists.
-      // String(null ?? '') = '' and every string contains '', so the check
-      // would trivially fail for null/undefined source_url.
+      if (sourceUrl != null) {
+        expect(payload.signedPlaybackUrl).not.toContain(String(sourceUrl));
+      }
+      // Signed URL must point back to our origin, never at the
+      // third-party source domain.
       if (typeof sourceUrl === 'string') {
-        expect(payload.signedPlaybackUrl).not.toContain(sourceUrl);
         const sourceHost = new URL(sourceUrl).host;
         expect(new URL(payload.signedPlaybackUrl!).host).not.toBe(sourceHost);
       }
