@@ -10,6 +10,9 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules"],
+    poolOptions: { threads: { maxThreads: 2, minThreads: 1 } },
+    isolate: false,
+    maxConcurrency: 2,
     coverage: {
       provider: "istanbul",
       // Enabled via CLI flag in CI: `vitest run --coverage`
