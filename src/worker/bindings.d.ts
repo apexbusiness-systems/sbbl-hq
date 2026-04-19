@@ -44,6 +44,7 @@ interface Env {
 
   // WS5 — biometric ingest rate limit per player per minute (default 60).
   BIOMETRIC_INGEST_RATE_PER_MIN?: string;
+  BIOMETRIC_WEBHOOK_SECRET?: string;
 
   ASSETS: { fetch: (req: Request) => Promise<Response> };
 }

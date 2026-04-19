@@ -9,7 +9,3 @@
 ## 2025-05-14 - [Performance] Optimized Ops Batch Product Insertion
 **Learning:** Sequential database inserts in a loop (N+1 query pattern) in Cloudflare Workers significantly increase latency due to multiple round-trips to the database.
 **Action:** Use Supabase's native batch insert capability (`insert([...items])`) to perform multiple insertions in a single database call, reducing I/O overhead and improving response times.
-
-## 2026-04-19 - CI/CD Health Probe Fix
-**Learning:** Cloudflare Bot Management often blocks automated requests (like curl) when querying custom domains for health checks, leading to intermittent failures during GitHub Actions deployment steps.
-**Action:** When validating a Cloudflare Worker deployment, explicitly use the `*.workers.dev` subdomain (if enabled) to bypass Bot Management, rather than hitting the production domain.

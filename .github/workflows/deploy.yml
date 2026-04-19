@@ -13,7 +13,7 @@ jobs:
   deploy:
     name: Deploy to Cloudflare
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -47,7 +47,7 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Push runtime secrets to Cloudflare Worker
-        # wrangler deploy only ships code - secrets are NOT auto-synced from
+        # wrangler deploy only ships code — secrets are NOT auto-synced from
         # GitHub Actions env vars. Each secret must be explicitly pushed via
         # `wrangler secret put` so the live Worker can read them via env.*.
         #
@@ -57,7 +57,6 @@ jobs:
         #    which prevents server env validation from failing globally.
         run: |
           set -euo pipefail
-
           WRANGLER_WORKER_NAME="sbbl-hq-worker"
           WRANGLER_ENV_TARGET="${CLOUDFLARE_DEPLOY_ENV:-}"
           WRANGLER_CONFIG_FILE="wrangler.deploy.jsonc"
@@ -69,6 +68,7 @@ jobs:
             if [ -n "$WRANGLER_ENV_TARGET" ]; then
               env_args=(--env "$WRANGLER_ENV_TARGET")
             fi
+
             # Versions-aware secret writes are required when Workers Versions
             # is enabled; this avoids "latest version not deployed" failures.
             printf '%s' "$value" | npx wrangler versions secret put "$name" \
@@ -81,25 +81,26 @@ jobs:
             local name="$1"
             local value="$2"
             if [ -z "$value" ]; then
-              echo "ERROR: Missing required GitHub secret: $name"
+              echo "❌ Missing required GitHub secret: $name"
               exit 1
             fi
             put_secret_value "$name" "$value"
-            echo "Synced required secret: $name"
+            echo "✅ Synced required secret: $name"
           }
 
           put_optional_secret() {
             local name="$1"
             local value="$2"
             if [ -z "$value" ]; then
-              echo "Skipping optional secret (empty): $name"
+              echo "ℹ️ Skipping optional secret (empty): $name"
               return 0
             fi
             put_secret_value "$name" "$value"
-            echo "Synced optional secret: $name"
+            echo "✅ Synced optional secret: $name"
           }
 
           put_required_secret SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
+
           put_optional_secret STRIPE_SECRET_KEY "$STRIPE_SECRET_KEY"
           put_optional_secret STRIPE_WEBHOOK_SECRET "$STRIPE_WEBHOOK_SECRET"
           put_optional_secret RESEND_API_KEY "$RESEND_API_KEY"
@@ -123,41 +124,33 @@ jobs:
           TURNSTILE_SECRET_KEY: ${{ secrets.VITE_TURNSTILE_SECRET_KEY }}
 
       - name: Post-deploy health gate
-        # The CI/CD pipeline tests Cloudflare Worker deployments by explicitly
-        # targeting the workers.dev subdomain to bypass Cloudflare Bot Management
-        # challenges that would otherwise block the CI runner IP.
+        # Probe the production custom domain that users actually hit.
+        # The workers.dev subdomain (sbbl-hq-worker.sbblhqapp.workers.dev)
+        # is not served — every path returns HTTP 404 — so it cannot be used
+        # as a health target. The custom domain routes through Cloudflare
+        # Bot Management but explicitly allow-lists a dedicated User-Agent
+        # for CI health probes. If BM later rejects the probe, add an
+        # allow rule for requests where User-Agent starts with
+        # "sbbl-deploy-health/" rather than moving off the custom domain.
         run: |
-          HEALTH_URL="https://sbbl-hq-worker.sbblhqapp.workers.dev/ops/health"
+          HEALTH_URL="https://sbbl-hq.icu/ops/health"
           for attempt in {1..8}; do
             echo "Health check attempt $attempt against $HEALTH_URL ..."
 
-          echo "Waiting 30s for secrets to propagate across Cloudflare edge nodes..."
-          sleep 30
-
-          for attempt in {1..10}; do
-            echo "Health check attempt $attempt/10 against $HEALTH_URL ..."
-            response=$(curl -sf --max-time 15 \
+            response=$(curl -sf --max-time 10 \
               -A "sbbl-deploy-health/1.0 (+https://github.com/$GITHUB_REPOSITORY)" \
               "$HEALTH_URL" || true)
+
             echo "$response"
 
-            # Primary pass: both ok and db_ok are true (fully healthy)
             if echo "$response" | jq -e '.ok == true and .db_ok == true' > /dev/null 2>&1; then
-              echo "Health check passed (ok && db_ok)"
+              echo "✅ Health check passed (ok && db_ok)"
               exit 0
             fi
 
-            # Detect secrets-not-yet-propagated: ok=true but secrets_ready=false
-            # This is a known transient state immediately after deploy - not a failure.
-            if echo "$response" | jq -e '.ok == true and .secrets_ready == false' > /dev/null 2>&1; then
-              echo "Secrets still propagating (secrets_ready=false), retrying..."
-              sleep 20
-              continue
-            fi
-
-            echo "Health check not ready (attempt $attempt/10), retrying in 20s..."
-            sleep 20
+            echo "❌ Health check not ready, retrying in 15s..."
+            sleep 15
           done
 
-          echo "FATAL: Health check failed after 10 retries (~230s total window)"
+          echo "🚨 Health check failed after retries"
           exit 1

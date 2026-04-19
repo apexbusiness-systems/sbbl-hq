@@ -11,7 +11,6 @@
  * must import the getter (not the raw env).
  */
 import { readClientEnv } from '@/lib/env';
-
 function parseFlag(v: unknown): boolean {
   return v === 'true' || v === true || v === '1' || v === 1;
 }
@@ -23,6 +22,23 @@ function parseFlag(v: unknown): boolean {
 let _cached: ReturnType<typeof readClientEnv> | null = null;
 function env() {
   if (!_cached) _cached = readClientEnv();
+  // E2E / Playwright test seam: merge flag overrides from localStorage.
+  // In Playwright tests, `sbbl_test_flags` is set before page.goto() to
+  // activate feature flags without rebuilding the app. This key is never
+  // set in production environments.
+  if (typeof window !== 'undefined' && typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('sbbl_test_flags');
+      if (raw) {
+        const overrides = JSON.parse(raw) as Record<string, unknown>;
+        if (overrides && typeof overrides === 'object') {
+          return { ..._cached, ...overrides };
+        }
+      }
+    } catch {
+      // Ignore malformed JSON in test flags.
+    }
+  }
   return _cached;
 }
 

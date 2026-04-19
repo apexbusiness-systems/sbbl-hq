@@ -1,4 +1,4 @@
-import { defineConfig, devices } from '@playwright/test';
+﻿import { defineConfig, devices } from '@playwright/test';
 
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${port}`;
@@ -6,7 +6,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${port}`;
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
-  // Per-assertion timeout ceiling — Vite dev cold-compile on CI runners can
+  // Per-assertion timeout ceiling â€” Vite dev cold-compile on CI runners can
   // push the first paint of /live past the 5s Playwright default, producing
   // flaky `toBeVisible` failures on specs that don't pass an explicit timeout.
   // Matches the convention already in critical-paths.spec.ts / broadcast-overlay-flow.spec.ts.
@@ -31,3 +31,5 @@ export default defineConfig({
     },
   ],
 });
+
+
