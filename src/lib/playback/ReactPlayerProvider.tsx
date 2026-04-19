@@ -1,18 +1,25 @@
 import React from 'react';
 import ReactPlayer from 'react-player';
-import type { IPlaybackProvider, PlaybackConfig } from './IPlaybackProvider';
+import type { IPlaybackProvider } from './IPlaybackProvider';
 
 export class ReactPlayerProvider implements IPlaybackProvider {
+  name = 'ReactPlayer';
+
   canHandle(url: string): boolean {
-    return url.includes('twitch.tv') ||
-            url.includes('youtube.com') ||
-            url.includes('youtu.be');
+    return url.includes('twitch.tv') || 
+           url.includes('youtube.com') || 
+           url.includes('youtu.be');
   }
 
-  render(config: PlaybackConfig) {
+  resolve(url: string) {
+    return { url, type: 'react-player' };
+  }
+
+  render(config: any) {
     const { url, muted = true, autoplay = true } = config;
+
     return (
-      <div className="relative w-full aspect-video bg-[#0A0A0A] rounded-xl overflow-hidden border border-[#111111]">
+      <div className="relative w-full aspect-video bg-black rounded-xl overflow-hidden">
         <ReactPlayer
           url={url}
           width="100%"
@@ -29,8 +36,6 @@ export class ReactPlayerProvider implements IPlaybackProvider {
             },
             twitch: {
               options: {
-                // MANDATORY: Without this, Twitch will block the embed in production
-                parent: ["sbbl-hq.icu", "localhost"], 
                 muted: muted,
                 autoplay: autoplay,
               },
