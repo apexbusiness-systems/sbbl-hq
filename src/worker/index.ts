@@ -61,8 +61,9 @@ import {
 import {
   handleBiometricIngest,
   handleBiometricLatest,
+  handleBiometricWebhookIngest,
 } from "./routes/biometrics";
-import { handleMicUpOverlayEvent } from "./routes/overlay-events";
+import { handleLatestMicUpOverlayEvents, handleMicUpOverlayEvent } from "./routes/overlay-events";
 import { handleReplayStatus } from "./routes/replay";
 import {
   handlePublicSponsors,
@@ -4833,114 +4834,6 @@ async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
   return handlePlaybackSession({ ...ctx, params: { ...ctx.params, gameId: null } });
 }
 
-export async function handleBiometricSnapshot(ctx: HandlerCtx) {
-  await ensureMutation(ctx.req, ctx);
-  const session = await requireLeagueOrSuperAdmin(ctx.req, ctx.admin);
-  const gameId = ctx.params.gameId;
-  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
-
-  const body = (await ctx.req.json().catch(() => null)) as {
-    playerId: string;
-    heartRateBpm?: number;
-    staminaPct?: number;
-    fatigueLevel?: "fresh" | "moderate" | "tired" | "gassed";
-    source?: string;
-  } | null;
-
-  if (!body || !body.playerId) {
-    return json({ ok: false, error: "player_id_required" }, 400);
-  }
-
-  const insert = await ctx.admin
-    .from("player_biometric_snapshots")
-    .insert({
-      game_id: gameId,
-      player_id: body.playerId,
-      heart_rate_bpm: body.heartRateBpm ?? null,
-      stamina_pct: body.staminaPct ?? null,
-      fatigue_level: body.fatigueLevel ?? null,
-      source: body.source ?? "manual",
-    })
-    .select("id")
-    .single();
-
-  if (insert.error) throw new Error(insert.error.message);
-  return json({ ok: true, id: insert.data.id });
-}
-
-export async function handleLatestBiometrics(ctx: HandlerCtx) {
-  const gameId = ctx.params.gameId;
-  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
-
-  const { data, error } = await ctx.admin
-    .from("player_biometric_snapshots")
-    .select("*")
-    .eq("game_id", gameId)
-    .order("recorded_at", { ascending: false })
-    .limit(20);
-
-  if (error) throw new Error(error.message);
-
-  const latestByPlayer = new Map<string, unknown>();
-  for (const row of (data ?? [])) {
-    const pId = String((row as Record<string, unknown>).player_id);
-    if (!latestByPlayer.has(pId)) {
-      latestByPlayer.set(pId, row);
-    }
-  }
-
-  return json({
-    ok: true,
-    snapshots: Array.from(latestByPlayer.values())
-  });
-}
-
-export async function handleLatestOverlayEvents(ctx: HandlerCtx) {
-  const gameId = ctx.params.gameId;
-  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
-
-  const { data, error } = await ctx.admin
-    .from("overlay_event_log")
-    .select("*")
-    .eq("game_id", gameId)
-    .order("triggered_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (error) throw new Error(error.message);
-  return json({ ok: true, event: data });
-}
-
-export async function handleOverlayEvent(ctx: HandlerCtx) {
-  await ensureMutation(ctx.req, ctx);
-  const session = await requireLeagueOrSuperAdmin(ctx.req, ctx.admin);
-  const gameId = ctx.params.gameId;
-  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
-
-  const body = (await ctx.req.json().catch(() => null)) as {
-    eventType: string;
-    payload?: Record<string, unknown>;
-  } | null;
-
-  if (!body || !body.eventType) {
-    return json({ ok: false, error: "event_type_required" }, 400);
-  }
-
-  const insert = await ctx.admin
-    .from("overlay_event_log")
-    .insert({
-      game_id: gameId,
-      event_type: body.eventType,
-      payload: body.payload ?? {},
-      triggered_by: session.userId,
-    })
-    .select("id")
-    .single();
-
-  if (insert.error) throw new Error(insert.error.message);
-  return json({ ok: true, id: insert.data.id });
-}
-
 /**
  * RC-6: Atomic Go Live / End Stream endpoint.
  * Merges updateStreamConfig + setStreamLive into a single upsert so the
@@ -6088,11 +5981,13 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   // 'true'. Write path additionally requires league_admin / super_admin
   // and games.event_type in ('1v1','2v2').
   { method: "POST", path: "/api/streams/:gameId/biometrics",        handler: handleBiometricIngest },
+  { method: "POST", path: "/api/streams/:gameId/biometrics/webhook", handler: handleBiometricWebhookIngest },
   { method: "GET",  path: "/api/streams/:gameId/biometrics/latest", handler: handleBiometricLatest },
   // ── WS6 Mic Up Series overlay events ──────────────────────────────────
   // Admin-triggered overlay events (trash_talk / lower_third / intro_sting).
   // Gated on FEATURE_MIC_UP_SERIES + games.mic_up_series=true.
   { method: "POST", path: "/api/streams/:gameId/overlay/event",     handler: handleMicUpOverlayEvent },
+  { method: "GET",  path: "/api/streams/:gameId/overlay/events/latest", handler: handleLatestMicUpOverlayEvents },
   // ── WS7 Replay monetization ───────────────────────────────────────────
   // Public read; does NOT leak a playback URL. Clients call the normal
   // session endpoint with playbackMode='replay' after purchase/entitlement.
@@ -6116,26 +6011,6 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/ops/streams/:gameId/reactions/reset",
     handler: handleResetReactions,
-  },
-  {
-    method: "POST",
-    path: "/api/streams/:gameId/biometrics",
-    handler: handleBiometricSnapshot,
-  },
-  {
-    method: "GET",
-    path: "/api/streams/:gameId/biometrics/latest",
-    handler: handleLatestBiometrics,
-  },
-  {
-    method: "POST",
-    path: "/api/streams/:gameId/overlay/event",
-    handler: handleOverlayEvent,
-  },
-  {
-    method: "GET",
-    path: "/api/streams/:gameId/overlay/events/latest",
-    handler: handleLatestOverlayEvents,
   },
   { method: "GET", path: "/api/cart", handler: handleGetCart },
   { method: "POST", path: "/api/cart/items", handler: handleAddCartItem },

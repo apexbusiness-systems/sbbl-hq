@@ -316,6 +316,11 @@ function StreamPlayer({
         // REQUIRED: Twitch embeds will not load without every allowed parent.
         // https://dev.twitch.tv/docs/embed/everything/#required-parameters
         parent: twitchParents,
+        // REQUIRED for autoplay: Twitch's embed SDK enforces muted=true for
+        // cross-origin autoplay. The ReactPlayer `muted` prop does NOT map to
+        // the Twitch embed URL — it must be set here explicitly.
+        muted: true,
+        playsinline: true,
       },
     },
     file: {
@@ -392,8 +397,12 @@ function StreamPlayer({
           Tap to unmute
         </button>
       )}
-      {/* Block iframe click-through to provider pages and prevent source copying via context menu. */}
-      {(isYoutube || isTwitch || isVimeo) && (
+      {/* Block iframe click-through for YouTube/Vimeo only.
+          Twitch's embed SDK validates iframe visibility at init — an opaque
+          overlay on top of the Twitch iframe causes the SDK to fail its
+          viewport-visibility check and permanently disable autoplay.
+          Twitch retains its own native controls and context menu. */}
+      {(isYoutube || isVimeo) && (
         <div
           className="absolute inset-0 z-10"
           aria-hidden="true"
