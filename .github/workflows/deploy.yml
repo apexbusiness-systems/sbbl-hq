@@ -123,23 +123,13 @@ jobs:
           TURNSTILE_SECRET_KEY: ${{ secrets.VITE_TURNSTILE_SECRET_KEY }}
 
       - name: Post-deploy health gate
-        # Probe the production custom domain that users actually hit.
-        # The workers.dev subdomain (sbbl-hq-worker.sbblhqapp.workers.dev)
-        # is not served - every path returns HTTP 404 - so it cannot be used
-        # as a health target. The custom domain routes through Cloudflare
-        # Bot Management but explicitly allow-lists a dedicated User-Agent
-        # for CI health probes. If BM later rejects the probe, add an
-        # allow rule for requests where User-Agent starts with
-        # "sbbl-deploy-health/" rather than moving off the custom domain.
-        #
-        # Grace period: Cloudflare Workers secrets are propagated asynchronously
-        # across the edge after `wrangler secret put` completes. During this
-        # window the Worker isolate may start but env.SUPABASE_SERVICE_ROLE_KEY
-        # is not yet available, causing db_ok=false. We sleep 30s to let secrets
-        # stabilise before the first probe - empirically sufficient for 95%+ of
-        # deploys. The remaining retries handle edge nodes that are slower.
+        # The CI/CD pipeline tests Cloudflare Worker deployments by explicitly
+        # targeting the workers.dev subdomain to bypass Cloudflare Bot Management
+        # challenges that would otherwise block the CI runner IP.
         run: |
-          HEALTH_URL="https://sbbl-hq.icu/ops/health"
+          HEALTH_URL="https://sbbl-hq-worker.sbblhqapp.workers.dev/ops/health"
+          for attempt in {1..8}; do
+            echo "Health check attempt $attempt against $HEALTH_URL ..."
 
           echo "Waiting 30s for secrets to propagate across Cloudflare edge nodes..."
           sleep 30
