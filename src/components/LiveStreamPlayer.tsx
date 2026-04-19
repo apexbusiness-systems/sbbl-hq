@@ -485,9 +485,10 @@ export function LiveStreamPlayer({
   hasPremiumPlayerAccess,
   isStreamLive,
 }: Readonly<LiveStreamPlayerProps>) {
+  const isBroadcast = game.id === 'broadcast';
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
-  const [accessChecked, setAccessChecked] = useState(false);
+  const [accessChecked, setAccessChecked] = useState(isBroadcast);
 
   const [purchasing, setPurchasing] = useState(false);
 
@@ -520,12 +521,18 @@ export function LiveStreamPlayer({
 
   const hasRoleAccess = isPlayer || isPaidFan || isSuperAdmin;
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
-  const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
+  const hasAccess = isBroadcast ? Boolean(userId) : hasRoleAccess || ppvEntitled || inviteGranted;
 
   // ── Fetch stream entitlement (skip if role already grants access) ─────────
   // Pass null instead of explicit token — apiFetch auto-fetches a fresh JWT
   // via getAuthToken(), preventing stale-token 401 loops.
   useEffect(() => {
+    if (isBroadcast) {
+      setPpvEntitled(false);
+      setInviteGranted(false);
+      setAccessChecked(true);
+      return;
+    }
     if (!userId || hasRoleAccess) {
       setAccessChecked(true);
       return;
@@ -537,7 +544,7 @@ export function LiveStreamPlayer({
       })
       .catch(() => { /* network error — stay in preview; user can retry purchase */ })
       .finally(() => setAccessChecked(true));
-  }, [userId, game.id, hasRoleAccess]);
+  }, [isBroadcast, userId, game.id, hasRoleAccess]);
 
   // Retry key: incrementing this re-triggers the session effect after the
   // user clicks "Retry" on the player error screen, without requiring a full
@@ -707,7 +714,7 @@ export function LiveStreamPlayer({
   }
 
   // ── Loading: waiting for server-side entitlement check ───────────────────
-  if (!accessChecked && !hasRoleAccess) {
+  if (!accessChecked && !hasRoleAccess && !isBroadcast) {
     return (
       <div className="absolute inset-0 flex items-center justify-center bg-background">
         <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
@@ -750,7 +757,7 @@ export function LiveStreamPlayer({
 
         {/* Connection lost / displaced banner — circuit breaker triggered.
             Suppressed for super admin: they never get displaced or kicked. */}
-        {!isSuperAdmin && heartbeatFailures >= MAX_HEARTBEAT_FAILURES && (
+        {!isSuperAdmin && !isBroadcast && heartbeatFailures >= MAX_HEARTBEAT_FAILURES && (
           <div className="absolute inset-0 z-20 bg-background/95 backdrop-blur-sm flex flex-col items-center justify-center text-center px-6 gap-4">
             <div className="w-14 h-14 rounded-full bg-red-500/15 flex items-center justify-center">
               <Lock className="w-7 h-7 text-red-400" />
@@ -784,7 +791,7 @@ export function LiveStreamPlayer({
         )}
 
         {/* Invite generator: shown to eligible roles only */}
-        {canGenerateInvite && (
+        {!isBroadcast && canGenerateInvite && (
           <div className="absolute bottom-4 right-4 z-10">
             {generatedCode ? (
               <div className="bg-background/90 backdrop-blur-sm border border-border rounded-2xl px-4 py-3 flex items-center gap-3 shadow-xl">

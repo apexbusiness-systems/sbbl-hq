@@ -4116,14 +4116,9 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     }, 200, cookieHeaders);
   }
 
-  const hasPrivilegedRole = roles.some(
-    (role) => role === "player" || role === "paid_fan",
-  );
-  // Camera-only broadcast alias (gameId=null) is accessible to any privileged
-  // role — roster players and paid fans (season pass). PPV is game-specific
-  // and does not apply when there is no game. Regular fans are expected to
-  // purchase PPV for a specific game instead.
-  let hasAccess = hasPrivilegedRole;
+  // Broadcast alias (gameId=null / /broadcast/session route): any authenticated
+  // viewer may start playback when stream is live. Keep game RPC gate unchanged.
+  let hasAccess = gameId === null;
   if (!hasAccess && gameId) {
     const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
       p_game_id: gameId,
@@ -4137,8 +4132,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   const cfg = await getOrCreateStreamConfig(ctx.admin);
 
   // RC-2: For the broadcast alias (no real game), enforce is_live for non-admins.
-  // Super admins already return above via the fast-path. Privileged roles
-  // (player/paid_fan) still need the stream to be online.
+  // Super admins already return above via the fast-path.
   if (gameId === null && !cfg.is_live && playbackMode !== "replay") {
     return json({ ok: false, error: "stream_offline" }, 403);
   }

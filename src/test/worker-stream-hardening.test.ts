@@ -50,6 +50,10 @@ function createQuery(table: string, state: Record<string, Row[]>) {
           colFilters.push((r) => r[col] === val);
           return builder;
         },
+        is(col: string, val: unknown) {
+          colFilters.push((r) => r[col] === val);
+          return builder;
+        },
         neq(col: string, val: unknown) {
           colFilters.push((r) => r[col] !== val);
           // neq terminates the displacement chain — apply patch now
@@ -112,12 +116,13 @@ function createQuery(table: string, state: Record<string, Row[]>) {
   return api;
 }
 
-function createAdmin(state: Record<string, Row[]>) {
+function createAdmin(state: Record<string, Row[]>, rpcCalls?: string[]) {
   return {
     from(table: string) {
       return createQuery(table, state);
     },
     rpc(name: string, payload: Record<string, unknown>) {
+      if (rpcCalls) rpcCalls.push(name);
       if (name === 'can_user_view_stream') {
         if (payload.p_user_id === 'allowed-user') return Promise.resolve({ data: true, error: null });
         return Promise.resolve({ data: false, error: null });
@@ -199,6 +204,31 @@ describe('stream hardening worker handlers', () => {
 
     // Crucial: Ensure the true origin is completely hidden from the client payload
     expect(body.playback.url).not.toContain('playback.example');
+  });
+
+  it('broadcast playback allows signed-in fan without entitlement RPC', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      games: [],
+      stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_access_sessions: [],
+    } as Record<string, Row[]>;
+    const rpcCalls: string[] = [];
+
+    const res = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/broadcast/session', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'idempotency-key-broadcast-1', 'x-sbbl-user-id-verified': 'blocked-user' },
+        body: JSON.stringify({ sessionKey: 'broadcast-session-key' }),
+      }),
+      params: { gameId: null },
+      env,
+      admin: createAdmin(state, rpcCalls),
+    } as any);
+
+    expect(res.status).toBe(200);
+    expect(rpcCalls).not.toContain('can_user_view_stream');
   });
 
   it('session heartbeat refreshes active presence', async () => {

@@ -721,12 +721,6 @@ const LivePage = () => {
   const { access, config: liveAccessConfig } = useLiveAccess();
   const isSuperAdmin = roles.includes('super_admin');
   const canModerateLive = roles.includes('super_admin') || roles.includes('league_admin');
-  // Any privileged role (roster player, paid fan, or super admin) gets the
-  // camera-only broadcast fallback when the admin has flipped the stream live
-  // but no real live game row exists yet. Non-privileged fans still need a
-  // real game + PPV entitlement.
-  const hasPrivilegedBroadcastAccess =
-    roles.includes('player') || roles.includes('paid_fan') || isSuperAdmin;
   const [liveGame, setLiveGame] = useState<Game | null>(null);
   // Incremented each time the admin saves a Go Live / End Stream action.
   // Used as React key on PlayerErrorBoundary to force a fresh session fetch
@@ -756,8 +750,7 @@ const LivePage = () => {
       try {
         const home = await fetchPublicHome();
         const liveRows = (home.data?.liveGames ?? []) as Array<Record<string, unknown>>;
-        const upcomingRows = (home.data?.upcomingGames ?? []) as Array<Record<string, unknown>>;
-        const selected = liveRows[0] ?? upcomingRows[0] ?? null;
+        const selected = liveRows[0] ?? null;
         if (active && selected) {
           setLiveGame(mapHomeGameToUi(selected));
           setActiveGameId(String(selected.id));
@@ -876,9 +869,8 @@ const LivePage = () => {
 
   const fallbackBroadcastGame = useMemo<Game | null>(() => {
     // Camera-only live mode has no real game row; use "broadcast" alias routes.
-    // Accessible to any privileged role (player, paid_fan, super_admin). Regular
-    // fans still see "No Active Broadcast" and must wait for a real game + PPV.
-    if (!hasPrivilegedBroadcastAccess || !isStreamLive || liveGame) return null;
+    // Accessible to all authenticated viewers when stream is live.
+    if (!user || !isStreamLive || liveGame) return null;
     return {
       id: 'broadcast',
       leagueId: 'sbbl',
@@ -892,7 +884,7 @@ const LivePage = () => {
       score: { home: 0, away: 0 },
       ppvPrice: 0,
     };
-  }, [hasPrivilegedBroadcastAccess, isStreamLive, liveGame]);
+  }, [user, isStreamLive, liveGame]);
   const showPreflight = isViewerPreflightEnabled() && !!activeGameId && activeGameId !== 'broadcast' && !preflightReady;
   const tokenEnabled = isFanTokenSystemEnabled();
   const biometricsEnabled = isBiometricOverlayEnabled();

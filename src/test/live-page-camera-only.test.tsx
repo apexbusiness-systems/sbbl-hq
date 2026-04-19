@@ -5,11 +5,11 @@ import { describe, expect, it, vi } from 'vitest';
 import LivePage from '@/pages/Live';
 
 vi.mock('@/hooks/use-auth', () => ({
-  useAuth: () => ({ user: { id: 'admin-1' }, session: { access_token: 'token' }, roles: ['super_admin'] }),
+  useAuth: () => ({ user: { id: 'fan-1' }, session: { access_token: 'token' }, roles: ['fan'] }),
 }));
 
 vi.mock('@/contexts/AppContext', () => ({
-  useApp: () => ({ hasPremiumPlayerAccess: true }),
+  useApp: () => ({ hasPremiumPlayerAccess: false }),
 }));
 
 vi.mock('@/contexts/BagContext', () => ({
@@ -29,7 +29,18 @@ vi.mock('@/components/LiveStreamPlayer', () => ({
 vi.mock('@/lib/api/public', () => ({
   fetchPublicHome: vi.fn(async () => ({
     ok: true,
-    data: { liveGames: [], upcomingGames: [] },
+    data: {
+      liveGames: [],
+      upcomingGames: [{
+        id: 'upcoming-game-1',
+        status: 'upcoming',
+        league_code: 'SBBL',
+        home_team_id: 'h1',
+        away_team_id: 'a1',
+        home_team: { name: 'Upcoming Home' },
+        away_team: { name: 'Upcoming Away' },
+      }],
+    },
   })),
 }));
 
@@ -46,7 +57,7 @@ vi.mock('@/lib/api/stream', () => ({
 }));
 
 describe('Live page camera-only mode', () => {
-  it('mounts playback with broadcast alias when live and no game rows exist', async () => {
+  it('mounts playback with broadcast alias when live and no live game rows exist', async () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
         <MemoryRouter>
@@ -57,6 +68,7 @@ describe('Live page camera-only mode', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('live-player').textContent).toContain('broadcast');
+      expect(screen.getByTestId('live-player').textContent).not.toContain('upcoming-game-1');
     });
   });
 });
