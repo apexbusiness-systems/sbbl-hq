@@ -4138,8 +4138,27 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   // RC-2: For the broadcast alias (no real game), enforce is_live for non-admins.
   // Super admins already return above via the fast-path. Privileged roles
   // (player/paid_fan) still need the stream to be online.
-  if (gameId === null && !cfg.is_live) {
+  if (gameId === null && !cfg.is_live && mode !== "replay") {
     return json({ ok: false, error: "stream_offline" }, 403);
+  }
+
+  // WS7: Replay Embargo & Monetization
+  if (mode === "replay" && gameId && !isSuperAdmin) {
+    const { data: gameData } = await ctx.admin
+      .from("games")
+      .select("replay_monetization_enabled_at, replay_price, replay_mode")
+      .eq("id", gameId)
+      .maybeSingle();
+
+    if (gameData) {
+      if (!gameData.replay_monetization_enabled_at || new Date(String(gameData.replay_monetization_enabled_at)) > new Date()) {
+        return json({ ok: false, error: "replay_embargoed", message: "Replays are embargoed for 48 hours post-game." }, 403);
+      }
+      // Replay entitlement check
+      if (!hasAccess) {
+        return json({ ok: false, error: "replay_available_for_purchase", price: gameData.replay_price ?? 500 }, 403);
+      }
+    }
   }
 
   const playbackUrl =
@@ -4260,6 +4279,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       type: "url",
       url: clientPlaybackUrl,
       deliveryClass,
+      playbackMode: mode,
       expiresAt: session.expiresAt,
       maxExpiresAt: session.maxExpiresAt,
       heartbeatIntervalSec: 25,
@@ -4808,6 +4828,114 @@ export async function handleResetReactions(ctx: HandlerCtx) {
 
 async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
   return handlePlaybackSession({ ...ctx, params: { ...ctx.params, gameId: null } });
+}
+
+export async function handleBiometricSnapshot(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireLeagueOrSuperAdmin(ctx.req, ctx.admin);
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    playerId: string;
+    heartRateBpm?: number;
+    staminaPct?: number;
+    fatigueLevel?: "fresh" | "moderate" | "tired" | "gassed";
+    source?: string;
+  } | null;
+
+  if (!body || !body.playerId) {
+    return json({ ok: false, error: "player_id_required" }, 400);
+  }
+
+  const insert = await ctx.admin
+    .from("player_biometric_snapshots")
+    .insert({
+      game_id: gameId,
+      player_id: body.playerId,
+      heart_rate_bpm: body.heartRateBpm ?? null,
+      stamina_pct: body.staminaPct ?? null,
+      fatigue_level: body.fatigueLevel ?? null,
+      source: body.source ?? "manual",
+    })
+    .select("id")
+    .single();
+
+  if (insert.error) throw new Error(insert.error.message);
+  return json({ ok: true, id: insert.data.id });
+}
+
+export async function handleLatestBiometrics(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+
+  const { data, error } = await ctx.admin
+    .from("player_biometric_snapshots")
+    .select("*")
+    .eq("game_id", gameId)
+    .order("recorded_at", { ascending: false })
+    .limit(20);
+
+  if (error) throw new Error(error.message);
+
+  const latestByPlayer = new Map<string, unknown>();
+  for (const row of (data ?? [])) {
+    const pId = String((row as Record<string, unknown>).player_id);
+    if (!latestByPlayer.has(pId)) {
+      latestByPlayer.set(pId, row);
+    }
+  }
+
+  return json({
+    ok: true,
+    snapshots: Array.from(latestByPlayer.values())
+  });
+}
+
+export async function handleLatestOverlayEvents(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+
+  const { data, error } = await ctx.admin
+    .from("overlay_event_log")
+    .select("*")
+    .eq("game_id", gameId)
+    .order("triggered_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return json({ ok: true, event: data });
+}
+
+export async function handleOverlayEvent(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireLeagueOrSuperAdmin(ctx.req, ctx.admin);
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    eventType: string;
+    payload?: Record<string, unknown>;
+  } | null;
+
+  if (!body || !body.eventType) {
+    return json({ ok: false, error: "event_type_required" }, 400);
+  }
+
+  const insert = await ctx.admin
+    .from("overlay_event_log")
+    .insert({
+      game_id: gameId,
+      event_type: body.eventType,
+      payload: body.payload ?? {},
+      triggered_by: session.userId,
+    })
+    .select("id")
+    .single();
+
+  if (insert.error) throw new Error(insert.error.message);
+  return json({ ok: true, id: insert.data.id });
 }
 
 /**
@@ -5985,6 +6113,26 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/ops/streams/:gameId/reactions/reset",
     handler: handleResetReactions,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/biometrics",
+    handler: handleBiometricSnapshot,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/biometrics/latest",
+    handler: handleLatestBiometrics,
+  },
+  {
+    method: "POST",
+    path: "/api/streams/:gameId/overlay/event",
+    handler: handleOverlayEvent,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/overlay/events/latest",
+    handler: handleLatestOverlayEvents,
   },
   { method: "GET", path: "/api/cart", handler: handleGetCart },
   { method: "POST", path: "/api/cart/items", handler: handleAddCartItem },
