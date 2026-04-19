@@ -13,11 +13,22 @@
  * has already played once → marker is present) and eliminates the
  * cross-mount timing dependency entirely.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render } from '@testing-library/react';
 import { MicUpIntroSting } from '@/components/micup/MicUpIntroSting';
 
+// The intro schedules a 2.5s setTimeout inside its effect. Fake timers
+// keep the test hermetic — the timeout can never fire into another
+// test's cleanup window, and RTL's cleanup still tears the tree down
+// via unmount (which runs clearTimeout via the effect cleanup).
+beforeEach(() => {
+  vi.useFakeTimers({ shouldAdvanceTime: false });
+});
+
 afterEach(() => {
+  cleanup();
+  vi.clearAllTimers();
+  vi.useRealTimers();
   sessionStorage.clear();
   vi.restoreAllMocks();
 });
