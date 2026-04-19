@@ -1,8 +1,19 @@
-<!-- Version: v1.5.0 | Date: 2026-04-18 | Status: Current -->
+<!-- Version: v1.6.0 | Date: 2026-04-19 | Status: Current -->
 # SBBL HQ — Operations Runbook
 
-> Last updated: 2026-04-18
+> Last updated: 2026-04-19
 > Owner: APEX Business Systems Ltd
+> Previous version: v1.5.0 (2026-04-18)
+
+## Change log
+
+**v1.6.0 — 2026-04-19** — Universal Stream Player + WHIP browser ingest.
+Added MediaMTX `/whip/*` listener and the matching Caddy reverse proxy on
+`stream.sbbl-hq.icu`. Documented admin operations for local-file broadcast
+and webcam broadcast flows (§ "Broadcast from the browser"). Player now
+accepts any Twitch/YouTube/Vimeo/HLS/DASH/MP4/m4v/mov/webm/WHEP/`blob:`
+source with zero friction — see `docs/features/STREAM_GATING_v1.7.0.md`
+for the capability matrix.
 
 This document is the canonical reference for all operational tasks, deployment procedures, emergency recovery steps, and script/tooling inventory for the SBBL HQ platform.
 
@@ -22,7 +33,7 @@ commands are banned and caught by the CI guard.
 | `REPLAY_RAW_PRICE_CAD` | $1.50 | Raw replay price. |
 | `REPLAY_EDITED_PRICE_CAD` | $5.00 | Edited replay price. |
 
-See `docs/features/STREAM_GATING_v1.6.0.md` for the full semantic model.
+See `docs/features/STREAM_GATING_v1.7.0.md` for the full semantic model.
 
 ## Changelog (v1.5.0)
 
@@ -356,3 +367,73 @@ All stream API calls use `apiFetch` which auto-refreshes expired JWTs via `getAu
 
 - Purchase entry and invite redemption support Turnstile verification via `useTurnstile` hook (client) and `verifyTurnstileToken()` (worker) when `OPTIONAL_TURNSTILE_SECRET_KEY` is configured.
 - Worker-side in-memory rate limiting protects: stream purchase starts, invite redemption attempts, live chat posting bursts.
+
+## Broadcast from the browser (v1.6.0)
+
+The admin console under `/live` → gear icon exposes three new controls.
+They replace the "bring your own OBS" workflow for simple highlight-reel
+broadcasts and camera-only feeds.
+
+### 1. Paste any link
+
+Every URL the detector in `src/lib/stream/url-detector.ts` recognizes is
+accepted verbatim — Twitch, YouTube, Vimeo, Facebook, Kick, Rumble,
+Dailymotion, HLS (including presigned), DASH, WHEP, RTMP (with advisory),
+and direct video files (mp4/m4v/mov/webm/ogg/ogv, including presigned
+S3/R2). The player normalizes to the canonical watch/embed form on save.
+
+### 2. Load Local File → Broadcast File
+
+1. Click `Load Local File`; pick a `.mp4` / `.mov` / `.webm` clip.
+2. The preview video appears inline. You can scrub / verify before
+   broadcasting — no viewers see it yet.
+3. Click `Broadcast File`. The hook captures a `MediaStream` from the
+   playing `<video>` via `HTMLVideoElement.captureStream()` and publishes
+   it to `https://stream.sbbl-hq.icu/whip/<gameId>` using WHIP.
+4. MediaMTX re-emits the feed as WHEP on the matching
+   `https://stream.sbbl-hq.icu/whep/<gameId>` endpoint. Paste that URL
+   into the Stream URL input if you want the session gating (PPV, invite,
+   session heartbeat) to apply.
+5. Click `Stop Broadcast` to tear down the peer connection and DELETE
+   the WHIP resource.
+
+### 3. Broadcast Camera
+
+1. Click `Broadcast Camera`. The browser prompts for camera+mic access.
+2. On approval, `getUserMedia({ video: {1280×720}, audio: true })` drives
+   the same WHIP publisher used by the file-broadcast path.
+3. Same `Stop Broadcast` flow tears it down.
+
+### Caddyfile layout
+
+```caddyfile
+stream.sbbl-hq.icu {
+  reverse_proxy /whep/* localhost:8889   # egress — viewers
+  reverse_proxy /whip/* localhost:8889   # ingest — admin browser publishers
+  reverse_proxy /api/*  localhost:9997   # MediaMTX admin API (loopback only in prod)
+}
+```
+
+Both `/whep/*` and `/whip/*` share MediaMTX's WebRTC mux listener on
+8889. Port 9997 (MediaMTX API) is intentionally exposed only inside the
+private network; use SSM Session Manager to hit it from an ops laptop.
+
+### MediaMTX config knobs
+
+- `paths.all.runOnInit: publisher_start.sh` can be used to forward the
+  re-emitted stream to YouTube/Twitch simultaneously (multi-push).
+- `webrtcAllowOrigin` must include `https://sbbl-hq.icu` (default is `*`
+  but the Caddy layer already scopes this per-path).
+- TURN is recommended for production resilience (admins behind symmetric
+  NATs); today we ship only STUN and rely on MediaMTX's public address
+  discovery. See v1.7.0 runbook for TURN rollout instructions.
+
+### Troubleshooting WHIP
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Status stuck on `connecting` | ICE candidates didn't reach MediaMTX | Check firewall; MediaMTX needs UDP 8189 (RTP) reachable. |
+| 401 on POST | Missing/expired bearer token | Re-authenticate; WHIP tokens are short-lived. |
+| 400 on POST | SDP parse error (usually codec mismatch) | Confirm browser supports H.264 + Opus; Safari on older iOS may not. |
+| `Stop Broadcast` doesn't release | Browser crashed before DELETE | MediaMTX GCs dead sessions on its idle timeout (default 30 s). |
+| Audio out of sync on captureStream() | Browser re-samples on tab throttling | Keep the `/live` tab active; consider using `Broadcast Camera` for production events. |

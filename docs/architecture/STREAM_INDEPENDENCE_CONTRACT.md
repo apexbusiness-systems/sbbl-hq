@@ -131,4 +131,4 @@ If a stage fails verification:
 - Skill doctrine: sbbl-agent (Iron Laws), apex-live (broadcast),
   omnidev-v2, apex-qa, apex-master-debug, one-pass-debug-skill
 - Related docs: `docs/protocols/no-mock-in-production.md`,
-  `docs/features/STREAM_GATING_v1.5.0.md`
+  `docs/features/STREAM_GATING_v1.7.0.md`
