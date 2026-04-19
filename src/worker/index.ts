@@ -4138,12 +4138,15 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   // RC-2: For the broadcast alias (no real game), enforce is_live for non-admins.
   // Super admins already return above via the fast-path. Privileged roles
   // (player/paid_fan) still need the stream to be online.
-  if (gameId === null && !cfg.is_live && mode !== "replay") {
+  if (gameId === null && !cfg.is_live && playbackMode !== "replay") {
     return json({ ok: false, error: "stream_offline" }, 403);
   }
 
-  // WS7: Replay Embargo & Monetization
-  if (mode === "replay" && gameId && !isSuperAdmin) {
+  // WS7: Replay Embargo & Monetization (belt-and-suspenders — the
+  // primary gate runs at the top of the handler on body.playbackMode;
+  // this redundant check keeps the invariant locally visible inside
+  // the non-admin branch).
+  if (playbackMode === "replay" && gameId && !isSuperAdmin) {
     const { data: gameData } = await ctx.admin
       .from("games")
       .select("replay_monetization_enabled_at, replay_price, replay_mode")
@@ -4279,7 +4282,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       type: "url",
       url: clientPlaybackUrl,
       deliveryClass,
-      playbackMode: mode,
+      playbackMode,
       expiresAt: session.expiresAt,
       maxExpiresAt: session.maxExpiresAt,
       heartbeatIntervalSec: 25,
