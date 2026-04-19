@@ -41,6 +41,7 @@ const OverlayControl = lazy(() => import('./pages/OverlayControl'));
 const Scorekeeper = lazy(() => import('./pages/Scorekeeper'));
 const Engage = lazy(() => import('./pages/Engage'));
 const Digest = lazy(() => import('./pages/Digest'));
+const OpsBiometrics = lazy(() => import('./pages/OpsBiometrics'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -155,6 +156,7 @@ const AppShell = () => (
           <Route path="/billing" element={<RequireAuth><Billing /></RequireAuth>} />
           <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
           <Route path="/ops" element={<RequireAdmin><Ops /></RequireAdmin>} />
+          <Route path="/ops/biometrics" element={<RequireAdmin><OpsBiometrics /></RequireAdmin>} />
           <Route path="/overlay-control/:gameId" element={<RequireAdmin><OverlayControl /></RequireAdmin>} />
           <Route path="/scorekeeper/:gameId" element={<RequireAdmin><Scorekeeper /></RequireAdmin>} />
           <Route path="/support" element={<Support />} />

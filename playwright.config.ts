@@ -19,7 +19,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: `VITE_E2E_BYPASS_ADMIN=true npm run dev -- --host 127.0.0.1 --port ${port}`,
+    command: `VITE_E2E_BYPASS_ADMIN=true VITE_FEATURE_SHOW_VIEWER_PREFLIGHT=true npm run dev -- --host 127.0.0.1 --port ${port}`,
     url: baseURL,
     reuseExistingServer: true,
     timeout: 120_000,
