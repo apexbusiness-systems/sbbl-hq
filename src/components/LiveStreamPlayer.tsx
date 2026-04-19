@@ -178,13 +178,9 @@ function StreamPlayer({
 }>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [playing, setPlaying] = useState(true);
-  // Start muted so cross-origin autoplay is permitted by Chrome.
-  // Unmuted autoplay is blocked for cross-origin iframes (embed.twitch.tv,
-  // YouTube, Vimeo) regardless of Permissions-Policy — the browser requires
-  // a user gesture. Twitch's SDK misreports this block as "style visibility,
-  // size, viewport visibility" and shows the blank player. Starting muted
-  // lets the stream play immediately; the user unmutes with the toggle
-  // already wired at the controls bar below.
+  // Start muted so cross-origin autoplay is permitted by Chrome. Unmuted
+  // autoplay is blocked for cross-origin iframes regardless of
+  // Permissions-Policy — the browser requires a user gesture.
   const [muted, setMuted] = useState(true);
   const [volume, setVolume] = useState(0.8);
   const [playedFraction, setPlayedFraction] = useState(0);
@@ -194,6 +190,42 @@ function StreamPlayer({
   const retryCountRef = useRef(0);
   const reactPlayerRef = useRef<ReactPlayer | null>(null);
   const MAX_AUTO_RETRIES = 1;
+
+  // Twitch's embed SDK measures the iframe's visibility and dimensions at
+  // creation time via getComputedStyle + getBoundingClientRect. When the
+  // player mounts inside a CSS `aspect-ratio` container, layout can resolve
+  // in a later frame and the SDK captures a 0×0 iframe — permanently
+  // disabling autoplay for that embed with the (misleading) error:
+  //   "Autoplay disabled. style visibility, size, viewport visibility."
+  // Defer ReactPlayer mount until the container has non-zero dimensions.
+  // YouTube / Vimeo / HLS tolerate 0-dim mounts and this gate is a safe
+  // no-op for them.
+  const [containerReady, setContainerReady] = useState(false);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const markReady = () => setContainerReady(true);
+    if (el.offsetWidth > 0 && el.offsetHeight > 0) {
+      markReady();
+      return;
+    }
+    if (typeof ResizeObserver === 'undefined') {
+      markReady();
+      return;
+    }
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect;
+        if (width > 0 && height > 0) {
+          markReady();
+          ro.disconnect();
+          return;
+        }
+      }
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const urlType = detectStreamUrlType(url);
   const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
@@ -305,38 +337,49 @@ function StreamPlayer({
   };
 
   return (
-    <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
-      <ReactPlayer
-        ref={(instance) => { reactPlayerRef.current = instance; }}
-        url={url}
-        width="100%"
-        height="100%"
-        playing={playing}
-        controls={showNativeControls}
-        muted={muted}
-        volume={volume}
-        onReady={() => { retryCountRef.current = 0; onReady(); }}
-        onDuration={(seconds) => setDurationSeconds(seconds)}
-        onProgress={({ played, playedSeconds: elapsed }) => {
-          setPlayedFraction(played);
-          setPlayedSeconds(elapsed);
-        }}
-        onPlay={() => { setPlaying(true); retryCountRef.current = 0; onPlay(); }}
-        onPause={() => setPlaying(false)}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onError={(err: any, data: any) => {
-          // Auto-retry: on first transient error, retry silently after 3s
-          // to avoid killing the player for 20k viewers on a single hiccup.
-          if (retryCountRef.current < MAX_AUTO_RETRIES) {
-            retryCountRef.current += 1;
-            setPlaying(false);
-            setTimeout(() => setPlaying(true), 3_000);
-            return;
-          }
-          onError(parsePlayerError(err, data));
-        }}
-        config={reactPlayerConfig}
-    />
+    <div
+      ref={containerRef}
+      className="absolute inset-0 bg-black"
+      data-testid="stream-player"
+      data-container-ready={containerReady ? 'true' : 'false'}
+    >
+      {containerReady && (
+        <ReactPlayer
+          ref={(instance) => { reactPlayerRef.current = instance; }}
+          url={url}
+          width="100%"
+          height="100%"
+          playing={playing}
+          controls={showNativeControls}
+          // Twitch's iron law: autoplay requires muted=true. We keep this
+          // strictly true for the first mount regardless of upstream state
+          // and let the tap-to-unmute overlay surrender control after the
+          // stream is playing.
+          muted={muted}
+          volume={volume}
+          onReady={() => { retryCountRef.current = 0; onReady(); }}
+          onDuration={(seconds) => setDurationSeconds(seconds)}
+          onProgress={({ played, playedSeconds: elapsed }) => {
+            setPlayedFraction(played);
+            setPlayedSeconds(elapsed);
+          }}
+          onPlay={() => { setPlaying(true); retryCountRef.current = 0; onPlay(); }}
+          onPause={() => setPlaying(false)}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onError={(err: any, data: any) => {
+            // Auto-retry: on first transient error, retry silently after 3s
+            // to avoid killing the player for 20k viewers on a single hiccup.
+            if (retryCountRef.current < MAX_AUTO_RETRIES) {
+              retryCountRef.current += 1;
+              setPlaying(false);
+              setTimeout(() => setPlaying(true), 3_000);
+              return;
+            }
+            onError(parsePlayerError(err, data));
+          }}
+          config={reactPlayerConfig}
+        />
+      )}
       {/* Block iframe click-through to provider pages and prevent source copying via context menu. */}
       {(isYoutube || isTwitch || isVimeo) && (
         <div
@@ -344,6 +387,22 @@ function StreamPlayer({
           aria-hidden="true"
           onContextMenu={(e) => e.preventDefault()}
         />
+      )}
+      {/* Tap-to-unmute overlay — Twitch autoplay requires muted=true on
+          first mount. Once the stream is playing, surface a prominent
+          action so the viewer can promote themselves to audio with one
+          gesture. Hidden as soon as the user unmutes. */}
+      {containerReady && muted && playing && (
+        <button
+          type="button"
+          onClick={() => setMuted(false)}
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-xs font-bold uppercase tracking-wider text-black shadow-lg hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+          aria-label="Tap to unmute audio"
+          data-testid="tap-to-unmute"
+        >
+          <VolumeX className="w-4 h-4" />
+          Tap to unmute
+        </button>
       )}
       <div
         className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm"
