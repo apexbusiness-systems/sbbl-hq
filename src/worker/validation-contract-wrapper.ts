@@ -31,6 +31,35 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
   });
 }
 
+function enforceInMemoryRateLimit(key: string, limit: number, period: number): boolean {
+    const now = Date.now();
+    const record = runtimeRateLimit.get(key) || [0, 0];
+    const [count, lastReset] = record;
+
+    if (now - lastReset > period * 1000) {
+          runtimeRateLimit.set(key, [1, now]);
+          return true;
+    }
+
+    if (count >= limit) {
+          return false;
+    }
+
+    runtimeRateLimit.set(key, [count + 1, lastReset]);
+
+    if (runtimeRateLimit.size >= RUNTIME_RATE_LIMIT_MAX) {
+          const toDelete = Math.floor(RUNTIME_RATE_LIMIT_MAX * 0.2);
+          let deleted = 0;
+          for (const k of runtimeRateLimit.keys()) {
+                  if (deleted >= toDelete) break;
+                  runtimeRateLimit.delete(k);
+                  deleted++;
+          }
+    }
+
+    return true;
+}
+
 function noStoreHeaders() {
   return {
     'Cache-Control': 'no-store, no-cache, must-revalidate, private',
