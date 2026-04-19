@@ -81,9 +81,9 @@ jobs:
         #   • Worker routes         — src/test/worker-routes.test.ts
         #   • Worker ingress        — src/test/worker-ingress.test.ts
         #   • RLS / roles           — src/test/roles.test.ts
-        run: npx vitest run --coverage --reporter=verbose
+        run: npx vitest run --coverage --reporter=verbose --pool=forks --poolOptions.forks.singleFork=true
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=8192
 
       - name: Upload coverage report
         if: always()
