@@ -68,6 +68,8 @@ import {
   handleUpdateHighlight,
   handleReactionAggregate,
 } from "./routes/highlights";
+import { parseStripeSignature, constantTimeEqualHex } from "./stripe-utils";
+export { parseStripeSignature, constantTimeEqualHex };
 
 type HandlerCtx = {
   req: Request;
@@ -371,19 +373,6 @@ async function getStreamUrlForGame(
   return streamUrl;
 }
 
-export function parseStripeSignature(header: string) {
-  const fields = header.split(",").map((part) => part.trim());
-  const timestamp = fields.find((part) => part.startsWith("t="))?.slice(2);
-  const signatures = fields
-    .filter((part) => part.startsWith("v1="))
-    .map((part) => part.slice(3))
-    .filter(Boolean);
-  return {
-    timestamp: timestamp ? Number(timestamp) : NaN,
-    signatures,
-  };
-}
-
 async function signHmacSha256(secret: string, payload: string) {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -420,15 +409,6 @@ async function verifyStripeSignature(
   return parsed.signatures.some((candidate) =>
     constantTimeEqualHex(candidate.toLowerCase(), expected),
   );
-}
-
-export function constantTimeEqualHex(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
 }
 
 async function verifyTurnstileToken(
