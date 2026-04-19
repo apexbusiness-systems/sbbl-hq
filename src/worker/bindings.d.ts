@@ -42,5 +42,8 @@ interface Env {
   // feature is on. Defaults to 30 in code if unset.
   FAN_TOKEN_AWARD_RATE_PER_MIN?: string;
 
+  // WS5 — biometric ingest rate limit per player per minute (default 60).
+  BIOMETRIC_INGEST_RATE_PER_MIN?: string;
+
   ASSETS: { fetch: (req: Request) => Promise<Response> };
 }
