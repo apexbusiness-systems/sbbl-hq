@@ -59,9 +59,9 @@ describe('signed-path contract', () => {
       });
       expect(payload.embedUrl).toBeUndefined();
       expect(payload.signedPlaybackUrl).toBeDefined();
-            if (sourceUrl != null) {
-                      expect(payload.signedPlaybackUrl).not.toContain(String(sourceUrl));
-            }
+      if (sourceUrl != null) {
+        expect(payload.signedPlaybackUrl).not.toContain(String(sourceUrl));
+      }
       // Signed URL must point back to our origin, never at the
       // third-party source domain.
       if (typeof sourceUrl === 'string') {
