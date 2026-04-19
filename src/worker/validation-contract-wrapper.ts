@@ -65,3 +65,27 @@ function noStoreHeaders() {
     return {
           'cache-control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
           'pragm
+    'pragma': 'no-cache',
+            'expires': '0',
+        };
+}
+
+export default {
+      async fetch(request: Request, env: any, ctx: any) {
+              const url = new URL(request.url);
+              const isValidationRoute = VALIDATION_ROUTE_RE.some(re => re.test(url.pathname));
+              const isMutationRoute = MUTATION_IDEMPOTENCY_RE.some(re => re.test(url.pathname));
+
+        if (!isValidationRoute && !isMutationRoute) {
+                  return baseWorker.fetch(request, env, ctx);
+        }
+
+        // Rate limit check
+        const clientIp = request.headers.get('cf-connecting-ip') || 'anonymous';
+              if (!enforceInMemoryRateLimit(clientIp, 100, 60)) {
+                        return json({ error: 'Too many requests' }, 429, noStoreHeaders());
+              }
+
+        return baseWorker.fetch(request, env, ctx);
+      }
+};
