@@ -206,6 +206,22 @@ function StreamPlayer({
   const reactPlayerRef = useRef<ReactPlayer | null>(null);
   const MAX_AUTO_RETRIES = 1;
 
+  // Twitch's embed SDK measures the iframe's visibility and dimensions at
+  // creation time via getComputedStyle + IntersectionObserver. When the
+  // player mounts inside a CSS `aspect-ratio` container, layout can resolve
+  // in a later frame and the SDK captures a 0×0 iframe — permanently
+  // disabling autoplay for that embed with the (misleading) error:
+  //   "Autoplay disabled. style visibility, size, viewport visibility."
+  // Defer ReactPlayer mount until after the browser's next paint so that
+  // CSS aspect-ratio has resolved before the embed SDK measures dimensions.
+  // One rAF is sufficient and avoids ResizeObserver edge cases on absolutely-
+  // positioned children in headless/CI Chromium.
+  const [containerReady, setContainerReady] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setContainerReady(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   const urlType = detectStreamUrlType(url);
   const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
   const isTwitch = urlType === 'twitch';
@@ -376,6 +392,22 @@ function StreamPlayer({
           aria-hidden="true"
           onContextMenu={(e) => e.preventDefault()}
         />
+      )}
+      {/* Tap-to-unmute overlay — Twitch autoplay requires muted=true on
+          first mount. Once the stream is playing, surface a prominent
+          action so the viewer can promote themselves to audio with one
+          gesture. Hidden as soon as the user unmutes. */}
+      {containerReady && muted && playing && (
+        <button
+          type="button"
+          onClick={() => setMuted(false)}
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-xs font-bold uppercase tracking-wider text-black shadow-lg hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+          aria-label="Tap to unmute audio"
+          data-testid="tap-to-unmute"
+        >
+          <VolumeX className="w-4 h-4" />
+          Tap to unmute
+        </button>
       )}
       <div
         className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm"
