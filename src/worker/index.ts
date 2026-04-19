@@ -4099,7 +4099,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     userId,
     body.sessionKey,
   );
-  let deliveryClass = getStreamDeliveryClass(playbackUrl);
+  const deliveryClass = getStreamDeliveryClass(playbackUrl);
   const cookieHeaders: Record<string, string> = {};
   let clientPlaybackUrl = playbackUrl;
   if (deliveryClass === "proxy" && gameId) {
@@ -4182,7 +4182,8 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
             playback_mode: "live",
           });
           clientPlaybackUrl = payload.signedPlaybackUrl;
-          deliveryClass = "hls";
+          // deliveryClass stays as whatever getStreamDeliveryClass
+          // returned. The client branches on URL format, not this field.
         }
       } catch (err) {
         // Signed-path failure → fall through to legacy. Logged but does
@@ -4307,7 +4308,7 @@ export async function handlePlaybackPreflight(ctx: HandlerCtx) {
   const gRes = await ctx.admin
     .from("games")
     .select(
-      "id, status, starts_at, ended_at, replay_mode, replay_monetization_enabled_at, replay_quality_tier, replay_price, is_halftime",
+      "id, status, starts_at, ended_at, replay_mode, replay_monetization_enabled_at, replay_quality_tier, replay_price",
     )
     .eq("id", gameId)
     .maybeSingle();
@@ -4321,17 +4322,19 @@ export async function handlePlaybackPreflight(ctx: HandlerCtx) {
         replay_monetization_enabled_at: string | null;
         replay_quality_tier: "raw" | "edited" | null;
         replay_price: number | null;
-        is_halftime?: boolean | null;
       }
     | null;
   if (!game) return json({ ok: false, error: "game_not_found" }, 404);
 
   const now = Date.now();
   const replayMode = (game.replay_mode ?? "none") as "none" | "raw" | "edited";
+  // Halftime is derived from games.status (authoritative), not a
+  // dedicated column. Missing status → treat as live if tipoff has
+  // passed.
   let state: "upcoming" | "live" | "halftime" | "ended_replay" | "ended_no_replay" | "unavailable";
-  if (game.ended_at) {
+  if (game.ended_at || game.status === "completed" || game.status === "ended") {
     state = replayMode === "none" ? "ended_no_replay" : "ended_replay";
-  } else if (game.is_halftime) {
+  } else if (game.status === "halftime") {
     state = "halftime";
   } else if (game.starts_at && new Date(game.starts_at).getTime() > now) {
     state = "upcoming";

@@ -30,24 +30,21 @@ describe('feature flags — default-off invariants', () => {
     expect(isMicUpSeriesEnabled()).toBe(false);
   });
 
-  it('preflight flag returns true only when exactly "true"', () => {
-    for (const value of ['true']) {
+  it('preflight flag returns true when set to "true" or "1"', () => {
+    for (const value of ['true', '1']) {
       vi.stubEnv('VITE_FEATURE_SHOW_VIEWER_PREFLIGHT', value);
       __resetFeatureFlagCacheForTests();
       expect(isViewerPreflightEnabled()).toBe(true);
     }
   });
 
-  it('preflight flag rejects ambiguous truthy strings', () => {
-    for (const value of ['yes', '1', 'on', 'TRUE', ' true ', '']) {
+  it('preflight flag stays false for any non-canonical string (robustness)', () => {
+    for (const value of ['yes', 'on', 'TRUE', ' true ', 'false', '']) {
       vi.stubEnv('VITE_FEATURE_SHOW_VIEWER_PREFLIGHT', value);
       __resetFeatureFlagCacheForTests();
-      // env schema enforces 'true' | 'false' union — anything else either
-      // defaults to 'false' (empty) or fails parse. In either case the
-      // flag should NOT resolve to true for ambiguous values.
-      expect(() => isViewerPreflightEnabled()).not.toThrow();
-      // We assert directly on the accepted-true path above; here we
-      // simply confirm the getter is robust.
+      // parseFlag is strict: only 'true' | true | '1' | 1 → true.
+      // Anything else resolves to false with no exception.
+      expect(isViewerPreflightEnabled()).toBe(false);
     }
   });
 
