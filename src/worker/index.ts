@@ -63,6 +63,7 @@ import {
   handleBiometricLatest,
 } from "./routes/biometrics";
 import { handleMicUpOverlayEvent } from "./routes/overlay-events";
+import { handleReplayStatus } from "./routes/replay";
 import {
   handlePublicSponsors,
   handleTrackSponsorEvent,
@@ -4018,9 +4019,53 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   const gameId: string | null = rawGameId === 'broadcast' ? null : rawGameId;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionKey?: string;
+    playbackMode?: 'live' | 'replay';
   } | null;
   if (!body?.sessionKey || body.sessionKey.length < 8) {
     return json({ ok: false, error: "session_key_required" }, 400);
+  }
+  const playbackMode: 'live' | 'replay' = body.playbackMode === 'replay' ? 'replay' : 'live';
+
+  // ── WS7 replay gate (embargo + entitlement) ────────────────────────────
+  // Applies only when the client explicitly requests replay playback
+  // for a real game. Broadcast alias and live mode unchanged.
+  if (playbackMode === 'replay' && gameId) {
+    const gRes = await ctx.admin
+      .from("games")
+      .select("replay_mode, replay_monetization_enabled_at")
+      .eq("id", gameId)
+      .maybeSingle();
+    const g = gRes.data as {
+      replay_mode?: 'none' | 'raw' | 'edited';
+      replay_monetization_enabled_at?: string | null;
+    } | null;
+    if (!g || g.replay_mode === 'none') {
+      return json({ ok: false, error: "replay_unavailable" }, 409);
+    }
+    const embargo = g.replay_monetization_enabled_at;
+    if (!embargo || new Date(embargo).getTime() > Date.now()) {
+      return json({ ok: false, error: "replay_embargoed", embargoEndsAt: embargo ?? null }, 409);
+    }
+    // Replay entitlement: a row with replay_tier in ('raw','edited'),
+    // active, not expired. Separate from the live entitlement check the
+    // existing code path performs later.
+    const eRes = await ctx.admin
+      .from("stream_entitlements")
+      .select("status, expires_at")
+      .eq("game_id", gameId)
+      .eq("user_id", userId)
+      .in("replay_tier", ["raw", "edited"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const ent = eRes.data as { status: string | null; expires_at: string | null } | null;
+    const entitled =
+      !!ent &&
+      ent.status === 'active' &&
+      (!ent.expires_at || new Date(ent.expires_at).getTime() > Date.now());
+    if (!entitled) {
+      return json({ ok: false, error: "replay_available_for_purchase" }, 402);
+    }
   }
 
   const roles = await getUserRolesFromDB(userId, ctx.admin);
@@ -5917,6 +5962,10 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   // Admin-triggered overlay events (trash_talk / lower_third / intro_sting).
   // Gated on FEATURE_MIC_UP_SERIES + games.mic_up_series=true.
   { method: "POST", path: "/api/streams/:gameId/overlay/event",     handler: handleMicUpOverlayEvent },
+  // ── WS7 Replay monetization ───────────────────────────────────────────
+  // Public read; does NOT leak a playback URL. Clients call the normal
+  // session endpoint with playbackMode='replay' after purchase/entitlement.
+  { method: "GET",  path: "/api/streams/:gameId/replay/status",     handler: handleReplayStatus },
   {
     method: "GET",
     path: "/api/streams/:gameId/comments",
