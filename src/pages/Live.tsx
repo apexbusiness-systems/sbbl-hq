@@ -11,9 +11,24 @@ import { useLiveAccess } from '@/hooks/useLiveAccess';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
+import { ViewerPreflight } from '@/components/preflight/ViewerPreflight';
+import { TokenWalletBadge } from '@/components/tokens/TokenWalletBadge';
+import { TokenPurchaseModal } from '@/components/tokens/TokenPurchaseModal';
+import { TokenAwardPanel, type AwardablePlayer } from '@/components/tokens/TokenAwardPanel';
+import { TokenLeaderboard } from '@/components/tokens/TokenLeaderboard';
+import { BiometricDualOverlay } from '@/components/biometrics/BiometricDualOverlay';
+import { MicUpIntroSting } from '@/components/micup/MicUpIntroSting';
+import { MicUpLowerThird } from '@/components/micup/MicUpLowerThird';
+import { TrashTalkBanner } from '@/components/micup/TrashTalkBanner';
 import CheerMeter from '@/components/CheerMeter';
 import { CASLNudge } from '@/components/CASLNudge';
 import { fetchPublicHome } from '@/lib/api/public';
+import { fetchPreflightSnapshot } from '@/lib/api/preflight';
+import { isBiometricOverlayEnabled, isFanTokenSystemEnabled, isMicUpSeriesEnabled, isViewerPreflightEnabled } from '@/lib/feature-flags';
+import { fetchLatestBiometrics } from '@/lib/api/biometrics';
+import { fetchLeaderboardByGame, fetchTokenCategories, fetchTokenProducts, fetchTokenWallet, startTokenPurchase, awardTokens } from '@/lib/api/tokens';
+import { useTokenLeaderboardRealtime } from '@/hooks/useTokenLeaderboardRealtime';
+import { useBiometricRealtime } from '@/hooks/useBiometricRealtime';
 import {
   fetchAdminStreamConfig,
   fetchPublicStreamStatus,
@@ -799,6 +814,11 @@ const LivePage = () => {
 
   const [comments, setComments] = useState<Array<{ id: string; user: string; text: string; status: 'active' | 'hidden' }>>([]);
   const [chatInput, setChatInput] = useState('');
+  const [preflightReady, setPreflightReady] = useState(false);
+  const [tokenModalOpen, setTokenModalOpen] = useState(false);
+  const [tokenBusyProductId, setTokenBusyProductId] = useState<string | null>(null);
+  const [overlayLowerThird, setOverlayLowerThird] = useState<{ playerName: string; teamName?: string; statLine?: string } | null>(null);
+  const [overlayTrashTalk, setOverlayTrashTalk] = useState<string | null>(null);
 
   // ── Real reactions (persisted + Realtime-broadcast) ──────────────────────
   const [reactions, setReactions] = useState({ fire: 0, heart: 0, clap: 0 });
@@ -873,6 +893,10 @@ const LivePage = () => {
       ppvPrice: 0,
     };
   }, [hasPrivilegedBroadcastAccess, isStreamLive, liveGame]);
+  const showPreflight = isViewerPreflightEnabled() && !!activeGameId && activeGameId !== 'broadcast' && !preflightReady;
+  const tokenEnabled = isFanTokenSystemEnabled();
+  const biometricsEnabled = isBiometricOverlayEnabled();
+  const micUpEnabled = isMicUpSeriesEnabled();
   const [clipSaved, setClipSaved] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -950,21 +974,6 @@ const LivePage = () => {
     };
   }, [canModerateLive, liveGame?.id, session?.access_token]);
 
-  // All hooks above this line. Early returns must come after all hooks.
-
-  // FIX #1: Show skeleton while auth is resolving to prevent flash of
-  // "No Active Broadcast" before we know the user's role or stream state.
-  // Priority: skeleton → onboarding redirect → full page.
-  if (authLoading || !initialPollDone) {
-    return <LivePageSkeleton />;
-  }
-
-  // Fan who registered but hasn't completed onboarding must finish it before
-  // reaching the PPV paywall.
-  if (!authLoading && needsOnboarding) {
-    return <Navigate to="/onboarding?redirect=/live" replace />;
-  }
-
   const handleShare = async () => {
     if (!liveGame) return;
     const shareData = {
@@ -1039,8 +1048,116 @@ const LivePage = () => {
       });
   };
 
+  const preflightQuery = useQuery({
+    queryKey: ['preflight-snapshot', activeGameId],
+    queryFn: () => fetchPreflightSnapshot(activeGameId as string),
+    enabled: showPreflight,
+    retry: 1,
+  });
+
+  const tokenWalletQuery = useQuery({
+    queryKey: ['fan-token-wallet'],
+    queryFn: fetchTokenWallet,
+    enabled: tokenEnabled && !!session,
+    retry: 1,
+  });
+  const tokenProductsQuery = useQuery({
+    queryKey: ['fan-token-products'],
+    queryFn: fetchTokenProducts,
+    enabled: tokenEnabled,
+    staleTime: 300_000,
+  });
+  const tokenCategoriesQuery = useQuery({
+    queryKey: ['fan-token-categories'],
+    queryFn: fetchTokenCategories,
+    enabled: tokenEnabled,
+    staleTime: 300_000,
+  });
+  const tokenLeaderboardQuery = useQuery({
+    queryKey: ['fan-token-leaderboard', activeGameId],
+    queryFn: () => fetchLeaderboardByGame(activeGameId as string),
+    enabled: tokenEnabled && !!activeGameId && activeGameId !== 'broadcast',
+    retry: 1,
+  });
+  const { entries: tokenEntries } = useTokenLeaderboardRealtime(activeGameId, tokenLeaderboardQuery.data ?? []);
+
+  const biometricsQuery = useQuery({
+    queryKey: ['biometric-latest', activeGameId],
+    queryFn: () => fetchLatestBiometrics(activeGameId as string),
+    enabled: biometricsEnabled && !!activeGameId && activeGameId !== 'broadcast',
+    retry: 1,
+  });
+  const { snapshots: biometricSnapshots } = useBiometricRealtime(activeGameId, biometricsQuery.data ?? []);
+  const awardablePlayers = useMemo<AwardablePlayer[]>(() => topPerformers.map((p) => ({
+    id: p.id,
+    displayName: p.name,
+    avatarUrl: p.avatar,
+    teamLabel: p.league_id.toUpperCase(),
+  })), [topPerformers]);
+
+  useEffect(() => {
+    if (!micUpEnabled || !activeGameId || activeGameId === 'broadcast') return;
+    const client = getSupabaseClient();
+    if (!client) return;
+    const channel = client
+      .channel(`overlay:${activeGameId}`)
+      .on('broadcast', { event: 'lower_third' }, (msg) => {
+        const payload = (msg.payload ?? {}) as Record<string, unknown>;
+        setOverlayLowerThird({
+          playerName: String(payload.playerName ?? payload.player_name ?? 'MIC UP'),
+          teamName: payload.teamName ? String(payload.teamName) : undefined,
+          statLine: payload.statLine ? String(payload.statLine) : undefined,
+        });
+      })
+      .on('broadcast', { event: 'trash_talk' }, (msg) => {
+        const payload = (msg.payload ?? {}) as Record<string, unknown>;
+        setOverlayTrashTalk(String(payload.label ?? 'TRASH TALK DETECTED'));
+      })
+      .subscribe();
+    return () => { void client.removeChannel(channel); };
+  }, [activeGameId, micUpEnabled]);
+
+  const submitTokenAward = async (args: { recipientPlayerId: string; amount: number; categorySlug: string; idempotencyKey: string; }) => {
+    if (!activeGameId || activeGameId === 'broadcast') throw new Error('No active game');
+    await awardTokens({ ...args, gameId: activeGameId });
+    await Promise.all([tokenWalletQuery.refetch(), tokenLeaderboardQuery.refetch()]);
+  };
+
+  // FIX #1: Show skeleton while auth is resolving to prevent flash of
+  // "No Active Broadcast" before we know the user's role or stream state.
+  // Priority: skeleton → onboarding redirect → full page.
+  if (authLoading || !initialPollDone) {
+    return <LivePageSkeleton />;
+  }
+
+  // Fan who registered but hasn't completed onboarding must finish it before
+  // reaching the PPV paywall.
+  if (!authLoading && needsOnboarding) {
+    return <Navigate to="/onboarding?redirect=/live" replace />;
+  }
+
   const sidebar = (
     <div className="space-y-4">
+      {tokenEnabled && (
+        <>
+          <div className="panel p-3 flex items-center justify-between">
+            <span className="text-xs text-muted-foreground uppercase tracking-wider">Fan Tokens</span>
+            <TokenWalletBadge
+              balance={tokenWalletQuery.data?.balance ?? 0}
+              loading={tokenWalletQuery.isLoading}
+              onClick={() => setTokenModalOpen(true)}
+            />
+          </div>
+          <TokenAwardPanel
+            players={awardablePlayers}
+            categories={tokenCategoriesQuery.data ?? []}
+            walletBalance={tokenWalletQuery.data?.balance ?? 0}
+            busy={tokenWalletQuery.isFetching}
+            onAward={submitTokenAward}
+          />
+          <TokenLeaderboard entries={tokenEntries} />
+        </>
+      )}
       {/* Featured Merch Carousel */}
       {featuredProducts.length > 0 && (
         <div className="panel overflow-hidden">
@@ -1155,7 +1272,23 @@ const LivePage = () => {
                   />
                 )}
 
-              {(liveGame || fallbackBroadcastGame) ? (
+              {showPreflight ? (
+                <div className="absolute inset-0 flex items-center justify-center bg-black/70 p-4">
+                  <ViewerPreflight
+                    title={streamTitle}
+                    snapshot={preflightQuery.data ?? null}
+                    snapshotError={(preflightQuery.error as Error | null) ?? null}
+                    onRemediate={(result) => {
+                      const action = result.remediation?.action;
+                      if (action === 'sign_in') window.location.assign('/login?redirect=/live');
+                      if (action === 'purchase_ppv' || action === 'buy_replay') window.location.assign('/billing?redirect=/live');
+                      if (action === 'displace_session' || action === 'retry') window.location.reload();
+                    }}
+                    onReady={() => setPreflightReady(true)}
+                    onRetry={() => void preflightQuery.refetch()}
+                  />
+                </div>
+              ) : (liveGame || fallbackBroadcastGame) ? (
                 <PlayerErrorBoundary key={streamNonce}>
                   <LiveStreamPlayer
                     game={(liveGame ?? fallbackBroadcastGame)!}
@@ -1177,6 +1310,34 @@ const LivePage = () => {
                       : 'Check back when a game is scheduled or a stream goes live.'}
                   </p>
                 </div>
+              )}
+              {micUpEnabled && activeGameId && activeGameId !== 'broadcast' && (
+                <MicUpIntroSting
+                  gameId={activeGameId}
+                  leftPlayerLabel={liveGame?.homeTeam.name ?? 'HOME'}
+                  rightPlayerLabel={liveGame?.awayTeam.name ?? 'AWAY'}
+                />
+              )}
+              {overlayLowerThird && (
+                <MicUpLowerThird
+                  playerName={overlayLowerThird.playerName}
+                  teamName={overlayLowerThird.teamName}
+                  statLine={overlayLowerThird.statLine}
+                  onDismiss={() => setOverlayLowerThird(null)}
+                />
+              )}
+              {overlayTrashTalk && (
+                <TrashTalkBanner
+                  label={overlayTrashTalk}
+                  onDismiss={() => setOverlayTrashTalk(null)}
+                />
+              )}
+              {biometricsEnabled && activeGameId && activeGameId !== 'broadcast' && awardablePlayers.length >= 2 && (
+                <BiometricDualOverlay
+                  snapshots={biometricSnapshots}
+                  leftPlayer={{ playerId: awardablePlayers[0].id, label: awardablePlayers[0].displayName }}
+                  rightPlayer={{ playerId: awardablePlayers[1].id, label: awardablePlayers[1].displayName }}
+                />
               )}
               {/* RC-1: LiveGate removed — LiveStreamPlayer is the single source of
                   truth for access gating (unregistered, privileged, PPV, invite, paywall).
@@ -1279,6 +1440,18 @@ const LivePage = () => {
 
       {/* CASL nudge — one-time per session, bottom-right, easy dismiss */}
       <CASLNudge roles={roles} />
+      <TokenPurchaseModal
+        open={tokenModalOpen}
+        products={tokenProductsQuery.data ?? []}
+        busyProductId={tokenBusyProductId}
+        onClose={() => setTokenModalOpen(false)}
+        onPurchase={(productId) => {
+          setTokenBusyProductId(productId);
+          void startTokenPurchase(productId)
+            .then((res) => { window.location.assign(res.checkoutUrl); })
+            .finally(() => setTokenBusyProductId(null));
+        }}
+      />
     </div>
   );
 };

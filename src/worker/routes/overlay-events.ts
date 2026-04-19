@@ -103,3 +103,17 @@ export async function handleMicUpOverlayEvent(ctx: HandlerCtx): Promise<Response
 
   return json({ ok: true, event: ins.data }, 201);
 }
+
+export async function handleLatestMicUpOverlayEvents(ctx: HandlerCtx): Promise<Response> {
+  if (!flagOn(ctx.env)) return json({ ok: false, error: 'mic_up_disabled' }, 403);
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: 'game_id_required' }, 400);
+  const res = await ctx.admin
+    .from('overlay_event_log')
+    .select('id, game_id, event_type, payload, triggered_at')
+    .eq('game_id', gameId)
+    .order('triggered_at', { ascending: false })
+    .limit(20);
+  if (res.error) return json({ ok: false, error: res.error.message }, 500);
+  return json({ ok: true, data: res.data ?? [] }, 200);
+}

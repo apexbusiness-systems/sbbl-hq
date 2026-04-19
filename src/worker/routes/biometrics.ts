@@ -152,6 +152,44 @@ export async function handleBiometricIngest(ctx: HandlerCtx): Promise<Response> 
   return json({ ok: true, snapshot: ins.data }, 201);
 }
 
+/**
+ * Wearable webhook ingress. HMAC is intentionally simple shared-secret
+ * header so league devices can post without an app session.
+ */
+export async function handleBiometricWebhookIngest(ctx: HandlerCtx): Promise<Response> {
+  if (!flagOn(ctx.env)) return json({ ok: false, error: 'biometric_disabled' }, 403);
+  const secret = ctx.env.BIOMETRIC_WEBHOOK_SECRET;
+  const provided = ctx.req.headers.get('x-sbbl-biometric-secret');
+  if (!secret || !provided || provided !== secret) {
+    return json({ ok: false, error: 'unauthorized' }, 401);
+  }
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: 'game_id_required' }, 400);
+  const body = (await ctx.req.json().catch(() => null)) as {
+    playerId?: string;
+    heartRateBpm?: number | null;
+    staminaPct?: number | null;
+    fatigueLevel?: string | null;
+    recordedAt?: string;
+  } | null;
+  if (!body?.playerId) return json({ ok: false, error: 'player_id_required' }, 400);
+  const ins = await ctx.admin
+    .from('player_biometric_snapshots')
+    .insert({
+      game_id: gameId,
+      player_id: body.playerId,
+      heart_rate_bpm: body.heartRateBpm ?? null,
+      stamina_pct: body.staminaPct ?? null,
+      fatigue_level: body.fatigueLevel ?? null,
+      source: 'webhook',
+      recorded_at: body.recordedAt ?? new Date().toISOString(),
+    })
+    .select('id, game_id, player_id, heart_rate_bpm, stamina_pct, fatigue_level, source, recorded_at')
+    .single();
+  if (ins.error) return json({ ok: false, error: ins.error.message }, 500);
+  return json({ ok: true, snapshot: ins.data }, 201);
+}
+
 // ── Latest ───────────────────────────────────────────────────────────────────
 
 export async function handleBiometricLatest(ctx: HandlerCtx): Promise<Response> {
