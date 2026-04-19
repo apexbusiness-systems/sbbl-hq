@@ -59,6 +59,10 @@ import {
   handleTokenWebhook,
 } from "./routes/tokens";
 import {
+  handleBiometricIngest,
+  handleBiometricLatest,
+} from "./routes/biometrics";
+import {
   handlePublicSponsors,
   handleTrackSponsorEvent,
   handleAdminListSponsors,
@@ -5902,6 +5906,12 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/api/tokens/purchase",                  handler: handleTokenPurchase },
   { method: "POST", path: "/api/tokens/award",                     handler: handleTokenAward },
   { method: "POST", path: "/api/tokens/webhook",                   handler: handleTokenWebhook },
+  // ── WS5 Biometric Overlay ─────────────────────────────────────────────
+  // Both routes 403 biometric_disabled unless FEATURE_BIOMETRIC_OVERLAY is
+  // 'true'. Write path additionally requires league_admin / super_admin
+  // and games.event_type in ('1v1','2v2').
+  { method: "POST", path: "/api/streams/:gameId/biometrics",        handler: handleBiometricIngest },
+  { method: "GET",  path: "/api/streams/:gameId/biometrics/latest", handler: handleBiometricLatest },
   {
     method: "GET",
     path: "/api/streams/:gameId/comments",
