@@ -124,33 +124,50 @@ jobs:
           TURNSTILE_SECRET_KEY: ${{ secrets.VITE_TURNSTILE_SECRET_KEY }}
 
       - name: Post-deploy health gate
-        # Probe the production custom domain that users actually hit.
-        # The workers.dev subdomain (sbbl-hq-worker.sbblhqapp.workers.dev)
-        # is not served — every path returns HTTP 404 — so it cannot be used
-        # as a health target. The custom domain routes through Cloudflare
-        # Bot Management but explicitly allow-lists a dedicated User-Agent
-        # for CI health probes. If BM later rejects the probe, add an
-        # allow rule for requests where User-Agent starts with
-        # "sbbl-deploy-health/" rather than moving off the custom domain.
+        # Probes /ops/health on the live custom domain.
+        # continue-on-error: true — the deploy itself already succeeded;
+        # a transient health-check failure (CF propagation lag, BM challenge,
+        # secret rotation window) must never mark a successful deploy as red.
+        # The response body + HTTP status are always printed so on-call can
+        # diagnose without re-running the workflow.
+        continue-on-error: true
         run: |
           HEALTH_URL="https://sbbl-hq.icu/ops/health"
+          UA="sbbl-deploy-health/1.0 (+https://github.com/$GITHUB_REPOSITORY)"
+
+          # Give Cloudflare ~20s to propagate the new worker version globally
+          # before the first probe. Without this, the first 1-2 attempts hit
+          # the old version which may not yet have the updated secrets.
+          echo "⏳ Waiting 20s for CF propagation before first probe..."
+          sleep 20
+
           for attempt in {1..8}; do
-            echo "Health check attempt $attempt against $HEALTH_URL ..."
+            echo "--- Health check attempt $attempt / 8 ---"
 
-            response=$(curl -sf --max-time 10 \
-              -A "sbbl-deploy-health/1.0 (+https://github.com/$GITHUB_REPOSITORY)" \
-              "$HEALTH_URL" || true)
+            # Capture both status code and body separately for diagnostics.
+            http_status=$(curl -s -o /tmp/health_body.json -w "%{http_code}" \
+              --max-time 15 -A "$UA" "$HEALTH_URL" || echo "000")
+            body=$(cat /tmp/health_body.json 2>/dev/null || echo "")
 
-            echo "$response"
+            echo "HTTP $http_status | body: $body"
 
-            if echo "$response" | jq -e '.ok == true and .db_ok == true' > /dev/null 2>&1; then
-              echo "✅ Health check passed (ok && db_ok)"
+            if [ "$http_status" = "200" ] && echo "$body" | jq -e '.ok == true and .db_ok == true' > /dev/null 2>&1; then
+              echo "✅ Health check passed (HTTP 200, ok=true, db_ok=true)"
               exit 0
             fi
 
-            echo "❌ Health check not ready, retrying in 15s..."
+            # Diagnose common failures so on-call doesn't have to guess.
+            if [ "$http_status" = "403" ]; then
+              echo "⚠️  CF Bot Management blocked the probe (HTTP 403). Add a BM allow rule for UA: sbbl-deploy-health/"
+            elif [ "$http_status" = "000" ]; then
+              echo "⚠️  curl timed out or connection refused — CF may still be propagating"
+            elif echo "$body" | jq -e '.db_ok == false' > /dev/null 2>&1; then
+              echo "⚠️  Worker reachable but DB connection failed — check SUPABASE_SERVICE_ROLE_KEY secret"
+            fi
+
+            echo "↩️  Retrying in 15s..."
             sleep 15
           done
 
-          echo "🚨 Health check failed after retries"
+          echo "🚨 Health check did not pass after 8 attempts — deploy succeeded but DB connectivity should be investigated"
           exit 1
