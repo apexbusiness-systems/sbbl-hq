@@ -1,4 +1,4 @@
-﻿import { expect, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 const GAME_ID = 'e2e-preflight-game';
 
@@ -30,6 +30,14 @@ test.beforeEach(async ({ page }) => {
           },
         ],
       }),
+    });
+  });
+
+  await page.route('**/api/public/stream/status*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, isLive: false, title: 'Test Stream', viewerCount: 0 }),
     });
   });
 });
