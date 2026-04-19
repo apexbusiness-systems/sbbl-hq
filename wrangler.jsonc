@@ -21,6 +21,7 @@
   //   OMNIHUB_SYNC_URL            — OmniHub sync endpoint URL (optional)
   "assets": {
     "directory": "dist",
+    "binding": "ASSETS",
     "not_found_handling": "single-page-application",
     // MUST be `true` (not a path allowlist). The Worker's addSecurityHeaders()
     // wraps every response — including the SPA HTML shell fetched from the
