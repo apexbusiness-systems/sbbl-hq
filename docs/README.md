@@ -58,7 +58,7 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
-| [OPERATIONS RUNBOOK](./operations/OPERATIONS_RUNBOOK_v1.4.0.md) | v1.4.0 | Env setup, deployments, DB ops, CI/CD, emergency procedures, livestream ops |
+| [OPERATIONS RUNBOOK](./operations/OPERATIONS_RUNBOOK_v1.6.0.md) | v1.6.0 | Env setup, deployments, DB ops, CI/CD, emergency procedures, livestream ops, browser-native WHIP broadcast |
 | [SUPABASE MONITORING RUNBOOK](./operations/SUPABASE_MONITORING_RUNBOOK_v1.0.0.md) | v1.0.0 | Supabase cost/health metrics, escalation, emergency cost controls |
 | [EXTERNAL BINDINGS](./operations/EXTERNAL_BINDINGS_v1.0.0.md) | v1.0.0 | Third-party secrets and service configuration checklist |
 
@@ -80,7 +80,7 @@ docs/
 |---|---|---|
 | [STATS PIPELINE](./features/STATS_PIPELINE_v1.2.0.md) | v1.2.0 | 4-stage stat submission + materialized standings + react-window virtualization |
 | [BROADCAST OVERLAY & ENGAGEMENT](./features/BROADCAST_OVERLAY_ENGAGEMENT_v1.0.0.md) | v1.0.0 | Chromeless OBS overlay, polls/predictions/trivia, watch parties, sponsor rotation, AI weekly digest, OBS remote control |
-| [STREAM GATING](./features/STREAM_GATING_v1.5.0.md) | v1.5.0 | PPV entitlement, comp codes, Facebook embed lockdown, server-derived game IDs |
+| [STREAM GATING](./features/STREAM_GATING_v1.7.0.md) | v1.7.0 | PPV entitlement, comp codes, universal URL detection, WHIP browser ingest, origin-aware CORS |
 | [PIPELINE MAP](./features/PIPELINE_MAP_v1.3.0.md) | v1.3.0 | Super-Admin Ops Console data upload pipeline flowchart |
 
 ---

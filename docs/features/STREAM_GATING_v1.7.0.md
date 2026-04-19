@@ -1,9 +1,9 @@
-<!-- Version: v1.6.0 | Date: 2026-04-18 | Status: Current -->
+<!-- Version: v1.7.0 | Date: 2026-04-19 | Status: Current -->
 # Stream Gating
 
-**Version:** v1.6.0
-**Previous:** v1.5.0 (2026-04-11)
-**Last Updated:** 2026-04-18
+**Version:** v1.7.0
+**Previous:** v1.6.0 (2026-04-18)
+**Last Updated:** 2026-04-19
 
 ## Entitlement Windows (canonical)
 
@@ -25,6 +25,28 @@ that references a different number is a bug.
 Semantic rule: **entitlement validity > session cap**. A buyer can wait up
 to 48 hours to start the stream (tolerating game delays, chargeback-safe).
 Once they start, the session is independently capped at 6 hours.
+
+## Changelog (v1.7.0)
+
+- **Universal stream player landed** on `/live`. Any URL the detector
+  recognizes (Twitch, YouTube, Vimeo, Facebook, Kick, Rumble, Dailymotion,
+  HLS including presigned, DASH, WHEP, MP4/m4v/mov/webm/ogg/ogv, and new
+  `local` sources) plays with the minimum friction legally possible —
+  paste, Go Live, done.
+- **`crossOrigin` is now origin-aware**. External CDNs no longer need to
+  emit `Access-Control-Allow-Credentials: true`; they just need
+  `Access-Control-Allow-Origin: *` (the default). `sbbl_proxy_auth`
+  still attaches for our own `*.sbbl-hq.icu` surface.
+- **Twitch embed `parent` allow-list widened** to cover `sbbl-hq.icu`,
+  `www.sbbl-hq.icu`, and `localhost` in addition to the current host.
+- **Browser WHIP ingest** — new `useWhipIngest` hook plus Caddyfile
+  `/whip/*` route, enabling admins to publish a local highlight clip or
+  their webcam directly from the browser without a separate OBS.
+  MediaMTX fans the feed out over the existing WHEP egress, so every
+  fan already gated by this doc (PPV, invite, role) sees it unchanged.
+- **Blob URL hygiene**: `AdminStreamOverlay` revokes object URLs on
+  reselect and unmount so repeated admin workflows cannot pin large
+  video buffers in memory.
 
 ## Changelog (v1.6.0)
 

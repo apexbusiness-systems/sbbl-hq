@@ -137,7 +137,7 @@ export async function handlePublicOverlay({ req, admin, params }: HandlerCtx) {
     .eq("active", true)
     .or(`starts_at.is.null,starts_at.lte.${now}`)
     .or(`ends_at.is.null,ends_at.gte.${now}`);
-  const { data: sponsorRows } = leagueId
+  const { data: sponsorRows } = leagueId && isUuid(leagueId)
     ? await sponsorQuery.or(`league_id.eq.${leagueId},league_id.is.null`)
     : await sponsorQuery;
 

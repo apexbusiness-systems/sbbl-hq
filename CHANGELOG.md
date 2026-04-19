@@ -1,10 +1,63 @@
-<!-- Version: v1.2.0 | Date: 2026-04-17 | Status: Current -->
+<!-- Version: v1.3.0 | Date: 2026-04-19 | Status: Current -->
 # CHANGELOG
 
 All notable changes to SBBL HQ are documented in this file.
 Versioning follows [semantic versioning](https://semver.org) with UTC date stamps.
 
 ---
+
+## 2026-04-19 — v1.3.0 — Universal Stream Player, WHIP Ingest, Zero-Friction Broadcast
+
+Closes the "paste any link → plays instantly; drop any local highlight → broadcast
+it seamlessly" mandate and turns the admin console into a production-grade
+broadcast cockpit.
+
+- **Universal URL detector.** `src/lib/stream/url-detector.ts` now covers
+  Twitch, YouTube, Vimeo, Facebook, Kick, Rumble, Dailymotion, X Spaces,
+  Instagram Live, HLS (presigned/query-suffixed), DASH, WHEP, RTMP,
+  direct MP4/m4v/mov/webm/ogg/ogv (including presigned S3/R2 variants),
+  plus new `local` class for `blob:` / `data:video` / `file:` sources.
+- **Origin-aware `crossOrigin` on the player.** `LiveStreamPlayer.tsx`
+  sends credentialed CORS only to our own `*.sbbl-hq.icu` proxy endpoints
+  (so the `sbbl_proxy_auth` cookie reaches hls.js) and anonymous CORS to
+  every public CDN. `blob:`/`data:`/`file:` sources omit the attribute
+  entirely. Fixes the silent CORS rejection that blocked league-highlight
+  MP4s behind public buckets.
+- **Twitch parent allow-list widened** to the union of the document host,
+  `sbbl-hq.icu`, `www.sbbl-hq.icu`, and `localhost`. Prevents Twitch
+  from refusing preview domains or the `www.` variant.
+- **Browser-native WHIP ingest.** New `useWhipIngest` hook
+  (`src/hooks/use-whip-ingest.ts`) publishes any `MediaStream` to a
+  WHIP endpoint with sendonly transceivers, SDP offer/answer handshake,
+  Location-header-driven cleanup, optional bearer token, and
+  deterministic ICE gather (MediaMTX doesn't trickle). Covered by 6
+  vitest cases with a fake `RTCPeerConnection`.
+- **AdminStreamOverlay broadcast controls.** `/live` gear menu now has
+  `Load Local File`, `Broadcast File` (via `HTMLVideoElement.captureStream()`),
+  `Broadcast Camera` (via `navigator.mediaDevices.getUserMedia`), and
+  `Stop Broadcast` with a live WHIP status chip. Blob URLs are revoked
+  on reselect and on unmount to keep memory flat across admin sessions.
+- **Caddyfile `/whip/*` proxy.** `ops/Caddyfile` mirrors the existing
+  WHEP listener on MediaMTX port 8889 (WebRTC mux — ingest and egress
+  share the same port). Adds OPTIONS preflight + policy headers.
+- **Duplicate `containerReady` declaration removed** (TS2451 blocker on
+  `LiveStreamPlayer.tsx`). Also collapses the duplicate tap-to-unmute
+  overlay that rendered twice.
+- **Playwright expect timeout raised** to 15 s in `playwright.config.ts`
+  so Vite dev cold-compile on CI stops producing flaky `toBeVisible`
+  failures on `/live`. Matches the convention already in
+  `critical-paths.spec.ts` and `broadcast-overlay-flow.spec.ts`.
+- **Eslint `.claude` ignore.** Subagent worktrees' `dev-dist/workbox-*.js`
+  outputs no longer pollute lint reports.
+
+Validation gates on 2026-04-19: typecheck clean · lint 0/0 · vitest
+857 passed / 7 skipped / 0 failed · production build 61 s. PR #398 CI:
+Unit & Integration Tests, Lint & Typecheck, e2e, Auth + Ingest + Render
+Harmony, Full Build Chaos Battery, Build & Bundle Check, Supabase
+Preview, and Workers Builds: sbbl-hq-worker — all green.
+
+Full capability matrix + root-cause fix log in
+[`ops/validation/STREAM_PLAYER_UNIVERSAL_E2E_2026-04-19.md`](ops/validation/STREAM_PLAYER_UNIVERSAL_E2E_2026-04-19.md).
 
 ## 2026-04-17 — v1.2.0 — Broadcast overlay, engagement, sponsors, AI digest, OBS control
 

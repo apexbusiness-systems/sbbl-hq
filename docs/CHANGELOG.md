@@ -1,5 +1,42 @@
 # CHANGELOG
 
+## 2026-04-19 — v1.3.0 — Universal Stream Player, WHIP Ingest, Zero-Friction Broadcast
+
+- **Universal URL detection**: `src/lib/stream/url-detector.ts` recognizes
+  Twitch, YouTube, Vimeo, Facebook, Kick, Rumble, Dailymotion, X Spaces,
+  Instagram Live, HLS (presigned), DASH, WHEP, RTMP, direct
+  MP4/m4v/mov/webm/ogg/ogv (including presigned S3/R2 signed URLs), and the
+  new `local` class for `blob:` / `data:video` / `file:` sources.
+- **Origin-aware CORS on the player**: credentialed requests only to
+  `*.sbbl-hq.icu`; anonymous CORS to every public CDN; omitted entirely for
+  `blob:`/`data:`/`file:`. Fixes league-highlight MP4 playback behind public
+  buckets that return `Access-Control-Allow-Origin: *`.
+- **Twitch parent allow-list** now unions `[currentHost, sbbl-hq.icu,
+  www.sbbl-hq.icu, localhost]` so preview/www variants stop being rejected.
+- **Browser-native WHIP ingest** via new `useWhipIngest` hook
+  (`src/hooks/use-whip-ingest.ts`): sendonly transceivers, SDP handshake,
+  Location-header cleanup, optional bearer token, deterministic 3 s ICE
+  gather ceiling (MediaMTX does not trickle).
+- **AdminStreamOverlay broadcast cockpit** on `/live`: Load Local File,
+  Broadcast File (via `HTMLVideoElement.captureStream()`), Broadcast
+  Camera (via `navigator.mediaDevices.getUserMedia`), and Stop Broadcast,
+  each with a live WHIP status chip. Blob URLs revoke on reselect + unmount.
+- **Caddyfile `/whip/*` proxy** on `stream.sbbl-hq.icu` → MediaMTX 8889
+  (same listener as WHEP; WebRTC mux). Full CORS policy + preflight.
+- **TS2451 blocker fix**: duplicate `containerReady` declaration removed
+  in `LiveStreamPlayer.tsx`; duplicate tap-to-unmute overlay collapsed.
+- **Playwright harness**: `expect.timeout` raised to 15 s to eliminate Vite
+  dev cold-compile flake on `/live` first paint.
+- **Eslint `.claude` ignore** so subagent worktree artifacts never pollute
+  lint reports.
+- Full capability matrix + root-cause log:
+  [`ops/validation/STREAM_PLAYER_UNIVERSAL_E2E_2026-04-19.md`](../ops/validation/STREAM_PLAYER_UNIVERSAL_E2E_2026-04-19.md).
+- New docs: `docs/features/STREAM_GATING_v1.7.0.md`,
+  `docs/operations/OPERATIONS_RUNBOOK_v1.6.0.md`.
+
+Gates on 2026-04-19: typecheck clean · lint 0/0 · vitest 857 passed / 7
+skipped / 0 failed · production build 61 s · PR #398 CI all-green.
+
 ## 2026-04-17 — v1.2.0 — Broadcast overlay, engagement, sponsors, AI digest, OBS control
 
 - **Overlay (OBS browser source)**: new chromeless `/overlay/:gameId` page.
