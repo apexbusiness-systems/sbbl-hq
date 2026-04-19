@@ -62,6 +62,7 @@ import {
   handleBiometricIngest,
   handleBiometricLatest,
 } from "./routes/biometrics";
+import { handleMicUpOverlayEvent } from "./routes/overlay-events";
 import {
   handlePublicSponsors,
   handleTrackSponsorEvent,
@@ -5912,6 +5913,10 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   // and games.event_type in ('1v1','2v2').
   { method: "POST", path: "/api/streams/:gameId/biometrics",        handler: handleBiometricIngest },
   { method: "GET",  path: "/api/streams/:gameId/biometrics/latest", handler: handleBiometricLatest },
+  // ── WS6 Mic Up Series overlay events ──────────────────────────────────
+  // Admin-triggered overlay events (trash_talk / lower_third / intro_sting).
+  // Gated on FEATURE_MIC_UP_SERIES + games.mic_up_series=true.
+  { method: "POST", path: "/api/streams/:gameId/overlay/event",     handler: handleMicUpOverlayEvent },
   {
     method: "GET",
     path: "/api/streams/:gameId/comments",
