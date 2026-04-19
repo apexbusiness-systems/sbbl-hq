@@ -19,28 +19,6 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" />
 
-    <!-- LCP preload for the AppHome hero. One variant fires per viewport
-         thanks to the media attribute; the browser picks AVIF when
-         supported (imagesrcset + type) and falls back to the PNG <img>. -->
-    <link
-      rel="preload"
-      as="image"
-      href="/assets/hero-desktop.avif"
-      imagesrcset="/assets/hero-desktop.avif"
-      type="image/avif"
-      media="(min-width: 768px)"
-      fetchpriority="high"
-    />
-    <link
-      rel="preload"
-      as="image"
-      href="/assets/hero-mobile.avif"
-      imagesrcset="/assets/hero-mobile.avif"
-      type="image/avif"
-      media="(max-width: 767px)"
-      fetchpriority="high"
-    />
-
     <meta property="og:type" content="website" />
     <meta property="og:title" content="SBBL HQ" />
     <meta property="og:description" content="The unified premium platform for SBBL, WBL, and TGIFBL basketball leagues. Live games, schedules, stats, store, and more." />
