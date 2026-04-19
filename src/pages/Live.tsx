@@ -1293,8 +1293,9 @@ const LivePage = () => {
                <PlayerErrorBoundary key={streamNonce}>
   {(() => {
     const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.streamUrl || "";
-    const playableUrl = toPlayableUrl(rawUrl);
-    const streamType = detectStreamUrlType(playableUrl);
+const playable = toPlayableUrl(rawUrl);
+const playableUrl = playable.url || rawUrl;   // ← the fix
+const streamType = detectStreamUrlType(playableUrl);
 
     if (streamType === "twitch" || streamType === "youtube") {
       return (
