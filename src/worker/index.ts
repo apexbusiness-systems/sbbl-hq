@@ -1542,7 +1542,7 @@ async function handleIngress(ctx: HandlerCtx) {
   }
 }
 
-async function handleSyncDrain(ctx: HandlerCtx) {
+export async function handleSyncDrain(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   requireAuth(ctx.req);
   const limit = Math.max(
@@ -1570,9 +1570,12 @@ async function handleSyncDrain(ctx: HandlerCtx) {
         emitted_at: new Date().toISOString(),
       };
 
+      if (!ctx.env.OMNIHUB_SIGNING_SECRET) {
+        throw new Error("OMNIHUB_SIGNING_SECRET_missing");
+      }
       const signed = await signSyncPacket(
         packet,
-        ctx.env.OMNIHUB_SIGNING_SECRET ?? "dev-signing-secret",
+        ctx.env.OMNIHUB_SIGNING_SECRET,
       );
       const url = ctx.env.OMNIHUB_SYNC_URL;
 
