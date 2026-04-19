@@ -1,4 +1,4 @@
-interface Env {
+export interface Env {
   SENTRY_DSN?: string;
   SUPABASE_URL: string;
   SUPABASE_PUBLISHABLE_KEY?: string;
