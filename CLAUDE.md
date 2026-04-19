@@ -176,8 +176,9 @@ CI runs all of these. Do not merge red.
   Stats/Live silently showed mock data because
   `/api/stats` + `/api/leaderboards` required auth but the public pages
   called them anonymously, and every page had a `|| mockX` fallback.
-  Fix: added `/api/public/stats` + `/api/public/leaderboards`; purged
-  all mock fallbacks from production pages; installed ESLint + vitest
-  guardrails (this guide). See
+  Fix: made `/api/stats` tier-aware (anonymous callers get limited data,
+  no 401); added explicit login-gate UI in Leaderboards for unauthenticated
+  visitors; purged all mock fallbacks from production pages; installed ESLint
+  + vitest guardrails (this guide). See
   [`docs/protocols/no-mock-in-production.md`](docs/protocols/no-mock-in-production.md)
   for details.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseStripeSignature } from '@/worker/index';
+import { parseStripeSignature } from '@/worker/stripe-utils';
 
 describe('parseStripeSignature', () => {
   it('parses a valid header with timestamp and one signature', () => {
@@ -65,6 +65,24 @@ describe('parseStripeSignature', () => {
     expect(result).toEqual({
       timestamp: 123,
       signatures: ['sig2'],
+    });
+  });
+
+  it('should handle invalid parts in the header', () => {
+    const header = 'foo=bar,t=123,v1=sig1,baz';
+    const result = parseStripeSignature(header);
+    expect(result).toEqual({
+      timestamp: 123,
+      signatures: ['sig1'],
+    });
+  });
+
+  it('should handle empty signature values', () => {
+    const header = 't=123,v1=';
+    const result = parseStripeSignature(header);
+    expect(result).toEqual({
+      timestamp: 123,
+      signatures: [],
     });
   });
 });

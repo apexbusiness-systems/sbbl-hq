@@ -64,10 +64,30 @@ describe('detectStreamUrlType — platform detection', () => {
     expect(detectStreamUrlType('https://cdn.example.com/stream.mpd')).toBe('dash');
   });
 
-  it('detects direct video files', () => {
+  it('detects direct video files — mp4/m4v/mov/webm/ogg/ogv', () => {
     expect(detectStreamUrlType('https://cdn.example.com/clip.mp4')).toBe('mp4');
+    expect(detectStreamUrlType('https://cdn.example.com/clip.m4v')).toBe('mp4');
+    expect(detectStreamUrlType('https://cdn.example.com/clip.mov')).toBe('mp4');
     expect(detectStreamUrlType('https://cdn.example.com/clip.webm')).toBe('mp4');
     expect(detectStreamUrlType('https://cdn.example.com/clip.ogg')).toBe('mp4');
+    expect(detectStreamUrlType('https://cdn.example.com/clip.ogv')).toBe('mp4');
+  });
+
+  it('tolerates signed/query suffixes on MP4 and m3u8 URLs (presigned S3, CDN tokens)', () => {
+    expect(detectStreamUrlType('https://s3.amazonaws.com/bucket/highlight.mp4?X-Amz-Signature=abc&X-Amz-Expires=900')).toBe('mp4');
+    expect(detectStreamUrlType('https://cdn.example.com/live/playlist.m3u8?token=abc&sig=xyz')).toBe('hls');
+    expect(detectStreamUrlType('https://r2.cloudflare.com/bucket/clip.mov?X-Amz-Date=20260419T000000Z')).toBe('mp4');
+  });
+
+  it('detects blob:/data: video/file: as local', () => {
+    expect(detectStreamUrlType('blob:https://sbbl-hq.icu/1234-5678')).toBe('local');
+    expect(detectStreamUrlType('data:video/mp4;base64,AAAA')).toBe('local');
+    expect(detectStreamUrlType('file:///Users/me/highlight.mp4')).toBe('local');
+  });
+
+  it('detects Dailymotion watch URLs', () => {
+    expect(detectStreamUrlType('https://www.dailymotion.com/video/x8abc12')).toBe('dailymotion');
+    expect(detectStreamUrlType('https://dai.ly/x8abc12')).toBe('dailymotion');
   });
 
   it('detects RTMP/RTMPS URLs', () => {
@@ -163,6 +183,28 @@ describe('toPlayableUrl', () => {
     const r = toPlayableUrl('');
     expect(r.type).toBe('unknown');
     expect(r.url).toBe('');
+  });
+
+  it('carries a local-file advisory warning and passes blob: URLs through unchanged', () => {
+    const r = toPlayableUrl('blob:https://sbbl-hq.icu/abc-123');
+    expect(r.type).toBe('local');
+    expect(r.url).toBe('blob:https://sbbl-hq.icu/abc-123');
+    expect(r.warning).toMatch(/local file|plays in this browser/i);
+  });
+});
+
+describe('getStreamDeliveryClass — local + extended extensions', () => {
+  it.each([
+    'blob:https://sbbl-hq.icu/1234',
+    'data:video/webm;base64,AAAA',
+    'file:///Users/me/clip.mp4',
+  ])('classifies local source %s as proxy (plays via <video>)', (url) => {
+    expect(getStreamDeliveryClass(url)).toBe('proxy');
+  });
+
+  it('still classifies m3u8/mp4 with presigned query strings as proxy', () => {
+    expect(getStreamDeliveryClass('https://cdn.example.com/playlist.m3u8?token=abc')).toBe('proxy');
+    expect(getStreamDeliveryClass('https://s3.amazonaws.com/clip.mov?X-Amz-Signature=abc')).toBe('proxy');
   });
 });
 

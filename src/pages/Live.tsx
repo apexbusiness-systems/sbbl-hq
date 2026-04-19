@@ -27,16 +27,27 @@ import {
   updateStreamConfig,
 } from '@/lib/api/stream';
 import { detectStreamUrlType, getStreamTypeAdvisory, STREAM_TYPE_LABELS, toPlayableUrl } from '@/lib/stream/url-detector';
+import { useWhipIngest } from '@/hooks/use-whip-ingest';
 import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
   Radio, Eye, DollarSign, Settings, X, Ticket, Copy,
+  Upload, Wifi,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Game, PlayerProfile, Product } from '@/types';
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 const LEAGUE_IDS = ['sbbl', 'wbl', 'tgifbl'];
+
+interface LeaderboardLeader {
+  id: string;
+  name: string;
+  avatar: string | null;
+  position: string;
+  pts: number;
+  league_id: string;
+}
 
 function mapHomeGameToUi(row: Record<string, unknown>): Game {
   const homeTeam = (row.home_team as Record<string, unknown> | null) ?? {};
@@ -94,6 +105,118 @@ function AdminStreamOverlay({
   const [compCopied, setCompCopied] = useState(false);
   const [streamUrlError, setStreamUrlError] = useState<string | null>(null);
   const [urlTypeAdvisory, setUrlTypeAdvisory] = useState<string | null>(null);
+  // Local file preview state. Creating a blob: URL lets the admin instantly
+  // review any highlight clip before Go Live. The preview URL is what drops
+  // into the Stream URL input; on save, the admin either points viewers at
+  // the same CDN-hosted file OR starts WHIP ingest to fan the preview out
+  // as a live broadcast.
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+  const previewBlobRef = useRef<string | null>(null);
+  const [localFileName, setLocalFileName] = useState<string | null>(null);
+  // WHIP broadcast: capture the previewed local file (or webcam) and push
+  // to MediaMTX which re-emits as WHEP. Admin clicks Broadcast to start;
+  // the hook tears down peer connection + releases the resource on stop.
+  const [broadcastStream, setBroadcastStream] = useState<MediaStream | null>(null);
+  const [broadcastSource, setBroadcastSource] = useState<'file' | 'camera' | null>(null);
+  const whipEndpoint = broadcastStream
+    ? `https://stream.sbbl-hq.icu/whip/${activeGameId ?? 'broadcast'}`
+    : null;
+  const whip = useWhipIngest({ whipUrl: whipEndpoint, stream: broadcastStream });
+
+  const handleLoadLocalFile = () => fileInputRef.current?.click();
+
+  const handleLocalFileChange = (evt: React.ChangeEvent<HTMLInputElement>) => {
+    const file = evt.target.files?.[0];
+    if (!file) return;
+    // Revoke the previous blob URL to prevent memory pressure on repeated
+    // selections — browsers keep the backing file pinned until revoke.
+    if (previewBlobRef.current) {
+      URL.revokeObjectURL(previewBlobRef.current);
+      previewBlobRef.current = null;
+    }
+    const blobUrl = URL.createObjectURL(file);
+    previewBlobRef.current = blobUrl;
+    setLocalFileName(file.name);
+    setCustomStreamUrl(blobUrl);
+    setUrlTypeAdvisory(getStreamTypeAdvisory(detectStreamUrlType(blobUrl)).message || null);
+    if (streamUrlError) setStreamUrlError(null);
+    // Reset the input so selecting the same file again still fires change.
+    evt.target.value = '';
+  };
+
+  const handleStopBroadcast = useCallback(async () => {
+    await whip.stop();
+    if (broadcastStream) {
+      broadcastStream.getTracks().forEach((t) => t.stop());
+    }
+    setBroadcastStream(null);
+    setBroadcastSource(null);
+  }, [broadcastStream, whip]);
+
+  const handleStartFileBroadcast = async () => {
+    if (broadcastStream) {
+      await handleStopBroadcast();
+      return;
+    }
+    const video = previewVideoRef.current;
+    if (!video) {
+      toast.error('Load a local file first, then press Broadcast.');
+      return;
+    }
+    try {
+      // captureStream() returns a MediaStream piped from the playing video.
+      // This is the one call that turns a local file into a broadcastable
+      // live stream — MediaMTX re-emits the WebRTC frames as WHEP so every
+      // viewer sees the same timeline as the admin.
+      const candidate = video as HTMLVideoElement & {
+        captureStream?: () => MediaStream;
+        mozCaptureStream?: () => MediaStream;
+      };
+      const capture = candidate.captureStream ?? candidate.mozCaptureStream;
+      if (!capture) throw new Error('captureStream_unsupported');
+      const ms = capture.call(video);
+      if (!ms || ms.getTracks().length === 0) throw new Error('no_tracks');
+      try {
+        await video.play();
+      } catch {
+        /* autoplay restrictions — muted playback should still capture */
+      }
+      setBroadcastStream(ms);
+      setBroadcastSource('file');
+      toast.success('WHIP ingest starting — viewers will see this clip live.');
+    } catch (err) {
+      toast.error(`Cannot start broadcast: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const handleStartCameraBroadcast = async () => {
+    if (broadcastStream) {
+      await handleStopBroadcast();
+      return;
+    }
+    try {
+      const ms = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: true,
+      });
+      setBroadcastStream(ms);
+      setBroadcastSource('camera');
+      toast.success('WHIP ingest starting — you are live from this camera.');
+    } catch (err) {
+      toast.error(`Camera access denied: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // Revoke any pending blob URL on unmount.
+  useEffect(() => () => {
+    if (previewBlobRef.current) URL.revokeObjectURL(previewBlobRef.current);
+  }, []);
+
+  // Auto-stop broadcast when the component closes / unmounts.
+  useEffect(() => () => {
+    if (broadcastStream) broadcastStream.getTracks().forEach((t) => t.stop());
+  }, [broadcastStream]);
 
   const handleGenerateCompCode = async () => {
     const gameId = activeGameId ?? 'broadcast';
@@ -256,7 +379,7 @@ function AdminStreamOverlay({
                     }
                   }}
                   className="w-full bg-white/10 border border-white/10 rounded px-3 py-2 text-xs text-white placeholder-white/30 focus:outline-none focus:border-primary/50 pr-16"
-                  placeholder="YouTube, Twitch, HLS, WHEP, or any stream URL…"
+                  placeholder="Paste any link — Twitch, YouTube, HLS, WHEP, MP4, or drag a local video…"
                 />
                 {customStreamUrl.trim() && (
                   <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[8px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-white/15 text-white/70 pointer-events-none">
@@ -275,6 +398,106 @@ function AdminStreamOverlay({
                   }`}>{urlTypeAdvisory}</p>
                 );
               })()}
+              {/* Local file loader + hidden <input type="file"> + offscreen
+                  preview video element. The video element must be mounted so
+                  the DOM has something to attach the blob: src to and so that
+                  captureStream() has a live frame source when Broadcast starts.
+                  opacity/height keeps it invisible without removing it from
+                  the render tree (otherwise captureStream() fires on nothing). */}
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleLoadLocalFile}
+                  className="text-[10px] inline-flex items-center gap-1 px-2 py-1 rounded bg-white/10 hover:bg-white/15 text-white/80 border border-white/10"
+                  title="Load a local highlight clip (plays instantly; viewers see it only after Broadcast)"
+                >
+                  <Upload className="w-3 h-3" /> Load Local File
+                </button>
+                {localFileName && (
+                  <span className="text-[10px] text-white/50 truncate max-w-[180px]">{localFileName}</span>
+                )}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/*"
+                onChange={handleLocalFileChange}
+                className="hidden"
+              />
+              {customStreamUrl.startsWith('blob:') && (
+                <video
+                  ref={previewVideoRef}
+                  src={customStreamUrl}
+                  controls
+                  muted
+                  playsInline
+                  className="mt-2 w-full rounded border border-white/10 bg-black"
+                  style={{ maxHeight: 140 }}
+                />
+              )}
+            </div>
+
+            {/* WHIP Broadcast — publish the current source to MediaMTX so all
+                viewers see it via WHEP. Two flows: local-file broadcast (uses
+                captureStream() on the preview video) and camera broadcast
+                (uses getUserMedia). The single "Stop" button tears both down
+                plus DELETEs the WHIP resource. */}
+            <div className="rounded border border-white/10 bg-white/5 p-2.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[9px] uppercase tracking-wider text-white/60 inline-flex items-center gap-1">
+                  <Wifi className="w-3 h-3" /> WHIP Broadcast
+                </span>
+                <span
+                  className={`text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                    whip.status === 'publishing'
+                      ? 'bg-red-500/20 text-red-300'
+                      : whip.status === 'connecting'
+                        ? 'bg-amber-500/20 text-amber-300'
+                        : whip.status === 'error'
+                          ? 'bg-red-900/40 text-red-200'
+                          : 'bg-white/10 text-white/50'
+                  }`}
+                >
+                  {whip.status}
+                </span>
+              </div>
+              {broadcastStream ? (
+                <button
+                  type="button"
+                  onClick={() => { void handleStopBroadcast(); }}
+                  className="w-full py-1.5 font-display font-bold text-[10px] uppercase tracking-wider rounded bg-red-600 text-white hover:bg-red-500"
+                >
+                  Stop Broadcast ({broadcastSource})
+                </button>
+              ) : (
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { void handleStartFileBroadcast(); }}
+                    disabled={!customStreamUrl.startsWith('blob:')}
+                    className="py-1.5 font-display font-bold text-[10px] uppercase tracking-wider rounded bg-amber-500 text-black hover:bg-amber-400 disabled:opacity-30"
+                    title="Push the loaded local file to viewers"
+                  >
+                    Broadcast File
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void handleStartCameraBroadcast(); }}
+                    className="py-1.5 font-display font-bold text-[10px] uppercase tracking-wider rounded bg-white/10 text-white hover:bg-white/15 border border-white/10"
+                    title="Publish your webcam + mic"
+                  >
+                    Broadcast Camera
+                  </button>
+                </div>
+              )}
+              {whip.error && (
+                <p className="text-[10px] text-red-300 leading-relaxed">{whip.error}</p>
+              )}
+              <p className="text-[9px] text-white/40 leading-relaxed">
+                Uses MediaMTX WHIP ingest — viewers auto-connect via WHEP. Paste
+                <code className="mx-1 text-white/60">https://stream.sbbl-hq.icu/whep/{activeGameId ?? 'broadcast'}</code>
+                into Stream URL once publishing to gate access.
+              </p>
             </div>
 
             {/* Stream Title */}
@@ -440,7 +663,6 @@ const LivePage = () => {
   const { addToBag } = useBag();
 
   // --- Top Performers Carousel Logic ---
-  /* eslint-disable @typescript-eslint/no-explicit-any */
 
   const [activeLeagueIdx, setActiveLeagueIdx] = useState(0);
   // leagueIds is moved outside to avoid dependency array issues
@@ -462,7 +684,7 @@ const LivePage = () => {
       const supabase = getSupabaseClient();
       const { data, error } = await supabase.rpc('get_leaderboards', { p_filters: { league: LEAGUE_IDS[activeLeagueIdx] } });
       if (error) throw new Error(error.message);
-      return (data as { leaders?: unknown[] } | null)?.leaders ?? [];
+      return (data as { leaders?: LeaderboardLeader[] } | null)?.leaders ?? [];
     },
     staleTime: 1000 * 60 * 5, // 5 min
     retry: 1,
@@ -470,7 +692,7 @@ const LivePage = () => {
 
   const topPerformers = useMemo(() => {
     // leaderboardsData is already sorted by points descending from the RPC.
-    return leaderboardsData.slice(0, 3).map((p: any) => ({
+    return leaderboardsData.slice(0, 3).map((p) => ({
       id: p.id,
       name: p.name,
       avatar: p.avatar, // the RPC does not currently return avatar_url, but we map what we have or let fallback handle it
@@ -889,7 +1111,7 @@ const LivePage = () => {
           </div>
         ) : performersError ? (
           <p className="text-xs text-muted-foreground py-4 text-center">Could not load top performers.</p>
-        ) : topPerformers.length > 0 ? topPerformers.map((p: PlayerProfile | any) => (
+        ) : topPerformers.length > 0 ? topPerformers.map((p) => (
           <div key={p.id} className="flex items-center gap-3 py-2 border-b border-border last:border-0">
             <PlayerAvatar src={p.avatar} alt={p.name} className="w-8 h-8" />
             <div className="flex-1 min-w-0">
