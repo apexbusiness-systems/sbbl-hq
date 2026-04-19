@@ -4832,7 +4832,7 @@ export async function handleLatestBiometrics(ctx: HandlerCtx) {
 
   const latestByPlayer = new Map<string, unknown>();
   for (const row of (data ?? [])) {
-    const pId = String((row as any).player_id);
+    const pId = String((row as Record<string, unknown>).player_id);
     if (!latestByPlayer.has(pId)) {
       latestByPlayer.set(pId, row);
     }
@@ -4842,6 +4842,22 @@ export async function handleLatestBiometrics(ctx: HandlerCtx) {
     ok: true,
     snapshots: Array.from(latestByPlayer.values())
   });
+}
+
+export async function handleLatestOverlayEvents(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+
+  const { data, error } = await ctx.admin
+    .from("overlay_event_log")
+    .select("*")
+    .eq("game_id", gameId)
+    .order("triggered_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw new Error(error.message);
+  return json({ ok: true, event: data });
 }
 
 export async function handleOverlayEvent(ctx: HandlerCtx) {
@@ -6050,6 +6066,11 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/api/streams/:gameId/overlay/event",
     handler: handleOverlayEvent,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/overlay/events/latest",
+    handler: handleLatestOverlayEvents,
   },
   { method: "GET", path: "/api/cart", handler: handleGetCart },
   { method: "POST", path: "/api/cart/items", handler: handleAddCartItem },
