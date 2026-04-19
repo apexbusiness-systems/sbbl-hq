@@ -206,22 +206,6 @@ function StreamPlayer({
   const reactPlayerRef = useRef<ReactPlayer | null>(null);
   const MAX_AUTO_RETRIES = 1;
 
-  // Twitch's embed SDK measures the iframe's visibility and dimensions at
-  // creation time via getComputedStyle + IntersectionObserver. When the
-  // player mounts inside a CSS `aspect-ratio` container, layout can resolve
-  // in a later frame and the SDK captures a 0×0 iframe — permanently
-  // disabling autoplay for that embed with the (misleading) error:
-  //   "Autoplay disabled. style visibility, size, viewport visibility."
-  // Defer ReactPlayer mount until after the browser's next paint so that
-  // CSS aspect-ratio has resolved before the embed SDK measures dimensions.
-  // One rAF is sufficient and avoids ResizeObserver edge cases on absolutely-
-  // positioned children in headless/CI Chromium.
-  const [containerReady, setContainerReady] = useState(false);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => setContainerReady(true));
-    return () => cancelAnimationFrame(id);
-  }, []);
-
   const urlType = detectStreamUrlType(url);
   const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
   const isTwitch = urlType === 'twitch';
@@ -292,6 +276,25 @@ function StreamPlayer({
 
   // HLS / DASH / YouTube / Twitch / Vimeo / direct / unknown — use ReactPlayer
   const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
+  // Twitch rejects embeds whose `parent` list does not include the actual
+  // document origin. A single entry fails on www/apex/localhost. Union the
+  // known SBBL surface areas with the current host so every environment
+  // (production, preview domains, local dev) loads without manual rewiring.
+  const twitchParents = Array.from(new Set([
+    currentHost,
+    'sbbl-hq.icu',
+    'www.sbbl-hq.icu',
+    'localhost',
+  ].filter(Boolean)));
+
+  // A URL is "proxy-authenticated" when it's served from our own sbbl-hq.icu
+  // infrastructure behind the sbbl_proxy_auth cookie. External CDN videos
+  // (league highlights, direct MP4s on a public bucket) respond with
+  // `Access-Control-Allow-Origin: *` which is incompatible with credentialed
+  // requests — browsers will reject playback with a CORS error. Detect and
+  // downgrade to anonymous CORS so every public video URL plays seamlessly.
+  const isProxyAuthedUrl = /\.sbbl-hq\.icu(?:\/|$)/i.test(url) || url.startsWith('/');
+  const isLocalBlob = urlType === 'local' || url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('file:');
   const reactPlayerConfig = {
     youtube: {
       playerVars: {
@@ -310,24 +313,28 @@ function StreamPlayer({
     },
     twitch: {
       options: {
-        // REQUIRED: Twitch embeds will not load without the parent domain.
+        // REQUIRED: Twitch embeds will not load without every allowed parent.
         // https://dev.twitch.tv/docs/embed/everything/#required-parameters
-        parent: [currentHost],
+        parent: twitchParents,
       },
     },
     file: {
       ...(forceHls ? { forceHLS: true } : {}),
       ...(forceDash ? { forceDASH: true } : {}),
       hlsOptions: {
-        // Required for proxy mode so the browser includes sbbl_proxy_auth on segment requests.
+        // withCredentials only for proxy-authed URLs — external CDNs respond
+        // with ACAO: * which browsers reject under credentialed mode.
         xhrSetup: (xhr: XMLHttpRequest) => {
-          xhr.withCredentials = true;
+          xhr.withCredentials = isProxyAuthedUrl;
         },
       },
-      attributes: {
-        // Mirror credentials behavior for native HLS paths where supported.
-        crossOrigin: 'use-credentials',
-      },
+      // blob: URLs: omit crossOrigin entirely (no cross-origin request at all).
+      // Proxy-authed URLs: use-credentials so sbbl_proxy_auth cookie attaches.
+      // Everything else (public CDNs, Twitch VODs, league highlight links):
+      // anonymous so the browser does not demand credentialed CORS headers.
+      ...(isLocalBlob
+        ? {}
+        : { attributes: { crossOrigin: isProxyAuthedUrl ? 'use-credentials' : 'anonymous' } }),
     },
   };
 
@@ -392,22 +399,6 @@ function StreamPlayer({
           aria-hidden="true"
           onContextMenu={(e) => e.preventDefault()}
         />
-      )}
-      {/* Tap-to-unmute overlay — Twitch autoplay requires muted=true on
-          first mount. Once the stream is playing, surface a prominent
-          action so the viewer can promote themselves to audio with one
-          gesture. Hidden as soon as the user unmutes. */}
-      {containerReady && muted && playing && (
-        <button
-          type="button"
-          onClick={() => setMuted(false)}
-          className="absolute top-3 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-xs font-bold uppercase tracking-wider text-black shadow-lg hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
-          aria-label="Tap to unmute audio"
-          data-testid="tap-to-unmute"
-        >
-          <VolumeX className="w-4 h-4" />
-          Tap to unmute
-        </button>
       )}
       <div
         className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm"

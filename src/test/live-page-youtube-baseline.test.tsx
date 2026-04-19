@@ -75,7 +75,7 @@ describe('Live page YouTube baseline validation', () => {
       expect(screen.getByTitle('Stream controls')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByTitle('Stream controls'));
-    const input = await screen.findByPlaceholderText('YouTube, Twitch, HLS, WHEP, or any stream URL…');
+    const input = await screen.findByPlaceholderText('Paste any link — Twitch, YouTube, HLS, WHEP, MP4, or drag a local video…');
     fireEvent.change(input, { target: { value: 'https://www.facebook.com/live/12345' } });
     fireEvent.click(screen.getByRole('button', { name: 'Go Live' }));
 
@@ -102,7 +102,7 @@ describe('Live page YouTube baseline validation', () => {
       expect(screen.getByTitle('Stream controls')).toBeInTheDocument();
     });
     fireEvent.click(screen.getByTitle('Stream controls'));
-    const input = await screen.findByPlaceholderText('YouTube, Twitch, HLS, WHEP, or any stream URL…');
+    const input = await screen.findByPlaceholderText('Paste any link — Twitch, YouTube, HLS, WHEP, MP4, or drag a local video…');
     fireEvent.change(input, { target: { value: 'https://youtu.be/abc123def45?t=5' } });
     fireEvent.click(screen.getByRole('button', { name: 'Go Live' }));
 
