@@ -18,6 +18,7 @@ const MUTATION_IDEMPOTENCY_RE = [
 ];
 
 const runtimeRateLimit = new Map<string, number[]>();
+const RUNTIME_RATE_LIMIT_MAX = 50_000; // OOM guard - hard cap on tracked keys 
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}) {
@@ -67,7 +68,19 @@ function enforceInMemoryRateLimit(key: string, limit: number, windowMs: number) 
   }
   next.push(now);
   runtimeRateLimit.set(key, next);
-  return true;
+
+    // OOM guard: if map exceeds hard cap, force-evict oldest 20% of entries
+    if (runtimeRateLimit.size >= RUNTIME_RATE_LIMIT_MAX) {
+          const toDelete = runtimeRateLimit.size - Math.floor(RUNTIME_RATE_LIMIT_MAX * 0.8);
+          let deleted = 0;
+          for (const k of runtimeRateLimit.keys()) 
+                if (deleted >= toDelete) break;
+        runtimeRateLimit.delete(k);
+            deleted++;
+    }
+}
+
+   return true;
 }
 
 async function verifySession(req: Request, env: Env): Promise<JwtSession | null> {
