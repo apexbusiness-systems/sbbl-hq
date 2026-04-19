@@ -71,7 +71,7 @@ import {
 import { parseStripeSignature, constantTimeEqualHex } from "./stripe-utils";
 export { parseStripeSignature, constantTimeEqualHex };
 
-export type HandlerCtx = {
+type HandlerCtx = {
   req: Request;
   env: Env;
   params: Record<string, string>;
