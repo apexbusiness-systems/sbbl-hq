@@ -81,7 +81,7 @@ jobs:
         #   • Worker routes         — src/test/worker-routes.test.ts
         #   • Worker ingress        — src/test/worker-ingress.test.ts
         #   • RLS / roles           — src/test/roles.test.ts
-        run: npx vitest run --coverage --reporter=verbose
+        run: npx vitest run --coverage --reporter=dot --coverage.reporter=text --coverage.reporter=json-summary
         env:
           NODE_OPTIONS: --max-old-space-size=4096
 

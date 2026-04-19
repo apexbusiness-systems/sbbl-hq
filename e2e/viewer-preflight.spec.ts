@@ -35,7 +35,7 @@ test.beforeEach(async ({ page }) => {
     });
   });
 
-  await page.route('**/api/public/stream/status*', async (route) => {
+  await page.route('**/api/streams/status*', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
