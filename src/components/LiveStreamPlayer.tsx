@@ -192,39 +192,19 @@ function StreamPlayer({
   const MAX_AUTO_RETRIES = 1;
 
   // Twitch's embed SDK measures the iframe's visibility and dimensions at
-  // creation time via getComputedStyle + getBoundingClientRect. When the
+  // creation time via getComputedStyle + IntersectionObserver. When the
   // player mounts inside a CSS `aspect-ratio` container, layout can resolve
   // in a later frame and the SDK captures a 0×0 iframe — permanently
   // disabling autoplay for that embed with the (misleading) error:
   //   "Autoplay disabled. style visibility, size, viewport visibility."
-  // Defer ReactPlayer mount until the container has non-zero dimensions.
-  // YouTube / Vimeo / HLS tolerate 0-dim mounts and this gate is a safe
-  // no-op for them.
+  // Defer ReactPlayer mount until after the browser's next paint so that
+  // CSS aspect-ratio has resolved before the embed SDK measures dimensions.
+  // One rAF is sufficient and avoids ResizeObserver edge cases on absolutely-
+  // positioned children in headless/CI Chromium.
   const [containerReady, setContainerReady] = useState(false);
   useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-    const markReady = () => setContainerReady(true);
-    if (el.offsetWidth > 0 && el.offsetHeight > 0) {
-      markReady();
-      return;
-    }
-    if (typeof ResizeObserver === 'undefined') {
-      markReady();
-      return;
-    }
-    const ro = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (width > 0 && height > 0) {
-          markReady();
-          ro.disconnect();
-          return;
-        }
-      }
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
+    const id = requestAnimationFrame(() => setContainerReady(true));
+    return () => cancelAnimationFrame(id);
   }, []);
 
   const urlType = detectStreamUrlType(url);
