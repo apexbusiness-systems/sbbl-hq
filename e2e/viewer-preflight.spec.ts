@@ -8,6 +8,8 @@ test.beforeEach(async ({ page }) => {
       'sbbl_test_flags',
       JSON.stringify({ VITE_FEATURE_SHOW_VIEWER_PREFLIGHT: 'true' }),
     );
+    // Mock video.play() to prevent headless chromium from hanging on empty src
+    HTMLVideoElement.prototype.play = () => Promise.reject(new Error('headless test mock'));
   });
 
   await page.route('**/api/public/home**', async (route) => {
@@ -55,7 +57,11 @@ test('viewer preflight renders when enabled', async ({ page }) => {
           state: 'upcoming',
           tipoffAt: new Date().toISOString(),
           ppvPriceCad: 4.99,
+          replay: { embargoEndsAt: null, entitled: false, priceCad: 4.99, qualityTier: 'raw' }
         },
+        userId: undefined,
+        entitlement: { status: 'none' },
+        activeSession: { hasConflict: false },
         session: { signedIn: false, ppvEntitled: false, entitlementHoursRemaining: null },
         stream: { live: false, signedUrlRequired: false },
       }),
