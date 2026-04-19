@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import { handleSyncDrain } from '../index';
+import { handleSyncDrain, type HandlerCtx } from '../index';
 import { type SupabaseClient } from '@supabase/supabase-js';
+import { type Env } from '../bindings';
 
 describe('handleSyncDrain security', () => {
   it('should throw an error if OMNIHUB_SIGNING_SECRET is missing', async () => {
@@ -17,17 +18,17 @@ describe('handleSyncDrain security', () => {
       },
     });
 
-    const ctx = {
+    const ctx: Partial<HandlerCtx> = {
       req: mockReq,
       env: {
         OMNIHUB_SYNC_URL: 'https://hub.local/sync',
         // OMNIHUB_SIGNING_SECRET is missing
-      } as any,
+      } as Env,
       params: {},
       admin: mockAdmin,
     };
 
-    await expect(handleSyncDrain(ctx as any)).rejects.toThrow('OMNIHUB_SIGNING_SECRET_missing');
+    await expect(handleSyncDrain(ctx as HandlerCtx)).rejects.toThrow('OMNIHUB_SIGNING_SECRET_missing');
   });
 
   it('should proceed if OMNIHUB_SIGNING_SECRET is present', async () => {
@@ -49,20 +50,20 @@ describe('handleSyncDrain security', () => {
     });
 
     // Mock global fetch for the sync delivery
-    global.fetch = vi.fn().mockResolvedValue({ ok: true });
+    global.fetch = vi.fn().mockResolvedValue({ ok: true } as Response);
 
-    const ctx = {
+    const ctx: Partial<HandlerCtx> = {
       req: mockReq,
       env: {
         OMNIHUB_SYNC_URL: 'https://hub.local/sync',
         OMNIHUB_SIGNING_SECRET: 'valid-secret',
-      } as any,
+      } as Env,
       params: {},
       admin: mockAdmin,
     };
 
-    const response = await handleSyncDrain(ctx as any);
-    const body = await response.json() as any;
+    const response = await handleSyncDrain(ctx as HandlerCtx);
+    const body = await response.json() as { ok: boolean; processed: number };
     expect(body.ok).toBe(true);
     expect(body.processed).toBe(1);
   });
