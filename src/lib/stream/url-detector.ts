@@ -26,9 +26,11 @@ export type StreamUrlType =
   | 'facebook'
   | 'kick'
   | 'rumble'
+  | 'dailymotion'
   | 'x-spaces'
   | 'instagram'
   | 'rtmp'
+  | 'local'
   | 'unknown';
 
 export type StreamAdvisoryLevel = 'ok' | 'warn' | 'info';
@@ -56,6 +58,9 @@ export function getStreamDeliveryClass(url: string): StreamDeliveryClass {
   const normalized = url.trim().toLowerCase();
   if (!normalized) return 'unsupported';
 
+  // Local media — blob:/data: video/file: — plays via native <video> element.
+  if (/^(?:blob:|data:video|file:)/i.test(normalized)) return 'proxy';
+
   // Embed platforms — served via iframe/player SDK.
   if (
     normalized.includes('youtube.com') ||
@@ -69,9 +74,10 @@ export function getStreamDeliveryClass(url: string): StreamDeliveryClass {
 
   // Proxy/direct playback — HLS, DASH, MP4, or SBBL infrastructure.
   if (
-    normalized.endsWith('.m3u8') ||
-    normalized.endsWith('.mp4') ||
-    normalized.endsWith('.mpd') ||
+    // Tolerate signed/query/filename variants (was: endsWith — broke presigned URLs).
+    /\.m3u8(?:[?#]|$)/i.test(normalized) ||
+    /\.(?:mp4|m4v|mov|webm|ogg|ogv)(?:[?#]|$)/i.test(normalized) ||
+    /\.mpd(?:[?#]|$)/i.test(normalized) ||
     // FIX #2a — catch ALL sbbl-hq.icu subdomains (was: only stream.sbbl-hq.icu)
     normalized.includes('sbbl-hq.icu') ||
     // FIX #2b — catch any URL with a standalone /whep/ path segment
@@ -89,7 +95,11 @@ export function getStreamDeliveryClass(url: string): StreamDeliveryClass {
  */
 export function detectStreamUrlType(url: string): StreamUrlType {
   if (!url) return 'unknown';
-  const lower = url.toLowerCase();
+
+  // blob: / data: / file: — locally-sourced media picked via File API or
+  // drag-drop. Playable only in the admin's own browser; used for preview
+  // before a Go Live that pushes to WHIP ingest for actual broadcast.
+  if (/^(?:blob:|data:video|file:)/i.test(url)) return 'local';
 
   // RTMP/RTMPS — must check before generic https checks
   if (/^rtmps?:\/\//i.test(url)) return 'rtmp';
@@ -107,14 +117,17 @@ export function detectStreamUrlType(url: string): StreamUrlType {
     return 'whep';
   }
 
-  // HLS
-  if (/\.m3u8(\?|#|$)/i.test(url)) return 'hls';
+  // HLS — .m3u8 anywhere in the path (tolerant of signed-URL query suffixes
+  // with tokens, expiry params, and arbitrary filename suffixes).
+  if (/\.m3u8(?:[?#]|$)/i.test(url) || /\/[^?#]*\.m3u8/i.test(url)) return 'hls';
 
   // DASH
-  if (/\.mpd(\?|#|$)/i.test(url)) return 'dash';
+  if (/\.mpd(?:[?#]|$)/i.test(url)) return 'dash';
 
-  // Direct video files
-  if (/\.mp4(\?|#|$)/i.test(url) || /\.webm(\?|#|$)/i.test(url) || /\.ogg(\?|#|$)/i.test(url)) {
+  // Direct video files — accept the full set of browser-playable containers
+  // (mp4, m4v, mov, webm, ogg/ogv). Presigned S3 URLs with ?X-Amz-* suffixes,
+  // Cloudflare R2 signed URLs, and YouTube-style ?v= params all pass.
+  if (/\.(?:mp4|m4v|mov|webm|ogg|ogv)(?:[?#]|$)/i.test(url)) {
     return 'mp4';
   }
 
@@ -125,6 +138,7 @@ export function detectStreamUrlType(url: string): StreamUrlType {
   if (/(?:^|[./])(?:facebook\.com|fb\.me|fbcdn\.net)(?:\/|$)/i.test(url)) return 'facebook';
   if (/(?:^|[./])kick\.com(?:\/|$)/i.test(url)) return 'kick';
   if (/(?:^|[./])rumble\.com(?:\/|$)/i.test(url)) return 'rumble';
+  if (/(?:^|[./])(?:dailymotion\.com|dai\.ly)(?:\/|$)/i.test(url)) return 'dailymotion';
   if (/(?:^|[./])(?:x\.com|twitter\.com)\/i\/(?:broadcasts|spaces)(?:\/|$)/i.test(url)) return 'x-spaces';
   if (/(?:^|[./])instagram\.com\/(?:live|.*\/live)(?:\/|$)/i.test(url)) return 'instagram';
 
@@ -184,6 +198,14 @@ export function toPlayableUrl(raw: string): PlayableUrl {
   if (!trimmed) return { url: '', type: 'unknown' };
 
   const type = detectStreamUrlType(trimmed);
+
+  if (type === 'local') {
+    return {
+      url: trimmed,
+      type: 'local',
+      warning: 'Local file plays in this browser only. To broadcast to viewers, use the WHIP ingest button.',
+    };
+  }
 
   if (type === 'rtmp') {
     return {
@@ -326,9 +348,11 @@ export const STREAM_TYPE_LABELS: Record<StreamUrlType, string> = {
   facebook: 'Facebook',
   kick: 'Kick',
   rumble: 'Rumble',
+  dailymotion: 'Dailymotion',
   'x-spaces': 'X Spaces',
   instagram: 'IG Live',
   rtmp: 'RTMP',
+  local: 'Local File',
   unknown: 'Stream',
 };
 
@@ -349,6 +373,8 @@ export function getStreamTypeAdvisory(type: StreamUrlType): StreamAdvisory {
       return { level: 'warn', message: 'Kick does not provide embeddable player URLs. Consider an HLS restream.' };
     case 'rumble':
       return { level: 'warn', message: 'Rumble embedding may be restricted. Verify playback after going live.' };
+    case 'dailymotion':
+      return { level: 'ok', message: 'Dailymotion stream detected.' };
     case 'x-spaces':
       return { level: 'warn', message: 'X Spaces does not support external embedding.' };
     case 'youtube':
@@ -365,6 +391,8 @@ export function getStreamTypeAdvisory(type: StreamUrlType): StreamAdvisory {
       return { level: 'ok', message: 'Vimeo stream detected — auto-configured.' };
     case 'mp4':
       return { level: 'ok', message: 'Direct video file detected.' };
+    case 'local':
+      return { level: 'info', message: 'Local file — plays in this browser. Use Broadcast to share with viewers.' };
     case 'unknown':
     default:
       return { level: 'ok', message: '' };

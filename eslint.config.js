@@ -37,7 +37,7 @@ const DATA_FIXTURE_PATTERNS = [
 ];
 
 export default tseslint.config(
-  { ignores: ["dist", "dev-dist", "supabase-source", "supabase", "supabase-docker"] },
+  { ignores: ["dist", "dev-dist", "supabase-source", "supabase", "supabase-docker", ".claude"] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ["**/*.{ts,tsx}"],

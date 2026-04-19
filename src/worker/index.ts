@@ -70,6 +70,8 @@ import {
   handleUpdateHighlight,
   handleReactionAggregate,
 } from "./routes/highlights";
+import { parseStripeSignature, constantTimeEqualHex } from "./stripe-utils";
+export { parseStripeSignature, constantTimeEqualHex };
 
 type HandlerCtx = {
   req: Request;
@@ -373,19 +375,6 @@ async function getStreamUrlForGame(
   return streamUrl;
 }
 
-export function parseStripeSignature(header: string) {
-  const fields = header.split(",").map((part) => part.trim());
-  const timestamp = fields.find((part) => part.startsWith("t="))?.slice(2);
-  const signatures = fields
-    .filter((part) => part.startsWith("v1="))
-    .map((part) => part.slice(3))
-    .filter(Boolean);
-  return {
-    timestamp: timestamp ? Number(timestamp) : NaN,
-    signatures,
-  };
-}
-
 async function signHmacSha256(secret: string, payload: string) {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -422,15 +411,6 @@ async function verifyStripeSignature(
   return parsed.signatures.some((candidate) =>
     constantTimeEqualHex(candidate.toLowerCase(), expected),
   );
-}
-
-export function constantTimeEqualHex(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i += 1) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
 }
 
 async function verifyTurnstileToken(
@@ -1573,7 +1553,7 @@ async function handleIngress(ctx: HandlerCtx) {
   }
 }
 
-async function handleSyncDrain(ctx: HandlerCtx) {
+export async function handleSyncDrain(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   requireAuth(ctx.req);
   const limit = Math.max(
@@ -1601,9 +1581,12 @@ async function handleSyncDrain(ctx: HandlerCtx) {
         emitted_at: new Date().toISOString(),
       };
 
+      if (!ctx.env.OMNIHUB_SIGNING_SECRET) {
+        throw new Error("OMNIHUB_SIGNING_SECRET_missing");
+      }
       const signed = await signSyncPacket(
         packet,
-        ctx.env.OMNIHUB_SIGNING_SECRET ?? "dev-signing-secret",
+        ctx.env.OMNIHUB_SIGNING_SECRET,
       );
       const url = ctx.env.OMNIHUB_SYNC_URL;
 
@@ -6423,8 +6406,22 @@ export default Sentry.withSentry(
         if (isHtml) {
           // HTML shell: cache 60s at edge, stale-while-revalidate for viral traffic resilience
           cacheHeaders.set("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=600");
+        } else {
+          // Non-HTML static assets (images/fonts/icons/media from /public).
+          // Vite-hashed JS/CSS under /assets/ already carry immutable cache
+          // headers; for un-hashed public files (hero-*, icons, logos, svgs)
+          // we force a 30-day browser cache + 1-year edge cache so the LCP
+          // hero is served from CDN + disk cache on repeat views.
+          const url = new URL(req.url);
+          const path = url.pathname;
+          const isHashedViteAsset = /\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/.test(path);
+          if (!isHashedViteAsset && !cacheHeaders.has("Cache-Control")) {
+            cacheHeaders.set(
+              "Cache-Control",
+              "public, max-age=2592000, s-maxage=31536000, stale-while-revalidate=86400",
+            );
+          }
         }
-        // Hashed assets already have immutable cache headers from Vite build
         return addSecurityHeaders(new Response(assetRes.body, {
           status: assetRes.status,
           statusText: assetRes.statusText,
@@ -6919,14 +6916,18 @@ async function handleOpsBatchProducts(ctx: HandlerCtx) {
   if (!Array.isArray(items) || items.length === 0) {
     return json({ ok: false, error: "items_required" }, 400);
   }
-  for (const item of items.slice(0, 4)) {
-    if (!item.title || !item.price) continue;
-    const { error } = await ctx.admin.from("products").insert({
+  const productsToInsert = items
+    .slice(0, 4)
+    .filter((item) => item.title && item.price)
+    .map((item) => ({
       name: String(item.title),
       price: Number(item.price),
       status: "draft",
       league_id: item.leagueId ?? null,
-    });
+    }));
+
+  if (productsToInsert.length > 0) {
+    const { error } = await ctx.admin.from("products").insert(productsToInsert);
     if (error) throw new Error(error.message);
   }
   await ctx.admin.from("audit_logs").insert({

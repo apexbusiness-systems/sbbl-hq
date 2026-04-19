@@ -178,14 +178,25 @@ function StreamPlayer({
 }>) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [playing, setPlaying] = useState(true);
-  // Start muted so cross-origin autoplay is permitted by Chrome.
-  // Unmuted autoplay is blocked for cross-origin iframes (embed.twitch.tv,
-  // YouTube, Vimeo) regardless of Permissions-Policy — the browser requires
-  // a user gesture. Twitch's SDK misreports this block as "style visibility,
-  // size, viewport visibility" and shows the blank player. Starting muted
-  // lets the stream play immediately; the user unmutes with the toggle
-  // already wired at the controls bar below.
+  // Start muted so cross-origin autoplay is permitted by Chrome. Unmuted
+  // autoplay is blocked for cross-origin iframes regardless of
+  // Permissions-Policy — the browser requires a user gesture.
   const [muted, setMuted] = useState(true);
+  // True once the stream fires its first onPlay event. Used to gate the
+  // tap-to-unmute overlay so it never appears before playback has started.
+  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
+  // Twitch's embed SDK measures iframe dimensions at creation time. When the
+  // player mounts inside a CSS aspect-ratio container, layout can resolve in
+  // a later frame, causing the SDK to capture a 0×0 iframe and permanently
+  // disable autoplay with the misleading error:
+  //   "Autoplay disabled. style visibility, size, viewport visibility."
+  // Defer ReactPlayer mount until after the browser's next paint so that
+  // aspect-ratio has resolved before the embed SDK measures dimensions.
+  const [containerReady, setContainerReady] = useState(false);
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setContainerReady(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
   const [volume, setVolume] = useState(0.8);
   const [playedFraction, setPlayedFraction] = useState(0);
   const [playedSeconds, setPlayedSeconds] = useState(0);
@@ -265,6 +276,25 @@ function StreamPlayer({
 
   // HLS / DASH / YouTube / Twitch / Vimeo / direct / unknown — use ReactPlayer
   const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
+  // Twitch rejects embeds whose `parent` list does not include the actual
+  // document origin. A single entry fails on www/apex/localhost. Union the
+  // known SBBL surface areas with the current host so every environment
+  // (production, preview domains, local dev) loads without manual rewiring.
+  const twitchParents = Array.from(new Set([
+    currentHost,
+    'sbbl-hq.icu',
+    'www.sbbl-hq.icu',
+    'localhost',
+  ].filter(Boolean)));
+
+  // A URL is "proxy-authenticated" when it's served from our own sbbl-hq.icu
+  // infrastructure behind the sbbl_proxy_auth cookie. External CDN videos
+  // (league highlights, direct MP4s on a public bucket) respond with
+  // `Access-Control-Allow-Origin: *` which is incompatible with credentialed
+  // requests — browsers will reject playback with a CORS error. Detect and
+  // downgrade to anonymous CORS so every public video URL plays seamlessly.
+  const isProxyAuthedUrl = /\.sbbl-hq\.icu(?:\/|$)/i.test(url) || url.startsWith('/');
+  const isLocalBlob = urlType === 'local' || url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('file:');
   const reactPlayerConfig = {
     youtube: {
       playerVars: {
@@ -283,60 +313,85 @@ function StreamPlayer({
     },
     twitch: {
       options: {
-        // REQUIRED: Twitch embeds will not load without the parent domain.
+        // REQUIRED: Twitch embeds will not load without every allowed parent.
         // https://dev.twitch.tv/docs/embed/everything/#required-parameters
-        parent: [currentHost],
+        parent: twitchParents,
       },
     },
     file: {
       ...(forceHls ? { forceHLS: true } : {}),
       ...(forceDash ? { forceDASH: true } : {}),
       hlsOptions: {
-        // Required for proxy mode so the browser includes sbbl_proxy_auth on segment requests.
+        // withCredentials only for proxy-authed URLs — external CDNs respond
+        // with ACAO: * which browsers reject under credentialed mode.
         xhrSetup: (xhr: XMLHttpRequest) => {
-          xhr.withCredentials = true;
+          xhr.withCredentials = isProxyAuthedUrl;
         },
       },
-      attributes: {
-        // Mirror credentials behavior for native HLS paths where supported.
-        crossOrigin: 'use-credentials',
-      },
+      // blob: URLs: omit crossOrigin entirely (no cross-origin request at all).
+      // Proxy-authed URLs: use-credentials so sbbl_proxy_auth cookie attaches.
+      // Everything else (public CDNs, Twitch VODs, league highlight links):
+      // anonymous so the browser does not demand credentialed CORS headers.
+      ...(isLocalBlob
+        ? {}
+        : { attributes: { crossOrigin: isProxyAuthedUrl ? 'use-credentials' : 'anonymous' } }),
     },
   };
 
   return (
-    <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
-      <ReactPlayer
-        ref={(instance) => { reactPlayerRef.current = instance; }}
-        url={url}
-        width="100%"
-        height="100%"
-        playing={playing}
-        controls={showNativeControls}
-        muted={muted}
-        volume={volume}
-        onReady={() => { retryCountRef.current = 0; onReady(); }}
-        onDuration={(seconds) => setDurationSeconds(seconds)}
-        onProgress={({ played, playedSeconds: elapsed }) => {
-          setPlayedFraction(played);
-          setPlayedSeconds(elapsed);
-        }}
-        onPlay={() => { setPlaying(true); retryCountRef.current = 0; onPlay(); }}
-        onPause={() => setPlaying(false)}
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onError={(err: any, data: any) => {
-          // Auto-retry: on first transient error, retry silently after 3s
-          // to avoid killing the player for 20k viewers on a single hiccup.
-          if (retryCountRef.current < MAX_AUTO_RETRIES) {
-            retryCountRef.current += 1;
-            setPlaying(false);
-            setTimeout(() => setPlaying(true), 3_000);
-            return;
-          }
-          onError(parsePlayerError(err, data));
-        }}
-        config={reactPlayerConfig}
-    />
+    <div
+      ref={containerRef}
+      className="absolute inset-0 bg-black"
+      data-testid="stream-player"
+      data-container-ready={containerReady ? 'true' : 'false'}
+    >
+      {containerReady && (
+        <ReactPlayer
+          ref={(instance) => { reactPlayerRef.current = instance; }}
+          url={url}
+          width="100%"
+          height="100%"
+          playing={playing}
+          controls={showNativeControls}
+          muted={muted}
+          volume={volume}
+          onReady={() => { retryCountRef.current = 0; onReady(); }}
+          onDuration={(seconds) => setDurationSeconds(seconds)}
+          onProgress={({ played, playedSeconds: elapsed }) => {
+            setPlayedFraction(played);
+            setPlayedSeconds(elapsed);
+          }}
+          onPlay={() => { setPlaying(true); retryCountRef.current = 0; setHasStartedPlaying(true); onPlay(); }}
+          onPause={() => setPlaying(false)}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onError={(err: any, data: any) => {
+            // Auto-retry: on first transient error, retry silently after 3s
+            // to avoid killing the player for 20k viewers on a single hiccup.
+            if (retryCountRef.current < MAX_AUTO_RETRIES) {
+              retryCountRef.current += 1;
+              setPlaying(false);
+              setTimeout(() => setPlaying(true), 3_000);
+              return;
+            }
+            onError(parsePlayerError(err, data));
+          }}
+          config={reactPlayerConfig}
+        />
+      )}
+      {/* Tap-to-unmute overlay — only shown after the stream fires its first
+          onPlay event, so it never appears during the connecting spinner. */}
+      {containerReady && muted && hasStartedPlaying && (
+        <button
+          type="button"
+          onClick={() => setMuted(false)}
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-xs font-bold uppercase tracking-wider text-black shadow-lg hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+          aria-label="Tap to unmute audio"
+          data-testid="tap-to-unmute"
+        >
+          <VolumeX className="w-4 h-4" />
+          Tap to unmute
+        </button>
+      )}
       {/* Block iframe click-through to provider pages and prevent source copying via context menu. */}
       {(isYoutube || isTwitch || isVimeo) && (
         <div
@@ -509,10 +564,8 @@ export function LiveStreamPlayer({
           body: JSON.stringify({ sessionKey }),
         }, null);
         if (!active) return;
-        // Use URL from session, fall back to game.stream_url, then env var.
         const rawResolved =
           res.playback.url ||
-          game.stream_url ||
           (import.meta.env.VITE_STREAM_URL as string | undefined) ||
           '';
         // RC-3: Surface a named error if no URL is available after all fallbacks
@@ -616,7 +669,7 @@ export function LiveStreamPlayer({
     };
     // retryKey is intentionally included: clicking Retry bumps it to re-run
     // the session start without a full page reload.
-  }, [hasAccess, userId, game.id, isSuperAdmin, game.stream_url, retryKey]);
+  }, [hasAccess, userId, game.id, isSuperAdmin, retryKey]);
 
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
