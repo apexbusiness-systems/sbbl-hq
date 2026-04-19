@@ -1291,53 +1291,41 @@ const LivePage = () => {
                 </div>
               ) : (liveGame || fallbackBroadcastGame) ? (
                <PlayerErrorBoundary key={streamNonce}>
-  {(() => {
-    const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.streamUrl || "";
-const playable = toPlayableUrl(rawUrl);
-const playableUrl = playable.url || rawUrl;   // ← the fix
-const streamType = detectStreamUrlType(playableUrl);
+{(() => {
+  const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.stream_url || "";
+  const playable = toPlayableUrl(rawUrl);
+  const playableUrl = playable.url || rawUrl;
+  const streamType = detectStreamUrlType(playableUrl);
 
-    if (streamType === "twitch" || streamType === "youtube") {
-      return (
-        <div className="relative w-full aspect-video bg-[#0A0A0A] rounded-xl overflow-hidden border border-[#111111]">
-          <ReactPlayer
-            url={playableUrl}
-            width="100%"
-            height="100%"
-            playing
-            muted={false}
-            controls
-            config={{
-              twitch: {
-                options: {
-                  // MANDATORY for production on sbbl-hq.icu
-                  parent: ["sbbl-hq.icu", "localhost"],
-                  muted: false,
-                  autoplay: true,
-                },
-              },
-              youtube: {
-                playerVars: {
-                  modestbranding: 1,
-                  rel: 0,
-                  autoplay: 1,
-                },
-              },
-            }}
-            style={{ position: "absolute", top: 0, left: 0 }}
-            onError={(e: any) => {
-              console.error(`[Live] ${streamType} player error:`, e);
-              if (typeof window !== "undefined" && (window as any).toast) {
-                (window as any).toast.error(`Failed to load ${streamType} stream`);
-              }
-            }}
-          />
-          <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full bg-red-600/90 px-2.5 py-0.5 text-[10px] font-bold tracking-[0.5px] text-white">
-            LIVE
-          </div>
+  if (streamType === "twitch" || streamType === "youtube") {
+    const provider = new ReactPlayerProvider();
+
+    return (
+      <div className="relative w-full aspect-video bg-[#0A0A0A] rounded-xl overflow-hidden border border-[#111111]">
+        {provider.render({
+          url: playableUrl,
+          muted: true,
+          autoplay: true,
+        })}
+
+        <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full bg-red-600/90 px-2.5 py-0.5 text-[10px] font-bold tracking-[0.5px] text-white">
+          LIVE
         </div>
-      );
-    }
+      </div>
+    );
+  }
+
+  // Fallback for WHEP / other stream types
+  return (
+    <div className="relative w-full aspect-video bg-[#0A0A0A] rounded-xl overflow-hidden border border-[#111111]">
+      <LiveStreamPlayer 
+        url={playableUrl} 
+        muted={true}
+        autoplay={true}
+      />
+    </div>
+  );
+})()}
 
     // All existing WHEP / HLS / native paths unchanged
     return (
