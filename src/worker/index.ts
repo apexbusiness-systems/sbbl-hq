@@ -68,6 +68,7 @@ import {
   handleReactionAggregate,
 } from "./routes/highlights";
 import { parseStripeSignature, constantTimeEqualHex } from "./stripe-utils";
+export { parseStripeSignature, constantTimeEqualHex };
 
 type HandlerCtx = {
   req: Request;

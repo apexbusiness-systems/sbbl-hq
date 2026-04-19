@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { constantTimeEqualHex } from '@/worker/index';
+import { constantTimeEqualHex } from '@/worker/stripe-utils';
 
 describe('constantTimeEqualHex', () => {
   it('returns true for equal strings', () => {
