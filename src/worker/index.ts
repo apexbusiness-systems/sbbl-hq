@@ -49,6 +49,16 @@ import {
   handleJoinByCode,
 } from "./routes/engagement";
 import {
+  handleLeaderboardByGame,
+  handleLeaderboardBySeason,
+  handleTokenAward,
+  handleTokenCategories,
+  handleTokenProducts,
+  handleTokenPurchase,
+  handleTokenWallet,
+  handleTokenWebhook,
+} from "./routes/tokens";
+import {
   handlePublicSponsors,
   handleTrackSponsorEvent,
   handleAdminListSponsors,
@@ -4236,16 +4246,24 @@ export async function handlePlaybackTokenVerify(ctx: HandlerCtx) {
 
   const secret = ctx.env.PLAYBACK_TOKEN_SECRET ?? "";
   const result = await verifyPlaybackToken(token, secret);
-  if (!result.ok) return json({ ok: false, reason: result.reason }, 401);
+  // strictNullChecks is off in tsconfig; discriminated-union narrowing on
+  // `result.ok` is unreliable here. Access both shapes via field read and
+  // assert truthiness at runtime. The JWT verifier is the authoritative
+  // gate — we are only reshaping its output for the response.
+  if (!result.ok) {
+    const reason = (result as { reason?: string }).reason ?? "bad_signature";
+    return json({ ok: false, reason }, 401);
+  }
+  const claims = (result as { claims: { gameId: string | null; userId: string; sessionId: string; assetId: string; playbackMode: string; exp: number; mex: number } }).claims;
 
-  if (urlGameId && result.claims.gameId && urlGameId !== result.claims.gameId) {
+  if (urlGameId && claims.gameId && urlGameId !== claims.gameId) {
     return json({ ok: false, reason: "game_mismatch" }, 401);
   }
 
   const sessRes = await ctx.admin
     .from("stream_access_sessions")
     .select("id,status,max_expires_at")
-    .eq("id", result.claims.sessionId)
+    .eq("id", claims.sessionId)
     .maybeSingle();
   const sess = sessRes.data as {
     id: string;
@@ -4261,7 +4279,7 @@ export async function handlePlaybackTokenVerify(ctx: HandlerCtx) {
   const tokenRes = await ctx.admin
     .from("stream_playback_tokens")
     .select("id,revoked_at")
-    .eq("session_id", result.claims.sessionId)
+    .eq("session_id", claims.sessionId)
     .is("revoked_at", null)
     .limit(1)
     .maybeSingle();
@@ -4272,13 +4290,13 @@ export async function handlePlaybackTokenVerify(ctx: HandlerCtx) {
   return json({
     ok: true,
     claims: {
-      userId: result.claims.userId,
-      gameId: result.claims.gameId,
-      sessionId: result.claims.sessionId,
-      assetId: result.claims.assetId,
-      playbackMode: result.claims.playbackMode,
-      exp: result.claims.exp,
-      mex: result.claims.mex,
+      userId: claims.userId,
+      gameId: claims.gameId,
+      sessionId: claims.sessionId,
+      assetId: claims.assetId,
+      playbackMode: claims.playbackMode,
+      exp: claims.exp,
+      mex: claims.mex,
     },
   });
 }
@@ -5871,6 +5889,19 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     path: "/api/streams/:gameId/preflight",
     handler: handlePlaybackPreflight,
   },
+  // ── WS4 Fan Token System ──────────────────────────────────────────────
+  // Every route below is no-op (403 fan_tokens_disabled) unless the
+  // worker-side FEATURE_FAN_TOKEN_SYSTEM env flag is 'true'. Webhook is
+  // intentionally unconditional so in-flight Stripe sessions complete
+  // safely if the flag is toggled off mid-purchase.
+  { method: "GET",  path: "/api/tokens/products",                  handler: handleTokenProducts },
+  { method: "GET",  path: "/api/tokens/categories",                handler: handleTokenCategories },
+  { method: "GET",  path: "/api/tokens/wallet",                    handler: handleTokenWallet },
+  { method: "GET",  path: "/api/tokens/leaderboard/season/:seasonId", handler: handleLeaderboardBySeason },
+  { method: "GET",  path: "/api/tokens/leaderboard/:gameId",       handler: handleLeaderboardByGame },
+  { method: "POST", path: "/api/tokens/purchase",                  handler: handleTokenPurchase },
+  { method: "POST", path: "/api/tokens/award",                     handler: handleTokenAward },
+  { method: "POST", path: "/api/tokens/webhook",                   handler: handleTokenWebhook },
   {
     method: "GET",
     path: "/api/streams/:gameId/comments",
