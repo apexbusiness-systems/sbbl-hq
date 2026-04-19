@@ -10,7 +10,7 @@
  * Note on type access: the project's tsconfig runs with
  * `strictNullChecks: false`, which defeats discriminated-union
  * narrowing on `ok: true | false`. Tests therefore avoid relying on
- * narrowing and instead use Vitest `toMatchObject` matchers, which
+ * narrowing and instead use Vitest `toHaveProperty` matchers, which
  * assert on runtime shape without requiring TS narrowing.
  */
 import { describe, expect, it } from 'vitest';

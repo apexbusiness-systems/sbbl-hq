@@ -17,6 +17,8 @@ import {
   adjustFoul,
   advancePeriod,
   resetOverlay,
+  postBiometrics,
+  postOverlayEvent,
   type OverlayPayload,
 } from '@/lib/api/overlay';
 import { enqueueObsCommand } from '@/lib/api/digest';

@@ -38,5 +38,9 @@ interface Env {
   // inlined in config.
   PLAYBACK_TOKEN_SECRET?: string;
 
+  // Per-user award rate limit (awards per minute) when the fan-token
+  // feature is on. Defaults to 30 in code if unset.
+  FAN_TOKEN_AWARD_RATE_PER_MIN?: string;
+
   ASSETS: { fetch: (req: Request) => Promise<Response> };
 }
