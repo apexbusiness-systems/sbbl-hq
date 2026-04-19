@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 
+/**
+ * Payload is event-type dependent and arrives verbatim from the server.
+ * Treat as opaque at this layer; downstream component funnels assert the
+ * specific shape they need (e.g. TrashTalkPayload).
+ */
+type OverlayPayload = Record<string, unknown>;
+
 interface OverlayEvent {
   id: string;
   event_type: string;
-  payload: Record<string, any>;
+  payload: OverlayPayload;
   triggered_at: string;
 }
 
@@ -104,7 +111,15 @@ function IntroSting() {
   );
 }
 
-function TrashTalkPopup({ payload }: { payload: any }) {
+interface TrashTalkPayload {
+  player_name?: string;
+  message?: string;
+}
+
+function TrashTalkPopup({ payload }: { payload: Record<string, unknown> }) {
+  // Narrow the opaque payload at the component boundary — the rest of
+  // the render is type-safe.
+  const { player_name, message } = payload as TrashTalkPayload;
   return (
     <div style={{
       animation: 'slide-up 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards, fade-out 0.5s 4.5s forwards',
@@ -117,10 +132,10 @@ function TrashTalkPopup({ payload }: { payload: any }) {
       boxShadow: '0 10px 30px rgba(0,0,0,0.5)'
     }}>
       <div style={{ fontSize: '14px', color: '#ff0055', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '8px' }}>
-        {payload.player_name || 'Player'}
+        {player_name || 'Player'}
       </div>
       <div style={{ fontSize: '24px', fontWeight: '800', fontStyle: 'italic' }}>
-        "{payload.message || 'Trash talk message'}"
+        &quot;{message || 'Trash talk message'}&quot;
       </div>
       <style>{`
         @keyframes slide-up {
