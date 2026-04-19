@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const wranglerPath = resolve(__dirname, '../../wrangler.jsonc');
 
 function stripJsonc(src: string): string {
   // Strip // line comments and /* block comments while preserving strings.
@@ -51,12 +50,16 @@ function stripJsonc(src: string): string {
   return out.replace(/,(\s*[}\]])/g, '$1');
 }
 
+type WranglerConfig = {
+  name?: string;
+  main?: string;
+  assets?: { run_worker_first?: boolean | string[] };
+};
+
+// ── wrangler.jsonc (dev / reference config) ───────────────────────────────────
 describe('wrangler.jsonc configuration contract', () => {
-  const raw = readFileSync(wranglerPath, 'utf8');
-  const config = JSON.parse(stripJsonc(raw)) as {
-    name?: string;
-    assets?: { run_worker_first?: boolean | string[] };
-  };
+  const raw = readFileSync(resolve(__dirname, '../../wrangler.jsonc'), 'utf8');
+  const config = JSON.parse(stripJsonc(raw)) as WranglerConfig;
 
   it('keeps the pinned worker name so custom domains + secrets stay bound', () => {
     expect(config.name).toBe('sbbl-hq-worker');
@@ -67,6 +70,29 @@ describe('wrangler.jsonc configuration contract', () => {
   // requests directly to the ASSETS binding, bypassing the Worker's
   // addSecurityHeaders() wrapper. The browser then received zero security
   // headers on /live and Twitch embed autoplay silently broke. Keep this `true`.
+  it('runs the Worker first for ALL routes so security headers reach SPA HTML', () => {
+    expect(config.assets?.run_worker_first).toBe(true);
+  });
+});
+
+// ── wrangler.deploy.jsonc (CI production deploy config) ───────────────────────
+// THIS IS THE FILE THAT ACTUALLY SHIPS TO CLOUDFLARE.
+// Regression guard: deploy.yml uses --config wrangler.deploy.jsonc. If this
+// file's run_worker_first regresses to a path array, the Worker is bypassed for
+// SPA routes (e.g. /live), stripping all security headers AND causing a
+// {"ok":false,"error":"not_found"} 404 for the root URL (total site outage).
+describe('wrangler.deploy.jsonc configuration contract (CI production deploy)', () => {
+  const raw = readFileSync(resolve(__dirname, '../../wrangler.deploy.jsonc'), 'utf8');
+  const config = JSON.parse(stripJsonc(raw)) as WranglerConfig;
+
+  it('keeps the pinned worker name so custom domains + secrets stay bound', () => {
+    expect(config.name).toBe('sbbl-hq-worker');
+  });
+
+  it('uses validation-contract-wrapper as entrypoint (rate limits + idempotency)', () => {
+    expect(config.main).toBe('src/worker/validation-contract-wrapper.ts');
+  });
+
   it('runs the Worker first for ALL routes so security headers reach SPA HTML', () => {
     expect(config.assets?.run_worker_first).toBe(true);
   });
