@@ -1,7 +1,7 @@
 /**
  * Migration smoke — structural invariants.
  *
- * Asserts the 20260419100000_fan_token_system.sql migration contains
+ * Asserts the 20260419101500_fan_token_system.sql migration contains
  * every expected table, constraint, RPC, and seed row. This is a
  * string-level check — it does NOT run SQL. Purpose: catch accidental
  * removal or rename in the migration during future edits.
@@ -16,7 +16,7 @@ const MIGRATION_PATH = join(
   '..',
   'supabase',
   'migrations',
-  '20260419100000_fan_token_system.sql',
+  '20260419101500_fan_token_system.sql',
 );
 
 const sql = readFileSync(MIGRATION_PATH, 'utf8');
