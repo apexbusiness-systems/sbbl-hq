@@ -68,7 +68,7 @@ import {
   handleReactionAggregate,
 } from "./routes/highlights";
 
-export type HandlerCtx = {
+type HandlerCtx = {
   req: Request;
   env: Env;
   params: Record<string, string>;
