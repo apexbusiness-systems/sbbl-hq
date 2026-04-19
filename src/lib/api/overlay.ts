@@ -122,3 +122,31 @@ export async function resetOverlay(gameId: string) {
     { method: 'POST', body: '{}' },
   );
 }
+
+export async function postBiometrics(
+  gameId: string,
+  payload: {
+    playerId: string;
+    heartRateBpm?: number;
+    staminaPct?: number;
+    fatigueLevel?: 'fresh' | 'moderate' | 'tired' | 'gassed';
+  }
+) {
+  return apiFetch<{ ok: boolean; id: string }>(
+    `/api/streams/${gameId}/biometrics`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}
+
+export async function postOverlayEvent(
+  gameId: string,
+  payload: {
+    eventType: string;
+    payload?: Record<string, unknown>;
+  }
+) {
+  return apiFetch<{ ok: boolean; id: string }>(
+    `/api/streams/${gameId}/overlay/event`,
+    { method: 'POST', body: JSON.stringify(payload) }
+  );
+}

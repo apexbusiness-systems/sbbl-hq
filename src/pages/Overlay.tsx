@@ -14,6 +14,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { fetchOverlay, type OverlayPayload } from '@/lib/api/overlay';
 import { trackSponsorEvent } from '@/lib/api/sponsors';
+import { BiometricsOverlay } from '@/components/BiometricsOverlay';
+import { MicUpOverlay } from '@/components/MicUpOverlay';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import CheerMeter from '@/components/CheerMeter';
 
@@ -400,6 +402,10 @@ export default function OverlayPage() {
           </div>
         </div>
       )}
+
+      {/* WS5 and WS6 Extensions */}
+      <BiometricsOverlay />
+      <MicUpOverlay />
     </div>
   );
 }
