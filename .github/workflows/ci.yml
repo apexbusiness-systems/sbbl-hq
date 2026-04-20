@@ -77,7 +77,7 @@ jobs:
         #   • Worker routes         — src/test/worker-routes.test.ts
         #   • Worker ingress        — src/test/worker-ingress.test.ts
         #   • RLS / roles           — src/test/roles.test.ts
-        run: NODE_OPTIONS="--max-old-space-size=8192 --no-compilation-cache" npx vitest run --coverage --reporter=dot --coverage.reporter=text --coverage.reporter=json-summary
+        run: NODE_OPTIONS="--max-old-space-size=8192" npx vitest run --coverage --reporter=dot --coverage.reporter=text --coverage.reporter=json-summary
 
       - name: Upload coverage report
         if: always()
