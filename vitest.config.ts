@@ -10,20 +10,16 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules"],
-    // ── Pool: forks instead of threads ──────────────────────────────────
-    // Threads share a V8 heap; with 97 test files + Istanbul instrumentation
-    // of large source files the shared heap exceeds 8 GB and OOMs during
-    // coverage aggregation. Forks give each worker its own isolated heap so
-    // GC can reclaim between files. singleFork serialises execution: higher
-    // wall-clock time but zero OOM risk and deterministic output in CI.
-    pool: "forks",
     poolOptions: {
-      forks: {
-        singleFork: true,
+      threads: {
+        maxThreads: 2,
+        minThreads: 1,
       },
     },
-    isolate: true,
-    maxConcurrency: 1,
+    isolate: false,
+    maxConcurrency: 2,
+    testTimeout: 30000,
+    hookTimeout: 30000,
     coverage: {
       provider: "istanbul",
       // Enabled via CLI flag in CI: `vitest run --coverage`
@@ -42,7 +38,7 @@ export default defineConfig({
         "src/contexts/BagContext.tsx",
       ],
       exclude: ["src/test/**", "src/**/*.test.{ts,tsx}", "src/**/*.spec.{ts,tsx}"],
-      reporter: ["text", "json", "html"],
+      reporter: ["text", "json-summary"],
       reportsDirectory: "coverage",
       thresholds: {
         lines: 25,

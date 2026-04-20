@@ -758,10 +758,20 @@ const LivePage = () => {
         const home = await fetchPublicHome();
         const liveRows = (home.data?.liveGames ?? []) as Array<Record<string, unknown>>;
         const upcomingRows = (home.data?.upcomingGames ?? []) as Array<Record<string, unknown>>;
-        const selected = liveRows[0] ?? upcomingRows[0] ?? null;
-        if (active && selected) {
-          setLiveGame(mapHomeGameToUi(selected));
-          setActiveGameId(String(selected.id));
+        // Super-admin control identity must stay decoupled from scheduled games.
+        // When no REAL live row exists we intentionally keep activeGameId null,
+        // which keeps the admin in standalone "broadcast" mode.
+        const selected = isSuperAdmin
+          ? (liveRows[0] ?? null)
+          : (liveRows[0] ?? upcomingRows[0] ?? null);
+        if (active) {
+          if (selected) {
+            setLiveGame(mapHomeGameToUi(selected));
+            setActiveGameId(String(selected.id));
+          } else {
+            setLiveGame(null);
+            setActiveGameId(null);
+          }
         }
         if (isSuperAdmin) {
           // Admin needs full config — pass null so apiFetch uses getAuthToken()
