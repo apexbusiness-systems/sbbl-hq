@@ -46,11 +46,11 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.node.json
         continue-on-error: true
 
-  # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
+      # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -64,9 +64,9 @@ jobs:
         run: npm ci
 
       - name: Run tests with coverage
-        run: npx vitest run --coverage --reporter=dot --max-workers=2
+        run: npx vitest run --coverage --reporter=dot --max-workers=1
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          NODE_OPTIONS: --max-old-space-size=12288
           CI: true
 
       - name: Upload coverage report
