@@ -1292,7 +1292,7 @@ const LivePage = () => {
               ) : (liveGame || fallbackBroadcastGame) ? (
                <PlayerErrorBoundary key={streamNonce}>
   {(() => {
-    const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.streamUrl || "";
+    const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.stream_url || "";
 const playable = toPlayableUrl(rawUrl);
 const playableUrl = playable.url || rawUrl;   // ← the fix
 const streamType = detectStreamUrlType(playableUrl);

@@ -1,8 +1,12 @@
 import React from 'react';
 import ReactPlayer from 'react-player';
-import type { IPlaybackProvider, PlaybackConfig } from './IPlaybackProvider';
+export interface PlaybackConfig {
+  url: string;
+  muted?: boolean;
+  autoplay?: boolean;
+}
 
-export class ReactPlayerProvider implements IPlaybackProvider {
+export class ReactPlayerProvider {
   canHandle(url: string): boolean {
     return url.includes('twitch.tv') ||
             url.includes('youtube.com') ||
