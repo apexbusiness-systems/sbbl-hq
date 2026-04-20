@@ -14,13 +14,15 @@ permissions:
 
 jobs:
   patch-prelive-workflow:
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
 
       - name: Apply prelive workflow verdict-comment patch
         run: node ops/validation/apply-prelive-comment-patch.mjs

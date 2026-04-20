@@ -18,6 +18,8 @@ on:
 
 jobs:
   block-cf-rename:
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     if: github.head_ref == 'update_worker_name_to_sbbl-hq'
     name: Auto-close Cloudflare rename PR
     runs-on: ubuntu-latest

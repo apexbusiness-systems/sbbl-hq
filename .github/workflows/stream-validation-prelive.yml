@@ -9,6 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
       VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://ezanilxygnpucwkwpsoc.supabase.co' }}
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'REDACTED' }}
       VALIDATION_SOURCE_CLASSIFICATION: sandbox
@@ -19,7 +20,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
           cache: npm
 
       - name: Install dependencies

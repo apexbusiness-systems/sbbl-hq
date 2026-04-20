@@ -13,6 +13,8 @@ permissions:
 
 jobs:
   apply-final-fixpass:
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -21,7 +23,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
 
       - name: Apply deterministic contract patch pass
         run: |
