@@ -3,6 +3,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
 import LivePage from '@/pages/Live';
+import { fetchPublicHome } from '@/lib/api/public';
 
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({ user: { id: 'admin-1' }, session: { access_token: 'token' }, roles: ['super_admin'] }),
@@ -46,6 +47,39 @@ vi.mock('@/lib/api/stream', () => ({
 }));
 
 describe('Live page camera-only mode', () => {
+  it('keeps super_admin in broadcast mode even when only upcoming games exist', async () => {
+    vi.mocked(fetchPublicHome).mockResolvedValueOnce({
+      ok: true,
+      data: {
+        liveGames: [],
+        upcomingGames: [
+          {
+            id: 'upcoming-1',
+            home_team_id: 'home-team',
+            away_team_id: 'away-team',
+            home_team: { name: 'Home' },
+            away_team: { name: 'Away' },
+            league_code: 'SBBL',
+            status: 'upcoming',
+            scheduled_at: new Date().toISOString(),
+          },
+        ],
+      },
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <LivePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('live-player').textContent).toContain('broadcast');
+    });
+  });
+
   it('mounts playback with broadcast alias when live and no game rows exist', async () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>

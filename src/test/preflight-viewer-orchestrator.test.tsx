@@ -124,7 +124,12 @@ describe('ViewerPreflight', () => {
         capabilitiesOverride={modernCaps}
       />,
     );
-    fireEvent.click(screen.getByTestId('preflight-remediation-cta'));
+    const ctas = screen.getAllByTestId('preflight-remediation-cta');
+    const cta = ctas.find(
+      (el) => (el as HTMLElement).dataset.action === 'displace_session',
+    );
+    expect(cta).toBeDefined();
+    fireEvent.click(cta as HTMLElement);
     expect(onRemediate).toHaveBeenCalledTimes(1);
     expect(onRemediate.mock.calls[0][0].remediation.action).toBe('displace_session');
   });

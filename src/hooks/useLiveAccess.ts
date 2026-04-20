@@ -107,15 +107,16 @@ export function useLiveAccess() {
     const supabase = getSupabaseClient();
     if (!supabase) return;
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    const authChange = supabase.auth.onAuthStateChange?.((event) => {
       if (event === 'SIGNED_OUT') {
         localStorage.removeItem(DEVICE_KEY);
         setResolveSignal(s => s + 1);
       } else if (event === 'SIGNED_IN') {
         setResolveSignal(s => s + 1);
       }
-    });
-    return () => subscription.unsubscribe();
+    }) ?? { data: { subscription: null } };
+    const { data: { subscription } = {} } = authChange;
+    return () => subscription?.unsubscribe();
   }, []);
 
   return { access, config };
