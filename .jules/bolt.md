@@ -12,3 +12,6 @@
 ## 2026-04-20 - [Chunked Base64 String Encoding]
 **Learning:** String concatenation inside a loop over a large Uint8Array creates excessive intermediate allocations and severe CPU/Memory pressure in V8/Cloudflare Workers.
 **Action:** Use chunked processing using `String.fromCharCode.apply` with a safe chunk size (e.g. 8192) to vastly minimize intermediate strings and speed up large buffer-to-string operations (~45% speedup on large arrays).
+## 2026-04-20 - [Typechecking]
+**Learning:** Be careful with type coercion like `as any` and renaming variables like `streamUrl` without verifying all places where the variable was referenced.
+**Action:** Always run `npm run typecheck` before committing to avoid breaking the CI.
