@@ -16,7 +16,6 @@ export default defineConfig({
       // Local dev: `vitest run` skips coverage for speed.
       enabled: false,
       include: [
-        "src/worker/index.ts",
         "src/lib/api/stream.ts",
         "src/pages/Live.tsx",
         "src/contexts/AppContext.tsx",
