@@ -15,3 +15,6 @@
 ## 2026-04-20 - [Typechecking]
 **Learning:** Be careful with type coercion like `as any` and renaming variables like `streamUrl` without verifying all places where the variable was referenced.
 **Action:** Always run `npm run typecheck` before committing to avoid breaking the CI.
+## 2026-04-20 - [Fixing Vitest OOM]
+**Learning:** Using `istanbul` for coverage in large React/JSDOM test suites will store the entire AST in memory and consume >8GB of heap, crashing Github Actions runners.
+**Action:** Replace `@vitest/coverage-istanbul` with `@vitest/coverage-v8` and configure `provider: "v8"` in `vitest.config.ts`.

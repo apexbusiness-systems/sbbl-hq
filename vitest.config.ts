@@ -11,7 +11,7 @@ export default defineConfig({
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules"],
     coverage: {
-      provider: "istanbul",
+      provider: "v8",
       // Enabled via CLI flag in CI: `vitest run --coverage`
       // Local dev: `vitest run` skips coverage for speed.
       enabled: false,
