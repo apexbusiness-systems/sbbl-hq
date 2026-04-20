@@ -66,7 +66,7 @@ jobs:
       - name: Run tests with coverage
         run: npx vitest run --coverage --reporter=dot --max-workers=1
         env:
-          NODE_OPTIONS: --max-old-space-size=12288
+          NODE_OPTIONS: --max-old-space-size=8192
           CI: true
 
       - name: Upload coverage report
