@@ -5,6 +5,14 @@ import path from "path";
 export default defineConfig({
   plugins: [react()],
   test: {
+    pool: "forks",
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
+    isolate: true,
+    maxConcurrency: 1,
     environment: "jsdom",
     globals: true,
     setupFiles: ["./src/test/setup.ts"],
