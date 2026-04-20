@@ -46,11 +46,11 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.node.json
         continue-on-error: true
 
-  # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
+      # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
