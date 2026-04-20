@@ -26,7 +26,11 @@ export default defineConfig({
       // Local dev: `vitest run` skips coverage for speed.
       enabled: false,
       include: [
-        "src/worker/index.ts",
+        // NOTE: src/worker/index.ts is intentionally excluded from coverage.
+        // It is 7 400+ lines; Istanbul AST-instrumentation allocates ~600 MB
+        // of heap per worker, pushing aggregation past the 8 GB budget.
+        // Worker routes are integration-tested via worker-routes.test.ts;
+        // statement-level coverage is tracked in the build-chaos-battery workflow.
         "src/lib/api/stream.ts",
         "src/pages/Live.tsx",
         "src/contexts/AppContext.tsx",

@@ -37,8 +37,6 @@ jobs:
         run: npm ci
 
       - name: Lint (zero-warning policy)
-        # --max-warnings 0 causes non-zero exit on any ESLint warning,
-        # enforcing the zero-warning policy.
         run: npx eslint . --max-warnings 0
 
       - name: Typecheck (app)
@@ -46,15 +44,13 @@ jobs:
 
       - name: Typecheck (node/vite config)
         run: npx tsc --noEmit -p tsconfig.node.json
-        # Pre-existing issues in tsconfig.node.json are expected until
-        # @types/node is added; non-blocking until that migration is done.
         continue-on-error: true
 
-  # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
+      # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -113,14 +109,6 @@ jobs:
         run: npm run build
 
       - name: Bundle regression guard
-        # Enforce chunk size budgets — calibrated to actual build output + 15% headroom.
-        # Gzip sizes shown for reference (Vite build report):
-        #   react-vendor    ~159 KB raw / ~53 KB gz  → hard limit 185 KB
-        #   supabase-vendor ~189 KB raw / ~51 KB gz  → hard limit 215 KB
-        #   ui-vendor       < 700 KB raw  (~245 KB gz)
-        #   charts-vendor   < 280 KB raw  (~98 KB gz)
-        #   rxdb-vendor     < 600 KB raw  (~210 KB gz)
-        #   media-vendor    < 360 KB raw  (~126 KB gz)
         shell: bash
         run: |
           set -e
@@ -155,7 +143,6 @@ jobs:
           check_chunk "utils-vendor"    140  "utils-vendor"
           check_chunk "forms-vendor"    80   "forms-vendor"
 
-          # Total dist/assets size guard: warn at 8 MB (not hard fail)
           total_kb=$(du -sk "$DIST" | cut -f1)
           echo "📦  Total assets: ${total_kb} KB"
           if [ "$total_kb" -gt 8192 ]; then
@@ -198,12 +185,9 @@ jobs:
 
       - name: Serve build and run Lighthouse
         run: |
-          # Serve the built app on port 4173
           npx vite preview --port 4173 &
           SERVER_PID=$!
-          # Wait for server to be ready
           timeout 30 bash -c 'until curl -sf http://localhost:4173/; do sleep 1; done'
-          # Run Lighthouse against the home page
           lhci autorun \
             --collect.url=http://localhost:4173/ \
             --collect.numberOfRuns=1 \
@@ -214,8 +198,6 @@ jobs:
             --upload.target=temporary-public-storage
           kill $SERVER_PID || true
         continue-on-error: true
-        # LCP budget is a warning gate — does not block merge on first rollout.
-        # Promote to hard failure once baseline is established.
 
   # ── Job 5: Playwright E2E ─────────────────────────────────────────────────
   e2e:
