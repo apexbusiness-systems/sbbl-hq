@@ -37,7 +37,8 @@ export const BagDrawer = () => {
   const handleCheckout = async () => {
     if (!session) { toast.error('Sign in to complete your purchase.'); return; }
     const lineItems = bagItems.reduce<Array<{ id: string; name: string; price: number; qty: number }>>((acc, id) => {
-      const product = products.find(p => p.id === id);
+      // ⚡ Bolt: Use pre-computed productMap for O(1) lookup inside loop
+      const product = productMap[id];
       if (!product || product.price === 0) return acc; // skip reward/free items
       const existing = acc.find(i => i.name === product.name);
       if (existing) { existing.qty += 1; } else { acc.push({ id: product.id, name: product.name, price: product.price, qty: 1 }); }
