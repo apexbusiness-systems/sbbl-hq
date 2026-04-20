@@ -259,9 +259,12 @@ type ProxyTokenPayload = {
 };
 
 function toBase64Url(input: Uint8Array): string {
-  let binary = "";
-  for (let i = 0; i < input.byteLength; i += 1) binary += String.fromCharCode(input[i]);
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+  const chunkSize = 8192;
+  const chunks: string[] = [];
+  for (let i = 0; i < input.length; i += chunkSize) {
+    chunks.push(String.fromCharCode.apply(null, Array.from(input.subarray(i, i + chunkSize))));
+  }
+  return btoa(chunks.join("")).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 function fromBase64Url(input: string): Uint8Array | null {
