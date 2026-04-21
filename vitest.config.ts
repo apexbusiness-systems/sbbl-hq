@@ -32,6 +32,13 @@ export default defineConfig({
         statements: 23,
       },
     },
+    pool: "threads",
+    poolOptions: {
+      threads: {
+        singleThread: true,
+        isolate: false
+      }
+    }
   },
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
