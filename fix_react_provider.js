@@ -1,4 +1,7 @@
-import React from 'react';
+import fs from 'fs';
+
+const path = 'src/lib/playback/ReactPlayerProvider.tsx';
+let content = `import React from 'react';
 import ReactPlayer from 'react-player';
 
 export class ReactPlayerProvider {
@@ -29,7 +32,7 @@ export class ReactPlayerProvider {
             twitch: {
               options: {
                 // MANDATORY: Without this, Twitch will block the embed in production
-                parent: ["sbbl-hq.icu", "localhost"], 
+                parent: ["sbbl-hq.icu", "localhost"],
                 muted: muted,
                 autoplay: autoplay,
               },
@@ -41,3 +44,5 @@ export class ReactPlayerProvider {
     );
   }
 }
+`
+fs.writeFileSync(path, content, 'utf8');

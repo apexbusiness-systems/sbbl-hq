@@ -119,7 +119,7 @@ function AdminStreamOverlay({
   const [compCode, setCompCode] = useState<string | null>(null);
   const [compExpiresAt, setCompExpiresAt] = useState<string | null>(null);
   const [compCopied, setCompCopied] = useState(false);
-  const [streamUrlError, setStreamUrlError] = useState<string | null>(null);
+  const [stream_urlError, setStreamUrlError] = useState<string | null>(null);
   const [urlTypeAdvisory, setUrlTypeAdvisory] = useState<string | null>(null);
   // Local file preview state. Creating a blob: URL lets the admin instantly
   // review any highlight clip before Go Live. The preview URL is what drops
@@ -156,7 +156,7 @@ function AdminStreamOverlay({
     setLocalFileName(file.name);
     setCustomStreamUrl(blobUrl);
     setUrlTypeAdvisory(getStreamTypeAdvisory(detectStreamUrlType(blobUrl)).message || null);
-    if (streamUrlError) setStreamUrlError(null);
+    if (stream_urlError) setStreamUrlError(null);
     // Reset the input so selecting the same file again still fires change.
     evt.target.value = '';
   };
@@ -276,7 +276,7 @@ function AdminStreamOverlay({
   const handleGoLive = async () => {
     const nextLive = !isLive;
     const trimmedUrl = customStreamUrl.trim();
-    if (streamUrlError) setStreamUrlError(null);
+    if (stream_urlError) setStreamUrlError(null);
     // Normalize YouTube short URLs to canonical watch URL before persisting
     const normalizedUrl = trimmedUrl ? (toPlayableUrl(trimmedUrl).url || trimmedUrl) : trimmedUrl;
     setSaving(true);
@@ -385,7 +385,7 @@ function AdminStreamOverlay({
                   onChange={e => {
                     const val = e.target.value;
                     setCustomStreamUrl(val);
-                    if (streamUrlError) setStreamUrlError(null);
+                    if (stream_urlError) setStreamUrlError(null);
                     // URL type detection + centralized advisory
                     if (val.trim()) {
                       const advisory = getStreamTypeAdvisory(detectStreamUrlType(val.trim()));
@@ -403,10 +403,10 @@ function AdminStreamOverlay({
                   </span>
                 )}
               </div>
-              {streamUrlError && (
-                <p className="mt-1 text-[10px] text-red-300">{streamUrlError}</p>
+              {stream_urlError && (
+                <p className="mt-1 text-[10px] text-red-300">{stream_urlError}</p>
               )}
-              {urlTypeAdvisory && !streamUrlError && (() => {
+              {urlTypeAdvisory && !stream_urlError && (() => {
                 const advisory = getStreamTypeAdvisory(detectStreamUrlType(customStreamUrl.trim()));
                 return (
                   <p className={`mt-1 text-[10px] leading-relaxed ${
@@ -1292,7 +1292,7 @@ const LivePage = () => {
               ) : (liveGame || fallbackBroadcastGame) ? (
                <PlayerErrorBoundary key={streamNonce}>
   {(() => {
-    const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.streamUrl || "";
+    const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.stream_url || "";
 const playable = toPlayableUrl(rawUrl);
 const playableUrl = playable.url || rawUrl;   // ← the fix
 const streamType = detectStreamUrlType(playableUrl);
@@ -1325,10 +1325,10 @@ const streamType = detectStreamUrlType(playableUrl);
               },
             }}
             style={{ position: "absolute", top: 0, left: 0 }}
-            onError={(e: any) => {
+            onError={(e: unknown) => {
               console.error(`[Live] ${streamType} player error:`, e);
-              if (typeof window !== "undefined" && (window as any).toast) {
-                (window as any).toast.error(`Failed to load ${streamType} stream`);
+              if (typeof window !== "undefined" && (window as unknown as { toast?: { error: (msg: string) => void } }).toast) {
+                (window as unknown as { toast?: { error: (msg: string) => void } }).toast.error(`Failed to load ${streamType} stream`);
               }
             }}
           />

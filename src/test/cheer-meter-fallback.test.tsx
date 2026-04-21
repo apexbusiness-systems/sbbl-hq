@@ -33,16 +33,14 @@ describe('CheerMeter Fallback Error Path', () => {
   });
 
   it('resets to ZERO_COUNTS when fetchReactionAggregate throws an error', async () => {
-    vi.mocked(reactionApi.fetchReactionAggregate).mockResolvedValueOnce(
-      Promise.resolve({
-        ok: true,
-        data: [
-          { reaction_type: 'fire', count: 10 },
-          { reaction_type: 'heart', count: 20 },
-          { reaction_type: 'clap', count: 30 },
-        ] as reactionApi.ReactionAggregate[]
-      } as Awaited<ReturnType<typeof reactionApi.fetchReactionAggregate>>)
-    );
+    vi.mocked(reactionApi.fetchReactionAggregate).mockResolvedValueOnce({
+      ok: true,
+      data: [
+        { reaction_type: 'fire', count: 10 },
+        { reaction_type: 'heart', count: 20 },
+        { reaction_type: 'clap', count: 30 },
+      ] as reactionApi.ReactionAggregate[]
+    } as unknown as Awaited<ReturnType<typeof reactionApi.fetchReactionAggregate>>);
 
     render(<CheerMeter gameId="test-game-123" />);
 
@@ -72,16 +70,14 @@ describe('CheerMeter Fallback Error Path', () => {
   });
 
   it('resets to ZERO_COUNTS when fetchReactionAggregate returns ok: false', async () => {
-    vi.mocked(reactionApi.fetchReactionAggregate).mockResolvedValueOnce(
-      Promise.resolve({
-        ok: true,
-        data: [
-          { reaction_type: 'fire', count: 5 },
-          { reaction_type: 'heart', count: 5 },
-          { reaction_type: 'clap', count: 5 },
-        ] as reactionApi.ReactionAggregate[]
-      } as Awaited<ReturnType<typeof reactionApi.fetchReactionAggregate>>)
-    );
+    vi.mocked(reactionApi.fetchReactionAggregate).mockResolvedValueOnce({
+      ok: true,
+      data: [
+        { reaction_type: 'fire', count: 5 },
+        { reaction_type: 'heart', count: 5 },
+        { reaction_type: 'clap', count: 5 },
+      ] as reactionApi.ReactionAggregate[]
+    } as unknown as Awaited<ReturnType<typeof reactionApi.fetchReactionAggregate>>);
 
     render(<CheerMeter gameId="test-game-123" />);
 
@@ -90,12 +86,10 @@ describe('CheerMeter Fallback Error Path', () => {
       expect(initialCounts).toHaveLength(3);
     });
 
-    vi.mocked(reactionApi.fetchReactionAggregate).mockResolvedValueOnce(
-      Promise.resolve({
-        ok: false,
-        error: 'Not found'
-      } as unknown as Awaited<ReturnType<typeof reactionApi.fetchReactionAggregate>>)
-    );
+    vi.mocked(reactionApi.fetchReactionAggregate).mockResolvedValueOnce({
+      ok: false,
+      error: 'Not found'
+    } as unknown as Awaited<ReturnType<typeof reactionApi.fetchReactionAggregate>>);
 
     await act(async () => {
       vi.advanceTimersByTime(30000);
