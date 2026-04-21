@@ -68,7 +68,7 @@ jobs:
         run: npm ci
 
       - name: Run tests with coverage
-        run: npx vitest run --coverage --reporter=verbose --pool=forks --poolOptions.forks.singleFork=true
+        run: npx vitest run --coverage --reporter=dot
         env:
           NODE_OPTIONS: --max-old-space-size=8192
           CI: true
