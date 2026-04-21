@@ -68,10 +68,20 @@ jobs:
         run: npm ci
 
       - name: Run tests with coverage
-        run: npx vitest run --coverage --reporter=dot
-        env:
-          NODE_OPTIONS: --max-old-space-size=8192
-          CI: true
+        # Test matrix — the following scenarios are covered by the test suite:
+        #   • Registration flow     — src/test/worker-stripe-webhook.test.ts
+        #   • Login / auth          — src/test/login-page.test.tsx
+        #                             src/test/worker-auth.test.ts
+        #   • Stripe payment / PPV  — src/test/worker-stripe-ppv.test.ts
+        #   • Schedule view         — src/test/worker-teams-route.test.ts
+        #   • Live game update      — src/test/live-page-secure-path.test.tsx
+        #   • Standings view        — src/test/teams-page.test.tsx
+        #   • Webhook idempotency   — src/test/idempotency.test.ts
+        #                             src/test/stripe-signature-parsing.test.ts
+        #   • Worker routes         — src/test/worker-routes.test.ts
+        #   • Worker ingress        — src/test/worker-ingress.test.ts
+        #   • RLS / roles           — src/test/roles.test.ts
+        run: NODE_OPTIONS="--max-old-space-size=8192" npx vitest run --coverage --reporter=dot --coverage.reporter=text --coverage.reporter=json-summary
 
       - name: Upload coverage report
         if: always()
