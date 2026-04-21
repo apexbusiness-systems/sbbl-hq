@@ -104,7 +104,7 @@ describe('ViewerPreflight', () => {
         capabilitiesOverride={modernCaps}
       />,
     );
-    const cta = screen.getByTestId('preflight-remediation-cta');
+    const cta = screen.getAllByTestId('preflight-remediation-cta')[0];
     expect(cta).toHaveAttribute('data-action', 'sign_in');
   });
 
@@ -124,7 +124,7 @@ describe('ViewerPreflight', () => {
         capabilitiesOverride={modernCaps}
       />,
     );
-    fireEvent.click(screen.getByTestId('preflight-remediation-cta'));
+    fireEvent.click(screen.getAllByTestId('preflight-remediation-cta')[0]);
     expect(onRemediate).toHaveBeenCalledTimes(1);
     expect(onRemediate.mock.calls[0][0].remediation.action).toBe('displace_session');
   });

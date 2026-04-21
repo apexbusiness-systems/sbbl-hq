@@ -17,7 +17,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Remove invalid password_hibp_enabled auth key
         run: node ops/validation/patch-supabase-config-hibp.mjs

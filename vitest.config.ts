@@ -7,13 +7,17 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    pool: "threads",
+    poolOptions: {
+      threads: {
+        singleThread: true,
+      },
+    },
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules"],
     coverage: {
       provider: "istanbul",
-      // Enabled via CLI flag in CI: `vitest run --coverage`
-      // Local dev: `vitest run` skips coverage for speed.
       enabled: false,
       include: [
         "src/worker/index.ts",
