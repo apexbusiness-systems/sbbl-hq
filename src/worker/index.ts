@@ -303,7 +303,7 @@ async function verifyProxyToken(token: string, secret: string): Promise<ProxyTok
     false,
     ["verify"],
   );
-  const valid = await crypto.subtle.verify("HMAC", key, signatureBytes, payloadBytes);
+  const valid = await crypto.subtle.verify("HMAC", key, signatureBytes as unknown as ArrayBuffer, payloadBytes as unknown as ArrayBuffer);
   if (!valid) return null;
   const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as ProxyTokenPayload;
   if (

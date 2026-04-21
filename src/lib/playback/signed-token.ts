@@ -145,7 +145,7 @@ export async function verifyPlaybackToken(
   const valid = await crypto.subtle.verify(
     'HMAC',
     key,
-    sig,
+    sig as unknown as ArrayBuffer,
     new TextEncoder().encode(`${headerB64}.${payloadB64}`),
   );
   if (!valid) return { ok: false, reason: 'bad_signature' };
