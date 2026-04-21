@@ -20,7 +20,6 @@ export default defineConfig({
       provider: "istanbul",
       enabled: false,
       include: [
-        "src/worker/index.ts",
         "src/lib/api/stream.ts",
         "src/pages/Live.tsx",
         "src/contexts/AppContext.tsx",

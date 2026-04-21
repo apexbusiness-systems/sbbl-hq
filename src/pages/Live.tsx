@@ -1,3 +1,4 @@
+import ReactPlayer from "react-player";
 import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
 import { Navigate } from 'react-router-dom';
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -1290,14 +1291,45 @@ const LivePage = () => {
                 </div>
               ) : (liveGame || fallbackBroadcastGame) ? (
                 <PlayerErrorBoundary key={streamNonce}>
-                  <LiveStreamPlayer
-                    game={(liveGame ?? fallbackBroadcastGame)!}
-                    userId={user?.id ?? null}
-                    roles={roles}
-                    hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-                    isStreamLive={isStreamLive}
-                  />
-                </PlayerErrorBoundary>
+  {(() => {
+    const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.stream_url || "";
+const playable = toPlayableUrl(rawUrl);
+const playableUrl = playable.url || rawUrl;   // ← the fix
+const streamType = detectStreamUrlType(playableUrl);
+
+    if (streamType === "twitch" || streamType === "youtube") {
+      return (
+        <div className="relative w-full aspect-video bg-[#0A0A0A] rounded-xl overflow-hidden border border-[#111111]">
+          <ReactPlayer
+            url={playableUrl}
+            width="100%"
+            height="100%"
+            playing={true}
+            controls={true}
+            config={{
+              youtube: { playerVars: { origin: window.location.origin } },
+              twitch: { options: { parent: [window.location.hostname] } },
+            }}
+          />
+          <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full bg-red-600/90 px-2.5 py-0.5 text-[10px] font-bold tracking-[0.5px] text-white">
+            LIVE
+          </div>
+        </div>
+      );
+    }
+
+    // All existing WHEP / HLS / native paths unchanged
+    return (
+      <LiveStreamPlayer
+        game={(liveGame ?? fallbackBroadcastGame) as NonNullable<typeof liveGame>}
+        userId={user?.id ?? null}
+        roles={roles}
+        hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+        isStreamLive={isStreamLive}
+      />
+    );
+  })()}
+</PlayerErrorBoundary>
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
                   <div className="w-14 h-14 rounded-full bg-secondary/50 flex items-center justify-center mb-3">
