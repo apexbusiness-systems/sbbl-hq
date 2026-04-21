@@ -1,3 +1,11 @@
+## [v1.3.0] - 2026-04-20
+
+- Root cleanup: Removed temp artifacts, extracted raw zip skills into structured `skills/` directories, and moved Python OCR logic into `scripts/ocr-pipeline/`.
+- Standardized on `bun.lock`.
+- Config Hardening: Replaced production URLs in README, set `strict: true` across tsconfigs, and fixed all TypeScript errors.
+- Added GitHub Issue/PR templates.
+
+
 <!-- Version: v1.3.0 | Date: 2026-04-19 | Status: Current -->
 # CHANGELOG
 
