@@ -36,13 +36,19 @@ export const BagDrawer = () => {
 
   const handleCheckout = async () => {
     if (!session) { toast.error('Sign in to complete your purchase.'); return; }
-    const lineItems = bagItems.reduce<Array<{ id: string; name: string; price: number; qty: number }>>((acc, id) => {
-      const product = products.find(p => p.id === id);
+    // ⚡ Bolt Performance Optimization: Replace O(N^2) array .find() lookups with O(N) single pass dictionary reduction.
+    // We use the pre-computed `productMap` for O(1) product lookup and an intermediate Record to tally quantities in O(1).
+    const lineItemsRecord = bagItems.reduce<Record<string, { id: string; name: string; price: number; qty: number }>>((acc, id) => {
+      const product = productMap[id];
       if (!product || product.price === 0) return acc; // skip reward/free items
-      const existing = acc.find(i => i.name === product.name);
-      if (existing) { existing.qty += 1; } else { acc.push({ id: product.id, name: product.name, price: product.price, qty: 1 }); }
+      if (acc[product.name]) {
+        acc[product.name].qty += 1;
+      } else {
+        acc[product.name] = { id: product.id, name: product.name, price: product.price, qty: 1 };
+      }
       return acc;
-    }, []);
+    }, {});
+    const lineItems = Object.values(lineItemsRecord);
     if (!lineItems.length) { toast.error('No purchasable items in bag.'); return; }
     setCheckingOut(true);
     try {

@@ -1325,10 +1325,10 @@ const streamType = detectStreamUrlType(playableUrl);
               },
             }}
             style={{ position: "absolute", top: 0, left: 0 }}
-            onError={(e: any) => {
+            onError={(e: Error | unknown) => {
               console.error(`[Live] ${streamType} player error:`, e);
-              if (typeof window !== "undefined" && (window as any).toast) {
-                (window as any).toast.error(`Failed to load ${streamType} stream`);
+              if (typeof window !== "undefined" && ('toast' in window)) {
+                (window as { toast?: { error: (msg: string) => void } }).toast?.error(`Failed to load ${streamType} stream`);
               }
             }}
           />
