@@ -3,7 +3,7 @@ import { webcrypto } from 'node:crypto';
 
 // Polyfill Web Crypto API for tests
 if (typeof globalThis.crypto === 'undefined') {
-  // @ts-ignore - safe polyfill for testing
+  // @ts-expect-error - safe polyfill for testing
   globalThis.crypto = webcrypto;
 }
 
