@@ -1,4 +1,3 @@
-import ReactPlayer from "react-player";
 import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
 import { Navigate } from 'react-router-dom';
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -84,6 +83,18 @@ function mapHomeGameToUi(row: Record<string, unknown>): Game {
     ppvPrice: 4.99,
     stream_url: typeof row.stream_url === 'string' ? row.stream_url : null,
   };
+}
+
+function isSameLiveGame(prev: Game | null, next: Game | null): boolean {
+  if (prev === next) return true;
+  if (!prev || !next) return false;
+  return (
+    prev.id === next.id &&
+    prev.status === next.status &&
+    prev.stream_url === next.stream_url &&
+    prev.score.home === next.score.home &&
+    prev.score.away === next.score.away
+  );
 }
 
 // ── Admin Stream Overlay ──────────────────────────────────────────────────
@@ -759,9 +770,11 @@ const LivePage = () => {
         const liveRows = (home.data?.liveGames ?? []) as Array<Record<string, unknown>>;
         const upcomingRows = (home.data?.upcomingGames ?? []) as Array<Record<string, unknown>>;
         const selected = liveRows[0] ?? upcomingRows[0] ?? null;
-        if (active && selected) {
-          setLiveGame(mapHomeGameToUi(selected));
-          setActiveGameId(String(selected.id));
+        const nextActiveGameId = selected ? String(selected.id) : null;
+        const nextLiveGame = selected ? mapHomeGameToUi(selected) : null;
+        if (active) {
+          setActiveGameId((prev) => (prev === nextActiveGameId ? prev : nextActiveGameId));
+          setLiveGame((prev) => (isSameLiveGame(prev, nextLiveGame) ? prev : nextLiveGame));
         }
         if (isSuperAdmin) {
           // Admin needs full config — pass null so apiFetch uses getAuthToken()
@@ -769,17 +782,23 @@ const LivePage = () => {
           // a React closure here; it goes stale and causes endless 401 loops.
           const res = await fetchAdminStreamConfig(null);
           if (active && res?.config) {
-            setIsStreamLive(res.config.isLive);
-            setStreamTitle(res.config.title);
-            setCustomStreamUrl(res.config.collectionId || ''); // collectionId stores the stream URL
+            const nextIsLive = Boolean(res.config.isLive);
+            const nextTitle = typeof res.config.title === 'string' ? res.config.title : 'Live Game Broadcast';
+            const nextCustomStreamUrl = res.config.collectionId || '';
+            setIsStreamLive((prev) => (prev === nextIsLive ? prev : nextIsLive));
+            setStreamTitle((prev) => (prev === nextTitle ? prev : nextTitle));
+            setCustomStreamUrl((prev) => (prev === nextCustomStreamUrl ? prev : nextCustomStreamUrl)); // collectionId stores the stream URL
           }
         } else {
           // Public poller
           const res = await fetchPublicStreamStatus();
           if (active && res?.ok) {
-            setIsStreamLive(Boolean(res.isLive));
-            setStreamTitle(typeof res.title === 'string' ? res.title : 'Live Game Broadcast');
-            setViewerCount(typeof res.viewerCount === 'number' && res.viewerCount >= 0 ? res.viewerCount : 0);
+            const nextIsLive = Boolean(res.isLive);
+            const nextTitle = typeof res.title === 'string' ? res.title : 'Live Game Broadcast';
+            const nextViewerCount = typeof res.viewerCount === 'number' && res.viewerCount >= 0 ? res.viewerCount : 0;
+            setIsStreamLive((prev) => (prev === nextIsLive ? prev : nextIsLive));
+            setStreamTitle((prev) => (prev === nextTitle ? prev : nextTitle));
+            setViewerCount((prev) => (prev === nextViewerCount ? prev : nextViewerCount));
           }
         }
         // Mark initial poll done on first successful fetch
@@ -894,6 +913,14 @@ const LivePage = () => {
       ppvPrice: 0,
     };
   }, [hasPrivilegedBroadcastAccess, isStreamLive, liveGame]);
+  const resolvedGame = useMemo<Game | null>(() => {
+    const baseGame = liveGame ?? fallbackBroadcastGame;
+    if (!baseGame) return null;
+    return {
+      ...baseGame,
+      stream_url: customStreamUrl || baseGame.stream_url || null,
+    };
+  }, [customStreamUrl, fallbackBroadcastGame, liveGame]);
   const showPreflight = isViewerPreflightEnabled() && !!activeGameId && activeGameId !== 'broadcast' && !preflightReady;
   const tokenEnabled = isFanTokenSystemEnabled();
   const biometricsEnabled = isBiometricOverlayEnabled();
@@ -1289,68 +1316,16 @@ const LivePage = () => {
                     onRetry={() => void preflightQuery.refetch()}
                   />
                 </div>
-              ) : (liveGame || fallbackBroadcastGame) ? (
-               <PlayerErrorBoundary key={streamNonce}>
-  {(() => {
-    const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.streamUrl || "";
-const playable = toPlayableUrl(rawUrl);
-const playableUrl = playable.url || rawUrl;   // ← the fix
-const streamType = detectStreamUrlType(playableUrl);
-
-    if (streamType === "twitch" || streamType === "youtube") {
-      return (
-        <div className="relative w-full aspect-video bg-[#0A0A0A] rounded-xl overflow-hidden border border-[#111111]">
-          <ReactPlayer
-            url={playableUrl}
-            width="100%"
-            height="100%"
-            playing
-            muted={false}
-            controls
-            config={{
-              twitch: {
-                options: {
-                  // MANDATORY for production on sbbl-hq.icu
-                  parent: ["sbbl-hq.icu", "localhost"],
-                  muted: false,
-                  autoplay: true,
-                },
-              },
-              youtube: {
-                playerVars: {
-                  modestbranding: 1,
-                  rel: 0,
-                  autoplay: 1,
-                },
-              },
-            }}
-            style={{ position: "absolute", top: 0, left: 0 }}
-            onError={(e: any) => {
-              console.error(`[Live] ${streamType} player error:`, e);
-              if (typeof window !== "undefined" && (window as any).toast) {
-                (window as any).toast.error(`Failed to load ${streamType} stream`);
-              }
-            }}
-          />
-          <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full bg-red-600/90 px-2.5 py-0.5 text-[10px] font-bold tracking-[0.5px] text-white">
-            LIVE
-          </div>
-        </div>
-      );
-    }
-
-    // All existing WHEP / HLS / native paths unchanged
-    return (
-      <LiveStreamPlayer
-        game={(liveGame ?? fallbackBroadcastGame)!}
-        userId={user?.id ?? null}
-        roles={roles}
-        hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-        isStreamLive={isStreamLive}
-      />
-    );
-  })()}
-</PlayerErrorBoundary>
+              ) : resolvedGame ? (
+                <PlayerErrorBoundary key={streamNonce}>
+                  <LiveStreamPlayer
+                    game={resolvedGame}
+                    userId={user?.id ?? null}
+                    roles={roles}
+                    hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                    isStreamLive={isStreamLive}
+                  />
+                </PlayerErrorBoundary>
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
                   <div className="w-14 h-14 rounded-full bg-secondary/50 flex items-center justify-center mb-3">
