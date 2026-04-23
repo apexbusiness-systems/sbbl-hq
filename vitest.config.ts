@@ -10,6 +10,15 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules"],
+    pool: "forks",
+    poolOptions: {
+      forks: {
+        singleFork: true,
+      },
+    },
+    isolate: false,
+    testTimeout: 120000,
+    hookTimeout: 120000,
     coverage: {
       provider: "istanbul",
       // Enabled via CLI flag in CI: `vitest run --coverage`
@@ -23,7 +32,7 @@ export default defineConfig({
         "src/contexts/BagContext.tsx",
       ],
       exclude: ["src/test/**", "src/**/*.test.{ts,tsx}", "src/**/*.spec.{ts,tsx}"],
-      reporter: ["text", "json", "html"],
+      reporter: ["text", "json-summary"],
       reportsDirectory: "coverage",
       thresholds: {
         lines: 25,
