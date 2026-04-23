@@ -11,7 +11,7 @@ export default defineConfig({
     include: ["src/**/*.{test,spec}.{ts,tsx}"],
     exclude: ["node_modules"],
     coverage: {
-      provider: "istanbul",
+            provider: "istanbul",
       // Enabled via CLI flag in CI: `vitest run --coverage`
       // Local dev: `vitest run` skips coverage for speed.
       enabled: false,
@@ -23,7 +23,9 @@ export default defineConfig({
         "src/contexts/BagContext.tsx",
       ],
       exclude: ["src/test/**", "src/**/*.test.{ts,tsx}", "src/**/*.spec.{ts,tsx}"],
-      reporter: ["text", "json", "html"],
+      reporter: process.env.CI ? ["text", "json"] : ["text", "json", "html"],
+      // CI: reduce instrumentation memory footprint while preserving signal.
+      all: false,
       reportsDirectory: "coverage",
       thresholds: {
         lines: 25,

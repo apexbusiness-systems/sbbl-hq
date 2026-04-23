@@ -758,10 +758,18 @@ const LivePage = () => {
         const home = await fetchPublicHome();
         const liveRows = (home.data?.liveGames ?? []) as Array<Record<string, unknown>>;
         const upcomingRows = (home.data?.upcomingGames ?? []) as Array<Record<string, unknown>>;
-        const selected = liveRows[0] ?? upcomingRows[0] ?? null;
-        if (active && selected) {
-          setLiveGame(mapHomeGameToUi(selected));
-          setActiveGameId(String(selected.id));
+        // Super admins can run spontaneous broadcasts from /live with no game row,
+        // so never auto-bind them to upcomingGames[0]. Viewers still resolve to
+        // live -> upcoming for preflight/paywall flows.
+        const selected = liveRows[0] ?? (!isSuperAdmin ? upcomingRows[0] : null) ?? null;
+        if (active) {
+          const nextGameId = selected ? String(selected.id) : null;
+          setActiveGameId((prev) => (prev === nextGameId ? prev : nextGameId));
+          setLiveGame((prev) => {
+            if (!selected) return null;
+            if (prev?.id === nextGameId) return prev;
+            return mapHomeGameToUi(selected);
+          });
         }
         if (isSuperAdmin) {
           // Admin needs full config — pass null so apiFetch uses getAuthToken()
