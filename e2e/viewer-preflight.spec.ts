@@ -18,9 +18,9 @@ test.beforeEach(async ({ page }) => {
       contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        data: {
-          liveGames: [],
-          upcomingGames: [
+        // Worker returns top-level fields; fetchPublicHome normalizes into data.
+        liveGames: [],
+        upcomingGames: [
           {
             id: GAME_ID,
             home_team_id: 'home-team',
@@ -31,8 +31,7 @@ test.beforeEach(async ({ page }) => {
             status: 'upcoming',
             scheduled_at: new Date().toISOString(),
           },
-          ],
-        },
+        ],
       }),
     });
   });
