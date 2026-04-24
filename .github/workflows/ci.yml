@@ -64,9 +64,9 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npx vitest run --reporter=dot --pool=forks --poolOptions.forks.singleFork=true
+        run: npx vitest run --reporter=dot --pool=forks
         env:
-          NODE_OPTIONS: --max-old-space-size=12288
+          NODE_OPTIONS: --max-old-space-size=7168
           CI: true
 
       - name: Upload coverage report
