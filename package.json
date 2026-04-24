@@ -30,7 +30,10 @@
     "test:stream:perf": "node ops/validation/stream-validation.mjs perf",
     "test:stream:all": "npm run test:stream:unit && npm run test:stream:int && npm run test:stream:e2e && npm run test:stream:perf",
     "validate:stream:gate": "node ops/validation/stream-validation.mjs gate",
-    "validate:prelive": "node ops/validation/stream-validation.mjs prelive"
+    "validate:prelive": "node ops/validation/stream-validation.mjs prelive",
+    "test:coverage:critical": "vitest run src/test/playback-provider-legacy.test.ts src/test/playback-provider-native-hls.test.ts src/test/playback-signed-path-contract.test.ts --coverage --reporter=dot --max-workers=1",
+    "test:ci:shard1": "vitest run --reporter=dot --max-workers=1 --shard=1/2",
+    "test:ci:shard2": "vitest run --reporter=dot --max-workers=1 --shard=2/2"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.0",
