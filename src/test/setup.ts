@@ -1,5 +1,6 @@
-import { vi } from 'vitest';
+import { afterEach, vi } from 'vitest';
 import '@testing-library/jest-dom';
+import { cleanup } from '@testing-library/react';
 import { createElement } from 'react';
 
 Object.defineProperty(window, 'matchMedia', {
@@ -23,3 +24,11 @@ vi.mock('react-player', () => ({
     return createElement('div', { 'data-testid': 'mock-react-player', 'data-url': url });
   },
 }));
+
+
+afterEach(() => {
+  // Force teardown between suites to prevent retained DOM/query clients/timers.
+  cleanup();
+  vi.clearAllMocks();
+  vi.useRealTimers();
+});
