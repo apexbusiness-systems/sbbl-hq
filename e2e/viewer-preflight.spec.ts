@@ -18,6 +18,7 @@ test.beforeEach(async ({ page }) => {
       contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
+        // Worker returns top-level fields; fetchPublicHome normalizes into data.
         liveGames: [],
         upcomingGames: [
           {

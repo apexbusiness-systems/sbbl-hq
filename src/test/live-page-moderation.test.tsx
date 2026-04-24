@@ -35,6 +35,23 @@ vi.mock('@/contexts/BagContext', () => ({
   }),
 }));
 
+
+vi.mock('@/lib/supabase/client', () => ({
+  getSupabaseClient: () => null,
+}));
+
+vi.mock('@/lib/api/client', () => ({
+  getAuthToken: vi.fn(async () => null),
+  apiFetch: vi.fn(async (path: string) => {
+    if (path.includes('/reactions')) {
+      return { ok: true, fire: 0, heart: 0, clap: 0 };
+    }
+    if (path.includes('/products')) {
+      return { ok: true, data: [] };
+    }
+    return { ok: true };
+  }),
+}));
 vi.mock('@/components/LiveStreamPlayer', () => ({
   LiveStreamPlayer: () => <div data-testid="live-player" />,
 }));
@@ -71,13 +88,14 @@ vi.mock('@/lib/api/stream', () => ({
 
 describe('Live page moderation controls', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     streamModerationMocks.moderateStreamComment.mockClear();
     streamModerationMocks.resetStreamReactions.mockClear();
   });
 
   it('lets super admins hide/restore comments and reset reactions', async () => {
     render(
-      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { gcTime: 0 } } })}>
         <MemoryRouter>
           <LivePage />
         </MemoryRouter>
