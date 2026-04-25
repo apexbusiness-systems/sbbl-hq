@@ -25,6 +25,7 @@ import { redeemAccessCode } from '@/lib/api/stream';
 import { IDEMPOTENCY_HEADER, createIdempotencyKey } from '@/lib/api/idempotency';
 import { isYoutubeUrl } from '@/lib/stream/youtube-url';
 import { detectStreamUrlType, toPlayableUrl } from '@/lib/stream/url-detector';
+import type { StreamUrlType } from '@/lib/stream/url-detector';
 import { WhepPlayer } from '@/components/WhepPlayer';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { useStreamForge } from '@/hooks/use-streamforge';
@@ -166,18 +167,35 @@ function parsePlayerError(
 function StreamPlayer({
   url,
   isSuperAdmin: _isSuperAdmin,
+  providerHint,
   onReady,
   onPlay,
   onError,
 }: Readonly<{
   url: string;
   isSuperAdmin: boolean;
+  providerHint?: StreamUrlType | null;
   onReady: () => void;
   onPlay: () => void;
   onError: (message: string) => void;
 }>) {
+  const urlType = detectStreamUrlType(url);
+  const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
+  // Playback URLs may be signed/proxied and hide provider hostnames; use the
+  // upstream source hint from session/game config to preserve provider logic.
+  const isTwitch = urlType === 'twitch' || providerHint === 'twitch';
+  const isVimeo = urlType === 'vimeo';
+  const isWhep = urlType === 'whep';
+  const isRtmp = urlType === 'rtmp';
+  // HLS and DASH use ReactPlayer with explicit forcing flags
+  const forceHls = urlType === 'hls';
+  const forceDash = urlType === 'dash';
+
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [playing, setPlaying] = useState(true);
+  // Twitch autoplay is fragile under provider visibility checks; start paused
+  // and require a user gesture for deterministic playback.
+  const [playing, setPlaying] = useState(!isTwitch);
+  const [hasUserStarted, setHasUserStarted] = useState(!isTwitch);
   // Start muted so cross-origin autoplay is permitted by Chrome. Unmuted
   // autoplay is blocked for cross-origin iframes regardless of
   // Permissions-Policy — the browser requires a user gesture.
@@ -185,17 +203,64 @@ function StreamPlayer({
   // True once the stream fires its first onPlay event. Used to gate the
   // tap-to-unmute overlay so it never appears before playback has started.
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
-  // Twitch's embed SDK measures iframe dimensions at creation time. When the
-  // player mounts inside a CSS aspect-ratio container, layout can resolve in
-  // a later frame, causing the SDK to capture a 0×0 iframe and permanently
-  // disable autoplay with the misleading error:
-  //   "Autoplay disabled. style visibility, size, viewport visibility."
-  // Defer ReactPlayer mount until after the browser's next paint so that
-  // aspect-ratio has resolved before the embed SDK measures dimensions.
+  // Twitch's embed SDK measures iframe dimensions/visibility at creation time.
+  // If it initializes while the aspect-ratio box is still resolving, Twitch
+  // latches a 0×0 or off-viewport state and disables autoplay permanently.
+  // Gate mount until the host is both sized and in viewport.
   const [containerReady, setContainerReady] = useState(false);
   useEffect(() => {
-    const id = requestAnimationFrame(() => setContainerReady(true));
-    return () => cancelAnimationFrame(id);
+    const host = containerRef.current;
+    if (!host) return;
+
+    let raf = 0;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let activated = false;
+
+    const promoteWhenVisible = () => {
+      if (activated) return;
+      const rect = host.getBoundingClientRect();
+      // Require practical embed dimensions + viewport intersection before mount.
+      const hasPlayableSize = rect.width >= 200 && rect.height >= 120;
+      const inViewport =
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth;
+      if (hasPlayableSize && inViewport) {
+        activated = true;
+        setContainerReady(true);
+      }
+    };
+
+    const schedulePromote = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(promoteWhenVisible);
+    };
+
+    schedulePromote();
+    const resizeObserver = new ResizeObserver(schedulePromote);
+    resizeObserver.observe(host);
+    const intersectionObserver = new IntersectionObserver(schedulePromote, { threshold: [0, 0.01] });
+    intersectionObserver.observe(host);
+    window.addEventListener('resize', schedulePromote);
+    window.addEventListener('scroll', schedulePromote, { passive: true });
+
+    // Safety net: never leave the player unmounted indefinitely.
+    timeoutId = setTimeout(() => {
+      if (!activated) {
+        activated = true;
+        setContainerReady(true);
+      }
+    }, 2000);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      resizeObserver.disconnect();
+      intersectionObserver.disconnect();
+      if (timeoutId) clearTimeout(timeoutId);
+      window.removeEventListener('resize', schedulePromote);
+      window.removeEventListener('scroll', schedulePromote);
+    };
   }, []);
   const [volume, setVolume] = useState(0.8);
   const [playedFraction, setPlayedFraction] = useState(0);
@@ -206,15 +271,6 @@ function StreamPlayer({
   const reactPlayerRef = useRef<ReactPlayer | null>(null);
   const MAX_AUTO_RETRIES = 1;
 
-  const urlType = detectStreamUrlType(url);
-  const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
-  const isTwitch = urlType === 'twitch';
-  const isVimeo = urlType === 'vimeo';
-  const isWhep = urlType === 'whep';
-  const isRtmp = urlType === 'rtmp';
-  // HLS and DASH use ReactPlayer with explicit forcing flags
-  const forceHls = urlType === 'hls';
-  const forceDash = urlType === 'dash';
   // Force unified in-app controls for all providers.
   const showNativeControls = false;
   const canSeek = Number.isFinite(durationSeconds) && durationSeconds > 0 && !isWhep && !isRtmp;
@@ -316,9 +372,11 @@ function StreamPlayer({
         // REQUIRED: Twitch embeds will not load without every allowed parent.
         // https://dev.twitch.tv/docs/embed/everything/#required-parameters
         parent: twitchParents,
-        // REQUIRED for autoplay: Twitch's embed SDK enforces muted=true for
-        // cross-origin autoplay. The ReactPlayer `muted` prop does NOT map to
-        // the Twitch embed URL — it must be set here explicitly.
+        // Explicitly disable provider-level autoplay; playback starts from an
+        // explicit user gesture to avoid Twitch visibility-gated failures.
+        autoplay: false,
+        // Keep muted true in embed options so Twitch starts cleanly once the
+        // viewer clicks Start Stream and playback begins.
         muted: true,
         playsinline: true,
       },
@@ -342,6 +400,9 @@ function StreamPlayer({
         : { attributes: { crossOrigin: isProxyAuthedUrl ? 'use-credentials' : 'anonymous' } }),
     },
   };
+  // Twitch no longer depends on autoplay timing, so render immediately and
+  // gate start via explicit user gesture instead of container-ready state.
+  const shouldRenderPlayer = isTwitch || containerReady;
 
   return (
     <div
@@ -350,13 +411,13 @@ function StreamPlayer({
       data-testid="stream-player"
       data-container-ready={containerReady ? 'true' : 'false'}
     >
-      {containerReady && (
+      {shouldRenderPlayer && (
         <ReactPlayer
           ref={(instance) => { reactPlayerRef.current = instance; }}
           url={url}
           width="100%"
           height="100%"
-          playing={playing}
+          playing={hasUserStarted ? playing : false}
           controls={showNativeControls}
           muted={muted}
           volume={volume}
@@ -385,7 +446,7 @@ function StreamPlayer({
       )}
       {/* Tap-to-unmute overlay — only shown after the stream fires its first
           onPlay event, so it never appears during the connecting spinner. */}
-      {containerReady && muted && hasStartedPlaying && (
+      {shouldRenderPlayer && muted && hasStartedPlaying && (
         <button
           type="button"
           onClick={() => setMuted(false)}
@@ -396,6 +457,23 @@ function StreamPlayer({
           <VolumeX className="w-4 h-4" />
           Tap to unmute
         </button>
+      )}
+      {isTwitch && !hasUserStarted && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/35">
+          <button
+            type="button"
+            onClick={() => {
+              setMuted(true);
+              setHasUserStarted(true);
+              setPlaying(true);
+            }}
+            className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-5 py-3 text-sm font-bold uppercase tracking-wider text-black shadow-lg hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+            aria-label="Start Twitch playback"
+          >
+            <Play className="h-4 w-4" />
+            Start Stream
+          </button>
+        </div>
       )}
       {/* Block iframe click-through for YouTube/Vimeo only.
           Twitch's embed SDK validates iframe visibility at init — an opaque
@@ -497,6 +575,7 @@ export function LiveStreamPlayer({
 
 
   const [playbackUrl, setPlaybackUrl] = useState('');
+  const [playbackTypeHint, setPlaybackTypeHint] = useState<StreamUrlType | null>(null);
   const [playbackLoading, setPlaybackLoading] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
@@ -559,6 +638,7 @@ export function LiveStreamPlayer({
     let consecutiveFailures = 0;
     setPlaybackLoading(true);
     setPlayerError(null);
+    setPlaybackTypeHint(null);
     setHeartbeatFailures(0);
     const deviceToken = getOrCreateDeviceToken();
     const sessionKey = `playback-${game.id}-${deviceToken}`;
@@ -586,7 +666,9 @@ export function LiveStreamPlayer({
           );
           return;
         }
-        const { url: resolvedUrl } = toPlayableUrl(rawResolved);
+        const rawType = detectStreamUrlType(rawResolved);
+        const { url: resolvedUrl, type: normalizedType } = toPlayableUrl(rawResolved);
+        setPlaybackTypeHint(normalizedType === 'unknown' ? rawType : normalizedType);
         setPlaybackUrl(resolvedUrl);
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
@@ -717,6 +799,10 @@ export function LiveStreamPlayer({
 
   // ── Gate 2: Access granted → Player ──────────────────────
   if (hasAccess) {
+    const gameSourceType = detectStreamUrlType(game.stream_url ?? '');
+    const providerHint = playbackTypeHint && playbackTypeHint !== 'unknown'
+      ? playbackTypeHint
+      : (gameSourceType !== 'unknown' ? gameSourceType : null);
     return (
       <div className="absolute inset-0 flex flex-col relative z-0">
         {/* Stream Player Area */}
@@ -742,6 +828,7 @@ export function LiveStreamPlayer({
           <StreamPlayer
             url={playbackUrl}
             isSuperAdmin={isSuperAdmin}
+            providerHint={providerHint}
             onReady={() => { sf.reportEvent('play'); sf.recordSuccess(); }}
             onPlay={() => sf.reportEvent('playing')}
             onError={(message) => { setPlayerError(message); sf.recordFailure(); }}
