@@ -176,8 +176,21 @@ function StreamPlayer({
   onPlay: () => void;
   onError: (message: string) => void;
 }>) {
+  const urlType = detectStreamUrlType(url);
+  const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
+  const isTwitch = urlType === 'twitch';
+  const isVimeo = urlType === 'vimeo';
+  const isWhep = urlType === 'whep';
+  const isRtmp = urlType === 'rtmp';
+  // HLS and DASH use ReactPlayer with explicit forcing flags
+  const forceHls = urlType === 'hls';
+  const forceDash = urlType === 'dash';
+
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [playing, setPlaying] = useState(true);
+  // Twitch autoplay is fragile under provider visibility checks; start paused
+  // and require a user gesture for deterministic playback.
+  const [playing, setPlaying] = useState(!isTwitch);
+  const [hasUserStarted, setHasUserStarted] = useState(!isTwitch);
   // Start muted so cross-origin autoplay is permitted by Chrome. Unmuted
   // autoplay is blocked for cross-origin iframes regardless of
   // Permissions-Policy — the browser requires a user gesture.
@@ -253,15 +266,6 @@ function StreamPlayer({
   const reactPlayerRef = useRef<ReactPlayer | null>(null);
   const MAX_AUTO_RETRIES = 1;
 
-  const urlType = detectStreamUrlType(url);
-  const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
-  const isTwitch = urlType === 'twitch';
-  const isVimeo = urlType === 'vimeo';
-  const isWhep = urlType === 'whep';
-  const isRtmp = urlType === 'rtmp';
-  // HLS and DASH use ReactPlayer with explicit forcing flags
-  const forceHls = urlType === 'hls';
-  const forceDash = urlType === 'dash';
   // Force unified in-app controls for all providers.
   const showNativeControls = false;
   const canSeek = Number.isFinite(durationSeconds) && durationSeconds > 0 && !isWhep && !isRtmp;
@@ -363,9 +367,11 @@ function StreamPlayer({
         // REQUIRED: Twitch embeds will not load without every allowed parent.
         // https://dev.twitch.tv/docs/embed/everything/#required-parameters
         parent: twitchParents,
-        // REQUIRED for autoplay: Twitch's embed SDK enforces muted=true for
-        // cross-origin autoplay. The ReactPlayer `muted` prop does NOT map to
-        // the Twitch embed URL — it must be set here explicitly.
+        // Explicitly disable provider-level autoplay; playback starts from an
+        // explicit user gesture to avoid Twitch visibility-gated failures.
+        autoplay: false,
+        // Keep muted true in embed options so Twitch starts cleanly once the
+        // viewer clicks Start Stream and playback begins.
         muted: true,
         playsinline: true,
       },
@@ -403,7 +409,7 @@ function StreamPlayer({
           url={url}
           width="100%"
           height="100%"
-          playing={playing}
+          playing={hasUserStarted ? playing : false}
           controls={showNativeControls}
           muted={muted}
           volume={volume}
@@ -443,6 +449,23 @@ function StreamPlayer({
           <VolumeX className="w-4 h-4" />
           Tap to unmute
         </button>
+      )}
+      {containerReady && isTwitch && !hasUserStarted && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/35">
+          <button
+            type="button"
+            onClick={() => {
+              setMuted(true);
+              setHasUserStarted(true);
+              setPlaying(true);
+            }}
+            className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-5 py-3 text-sm font-bold uppercase tracking-wider text-black shadow-lg hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+            aria-label="Start Twitch playback"
+          >
+            <Play className="h-4 w-4" />
+            Start Stream
+          </button>
+        </div>
       )}
       {/* Block iframe click-through for YouTube/Vimeo only.
           Twitch's embed SDK validates iframe visibility at init — an opaque
