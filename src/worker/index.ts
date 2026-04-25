@@ -6348,8 +6348,8 @@ function addSecurityHeaders(res: Response): Response {
   // *.sbbl-hq.icu wildcard in connect-src; media-src blob: covers WebRTC tracks.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://assets.twitch.tv https://static.cloudflareinsights.com; " +
-    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://static.cloudflareinsights.com; " +
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://player.twitch.tv https://assets.twitch.tv https://static.cloudflareinsights.com; " +
+    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://player.twitch.tv https://static.cloudflareinsights.com; " +
     // fonts.googleapis.com serves the @font-face CSS (style-src).
     // fonts.gstatic.com serves the actual .woff2 files (font-src).
     // Both are required for Space Grotesk loaded in index.html (canonical brand font).
