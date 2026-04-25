@@ -395,6 +395,9 @@ function StreamPlayer({
         : { attributes: { crossOrigin: isProxyAuthedUrl ? 'use-credentials' : 'anonymous' } }),
     },
   };
+  // Twitch no longer depends on autoplay timing, so render immediately and
+  // gate start via explicit user gesture instead of container-ready state.
+  const shouldRenderPlayer = isTwitch || containerReady;
 
   return (
     <div
@@ -403,7 +406,7 @@ function StreamPlayer({
       data-testid="stream-player"
       data-container-ready={containerReady ? 'true' : 'false'}
     >
-      {containerReady && (
+      {shouldRenderPlayer && (
         <ReactPlayer
           ref={(instance) => { reactPlayerRef.current = instance; }}
           url={url}
@@ -438,7 +441,7 @@ function StreamPlayer({
       )}
       {/* Tap-to-unmute overlay — only shown after the stream fires its first
           onPlay event, so it never appears during the connecting spinner. */}
-      {containerReady && muted && hasStartedPlaying && (
+      {shouldRenderPlayer && muted && hasStartedPlaying && (
         <button
           type="button"
           onClick={() => setMuted(false)}
@@ -450,7 +453,7 @@ function StreamPlayer({
           Tap to unmute
         </button>
       )}
-      {containerReady && isTwitch && !hasUserStarted && (
+      {isTwitch && !hasUserStarted && (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/35">
           <button
             type="button"
