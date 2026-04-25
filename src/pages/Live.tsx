@@ -1264,7 +1264,16 @@ const LivePage = () => {
           <div className="lg:col-span-2 flex flex-col">
 
             {/* Broadcast Area — admin overlay + access-gate player */}
-            <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
+            <div
+              className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm"
+              style={{
+                width: '100%',
+                height: '100%',
+                minWidth: '400px',
+                minHeight: '300px',
+              }}
+            >
+              {/* Twitch embed parent: ['sbbl-hq.icu'] is enforced in LiveStreamPlayer. */}
               {/* Admin stream overlay — inside the video wrapper, super_admin only */}
               {isSuperAdmin && (
                   <AdminStreamOverlay
