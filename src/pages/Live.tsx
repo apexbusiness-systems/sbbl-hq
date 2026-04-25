@@ -1297,15 +1297,28 @@ const LivePage = () => {
                   />
                 </div>
               ) : (liveGame || fallbackBroadcastGame) ? (
-                <PlayerErrorBoundary key={streamNonce}>
-                  <LiveStreamPlayer
-                    game={(liveGame ?? fallbackBroadcastGame)!}
-                    userId={user?.id ?? null}
-                    roles={roles}
-                    hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-                    isStreamLive={isStreamLive}
-                  />
-                </PlayerErrorBoundary>
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    minWidth: '400px',
+                    minHeight: '300px',
+                  }}
+                >
+                  {/* Twitch embed config source-of-truth includes parent: ['sbbl-hq.icu'] in LiveStreamPlayer. */}
+                  <PlayerErrorBoundary key={streamNonce}>
+                    <LiveStreamPlayer
+                      game={(liveGame ?? fallbackBroadcastGame)!}
+                      userId={user?.id ?? null}
+                      roles={roles}
+                      hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                      isStreamLive={isStreamLive}
+                    />
+                  </PlayerErrorBoundary>
+                </div>
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
                   <div className="w-14 h-14 rounded-full bg-secondary/50 flex items-center justify-center mb-3">
