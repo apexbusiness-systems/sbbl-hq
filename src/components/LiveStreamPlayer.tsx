@@ -185,17 +185,64 @@ function StreamPlayer({
   // True once the stream fires its first onPlay event. Used to gate the
   // tap-to-unmute overlay so it never appears before playback has started.
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
-  // Twitch's embed SDK measures iframe dimensions at creation time. When the
-  // player mounts inside a CSS aspect-ratio container, layout can resolve in
-  // a later frame, causing the SDK to capture a 0×0 iframe and permanently
-  // disable autoplay with the misleading error:
-  //   "Autoplay disabled. style visibility, size, viewport visibility."
-  // Defer ReactPlayer mount until after the browser's next paint so that
-  // aspect-ratio has resolved before the embed SDK measures dimensions.
+  // Twitch's embed SDK measures iframe dimensions/visibility at creation time.
+  // If it initializes while the aspect-ratio box is still resolving, Twitch
+  // latches a 0×0 or off-viewport state and disables autoplay permanently.
+  // Gate mount until the host is both sized and in viewport.
   const [containerReady, setContainerReady] = useState(false);
   useEffect(() => {
-    const id = requestAnimationFrame(() => setContainerReady(true));
-    return () => cancelAnimationFrame(id);
+    const host = containerRef.current;
+    if (!host) return;
+
+    let raf = 0;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let activated = false;
+
+    const promoteWhenVisible = () => {
+      if (activated) return;
+      const rect = host.getBoundingClientRect();
+      // Require practical embed dimensions + viewport intersection before mount.
+      const hasPlayableSize = rect.width >= 200 && rect.height >= 120;
+      const inViewport =
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth;
+      if (hasPlayableSize && inViewport) {
+        activated = true;
+        setContainerReady(true);
+      }
+    };
+
+    const schedulePromote = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(promoteWhenVisible);
+    };
+
+    schedulePromote();
+    const resizeObserver = new ResizeObserver(schedulePromote);
+    resizeObserver.observe(host);
+    const intersectionObserver = new IntersectionObserver(schedulePromote, { threshold: [0, 0.01] });
+    intersectionObserver.observe(host);
+    window.addEventListener('resize', schedulePromote);
+    window.addEventListener('scroll', schedulePromote, { passive: true });
+
+    // Safety net: never leave the player unmounted indefinitely.
+    timeoutId = setTimeout(() => {
+      if (!activated) {
+        activated = true;
+        setContainerReady(true);
+      }
+    }, 2000);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      resizeObserver.disconnect();
+      intersectionObserver.disconnect();
+      if (timeoutId) clearTimeout(timeoutId);
+      window.removeEventListener('resize', schedulePromote);
+      window.removeEventListener('scroll', schedulePromote);
+    };
   }, []);
   const [volume, setVolume] = useState(0.8);
   const [playedFraction, setPlayedFraction] = useState(0);
