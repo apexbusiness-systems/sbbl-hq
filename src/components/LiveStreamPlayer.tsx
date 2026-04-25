@@ -25,6 +25,7 @@ import { redeemAccessCode } from '@/lib/api/stream';
 import { IDEMPOTENCY_HEADER, createIdempotencyKey } from '@/lib/api/idempotency';
 import { isYoutubeUrl } from '@/lib/stream/youtube-url';
 import { detectStreamUrlType, toPlayableUrl } from '@/lib/stream/url-detector';
+import type { StreamUrlType } from '@/lib/stream/url-detector';
 import { WhepPlayer } from '@/components/WhepPlayer';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { useStreamForge } from '@/hooks/use-streamforge';
@@ -166,19 +167,23 @@ function parsePlayerError(
 function StreamPlayer({
   url,
   isSuperAdmin: _isSuperAdmin,
+  providerHint,
   onReady,
   onPlay,
   onError,
 }: Readonly<{
   url: string;
   isSuperAdmin: boolean;
+  providerHint?: StreamUrlType | null;
   onReady: () => void;
   onPlay: () => void;
   onError: (message: string) => void;
 }>) {
   const urlType = detectStreamUrlType(url);
   const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
-  const isTwitch = urlType === 'twitch';
+  // Playback URLs may be signed/proxied and hide provider hostnames; use the
+  // upstream source hint from session/game config to preserve provider logic.
+  const isTwitch = urlType === 'twitch' || providerHint === 'twitch';
   const isVimeo = urlType === 'vimeo';
   const isWhep = urlType === 'whep';
   const isRtmp = urlType === 'rtmp';
@@ -570,6 +575,7 @@ export function LiveStreamPlayer({
 
 
   const [playbackUrl, setPlaybackUrl] = useState('');
+  const [playbackTypeHint, setPlaybackTypeHint] = useState<StreamUrlType | null>(null);
   const [playbackLoading, setPlaybackLoading] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
@@ -632,6 +638,7 @@ export function LiveStreamPlayer({
     let consecutiveFailures = 0;
     setPlaybackLoading(true);
     setPlayerError(null);
+    setPlaybackTypeHint(null);
     setHeartbeatFailures(0);
     const deviceToken = getOrCreateDeviceToken();
     const sessionKey = `playback-${game.id}-${deviceToken}`;
@@ -659,7 +666,9 @@ export function LiveStreamPlayer({
           );
           return;
         }
-        const { url: resolvedUrl } = toPlayableUrl(rawResolved);
+        const rawType = detectStreamUrlType(rawResolved);
+        const { url: resolvedUrl, type: normalizedType } = toPlayableUrl(rawResolved);
+        setPlaybackTypeHint(normalizedType === 'unknown' ? rawType : normalizedType);
         setPlaybackUrl(resolvedUrl);
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
@@ -790,6 +799,10 @@ export function LiveStreamPlayer({
 
   // ── Gate 2: Access granted → Player ──────────────────────
   if (hasAccess) {
+    const gameSourceType = detectStreamUrlType(game.stream_url ?? '');
+    const providerHint = playbackTypeHint && playbackTypeHint !== 'unknown'
+      ? playbackTypeHint
+      : (gameSourceType !== 'unknown' ? gameSourceType : null);
     return (
       <div className="absolute inset-0 flex flex-col relative z-0">
         {/* Stream Player Area */}
@@ -815,6 +828,7 @@ export function LiveStreamPlayer({
           <StreamPlayer
             url={playbackUrl}
             isSuperAdmin={isSuperAdmin}
+            providerHint={providerHint}
             onReady={() => { sf.reportEvent('play'); sf.recordSuccess(); }}
             onPlay={() => sf.reportEvent('playing')}
             onError={(message) => { setPlayerError(message); sf.recordFailure(); }}
