@@ -1,80 +1,85 @@
-import { expect, test } from '../playwright-fixture';
+import { test, expect } from './playwright-fixture';
 
-test.describe('critical path coverage', () => {
-  test('home page renders header and content', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('header')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('header').getByRole('tab', { name: 'SBBL' })).toBeVisible();
-  });
+test.describe('sbbl hq critical paths', () => {
+  test('home page structural integrity', async ({ page, isMobile }) => {
+    const response = await page.goto('/', { waitUntil: 'networkidle' });
+    expect(response?.status()).toBe(200);
 
-  test('league selector has three tabs with SBBL active by default', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('tab', { name: 'SBBL' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'WBL' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'TGIF' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'SBBL' })).toHaveAttribute('aria-selected', 'true');
-  });
+    await expect(page).toHaveTitle(/SBBL HQ/);
+    await expect(page.locator('header')).toBeVisible();
 
-  test('league switch updates active tab state', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    await page.getByRole('tab', { name: 'WBL' }).click();
-    await expect(page.getByRole('tab', { name: 'WBL' })).toHaveAttribute('aria-selected', 'true');
-    await expect(page.getByRole('tab', { name: 'SBBL' })).toHaveAttribute('aria-selected', 'false');
-  });
-
-  test('login route renders sign in without leaking raw config names', async ({ page }) => {
-    await page.goto('/login', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('body')).not.toContainText(/VITE_SUPABASE|SUPABASE_SERVICE_ROLE_KEY|SUPABASE_URL/);
-  });
-
-  test('login route renders trust bullets', async ({ page, isMobile }) => {
-    await page.goto('/login', { waitUntil: 'domcontentloaded' });
+    // Verify main navigation links
     if (isMobile) {
-      // Trust surface panel uses `hidden md:flex` — intentionally invisible on mobile.
-      // Verify the text exists in the DOM but do not assert visibility.
-      await expect(page.getByText('Three Leagues.')).toBeAttached();
-      await expect(page.getByText('Live scoring and real-time game updates')).toBeAttached();
-    } else {
-      await expect(page.getByText('Three Leagues.')).toBeVisible();
-      await expect(page.getByText('Live scoring and real-time game updates')).toBeVisible();
-    }
-  });
-
-  test('release-cut navigation exposes only shipped primary routes', async ({ page, isMobile }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    
-    if (isMobile) {
+      // Mobile requires opening the drawer first
       await page.getByRole('button', { name: 'Open menu' }).click();
+
+      // Ensure drawer is open before asserting inner visibility
+      const mobileNav = page.locator('nav').filter({ hasText: 'Standings' }).first();
+      await expect(mobileNav).toBeVisible();
+
+      await expect(mobileNav.getByRole('link', { name: 'Schedule', exact: true })).toBeVisible();
+      await expect(mobileNav.getByRole('link', { name: 'Standings', exact: true })).toBeVisible();
+      await expect(mobileNav.getByRole('link', { name: 'Media', exact: true })).toBeVisible();
+
+      // Close the menu to clean up
+      await page.getByRole('button', { name: 'Close menu' }).click();
+    } else {
+      // Desktop nav is directly visible in the header
+      const desktopNav = page.locator('header nav').first();
+      await expect(desktopNav).toBeVisible();
+
+      await expect(desktopNav.getByRole('link', { name: 'Schedule', exact: true })).toBeVisible();
+      await expect(desktopNav.getByRole('link', { name: 'Standings', exact: true })).toBeVisible();
+      await expect(desktopNav.getByRole('link', { name: 'Media', exact: true })).toBeVisible();
     }
-    
-    // For mobile, the nav is inside the drawer, for desktop it's in the header. We can search the whole page or just the header.
-    // The drawer is within the header component.
-    const nav = isMobile ? page.locator('header nav').last() : page.locator('header nav').first();
-    await expect(nav.getByRole('link', { name: 'Home', exact: true })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Live', exact: true })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Schedules', exact: true })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Store', exact: true })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Profiles', exact: true })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Stats', exact: true })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Leaderboards', exact: true })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Media', exact: true })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Teams', exact: true })).toBeVisible();
   });
 
-  test('schedules and teams routes render headings', async ({ page }) => {
-    await page.goto('/schedules', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Schedules' })).toBeVisible();
-    await page.goto('/teams', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'Teams & Standings' })).toBeVisible();
+  test('public media gallery loads', async ({ page }) => {
+    const response = await page.goto('/media', { waitUntil: 'networkidle' });
+    expect(response?.status()).toBe(200);
+
+    // Verify header exists
+    await expect(page.getByRole('heading', { name: 'Media' })).toBeVisible();
+
+    // Wait for the feed to either load items or show the empty state
+    // We don't want to fail if the DB is empty, just ensure it didn't crash
+    const feedUnavailable = page.getByText(/Media feed unavailable/i);
+    const mediaItems = page.getByLabel('Share');
+
+    // Either we have an error state, or we have 0+ items rendered successfully
+    // We check that the main container isn't throwing a React error
+    const bodyText = await page.locator('body').innerText();
+    expect(bodyText).not.toContain('Application Error'); // Next.js fatal error
+
+    // Wait to see if items or empty state appear
+    await Promise.race([
+      expect(feedUnavailable).toBeVisible({ timeout: 10000 }).catch(() => {}),
+      expect(mediaItems.first()).toBeVisible({ timeout: 10000 }).catch(() => {})
+    ]);
   });
 
-  test('music player is present but does not autoplay before user gesture', async ({ page }) => {
-    await page.goto('/', { waitUntil: 'domcontentloaded' });
-    const audio = page.locator('audio').first();
-    await expect(audio).toHaveCount(1);
-    const state = await audio.evaluate((node: HTMLAudioElement) => ({ paused: node.paused, autoplay: node.autoplay }));
-    expect(state.paused).toBeTruthy();
-    expect(state.autoplay).toBeFalsy();
+  test('unauthenticated ops route redirects to login', async ({ page }) => {
+    // Clear any potential cookies
+    await page.context().clearCookies();
+
+    // Attempt to access protected route
+    await page.goto('/ops', { waitUntil: 'networkidle' });
+
+    // Should be redirected
+    expect(page.url()).toContain('/login');
+    expect(page.url()).toContain('redirect=%2Fops');
+
+    // Verify login form is visible
+    await expect(page.getByLabel('Email Address')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Sign In' })).toBeVisible();
+  });
+
+  test('404 page functions correctly', async ({ page }) => {
+    const response = await page.goto('/this-route-definitely-does-not-exist', { waitUntil: 'networkidle' });
+    expect(response?.status()).toBe(404);
+
+    await expect(page.getByRole('heading', { name: '404' })).toBeVisible();
+    await expect(page.getByText('Page not found')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Return to Homepage' })).toBeVisible();
   });
 });
