@@ -314,7 +314,7 @@ function buildMatrix(report) {
 async function execute(targetMode) {
   if (targetMode === 'unit') return run('npx', ['vitest', 'run', 'src/test/stream/validation-policy.unit.test.ts']).ok ? 0 : 1;
   if (targetMode === 'int') return run('npx', ['vitest', 'run', 'src/test/stream/rate-limit.int.test.ts']).ok ? 0 : 1;
-  if (targetMode === 'e2e') return run('npx', ['playwright', 'test', 'e2e/stream-validation.spec.ts', '--reporter=json']).ok ? 0 : 1;
+  if (targetMode === 'e2e') return run('npx', ['playwright', 'test', '--project=chromium', 'e2e/stream-validation.spec.ts', '--reporter=json']).ok ? 0 : 1;
   if (targetMode === 'perf') return (await runPerf()).ok ? 0 : 1;
   if (targetMode === 'gate') {
     const hits = findSensitiveHits(collectFiles(resolve(root, 'artifacts', 'stream-validation')));
@@ -329,7 +329,7 @@ async function execute(targetMode) {
     int: run('npx', ['vitest', 'run', 'src/test/stream/rate-limit.int.test.ts']),
     playwright_install: run('npx', ['playwright', 'install', 'chromium']),
     playwright_install_deps: run('npx', ['playwright', 'install-deps', 'chromium']),
-    e2e: run('npx', ['playwright', 'test', 'e2e/stream-validation.spec.ts', '--reporter=json']),
+    e2e: run('npx', ['playwright', 'test', '--project=chromium', 'e2e/stream-validation.spec.ts', '--reporter=json']),
     perf: await runPerf(),
   };
 
