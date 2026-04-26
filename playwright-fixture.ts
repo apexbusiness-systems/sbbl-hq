@@ -1,10 +1,45 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test as base, type ConsoleMessage, type Page } from '@playwright/test';
 
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL ?? 'https://ezanilxygnpucwkwpsoc.supabase.co';
 const SUPABASE_REF = new URL(SUPABASE_URL).hostname.split('.')[0] ?? 'local';
 const SESSION_KEY = `sb-${SUPABASE_REF}-auth-token`;
 const DEFAULT_USER_ID = '00000000-0000-4000-8000-000000000001';
 const DEFAULT_EMAIL = 'ops-super-admin@test.local';
+
+type CSPFixtures = {
+  cspWatcher: { violations: string[]; pageErrors: string[] };
+};
+
+const CSP_PATTERN = /content security policy|script-src|frame-src|worker-src|connect-src|style-src|img-src|media-src|refused to (load|execute|connect|frame)/i;
+
+export const test = base.extend<CSPFixtures>({
+  cspWatcher: async ({ page }, use, testInfo) => {
+    const violations: string[] = [];
+    const pageErrors: string[] = [];
+    const onConsole = (msg: ConsoleMessage) => {
+      if (msg.type() === 'error' && CSP_PATTERN.test(msg.text())) {
+        violations.push(msg.text());
+      }
+    };
+    const onPageError = (err: Error) => {
+      if (CSP_PATTERN.test(err.message)) pageErrors.push(err.message);
+    };
+    page.on('console', onConsole);
+    page.on('pageerror', onPageError);
+
+    await use({ violations, pageErrors });
+
+    page.off('console', onConsole);
+    page.off('pageerror', onPageError);
+
+    if (violations.length || pageErrors.length) {
+      await testInfo.attach('csp-violations', {
+        body: JSON.stringify({ violations, pageErrors }, null, 2),
+        contentType: 'application/json',
+      });
+    }
+  },
+});
 
 /**
  * Seed a deterministic super-admin Supabase session so auth guards pass.
@@ -125,4 +160,4 @@ export async function seedSuperAdminSession(page: Page) {
   );
 }
 
-export { expect, test };
+export { expect };
