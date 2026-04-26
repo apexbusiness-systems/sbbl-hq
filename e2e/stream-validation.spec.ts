@@ -398,4 +398,10 @@ test.describe('stream prelive validation', () => {
     expect(viewerCounter.direct.activeEntitledViewerCount).toBe(2);
     expect(viewerCounter.status.viewerCount).toBe(2);
   });
+
+  test.afterEach(async ({ cspWatcher }, testInfo) => {
+    if (testInfo.status !== 'passed') return;
+    expect(cspWatcher.violations, `CSP violations:\n${cspWatcher.violations.join('\n')}`).toHaveLength(0);
+    expect(cspWatcher.pageErrors, `CSP page errors:\n${cspWatcher.pageErrors.join('\n')}`).toHaveLength(0);
+  });
 });

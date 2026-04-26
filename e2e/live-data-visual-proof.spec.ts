@@ -21,7 +21,7 @@
  * runners (Cloudflare blocks non-allowlisted IPs with a 403). Run manually
  * after merge to verify production data availability end-to-end.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../playwright-fixture';
 
 const API_BASE = process.env.E2E_API_BASE ?? 'https://sbbl-hq.icu';
 
@@ -86,5 +86,11 @@ test.describe('production public APIs return populated live data', () => {
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(Array.isArray(body.games)).toBe(true);
+  });
+
+  test.afterEach(async ({ cspWatcher }, testInfo) => {
+    if (testInfo.status !== 'passed') return;
+    expect(cspWatcher.violations, `CSP violations:\n${cspWatcher.violations.join('\n')}`).toHaveLength(0);
+    expect(cspWatcher.pageErrors, `CSP page errors:\n${cspWatcher.pageErrors.join('\n')}`).toHaveLength(0);
   });
 });
