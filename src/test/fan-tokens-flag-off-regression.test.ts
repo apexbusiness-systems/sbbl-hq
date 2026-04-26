@@ -21,33 +21,15 @@ import {
   handleTokenPurchase,
   handleTokenWallet,
 } from '@/worker/routes/tokens';
+import { createTestCtx } from './worker-test-utils';
 
 function ctxWithEnv(envOverrides: Partial<Env> = {}) {
-  const env = {
-    SUPABASE_URL: 'http://local',
-    SUPABASE_SERVICE_ROLE_KEY: 'srk',
-    STRIPE_SECRET_KEY: 'sk',
-    STRIPE_WEBHOOK_SECRET: 'whs',
-    RESEND_API_KEY: 'rk',
-    ASSETS: { fetch: async () => new Response('') },
-    ...envOverrides,
-  } as unknown as Env;
-  return {
-    req: new Request('http://local/api/tokens/x', {
-      headers: { 'x-sbbl-user-id-verified': 'u-1' },
-    }),
-    env,
+  return createTestCtx({
+    url: 'http://local/api/tokens/x',
+    headers: { 'x-sbbl-user-id-verified': 'u-1' },
     params: { gameId: 'g-1', seasonId: 's-1' },
-    admin: {
-      // Proxy that throws if any method is called — proves no DB access.
-      from() {
-        throw new Error('DB accessed despite flag off');
-      },
-      rpc() {
-        throw new Error('RPC called despite flag off');
-      },
-    } as unknown as import('@/worker/shared').HandlerCtx['admin'],
-  } as import('@/worker/shared').HandlerCtx;
+    envOverrides,
+  });
 }
 
 describe('fan-tokens flag-off invariants', () => {
@@ -63,7 +45,7 @@ describe('fan-tokens flag-off invariants', () => {
 
   for (const [name, handler] of handlers) {
     it(`${name} returns 403 fan_tokens_disabled when flag unset`, async () => {
-      const ctx = ctxWithEnv({});
+      const ctx = ctxWithEnv();
       const res = await handler(ctx);
       expect(res.status).toBe(403);
       const body = await res.json();
