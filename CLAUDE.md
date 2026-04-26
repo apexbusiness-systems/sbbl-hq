@@ -1,9 +1,9 @@
-# Claude / Agent Operating Guide — SBBL-HQ
+# Claude / Agent Operating Guide â SBBL-HQ
 
 Welcome. This document is the **single source of truth** for agents
 working in this repo. Read it in full before your first edit.
 
-## 🚨 HARD RULES — Do not break these
+## ð¨ HARD RULES â Do not break these
 
 ### 1. No mock data in production pages
 
@@ -21,10 +21,10 @@ for the canonical endpoint table.
 
 This rule is enforced by:
 
-- **ESLint** `no-restricted-imports` (see `eslint.config.js`) — lint runs
+- **ESLint** `no-restricted-imports` (see `eslint.config.js`) â lint runs
   with `--max-warnings 0` in CI.
 - **vitest** guard test (`src/test/no-mock-in-production.test.ts`).
-- **CI** (`.github/workflows/ci.yml`) — both gates block merge.
+- **CI** (`.github/workflows/ci.yml`) â both gates block merge.
 
 If you see a test failure pointing at those files, **do not disable the
 test**. Fix the import.
@@ -37,7 +37,7 @@ If you need league identity metadata (codes, names, colors, logos), use
 Do not write:
 
 ```ts
-// ❌ BANNED — silently hides pipeline outages.
+// â BANNED â silently hides pipeline outages.
 const players = apiData && apiData.length > 0 ? apiData : mockPlayers;
 const potg = apiPotg ?? playersOfTheGame;
 ```
@@ -45,14 +45,14 @@ const potg = apiPotg ?? playersOfTheGame;
 Do write:
 
 ```ts
-// ✅ CORRECT — empty state is visible.
+// â CORRECT â empty state is visible.
 const players = Array.isArray(apiData) ? apiData : [];
 ```
 
 Render an explicit empty-state UI when the array is empty. Never
 substitute fixtures.
 
-### 3. Public pages → public endpoints
+### 3. Public pages â public endpoints
 
 If a page is anonymous-accessible (Stats, Leaderboards, Scores,
 Schedules, Home, AppHome, Store, Teams), it must call a public worker
@@ -65,7 +65,7 @@ Before wiring a page to a new endpoint, grep the worker for
 `requireAuth(req)` in the handler. If present and the page is public,
 use or add a `/api/public/*` variant instead.
 
-### 4. Stream Independence Contract — streams are not games
+### 4. Stream Independence Contract â streams are not games
 
 **NEVER** couple `streams`, `stream_assignments`, or
 `stream_entitlements` to a NOT-NULL `game_id`. Streams are first-class
@@ -76,21 +76,21 @@ nullable legacy column retained for backward compatibility only.
 Forbidden patterns (CI will block):
 
 ```sql
--- ❌ BANNED — cements the coupling we removed.
+-- â BANNED â cements the coupling we removed.
 ALTER TABLE streams ADD COLUMN game_id uuid NOT NULL;
 ALTER TABLE stream_entitlements ALTER COLUMN game_id SET NOT NULL;
 ALTER TABLE stream_assignments ALTER COLUMN game_id SET NOT NULL;
 ```
 
 ```ts
-// ❌ BANNED — reading games.stream_url from worker/frontend paths.
+// â BANNED â reading games.stream_url from worker/frontend paths.
 const url = game.stream_url;
 ```
 
 Do instead:
 
 ```ts
-// ✅ CORRECT — resolve via stream_assignments / streams.
+// â CORRECT â resolve via stream_assignments / streams.
 const { data } = await admin
   .from("stream_assignments")
   .select("streams(stream_url, source_platform)")
@@ -104,7 +104,7 @@ Before modifying any stream/ppv/entitlement code, **read**
 
 This rule is enforced by:
 
-- **CI AST gate** (`.github/workflows/stream-contract-gate.yml`) — pglast
+- **CI AST gate** (`.github/workflows/stream-contract-gate.yml`) â pglast
   parser scans migration diffs for forbidden `NOT NULL` on `game_id`.
 - **Armageddon test battery** (`src/test/armageddon-stream-invariants.test.ts`).
 - **Vitest stage tests** (`src/test/stream-independence-stage*.test.ts`).
@@ -114,31 +114,50 @@ This rule is enforced by:
 
 ```
 React (src/)
-  ├── src/pages/**             ← page-level components; fetch via react-query
-  ├── src/components/**        ← shared UI; never fetch directly
-  ├── src/lib/api/**           ← thin API client wrappers
-  └── src/lib/leagues.ts       ← LEAGUE_REGISTRY (canonical branding)
+  âââ src/pages/**             â page-level components; fetch via react-query
+  âââ src/components/**        â shared UI; never fetch directly
+  âââ src/lib/api/**           â thin API client wrappers
+  âââ src/lib/leagues.ts       â LEAGUE_REGISTRY (canonical branding)
 
 Cloudflare Worker (src/worker/index.ts, src/worker/routes/*)
-  ├── requireAuth(req)          ← throws on missing x-sbbl-user-id-verified
-  ├── admin = getAdminClient()  ← Supabase service-role
-  └── route table at bottom     ← append new routes here
+  âââ requireAuth(req)          â throws on missing x-sbbl-user-id-verified
+  âââ admin = getAdminClient()  â Supabase service-role
+  âââ route table at bottom     â append new routes here
 
 Supabase
-  ├── tables                    ← players, teams, games, leagues, seasons,
-  │                               player_game_stats, store_products,
-  │                               media_publications, …
-  ├── RPCs                      ← get_stats_dashboard, get_leaderboards,
-  │                               mark_order_paid, finalize_game_stats, …
-  └── migrations                ← supabase/migrations/*.sql (date-prefixed)
+  âââ tables                    â players, teams, games, leagues, seasons,
+  â                               player_game_stats, store_products,
+  â                               media_publications, â¦
+  âââ RPCs                      â get_stats_dashboard, get_leaderboards,
+  â                               mark_order_paid, finalize_game_stats, â¦
+  âââ migrations                â supabase/migrations/*.sql (date-prefixed)
 ```
 
 Data flow for any page:
 
 1. Page calls `useQuery(apiFetch('/api/public/X'))`.
-2. Worker handler runs Supabase query (service role — RLS-free).
+2. Worker handler runs Supabase query (service role â RLS-free).
 3. Handler returns `{ ok, data }` with edge cache headers.
 4. Page renders the array. Empty = visible empty state.
+
+## Skills & Commands
+
+This project includes 7 APEX skills and 1 project context profile in
+`.claude/skills/`. Each skill has YAML frontmatter with `name`,
+`description`, and `triggers` for auto-discovery. See
+[`.claude/README.md`](.claude/README.md) for the full skill map.
+
+**Available slash commands:**
+- `/project:apex-power` — Activate APEX-POWER-20X execution protocol
+- `/project:debug` — Activate 8-phase debug protocol
+- `/project:qa-gate` — Run zero-trust QA verification matrix
+
+**Skill hierarchy:**
+```
+apex-power (meta-skill) → omnidev-v2 | apex-master-debug | apex-frontend
+                        → apex-omnitest | apex-memory | apex-qa
+sbbl-agent (project context) → domain awareness for all skills
+```
 
 ## Common tasks
 
@@ -155,7 +174,7 @@ Data flow for any page:
 ### Modify a Supabase RPC
 
 1. Add a new dated migration under `supabase/migrations/` (NEVER edit
-   an existing one — they are immutable once merged).
+   an existing one â they are immutable once merged).
 2. Update the worker handler if the response shape changes.
 3. Update the frontend type and its consumers.
 
@@ -172,7 +191,7 @@ CI runs all of these. Do not merge red.
 
 ## Incident history (relevant to this guide)
 
-- **2026-04-16** — Live data regression. Store/Leaderboards/Scores/
+- **2026-04-16** â Live data regression. Store/Leaderboards/Scores/
   Stats/Live silently showed mock data because
   `/api/stats` + `/api/leaderboards` required auth but the public pages
   called them anonymously, and every page had a `|| mockX` fallback.
