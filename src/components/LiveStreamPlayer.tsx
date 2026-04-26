@@ -338,6 +338,7 @@ function StreamPlayer({
   // (production, preview domains, local dev) loads without manual rewiring.
   const twitchParents = Array.from(new Set([
     currentHost,
+    ...(twitchParentDomains ?? []),
     'sbbl-hq.icu',
     'www.sbbl-hq.icu',
     'localhost',
@@ -554,6 +555,8 @@ interface LiveStreamPlayerProps {
   hasPremiumPlayerAccess: boolean;
   /** Whether admin has set stream to live */
   isStreamLive?: boolean;
+  /** Explicit parent domains to include for Twitch embeds. */
+  twitchParentDomains?: string[];
 }
 
 export function LiveStreamPlayer({
@@ -562,6 +565,7 @@ export function LiveStreamPlayer({
   roles,
   hasPremiumPlayerAccess,
   isStreamLive,
+  twitchParentDomains,
 }: Readonly<LiveStreamPlayerProps>) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
