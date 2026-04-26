@@ -54,4 +54,4 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: E2E chaos battery
-        run: npx playwright test e2e/build-chaos-battery.spec.ts e2e/ops-auth-ingest-harmony.spec.ts e2e/critical-paths.spec.ts
+        run: npx playwright test --project=chromium e2e/build-chaos-battery.spec.ts e2e/ops-auth-ingest-harmony.spec.ts e2e/critical-paths.spec.ts
