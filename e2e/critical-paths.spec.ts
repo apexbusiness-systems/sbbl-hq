@@ -28,24 +28,38 @@ test.describe('critical path coverage', () => {
     await expect(page.locator('body')).not.toContainText(/VITE_SUPABASE|SUPABASE_SERVICE_ROLE_KEY|SUPABASE_URL/);
   });
 
-  test('login route renders trust bullets', async ({ page }) => {
+  test('login route renders trust bullets', async ({ page, isMobile }) => {
     await page.goto('/login', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByText('Three Leagues.')).toBeVisible();
-    await expect(page.getByText('Live scoring and real-time game updates')).toBeVisible();
+    if (isMobile) {
+      // Trust surface panel uses `hidden md:flex` — intentionally invisible on mobile.
+      // Verify the text exists in the DOM but do not assert visibility.
+      await expect(page.getByText('Three Leagues.')).toBeAttached();
+      await expect(page.getByText('Live scoring and real-time game updates')).toBeAttached();
+    } else {
+      await expect(page.getByText('Three Leagues.')).toBeVisible();
+      await expect(page.getByText('Live scoring and real-time game updates')).toBeVisible();
+    }
   });
 
-  test('release-cut navigation exposes only shipped primary routes', async ({ page }) => {
+  test('release-cut navigation exposes only shipped primary routes', async ({ page, isMobile }) => {
     await page.goto('/', { waitUntil: 'domcontentloaded' });
-    const nav = page.locator('header nav').first();
-    await expect(nav.getByRole('link', { name: 'Home' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Live' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Schedules' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Store' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Profiles' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Stats' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Leaderboards' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Media' })).toBeVisible();
-    await expect(nav.getByRole('link', { name: 'Teams' })).toBeVisible();
+    
+    if (isMobile) {
+      await page.getByRole('button', { name: 'Open menu' }).click();
+    }
+    
+    // For mobile, the nav is inside the drawer, for desktop it's in the header. We can search the whole page or just the header.
+    // The drawer is within the header component.
+    const nav = isMobile ? page.locator('header nav').last() : page.locator('header nav').first();
+    await expect(nav.getByRole('link', { name: 'Home', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Live', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Schedules', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Store', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Profiles', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Stats', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Leaderboards', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Media', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Teams', exact: true })).toBeVisible();
   });
 
   test('schedules and teams routes render headings', async ({ page }) => {

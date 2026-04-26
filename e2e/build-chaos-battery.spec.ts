@@ -42,7 +42,7 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, jobs: [] }) });
   });
 
-  await page.route('**/api/public/home**', async (route) => {
+  await page.route(/\/api\/public\/home/, async (route) => {
     const call = bump(state, 'api/public/home');
     if (call === 1) {
       await route.fulfill({
@@ -66,7 +66,7 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
   });
 
   // Admin stream config polling path (when current auth role resolves to super_admin).
-  await page.route('**/ops/streams/config**', async (route) => {
+  await page.route(/\/ops\/streams\/config/, async (route) => {
     const call = bump(state, 'ops/streams/config');
     if (call === 1) {
       await route.fulfill({
@@ -94,7 +94,7 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
   });
 
   // Public stream status polling path (when current auth role is not super_admin).
-  await page.route('**/api/streams/status**', async (route) => {
+  await page.route(/\/api\/streams\/status/, async (route) => {
     const call = bump(state, 'api/streams/status');
     if (call === 1) {
       await route.fulfill({
@@ -118,7 +118,7 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
     });
   });
 
-  await page.route('**/api/scores**', async (route) => {
+  await page.route(/\/api\/scores/, async (route) => {
     const call = bump(state, 'api/scores');
     if (call === 1) {
       await route.fulfill({
@@ -151,7 +151,7 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
     });
   });
 
-  await page.route('**/api/teams**', async (route) => {
+  await page.route(/\/api\/teams/, async (route) => {
     const call = bump(state, 'api/teams');
     if (call === 1) {
       await route.fulfill({
@@ -193,7 +193,7 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
     });
   });
 
-  await page.route('**/api/public/schedule**', async (route) => {
+  await page.route(/\/api\/public\/schedule/, async (route) => {
     const call = bump(state, 'api/public/schedule');
     if (call === 1) {
       await route.fulfill({
@@ -211,7 +211,7 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
     });
   });
 
-  await page.route('**/api/public/media**', async (route) => {
+  await page.route(/\/api\/public\/media/, async (route) => {
     const call = bump(state, 'api/public/media');
     if (call === 1) {
       await route.fulfill({
@@ -246,7 +246,7 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
 }
 
 test.describe('full-build chaos battery', () => {
-  test('cross-route orchestration survives auth/network turbulence', async ({ page }) => {
+  test('cross-route orchestration survives auth/network turbulence', async ({ page, isMobile }) => {
     test.setTimeout(90_000);
     await seedSuperAdminSession(page);
     const state = await registerBuildChaosRoutes(page);
@@ -261,8 +261,19 @@ test.describe('full-build chaos battery', () => {
         path: '/league/sbbl',
         verify: async () => {
           await expect(page.locator('header')).toBeVisible();
-          await expect(page.getByRole('link', { name: 'Live', exact: true })).toBeVisible();
-          await expect.poll(() => state.counters.get('api/public/home') ?? 0).toBeGreaterThan(0);
+          
+          if (isMobile) {
+            await page.getByRole('button', { name: 'Open menu' }).click();
+          }
+          
+          const nav = isMobile ? page.locator('header nav').last() : page.locator('header nav').first();
+          await expect(nav.getByRole('link', { name: 'Live', exact: true })).toBeVisible();
+          
+          if (isMobile) {
+            await page.getByRole('button', { name: 'Close menu' }).click();
+          }
+          
+          await expect.poll(() => state.counters.get('api/public/home') ?? 0, { timeout: 30_000 }).toBeGreaterThan(0);
         },
       },
       {
