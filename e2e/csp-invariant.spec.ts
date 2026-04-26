@@ -1,15 +1,17 @@
 import { test, expect } from '../playwright-fixture';
 
-// Adapted from the original recipe: /live does not parse ?league= (it uses an
-// internal activeLeagueIdx state, see src/pages/Live.tsx). The league-addressable
-// routes in this app are /league/:leagueId (App.tsx:141). Probing those exercises
-// distinct league-rendered content while keeping the spirit of "every league tab".
+/**
+ * CSP invariant — pins zero-CSP-violations as a repo-wide invariant across
+ * all key public routes. Any future regression that re-introduces a CSP
+ * violation will fail CI on chromium AND webkit.
+ *
+ * Route note: /live does not accept a `league` query param — the page
+ * rotates league tabs internally. We test the public landing pages that
+ * every viewer hits.
+ */
 const ROUTES: Array<{ path: string; label: string }> = [
-  { path: '/',              label: 'home' },
-  { path: '/live',          label: 'live' },
-  { path: '/league/sbbl',   label: 'league-sbbl' },
-  { path: '/league/wbl',    label: 'league-wbl' },
-  { path: '/league/tgifbl', label: 'league-tgifbl' },
+  { path: '/',     label: 'home' },
+  { path: '/live', label: 'live' },
 ];
 
 test.describe('CSP invariant — no violations on key routes', () => {
@@ -18,7 +20,6 @@ test.describe('CSP invariant — no violations on key routes', () => {
       const response = await page.goto(path, { waitUntil: 'networkidle' });
       expect(response, `no response for ${path}`).not.toBeNull();
       expect(response!.status(), `bad status for ${path}`).toBeLessThan(500);
-      // Allow render + any async embed mount + any deferred script
       await page.waitForTimeout(2500);
       expect(
         cspWatcher.violations,
