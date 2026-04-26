@@ -67,7 +67,8 @@ export function getStreamDeliveryClass(url: string): StreamDeliveryClass {
     normalized.includes('youtu.be') ||
     normalized.includes('twitch.tv') ||
     normalized.includes('vimeo.com') ||
-    normalized.includes('facebook.com')
+    normalized.includes('facebook.com') ||
+    normalized.includes('fb.watch')
   ) {
     return 'embed';
   }
@@ -135,7 +136,7 @@ export function detectStreamUrlType(url: string): StreamUrlType {
   if (isYoutubeUrl(url)) return 'youtube';
   if (/(?:^|[./])twitch\.tv(?:\/|$)/i.test(url)) return 'twitch';
   if (/(?:^|[./])vimeo\.com(?:\/|$)/i.test(url)) return 'vimeo';
-  if (/(?:^|[./])(?:facebook\.com|fb\.me|fbcdn\.net)(?:\/|$)/i.test(url)) return 'facebook';
+  if (/(?:^|[./])(?:facebook\.com|fb\.watch|fb\.me|fbcdn\.net)(?:\/|$)/i.test(url)) return 'facebook';
   if (/(?:^|[./])kick\.com(?:\/|$)/i.test(url)) return 'kick';
   if (/(?:^|[./])rumble\.com(?:\/|$)/i.test(url)) return 'rumble';
   if (/(?:^|[./])(?:dailymotion\.com|dai\.ly)(?:\/|$)/i.test(url)) return 'dailymotion';
