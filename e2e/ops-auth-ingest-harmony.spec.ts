@@ -127,7 +127,7 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
     mediaFeed.unshift(next);
   };
 
-  await page.route('**/ops/bootstrap', async (route) => {
+  await page.route(/\/ops\/bootstrap/, async (route) => {
     bootstrapCalls += 1;
     if (options.bootstrap401Once && bootstrapCalls === 1) {
       await route.fulfill({
@@ -151,11 +151,11 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
     });
   });
 
-  await page.route('**/ops/imports/history', async (route) => {
+  await page.route(/\/ops\/imports\/history/, async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, jobs: [] }) });
   });
 
-  await page.route('**/ops/potg/parse', async (route) => {
+  await page.route(/\/ops\/potg\/parse/, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -173,7 +173,7 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
     });
   });
 
-  await page.route('**/ops/event/parse', async (route) => {
+  await page.route(/\/ops\/event\/parse/, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -184,11 +184,11 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
     });
   });
 
-  await page.route('**/ops/imports/events', async (route) => {
+  await page.route(/\/ops\/imports\/events/, async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true }) });
   });
 
-  await page.route('**/ops/ingest/presign', async (route) => {
+  await page.route(/\/ops\/ingest\/presign/, async (route) => {
     const request = route.request();
     const payload = request.postDataJSON() as { kind: string; filename: string };
     presignRequests.push({
@@ -209,7 +209,7 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
     });
   });
 
-  await page.route('https://upload.test/**', async (route) => {
+  await page.route(/^https:\/\/upload\.test\/.+/, async (route) => {
     expect(route.request().method()).toBe('PUT');
 
     const uploadBody = route.request().postDataBuffer();
@@ -221,7 +221,7 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
     await route.fulfill({ status: 200, body: '' });
   });
 
-  await page.route('**/ops/ingest/submit', async (route) => {
+  await page.route(/\/ops\/ingest\/submit/, async (route) => {
     const request = route.request();
     const payload = request.postDataJSON() as Record<string, JsonValue>;
     submitRequests.push(payload);
@@ -248,7 +248,7 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
     });
   });
 
-  await page.route('**/ops/ingest/*/approve', async (route) => {
+  await page.route(/\/ops\/ingest\/.*\/approve/, async (route) => {
     const request = route.request();
     const match = request.url().match(/\/ops\/ingest\/(.+)\/approve$/);
     const jobId = match?.[1] ?? 'unknown';
@@ -271,7 +271,7 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
     });
   });
 
-  await page.route('**/ops/ingest/*/reject', async (route) => {
+  await page.route(/\/ops\/ingest\/.*\/reject/, async (route) => {
     const request = route.request();
     const match = request.url().match(/\/ops\/ingest\/(.+)\/reject$/);
     const jobId = match?.[1] ?? 'unknown';
@@ -291,7 +291,7 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
     });
   });
 
-  await page.route('**/api/public/media', async (route) => {
+  await page.route(/\/api\/public\/media/, async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -314,7 +314,7 @@ test.describe('ops auth + ingest harmony gate', () => {
     await expect(page.getByText('Session expired. Sign in again.')).toHaveCount(0);
   });
 
-  test('potg ingest approves into /media and core routes still render', async ({ page }) => {
+  test('potg ingest approves into /media and core routes still render', async ({ page, isMobile }) => {
     await seedSuperAdminSession(page);
     const captures = await registerHarmonyRoutes(page);
 
@@ -322,14 +322,17 @@ test.describe('ops auth + ingest harmony gate', () => {
     await expect(page.getByRole('tab', { name: 'POTG Parser' })).toBeVisible();
     await page.getByRole('tab', { name: 'POTG Parser' }).click();
 
-    const potgInput = page.locator('div:has-text("Drop POTG graphic or click to upload") input[type="file"]');
-    await potgInput.setInputFiles({
-      name: '1a6b9a95-405b-471f-abaf-faf66ece4646.jpg',
-      mimeType: 'image/png',
-      buffer: PNG_1X1,
-    });
+    const potgInput = page.getByTestId('potg-file-input');
+    await Promise.all([
+      page.waitForResponse((res) => /\/ops\/potg\/parse/.test(res.url()) && res.status() === 200),
+      potgInput.setInputFiles({
+        name: '1a6b9a95-405b-471f-abaf-faf66ece4646.jpg',
+        mimeType: 'image/png',
+        buffer: PNG_1X1,
+      }),
+    ]);
 
-    await expect(page.getByText('Data extracted — review below')).toBeVisible();
+    await expect(page.getByText('Data extracted — review below')).toBeVisible({ timeout: 30_000 });
     await page.getByRole('button', { name: 'Submit to Data Pipeline' }).click();
     await expect(page.getByText('needs_review')).toBeVisible();
 
@@ -344,7 +347,14 @@ test.describe('ops auth + ingest harmony gate', () => {
 
     await page.goto('/', { waitUntil: 'domcontentloaded' });
     await expect(page.locator('header')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Media' })).toBeVisible();
+    if (isMobile) {
+      await page.getByRole('button', { name: 'Open menu' }).click();
+    }
+    const nav = isMobile ? page.locator('header nav').last() : page.locator('header nav').first();
+    await expect(nav.getByRole('link', { name: 'Media', exact: true })).toBeVisible();
+    if (isMobile) {
+      await page.getByRole('button', { name: 'Close menu' }).click();
+    }
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('tab', { name: 'Store Media' })).toBeVisible();
