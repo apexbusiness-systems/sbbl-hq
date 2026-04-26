@@ -81,4 +81,20 @@ export default tseslint.config(
       ],
     },
   },
+  // Playwright test infrastructure uses a fixture API where the body of an
+  // `extend({...})` callback calls `use(value)` to provide the fixture to the
+  // test. The react-hooks/rules-of-hooks rule incorrectly flags these `use(`
+  // calls as React Hook violations because the function name matches the
+  // `useXxx` heuristic. Disable the rule on Playwright config + fixture +
+  // spec files only — these never run in a React tree.
+  {
+    files: [
+      "playwright.config.ts",
+      "playwright-fixture.ts",
+      "e2e/**/*.{ts,tsx}",
+    ],
+    rules: {
+      "react-hooks/rules-of-hooks": "off",
+    },
+  },
 );
