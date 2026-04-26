@@ -18,9 +18,7 @@ test.beforeEach(async ({ page }) => {
       contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        // Worker returns top-level fields; fetchPublicHome normalizes into data.
-        liveGames: [],
-        upcomingGames: [
+        liveGames: [
           {
             id: GAME_ID,
             home_team_id: 'home-team',
@@ -28,10 +26,12 @@ test.beforeEach(async ({ page }) => {
             home_team: { name: 'Home' },
             away_team: { name: 'Away' },
             league_code: 'SBBL',
-            status: 'upcoming',
+            status: 'live',
             scheduled_at: new Date().toISOString(),
+            stream_url: '',
           },
         ],
+        upcomingGames: [],
       }),
     });
   });
