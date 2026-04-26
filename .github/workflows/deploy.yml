@@ -38,7 +38,7 @@ jobs:
           VITE_DEFAULT_LEAGUE: SBBL
 
       - name: Generate Pre-Live Evidence
-        run: python update_livestream.py
+        run: python scripts/archive/update_livestream.py
 
       - name: Deploy to Cloudflare Workers
         run: npx wrangler deploy --config wrangler.deploy.jsonc
