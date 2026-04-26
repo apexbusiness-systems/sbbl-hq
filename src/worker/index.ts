@@ -3906,7 +3906,9 @@ async function handleStreamQoeBeacon(ctx: HandlerCtx): Promise<Response> {
   }
 
   const clientIp = getClientIP(ctx.req);
-  if (!enforceInMemoryRateLimit(`qoe:${clientIp}`, 10, 60_000)) {
+  // Scope per (gameId, IP) so a household watching two different live games
+  // does not collide on a shared bucket and 429 each other's beacons.
+  if (!enforceInMemoryRateLimit(`qoe:${gameId}:${clientIp}`, 10, 60_000)) {
     return new Response(null, { status: 429 });
   }
 

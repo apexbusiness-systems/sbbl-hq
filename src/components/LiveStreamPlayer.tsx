@@ -398,9 +398,13 @@ function StreamPlayer({
         : { attributes: { crossOrigin: isProxyAuthedUrl ? 'use-credentials' : 'anonymous' } }),
     },
   };
-  // Twitch no longer depends on autoplay timing, so render immediately and
-  // gate start via explicit user gesture instead of container-ready state.
-  const shouldRenderPlayer = isTwitch || containerReady;
+  // Mount the player only after the host element has practical dimensions
+  // and is in the viewport. Twitch's embed SDK runs its visibility checks
+  // synchronously at init: if the iframe is 0×0 or off-viewport when the
+  // SDK initializes, it latches autoplay-disabled with errors like
+  // "minimum requirements for autoplay were not met: style visibility, size,
+  // viewport visibility" and never recovers without a remount.
+  const shouldRenderPlayer = containerReady;
 
   return (
     <div
