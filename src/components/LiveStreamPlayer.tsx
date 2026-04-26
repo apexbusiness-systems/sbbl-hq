@@ -142,15 +142,13 @@ const YOUTUBE_ERROR_MESSAGES: Partial<Record<number, string>> = {
 };
 
 function parsePlayerError(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  err: any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  data: any,
+  err: unknown,
+  data: { error?: number } | null | undefined,
 ): string {
   if (data != null && typeof data.error === 'number') {
     return (
-      YOUTUBE_ERROR_MESSAGES[data.error as number] ??
-      `Stream error (YouTube code ${data.error as number}). Try a different URL.`
+      YOUTUBE_ERROR_MESSAGES[data.error] ??
+      `Stream error (YouTube code ${data.error}). Try a different URL.`
     );
   }
   if (err instanceof Event) {
@@ -408,6 +406,7 @@ function StreamPlayer({
     <div
       ref={containerRef}
       className="absolute inset-0 bg-black"
+      style={{ width: '100%', height: '100%', minWidth: 400, minHeight: 300 }}
       data-testid="stream-player"
       data-container-ready={containerReady ? 'true' : 'false'}
     >
