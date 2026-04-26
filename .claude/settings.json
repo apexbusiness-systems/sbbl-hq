@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "Read *.md",
+      "Read *.ts",
+      "Read *.tsx",
+      "Read *.js",
+      "Read *.jsx",
+      "Read *.json",
+      "Read *.css",
+      "Read *.sql",
+      "Read *.html",
+      "Write src/**",
+      "Write supabase/**",
+      "Write tests/**",
+      "Write e2e/**",
+      "Write docs/**"
+    ],
+    "deny": [
+      "Read .env",
+      "Read .dev.vars*",
+      "Read **/secrets/**",
+      "Write .env",
+      "Write .dev.vars*",
+      "Write node_modules/**"
+    ]
+  }
+}
