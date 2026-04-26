@@ -168,6 +168,7 @@ function StreamPlayer({
   url,
   isSuperAdmin: _isSuperAdmin,
   providerHint,
+  twitchParentDomains,
   onReady,
   onPlay,
   onError,
@@ -175,6 +176,7 @@ function StreamPlayer({
   url: string;
   isSuperAdmin: boolean;
   providerHint?: StreamUrlType | null;
+  twitchParentDomains?: string[];
   onReady: () => void;
   onPlay: () => void;
   onError: (message: string) => void;
@@ -338,6 +340,7 @@ function StreamPlayer({
   // (production, preview domains, local dev) loads without manual rewiring.
   const twitchParents = Array.from(new Set([
     currentHost,
+    ...(twitchParentDomains ?? []),
     'sbbl-hq.icu',
     'www.sbbl-hq.icu',
     'localhost',
@@ -554,6 +557,8 @@ interface LiveStreamPlayerProps {
   hasPremiumPlayerAccess: boolean;
   /** Whether admin has set stream to live */
   isStreamLive?: boolean;
+  /** Explicit parent domains to include for Twitch embeds. */
+  twitchParentDomains?: string[];
 }
 
 export function LiveStreamPlayer({
@@ -562,6 +567,7 @@ export function LiveStreamPlayer({
   roles,
   hasPremiumPlayerAccess,
   isStreamLive,
+  twitchParentDomains,
 }: Readonly<LiveStreamPlayerProps>) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
@@ -829,6 +835,7 @@ export function LiveStreamPlayer({
             url={playbackUrl}
             isSuperAdmin={isSuperAdmin}
             providerHint={providerHint}
+            twitchParentDomains={twitchParentDomains}
             onReady={() => { sf.reportEvent('play'); sf.recordSuccess(); }}
             onPlay={() => sf.reportEvent('playing')}
             onError={(message) => { setPlayerError(message); sf.recordFailure(); }}
