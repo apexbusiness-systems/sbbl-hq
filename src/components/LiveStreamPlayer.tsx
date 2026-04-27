@@ -802,10 +802,9 @@ export function LiveStreamPlayer({
 
   // ── Gate 2: Access granted → Player ──────────────────────
   if (hasAccess) {
-    const gameSourceType = detectStreamUrlType(game.stream_url ?? '');
     const providerHint = playbackTypeHint && playbackTypeHint !== 'unknown'
       ? playbackTypeHint
-      : (gameSourceType !== 'unknown' ? gameSourceType : null);
+      : null;
     return (
       <div className="absolute inset-0 flex flex-col relative z-0">
         {/* Stream Player Area */}
