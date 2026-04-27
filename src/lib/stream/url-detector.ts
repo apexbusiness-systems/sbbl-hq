@@ -259,7 +259,7 @@ export function toPlayableUrl(raw: string): PlayableUrl {
     return {
       url: trimmed,
       type: 'facebook',
-      warning: 'Facebook embedding may be limited. Verify playback after going live.',
+      warning: 'Facebook stream URLs are not supported. Use YouTube, Twitch, Vimeo, or HLS instead.',
     };
   }
 
@@ -367,7 +367,7 @@ export function getStreamTypeAdvisory(type: StreamUrlType): StreamAdvisory {
     case 'rtmp':
       return { level: 'warn', message: 'RTMP cannot play in browser — use an HLS endpoint instead.' };
     case 'facebook':
-      return { level: 'warn', message: 'Facebook embedding may be limited. Verify playback after going live.' };
+      return { level: 'warn', message: 'Facebook stream URLs are not supported. Use YouTube, Twitch, Vimeo, or HLS instead.' };
     case 'instagram':
       return { level: 'warn', message: 'Instagram Live does not support external embedding.' };
     case 'kick':

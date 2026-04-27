@@ -78,16 +78,14 @@ describe('CSP allows stream embed domains including Facebook SDK sources', () =>
     expect(csp).toContain('https://player.vimeo.com');
   });
 
-  it('allows required Facebook SDK and embed domains in CSP', async () => {
+  it('does not advertise any Facebook host in CSP', async () => {
+    // Facebook is not a supported stream provider. Allowing connect.facebook.net
+    // in script-src-elem let react-player/lazy fetch the FB SDK, which then
+    // failed connect-src and stormed the console via Workbox CacheFirst.
     const res = await worker.fetch(new Request('https://local/api/public-config'), env);
     const csp = res.headers.get('Content-Security-Policy') ?? '';
-    // Facebook SDK script host required for ReactPlayer Facebook provider.
-    expect(csp).toContain('https://connect.facebook.net');
-    // Facebook frame hosts required for embedded playback contexts.
-    expect(csp).toContain('https://www.facebook.com');
-    expect(csp).toContain('https://web.facebook.com');
-    // Graph API host required for SDK/API connect flows.
-    expect(csp).toContain('https://graph.facebook.com');
+    expect(csp).not.toContain('facebook.net');
+    expect(csp).not.toContain('facebook.com');
   });
 
   it('allows self-hosted Supabase connect-src', async () => {

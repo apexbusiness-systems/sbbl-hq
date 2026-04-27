@@ -17,13 +17,15 @@ Object.defineProperty(window, 'matchMedia', {
   }),
 });
 
-vi.mock('react-player', () => ({
+const reactPlayerStub = {
   default: (props: { url?: string }) => {
     const url = typeof props?.url === 'string' ? props.url : '';
     // Stable stub avoids dynamic provider imports in tests.
     return createElement('div', { 'data-testid': 'mock-react-player', 'data-url': url });
   },
-}));
+};
+vi.mock('react-player', () => reactPlayerStub);
+vi.mock('react-player/lazy', () => reactPlayerStub);
 
 
 afterEach(() => {
