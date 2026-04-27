@@ -112,11 +112,15 @@ export default defineConfig(({ mode }) => {
               },
             },
             // Hashed JS/CSS/Fonts: Cache-First
+            // Same-origin only. Cross-origin scripts (provider SDKs) under
+            // CacheFirst throw `no-response` on CSP/network failure and storm
+            // the console; let them fall through to the browser default.
             {
-              urlPattern: ({ request }) =>
-                request.destination === 'script' ||
-                request.destination === 'style' ||
-                request.destination === 'font',
+              urlPattern: ({ request, sameOrigin }) =>
+                sameOrigin &&
+                (request.destination === 'script' ||
+                  request.destination === 'style' ||
+                  request.destination === 'font'),
               handler: 'CacheFirst',
               options: {
                 cacheName: 'static-assets',
