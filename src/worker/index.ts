@@ -377,14 +377,17 @@ async function getStreamUrlForGame(
   const cacheHit = streamUrlCache.get(gameId);
   if (cacheHit && cacheHit.expiresAtMs > nowMs) return cacheHit.url;
 
-  const game = await admin
-    .from("games")
-    .select("stream_url")
-    .eq("id", gameId)
+  // Resolve via stream_admin_config.collection_id (canonical source — same path
+  // used by handlePlaybackSession). Never reads games.stream_url; raw origin is
+  // never returned to clients (handleStreamProxy proxies it).
+  const cfg = await admin
+    .from("stream_admin_config")
+    .select("collection_id")
+    .eq("id", true)
     .maybeSingle();
-  if (game.error) throw new Error(game.error.message);
+  if (cfg.error) throw new Error(cfg.error.message);
   const streamUrl =
-    String((game.data as { stream_url?: string } | null)?.stream_url ?? "").trim() ||
+    String((cfg.data as { collection_id?: string } | null)?.collection_id ?? "").trim() ||
     String(env.VITE_STREAM_URL ?? "").trim();
   if (!streamUrl) throw new Error("stream_not_configured");
 
