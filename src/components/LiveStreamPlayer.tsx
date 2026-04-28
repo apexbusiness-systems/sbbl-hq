@@ -826,7 +826,7 @@ export function LiveStreamPlayer({
       ? playbackTypeHint
       : null;
     return (
-      <div className="absolute inset-0 flex flex-col relative z-0">
+      <div className="absolute inset-0 flex flex-col z-0">
         {/* Stream Player Area */}
         {playbackLoading ? (
           <div className="absolute inset-0 flex items-center justify-center bg-black">
