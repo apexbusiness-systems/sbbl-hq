@@ -266,8 +266,18 @@ function StreamPlayer({
   const [durationSeconds, setDurationSeconds] = useState(0);
   // Auto-retry: allow one silent retry on transient errors before showing error UI
   const retryCountRef = useRef(0);
+  const autoRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactPlayerRef = useRef<ReactPlayer | null>(null);
   const MAX_AUTO_RETRIES = 1;
+
+  useEffect(() => {
+    return () => {
+      if (autoRetryTimerRef.current) {
+        clearTimeout(autoRetryTimerRef.current);
+        autoRetryTimerRef.current = null;
+      }
+    };
+  }, []);
 
   // Force unified in-app controls for all providers.
   const showNativeControls = false;
@@ -439,7 +449,11 @@ function StreamPlayer({
             if (retryCountRef.current < MAX_AUTO_RETRIES) {
               retryCountRef.current += 1;
               setPlaying(false);
-              setTimeout(() => setPlaying(true), 3_000);
+              if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current);
+              autoRetryTimerRef.current = setTimeout(() => {
+                autoRetryTimerRef.current = null;
+                setPlaying(true);
+              }, 3_000);
               return;
             }
             onError(parsePlayerError(err, data));
@@ -637,6 +651,10 @@ export function LiveStreamPlayer({
     if (!hasAccess || !userId) return;
     let active = true;
     let heartbeatId: ReturnType<typeof globalThis.setInterval> | null = null;
+    // Store the hard-cap timer so unmount can clear it. Without this
+    // reference the timer lingered for up to 6 hours after navigation,
+    // pinning the heartbeat closure in memory.
+    let hardCapTimerId: ReturnType<typeof globalThis.setTimeout> | null = null;
     let sessionIdForCleanup: string | null = null;
     let consecutiveFailures = 0;
     setPlaybackLoading(true);
@@ -680,7 +698,8 @@ export function LiveStreamPlayer({
         if (res.session.maxExpiresAt) {
           const msUntilCap = new Date(res.session.maxExpiresAt).getTime() - Date.now();
           if (msUntilCap > 0) {
-            setTimeout(() => {
+            hardCapTimerId = globalThis.setTimeout(() => {
+              hardCapTimerId = null;
               if (!active) return;
               if (heartbeatId) { clearInterval(heartbeatId); heartbeatId = null; }
               toast.error('Your 6-hour viewing session has ended. Purchase a new pass to continue.');
@@ -754,6 +773,7 @@ export function LiveStreamPlayer({
     return () => {
       active = false;
       if (heartbeatId) clearInterval(heartbeatId);
+      if (hardCapTimerId) clearTimeout(hardCapTimerId);
       if (sessionIdForCleanup) {
         void apiFetch(`/api/streams/${game.id}/session/end`, {
           method: 'POST',
