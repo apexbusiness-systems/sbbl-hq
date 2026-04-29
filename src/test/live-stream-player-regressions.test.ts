@@ -51,6 +51,33 @@ describe('LiveStreamPlayer regression guards', () => {
     });
   });
 
+  describe('Unsupported-provider short-circuit (Facebook + walled gardens)', () => {
+    it('detects Facebook URLs as a distinct branch', () => {
+      // The bug: when the configured stream URL was a Facebook page
+      // (e.g. https://www.facebook.com/boxontrack2019), ReactPlayer's
+      // facebook provider tried to load connect.facebook.net/sdk.js and
+      // tripped the script-src CSP, then fell through to FilePlayer which
+      // dies with "Stream error: The element has no supported sources."
+      // Bail before mount instead.
+      expect(SOURCE).toMatch(/const isFacebook = urlType === 'facebook'/);
+    });
+
+    it('renders an advisory before ReactPlayer can mount on Facebook URLs', () => {
+      // The advisory must short-circuit (early return) — not a flag that
+      // gates props on the mounted player. ReactPlayer must never see a
+      // Facebook URL or it will load the SDK script.
+      expect(SOURCE).toMatch(/if \(isFacebook\) \{[\s\S]*?return \(/);
+      expect(SOURCE).toMatch(/Facebook Stream Not Supported/);
+    });
+
+    it('also short-circuits Kick / Instagram / X-Spaces (no public embed surface)', () => {
+      expect(SOURCE).toMatch(
+        /const isUnembeddable =\s*urlType === 'kick' \|\| urlType === 'instagram' \|\| urlType === 'x-spaces'/,
+      );
+      expect(SOURCE).toMatch(/if \(isUnembeddable\) \{[\s\S]*?return \(/);
+    });
+  });
+
   describe('Timer cleanup (fix fd4bf71)', () => {
     it('captures the 6-hour hard-cap setTimeout handle', () => {
       // Before: setTimeout(() => { ... }, msUntilCap) — handle thrown away.
