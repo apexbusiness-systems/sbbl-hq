@@ -185,6 +185,14 @@ function StreamPlayer({
   const isVimeo = urlType === 'vimeo';
   const isWhep = urlType === 'whep';
   const isRtmp = urlType === 'rtmp';
+  // Facebook + the other walled-garden providers cannot play in our locked-down
+  // CSP. ReactPlayer's facebook provider attempts to load
+  // connect.facebook.net/sdk.js (blocked by script-src) and then falls through
+  // to FilePlayer, which loads the URL as <video src> and dies with
+  // "no supported sources". Detect and bail with a clear advisory instead.
+  const isFacebook = urlType === 'facebook';
+  const isUnembeddable =
+    urlType === 'kick' || urlType === 'instagram' || urlType === 'x-spaces';
   // HLS and DASH use ReactPlayer with explicit forcing flags
   const forceHls = urlType === 'hls';
   const forceDash = urlType === 'dash';
@@ -316,6 +324,43 @@ function StreamPlayer({
         <p className="text-xs text-white/60 max-w-xs leading-relaxed">
           RTMP cannot play directly in the browser. Configure an HLS endpoint
           (e.g. <code className="text-amber-400">https://…/live/stream.m3u8</code>) in Broadcast Controls.
+        </p>
+      </div>
+    );
+  }
+
+  // Facebook URLs cannot play under our CSP (the FB SDK is intentionally
+  // blocked). Bail before ReactPlayer mounts so we never trigger the
+  // connect.facebook.net script-src violation or the "no supported sources"
+  // fallthrough into FilePlayer.
+  if (isFacebook) {
+    return (
+      <div className="absolute inset-0 bg-black flex flex-col items-center justify-center gap-3 px-6 text-center" data-testid="stream-player">
+        <AlertTriangle className="w-10 h-10 text-amber-400" />
+        <p className="text-sm font-semibold text-white">Facebook Stream Not Supported</p>
+        <p className="text-xs text-white/60 max-w-xs leading-relaxed">
+          Facebook URLs cannot be embedded under the SBBL HQ content policy.
+          Configure an HLS endpoint, or a YouTube / Twitch / Vimeo URL, in
+          Broadcast Controls.
+        </p>
+      </div>
+    );
+  }
+
+  // Other walled-garden providers (Kick, Instagram Live, X Spaces) advertise
+  // no public embed surface compatible with our CSP; treat them like Facebook.
+  if (isUnembeddable) {
+    const label =
+      urlType === 'kick' ? 'Kick'
+      : urlType === 'instagram' ? 'Instagram Live'
+      : 'X Spaces';
+    return (
+      <div className="absolute inset-0 bg-black flex flex-col items-center justify-center gap-3 px-6 text-center" data-testid="stream-player">
+        <AlertTriangle className="w-10 h-10 text-amber-400" />
+        <p className="text-sm font-semibold text-white">{label} Not Supported</p>
+        <p className="text-xs text-white/60 max-w-xs leading-relaxed">
+          {label} does not provide an embeddable player URL. Configure an HLS
+          endpoint, or a YouTube / Twitch / Vimeo URL, in Broadcast Controls.
         </p>
       </div>
     );
