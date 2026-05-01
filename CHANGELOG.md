@@ -1,8 +1,75 @@
-<!-- Version: v1.3.0 | Date: 2026-04-19 | Status: Current -->
+<!-- Version: v1.4.0 | Date: 2026-04-29 | Status: Current -->
 # CHANGELOG
 
 All notable changes to SBBL HQ are documented in this file.
 Versioning follows [semantic versioning](https://semver.org) with UTC date stamps.
+
+---
+
+## 2026-04-29 — v1.4.0 — Live Player Hardening (BASELINE REFERENCE BUILD)
+
+> **This is the canonical baseline build for the live-stream player.**
+> Onboarding agents and devs MUST read this entry, the Live Player
+> Invariants section in `CLAUDE.md`, and the runbook at
+> `ops/runbooks/universal-ingest.md` before touching anything in
+> `src/components/LiveStreamPlayer.tsx` or `src/lib/stream/`.
+
+Closes a five-incident cascade caused by stale/invisible regressions in
+the broadcast surface: a half-rendered player container, two orphaned
+timers leaking the heartbeat closure for up to six hours, and a
+silent CSP-trip on Facebook URLs that surfaced as a generic
+"no supported sources" error with no admin-actionable hint.
+
+### What landed
+
+- **Layout fix** (`820949e`). Removed the conflicting
+  `absolute inset-0 flex flex-col relative z-0` Tailwind classes on the
+  Gate-2 wrapper of `LiveStreamPlayer.tsx`. Tailwind emitted
+  `position: relative` last, collapsing the wrapper out of its absolute
+  ancestor and rendering the iframe at min-height while the controls
+  bar floated mid-canvas above empty black space.
+- **Timer hygiene** (`fd4bf71`). The 6-hour session-cap `setTimeout` and
+  the 3-second auto-retry `setTimeout` were started without retaining
+  their handles. The cap timer pinned the heartbeat closure for up to
+  six hours after navigation; the retry timer could call `setPlaying`
+  on a torn-down `ReactPlayer`. Both now stored and cleared on unmount.
+- **Unembeddable-URL bail** (`0cacfb1`). `StreamPlayer` now short-circuits
+  before `ReactPlayer` mounts for `facebook | kick | instagram | x-spaces`
+  URLs, mirroring the existing RTMP advisory pattern. ReactPlayer never
+  attempts the `connect.facebook.net/sdk.js` load (intentionally blocked
+  by CSP since `89d9696`), so the silent `FilePlayer` fall-through into
+  "no supported sources" is gone.
+- **Regression guards** (`de7c49f`). Added
+  `src/test/live-stream-player-regressions.test.ts` — 11 cheap,
+  deterministic source-level assertions that lock in every fix above.
+  Mutation-tested by re-introducing each bug locally and confirming the
+  relevant assertion failed before reverting.
+- **Pipeline simulation** (`scripts/simulate-broadcast.ts`). New
+  `npm run simulate:broadcast` walks every supported provider type
+  (HLS / DASH / MP4 / YouTube / Twitch / Vimeo / WHEP / RTMP / Facebook /
+  Kick / Instagram / X-Spaces / blob: / garbage) through the full
+  ingest → playback pipeline (`canonicalizeStreamSourceUrl` →
+  `detectStreamUrlType` → `toPlayableUrl` → `getStreamDeliveryClass` →
+  `StreamPlayer` outcome) and asserts each scenario produces the right
+  result. **19 / 19 scenarios pass** at v1.4.0; the script exits non-zero
+  on any mismatch and is the canonical baseline reference.
+
+### Validation gates green at release
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm run lint` (max-warnings 0) | clean |
+| `npm test` | 97 files, 1001 passed / 7 skipped / 0 failed in ~30s |
+| `npm run build` | clean (PWA 81 entries / 1.7 MiB) |
+| `npm run simulate:broadcast` | 19 / 19 scenarios pass |
+
+### Required reading before changing the player
+
+1. The **Live Player Invariants** HARD RULE in `CLAUDE.md` §1.5.
+2. `src/test/live-stream-player-regressions.test.ts` — every assertion
+   maps to a real production incident.
+3. `ops/runbooks/universal-ingest.md` — the validation checklist.
 
 ---
 

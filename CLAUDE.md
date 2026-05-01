@@ -110,6 +110,95 @@ This rule is enforced by:
 - **Vitest stage tests** (`src/test/stream-independence-stage*.test.ts`).
 - **Sentry alert** on `stream.access.v2` error rate > 0.1%.
 
+### 5. Live Player Invariants — do not regress v1.4.0
+
+The live-stream player (`src/components/LiveStreamPlayer.tsx`) is the
+**single most regression-prone surface in the app**. v1.4.0 hardened it
+after a five-incident cascade. The invariants below MUST hold:
+
+#### 5.1 — Layout: never combine `absolute` with `relative` on the player wrapper
+
+The Gate-2 wrapper must be:
+
+```tsx
+// CORRECT
+<div className="absolute inset-0 flex flex-col z-0">
+```
+
+```tsx
+// BANNED — Tailwind emits position:relative last; the wrapper drops
+// out of its absolute-positioned ancestor, the iframe collapses to
+// min-height, and the controls bar floats mid-canvas above empty space.
+<div className="absolute inset-0 flex flex-col relative z-0">
+```
+
+`z-0` alone gives an absolute element its own stacking context.
+
+#### 5.2 — Timers: every `setTimeout` / `setInterval` must be cleared on unmount
+
+Both the **6-hour session-cap timer** and the **3-second auto-retry timer**
+previously leaked closures for up to six hours after navigation. Every
+new timer in the player MUST:
+
+1. Capture the handle in a ref (component-scope) or local var (effect-scope).
+2. Clear it in the effect cleanup (`return () => { ... }`).
+3. Clear it before scheduling a replacement (no overlapping timers).
+
+Pattern reference: `hardCapTimerId` and `autoRetryTimerRef` in `LiveStreamPlayer.tsx`.
+
+#### 5.3 — Unembeddable URLs must bail before ReactPlayer mounts
+
+Provider types that cannot play under our locked-down CSP MUST short-circuit
+in `StreamPlayer` with an advisory panel, mirroring the existing RTMP branch:
+
+| Type | Why blocked |
+|---|---|
+| `rtmp` | Browsers cannot decode RTMP. |
+| `facebook` | `connect.facebook.net/sdk.js` is intentionally not in our `script-src` (killed in `89d9696` to stop the CacheFirst storm). |
+| `kick`, `instagram`, `x-spaces` | No public embed surface compatible with our CSP. |
+
+Forbidden:
+
+```ts
+// BANNED — lets ReactPlayer mount, FB SDK trips CSP, FilePlayer
+// fall-through reports "no supported sources" with no admin hint.
+<ReactPlayer url={facebookUrl} />
+```
+
+Required:
+
+```ts
+// CORRECT — advisory before mount, ReactPlayer never sees the URL.
+if (isFacebook) return <FacebookAdvisoryPanel />;
+```
+
+#### 5.4 — `react-player` must be lazy-loaded
+
+```ts
+// CORRECT — each provider is a separate dynamic chunk; FB code
+// never executes unless an FB URL is rendered (it isn't, per 5.3).
+import ReactPlayer from 'react-player/lazy';
+```
+
+The bare `react-player` import is **lint-blocked** by
+`no-restricted-imports` in `eslint.config.js`. Do not bypass.
+
+### Enforcement (all run in CI on every PR)
+
+- **Source-level regression tests**:
+  `src/test/live-stream-player-regressions.test.ts` (11 assertions,
+  one per invariant above; mutation-tested).
+- **Pipeline simulation**: `npm run simulate:broadcast` walks 19
+  representative URLs through the full ingest pipeline. Add a scenario
+  to `scripts/simulate-broadcast.ts` whenever you add a new provider
+  type or a new branch in `StreamPlayer`.
+- **ESLint** (`no-restricted-imports`): blocks bare `react-player`.
+- **Vitest**: `src/test/live-page-*.test.tsx` covers each access-gate path.
+
+If a regression test fails on your branch, **read the failing assertion**.
+Each one maps to a real production incident from v1.3.x. Disabling the
+test is never the right answer.
+
 ## Architecture at a glance
 
 ```
