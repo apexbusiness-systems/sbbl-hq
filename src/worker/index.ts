@@ -3496,7 +3496,7 @@ async function getUserRolesFromDB(
  * Returns { code: uuid } — the invite ID is the redemption token.
  * On duplicate request for same game returns the existing code (idempotent).
  */
-async function handleInviteGenerate(ctx: HandlerCtx) {
+export async function handleInviteGenerate(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
 
@@ -3747,7 +3747,9 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
   // First use: atomically lock the invite to this user + IP
   // The `.is('used_by', null)` filter makes this a compare-and-swap:
   // if a concurrent request already locked it, this update affects 0 rows.
-  const { error: updateErr, count } = await ctx.admin
+  // Use data.length (not count) — Supabase JS only populates count when
+  // the Prefer:count=exact header is sent; without it count is always null.
+  const { data: claimedRows, error: updateErr } = await ctx.admin
     .from("ppv_invites")
     .update({
       used_by: userId,
@@ -3756,12 +3758,13 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
     })
     .eq("id", code)
     .is("used_by", null)
-    .select("id"); // returns rows to detect 0-row update
+    .select("id");
 
   if (updateErr) throw new Error(updateErr.message);
 
-  // count === 0 means a concurrent request locked it first — re-check
-  if (count === 0) {
+  const claimedCount = Array.isArray(claimedRows) ? claimedRows.length : 0;
+  // claimedCount === 0 means a concurrent request locked it first — re-check
+  if (claimedCount === 0) {
     const { data: recheck } = await ctx.admin
       .from("ppv_invites")
       .select("used_by, ip_address")
@@ -3988,7 +3991,7 @@ async function handleStreamQoeHealth(ctx: HandlerCtx): Promise<Response> {
 
 // ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
 
-async function handleStreamAccess({ req, admin }: HandlerCtx) {
+export async function handleStreamAccess({ req, admin }: HandlerCtx) {
   const userId = requireAuth(req);
   const gameId = new URL(req.url).pathname.split("/")[3]; // /api/streams/:gameId/access
   const { data, error } = await admin.rpc("can_user_view_stream", {
@@ -4103,10 +4106,16 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   }
   const playbackMode: 'live' | 'replay' = body.playbackMode === 'replay' ? 'replay' : 'live';
 
+  // Fetch roles once here so both the super-admin fast-path and the replay gate
+  // can use them without a second DB round-trip.
+  const roles = await getUserRolesFromDB(userId, ctx.admin);
+  const isSuperAdmin = roles.includes("super_admin");
+
   // ── WS7 replay gate (embargo + entitlement) ────────────────────────────
-  // Applies only when the client explicitly requests replay playback
-  // for a real game. Broadcast alias and live mode unchanged.
-  if (playbackMode === 'replay' && gameId) {
+  // Applies only when the client explicitly requests replay playback for a real
+  // game. Super admins bypass this gate (they have full fast-path access below).
+  // Broadcast alias and live mode are unchanged.
+  if (playbackMode === 'replay' && gameId && !isSuperAdmin) {
     const gRes = await ctx.admin
       .from("games")
       .select("replay_mode, replay_monetization_enabled_at")
@@ -4144,9 +4153,6 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       return json({ ok: false, error: "replay_available_for_purchase" }, 402);
     }
   }
-
-  const roles = await getUserRolesFromDB(userId, ctx.admin);
-  const isSuperAdmin = roles.includes("super_admin");
 
   // ── Super admin fast-path ──────────────────────────────────────────────
   // No access checks, no PPV, no one-device displacement, and no DB session
