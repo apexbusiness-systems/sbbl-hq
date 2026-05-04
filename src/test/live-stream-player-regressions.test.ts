@@ -62,12 +62,13 @@ describe('LiveStreamPlayer regression guards', () => {
       expect(SOURCE).toMatch(/const isFacebook = urlType === 'facebook'/);
     });
 
-    it('renders an advisory before ReactPlayer can mount on Facebook URLs', () => {
-      // The advisory must short-circuit (early return) — not a flag that
-      // gates props on the mounted player. ReactPlayer must never see a
-      // Facebook URL or it will load the SDK script.
+    it('renders a plugins/video.php iframe before ReactPlayer can mount on Facebook URLs', () => {
+      // Must short-circuit (early return) — ReactPlayer must never see a
+      // Facebook URL or it will attempt to load connect.facebook.net/sdk.js.
+      // Rendered via the official FB sandboxed iframe; no SDK ever executes.
       expect(SOURCE).toMatch(/if \(isFacebook\) \{[\s\S]*?return \(/);
-      expect(SOURCE).toMatch(/Facebook Stream Not Supported/);
+      expect(SOURCE).toMatch(/facebook\.com\/plugins\/video\.php/);
+      expect(SOURCE).toMatch(/encodeURIComponent\(url\)/);
     });
 
     it('also short-circuits Kick / Instagram / X-Spaces (no public embed surface)', () => {

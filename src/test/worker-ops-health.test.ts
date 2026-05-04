@@ -78,14 +78,20 @@ describe('CSP allows stream embed domains including Facebook SDK sources', () =>
     expect(csp).toContain('https://player.vimeo.com');
   });
 
-  it('does not advertise any Facebook host in CSP', async () => {
-    // Facebook is not a supported stream provider. Allowing connect.facebook.net
-    // in script-src-elem let react-player/lazy fetch the FB SDK, which then
-    // failed connect-src and stormed the console via Workbox CacheFirst.
+  it('blocks Facebook SDK (facebook.net) but allows facebook.com iframe embed in frame-src', async () => {
+    // connect.facebook.net must stay out of script-src — that SDK load caused
+    // the CacheFirst storm (commit 89d9696). facebook.com is intentionally
+    // allowed in frame-src only, for the plugins/video.php sandboxed iframe.
     const res = await worker.fetch(new Request('https://local/api/public-config'), env);
     const csp = res.headers.get('Content-Security-Policy') ?? '';
     expect(csp).not.toContain('facebook.net');
-    expect(csp).not.toContain('facebook.com');
+    expect(csp).toContain('frame-src');
+    expect(csp).toContain('https://www.facebook.com');
+    // facebook.com must NOT appear in script-src or connect-src
+    const scriptSrc = csp.match(/script-src[^;]*/)?.[0] ?? '';
+    const connectSrc = csp.match(/connect-src[^;]*/)?.[0] ?? '';
+    expect(scriptSrc).not.toContain('facebook');
+    expect(connectSrc).not.toContain('facebook');
   });
 
   it('allows self-hosted Supabase connect-src', async () => {
