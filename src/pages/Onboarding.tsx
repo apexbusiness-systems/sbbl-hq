@@ -2,6 +2,7 @@ import { FormEvent, useState } from 'react';
 import { Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { saveOnboarding } from '@/lib/api/auth';
 import { useAuth } from '@/hooks/use-auth';
+import { getSupabaseClient } from '@/lib/supabase/client';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 
 type RoleIntent = 'fan' | 'player' | 'coach';
@@ -28,11 +29,16 @@ const OnboardingPage = () => {
   const { user, isSignedIn, isAdmin, needsOnboarding, loading, refresh } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  // Preserve the ?redirect= param so PPV buyers land directly on /live
-  const redirectTarget = new URLSearchParams(location.search).get('redirect') ?? '/live';
+
+  const urlParams = new URLSearchParams(location.search);
+  // ?intent=fan drives straight into the fan branch (skip role picker pre-selection)
+  const intentParam = urlParams.get('intent');
+  const redirectTarget = urlParams.get('redirect') ?? '/live';
+
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [coachSubmitted, setCoachSubmitted] = useState(false);
+
   const [form, setForm] = useState({
     displayName: '',
     fullName: '',
@@ -43,8 +49,20 @@ const OnboardingPage = () => {
   });
 
   if (loading) return <div className="container py-10 text-sm text-muted-foreground">Loading…</div>;
-  if (!isSignedIn || !user) return <Navigate to="/login" replace />;
+
+  if (!isSignedIn || !user) {
+    // Preserve intent + redirect so the fan paywall flow survives the sign-in round-trip.
+    // Only inject ?intent= if it was explicitly present — never default to fan for bare /onboarding.
+    const onboardingQs = new URLSearchParams();
+    if (intentParam) onboardingQs.set('intent', intentParam);
+    onboardingQs.set('redirect', redirectTarget);
+    return <Navigate to={`/login?redirect=${encodeURIComponent(`/onboarding?${onboardingQs.toString()}`)}`} replace />;
+  }
+
   if (!needsOnboarding) return <Navigate to={isAdmin ? '/ops' : redirectTarget} replace />;
+
+  // Fan mode: active when intent=fan OR user selected fan role
+  const isFan = form.primaryRoleIntent === 'fan';
 
   if (coachSubmitted) {
     return (
@@ -68,33 +86,64 @@ const OnboardingPage = () => {
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!form.displayName.trim() || !form.fullName.trim()) {
-      setError('Display name and full name are required.');
-      return;
+
+    // Fan path: only display_name required; no bio or avatar collected.
+    if (isFan) {
+      if (!form.displayName.trim()) {
+        setError('Display name is required.');
+        return;
+      }
+    } else {
+      if (!form.displayName.trim() || !form.fullName.trim()) {
+        setError('Display name and full name are required.');
+        return;
+      }
     }
 
     try {
       setError(null);
       setSubmitting(true);
-      await saveOnboarding({
-        userId: user.id,
-        displayName: form.displayName,
-        fullName: form.fullName,
-        primaryRoleIntent: form.primaryRoleIntent,
-        preferredLeague: form.preferredLeague,
-        bio: form.bio,
-        avatarFile: form.avatarFile,
-      });
-      await refresh();
 
-      if (form.primaryRoleIntent === 'coach') {
-        setCoachSubmitted(true);
-      } else if (form.primaryRoleIntent === 'player') {
-        // Player path: proceed to Stripe checkout
-        navigate('/billing?checkout=1');
-      } else {
-        // Fan path (and admins): go to /live so fans can watch immediately
+      if (isFan) {
+        // Fan path: use complete_fan_onboarding() RPC — never sets bio or avatar_url.
+        const supabase = getSupabaseClient();
+        if (!supabase) throw new Error('Supabase client unavailable');
+
+        const { data, error: rpcError } = await supabase.rpc('complete_fan_onboarding', {
+          p_display_name:     form.displayName.trim(),
+          p_full_name:        form.fullName.trim() || null,
+          p_preferred_league: form.preferredLeague || null,
+        });
+
+        if (rpcError) throw new Error(rpcError.message);
+
+        const result = data as { ok: boolean; error?: string } | null;
+        if (!result?.ok) {
+          throw new Error(result?.error ?? 'onboarding_failed');
+        }
+
+        await refresh();
         navigate(isAdmin ? '/ops' : redirectTarget);
+      } else {
+        // Player / coach path: existing saveOnboarding() — DO NOT CHANGE.
+        await saveOnboarding({
+          userId: user.id,
+          displayName: form.displayName,
+          fullName: form.fullName,
+          primaryRoleIntent: form.primaryRoleIntent,
+          preferredLeague: form.preferredLeague,
+          bio: form.bio,
+          avatarFile: form.avatarFile,
+        });
+        await refresh();
+
+        if (form.primaryRoleIntent === 'coach') {
+          setCoachSubmitted(true);
+        } else if (form.primaryRoleIntent === 'player') {
+          navigate('/billing?checkout=1');
+        } else {
+          navigate(isAdmin ? '/ops' : redirectTarget);
+        }
       }
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : 'Onboarding failed');
@@ -122,13 +171,18 @@ const OnboardingPage = () => {
               onChange={(e) => setForm((p) => ({ ...p, displayName: e.target.value }))}
             />
           </div>
+
           <div>
             <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Full name <span className="text-destructive">*</span>
+              Full name{' '}
+              {isFan
+                ? <span className="text-muted-foreground/60">(optional)</span>
+                : <span className="text-destructive">*</span>
+              }
             </label>
             <input
               className="mt-1 w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm"
-              placeholder="Your legal name (for league records)"
+              placeholder={isFan ? 'Your name (optional)' : 'Your legal name (for league records)'}
               value={form.fullName}
               onChange={(e) => setForm((p) => ({ ...p, fullName: e.target.value }))}
             />
@@ -180,29 +234,34 @@ const OnboardingPage = () => {
             </select>
           </div>
 
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Bio <span className="text-muted-foreground/60">(optional)</span>
-            </label>
-            <textarea
-              className="mt-1 w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm min-h-20 resize-y"
-              placeholder="Tell the league a bit about yourself…"
-              value={form.bio}
-              onChange={(e) => setForm((p) => ({ ...p, bio: e.target.value }))}
-            />
-          </div>
+          {/* Bio and Avatar: MUST NOT appear for fans — player/coach only */}
+          {!isFan && (
+            <>
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Bio <span className="text-muted-foreground/60">(optional)</span>
+                </label>
+                <textarea
+                  className="mt-1 w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm min-h-20 resize-y"
+                  placeholder="Tell the league a bit about yourself…"
+                  value={form.bio}
+                  onChange={(e) => setForm((p) => ({ ...p, bio: e.target.value }))}
+                />
+              </div>
 
-          <div>
-            <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Profile photo <span className="text-muted-foreground/60">(optional)</span>
-            </label>
-            <input
-              type="file"
-              accept="image/*"
-              className="mt-1 text-sm"
-              onChange={(e) => setForm((p) => ({ ...p, avatarFile: e.target.files?.[0] ?? null }))}
-            />
-          </div>
+              <div>
+                <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+                  Profile photo <span className="text-muted-foreground/60">(optional)</span>
+                </label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="mt-1 text-sm"
+                  onChange={(e) => setForm((p) => ({ ...p, avatarFile: e.target.files?.[0] ?? null }))}
+                />
+              </div>
+            </>
+          )}
 
           {error && <p className="text-xs text-destructive">{error}</p>}
 
