@@ -938,9 +938,15 @@ const LivePage = () => {
 
   const fallbackBroadcastGame = useMemo<Game | null>(() => {
     // Camera-only live mode has no real game row; use "broadcast" alias routes.
-    // Accessible to any privileged role (player, paid_fan, super_admin). Regular
-    // fans still see "No Active Broadcast" and must wait for a real game + PPV.
-    if (!hasBroadcastFallbackAccess || !isStreamLive || liveGame) return null;
+    // Activate when EITHER (a) the legacy local check grants privileged-role
+    // access, OR (b) get_active_broadcast() has populated stream_url — i.e.
+    // the server has already confirmed the viewer is permitted to watch
+    // (subscriber, code-redeemed, or registered user on an open broadcast).
+    // Without (b), a registered fan whose access was just granted via the
+    // server-side oracle would see "No Active Broadcast" because useLiveAccess
+    // returns 'paywall' for broadcasts with no active_game_id.
+    const serverGrantedAccess = (broadcast?.stream_url ?? null) !== null;
+    if (!(hasBroadcastFallbackAccess || serverGrantedAccess) || !isStreamLive || liveGame) return null;
     return {
       id: 'broadcast',
       leagueId: 'sbbl',
@@ -954,7 +960,7 @@ const LivePage = () => {
       score: { home: 0, away: 0 },
       ppvPrice: 0,
     };
-  }, [hasBroadcastFallbackAccess, isStreamLive, liveGame]);
+  }, [hasBroadcastFallbackAccess, isStreamLive, liveGame, broadcast?.stream_url]);
   const showPreflight = isViewerPreflightEnabled() && !!activeGameId && activeGameId !== 'broadcast' && !preflightReady;
   const tokenEnabled = isFanTokenSystemEnabled();
   const biometricsEnabled = isBiometricOverlayEnabled();

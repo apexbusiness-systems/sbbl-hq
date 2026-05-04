@@ -183,6 +183,181 @@ import ReactPlayer from 'react-player/lazy';
 The bare `react-player` import is **lint-blocked** by
 `no-restricted-imports` in `eslint.config.js`. Do not bypass.
 
+### 6. Broadcast & Paywall System — single oracle, server-side gating
+
+The broadcast/paywall system was hardened in PR #461 (and audited in PR
+#462). Two latent bugs from #461 were fixed in migration
+`20260504100000_hotfix_broadcast_paywall_audit.sql`. **Read both before
+editing any of: `get_active_broadcast`, `redeem_ppv_invite`,
+`create_stream_entitlement`, `can_user_view_stream`, `PaywallGate`,
+`Live.tsx` broadcast query, or any `ppv_invites`/`stream_entitlements`
+schema.**
+
+#### 6.1 — `get_active_broadcast()` is the SINGLE access oracle
+
+Non-admin clients MUST resolve broadcast state via the
+`get_active_broadcast()` RPC. It returns:
+
+```ts
+{
+  is_live:          boolean,
+  stream_url:       string | null,  // null unless user may watch
+  title:            string | null,
+  active_game_id:   string | null,
+  live_started_at:  string | null,
+  requires_payment: boolean,        // show paywall (registered, no access)
+  is_subscribed:    boolean,
+  has_entitlement:  boolean,
+  user_registered:  boolean,
+}
+```
+
+**Forbidden:**
+
+```ts
+// BANNED — bypasses server-side stream_url gating; lets unpermitted
+// users see the URL in dev tools and download the broadcast.
+const { data } = await supabase
+  .from('stream_admin_config')
+  .select('collection_id')
+  .single();
+const url = data.collection_id;
+```
+
+**Required:**
+
+```ts
+// CORRECT — server decides whether to send the URL.
+const { data: broadcast } = await supabase.rpc('get_active_broadcast');
+if (broadcast.stream_url) play(broadcast.stream_url);
+else if (broadcast.requires_payment) showPaywallGate();
+```
+
+Super-admin is the only role that may read `stream_admin_config.collection_id`
+directly (via `fetchAdminStreamConfig`) for the broadcast control panel.
+
+#### 6.2 — `can_user_view_stream` argument order: `(text, uuid)`
+
+The published signature (per migration `20260402120000_ppv_invites_relax_game_id.sql`)
+is `(p_game_id text, p_user_id uuid)`. **Multiple overloads exist** (the
+older `(uuid, uuid)` from core_schema is still in the catalog).
+
+Always use **named arguments** when calling from PL/pgSQL:
+
+```sql
+-- CORRECT
+public.can_user_view_stream(
+  p_game_id => v_game_id::text,
+  p_user_id => v_user_id
+);
+
+-- BANNED — positional args silently bind to the wrong overload or
+-- raise "function does not exist" at runtime (only when active_game_id
+-- is set, which CI never exercises).
+public.can_user_view_stream(v_user_id, v_game_id);
+```
+
+This was bug #1 of the post-merge audit.
+
+#### 6.3 — `ppv_invites.game_id` is TEXT — never cast unconditionally
+
+Per migration `20260402120000_ppv_invites_relax_game_id.sql`, the column
+is `text` and may legitimately hold the literal string `'broadcast'` for
+open-broadcast comp codes (admin generates them with no game bound).
+`stream_entitlements.game_id` is still `uuid`.
+
+**Forbidden:**
+
+```sql
+-- BANNED — throws invalid_text_representation for 'broadcast'.
+SELECT public.create_stream_entitlement(
+  v_invite.game_id::uuid,  -- explodes
+  ...
+);
+```
+
+**Required pattern** (used in `redeem_ppv_invite`):
+
+```sql
+DECLARE
+  v_game_uuid       uuid;
+  v_is_uuid_game_id boolean := false;
+BEGIN
+  v_game_uuid := v_invite.game_id::uuid;
+  v_is_uuid_game_id := true;
+EXCEPTION WHEN others THEN
+  v_is_uuid_game_id := false;
+END;
+
+IF v_is_uuid_game_id THEN
+  -- game-bound flow: create entitlement
+ELSE
+  -- open-broadcast flow: mark consumed, no entitlement row
+END IF;
+```
+
+This was bug #2 of the post-merge audit.
+
+#### 6.4 — `entitlement_status = 'active'` (never `'purchased'`)
+
+`can_user_view_stream` filters on `status = 'active'`. The original
+`create_stream_entitlement` inserted `'purchased'` — every PPV purchase
+was silently rejected. Fixed in migration `20260504000200`. If you add a
+new path that creates an entitlement, insert `'active'`.
+
+The `'purchased'` value still exists in the enum for historical rows;
+do **not** drop it (would require backfill + downtime).
+
+#### 6.5 — Fan onboarding never sets `bio` or `avatar_url`
+
+Use `complete_fan_onboarding(p_display_name, p_full_name, p_preferred_league)`
+RPC. The function deliberately omits `bio` and `avatar_url` from its
+INSERT/UPDATE. The `Onboarding.tsx` page hides those form fields when
+`isFan === true`. Players and coaches still use `saveOnboarding()` which
+collects bio + avatar.
+
+If you add a fan-side form anywhere, **never** prompt for bio or avatar.
+Do **not** call `saveOnboarding()` from a fan code path — it would write
+empty strings or null overrides into player-only columns.
+
+#### 6.6 — Admin `Go Live` MUST sync stream_sessions + stream_sources
+
+The admin overlay's `handleGoLive()` writes `stream_admin_config` first
+(unchanged), THEN calls `admin_sync_broadcast_to_sessions()` so the
+viewer-facing tables have rows. Removing the second call recreates
+bug A4/A5 (stream_sessions / stream_sources empty → viewer queries
+return empty even after RLS fixes).
+
+The sync call is intentionally non-fatal (try/catch) so a transient
+sync failure cannot roll back the primary go-live action.
+
+#### 6.7 — Paywall fallback game must honor server-granted access
+
+`fallbackBroadcastGame` in `Live.tsx` activates when the camera-only
+broadcast is live but no real game row exists. It MUST honor BOTH:
+
+1. The legacy `hasBroadcastFallbackAccess` (privileged role check), AND
+2. `broadcast?.stream_url != null` (server has granted access via
+   `get_active_broadcast`).
+
+Without #2, registered fans whose access was just granted server-side
+see "No Active Broadcast" because `useLiveAccess` returns `'paywall'`
+for broadcasts with no `active_game_id`. This was bug #3 of the audit.
+
+#### 6.8 — `?intent=fan` must survive sign-in round-trips
+
+The fan paywall flow depends on `?intent=fan` reaching `/onboarding` so
+the form hides bio/avatar. Three round-trip points must preserve it:
+
+| Surface | Where preserved |
+|---|---|
+| Anon paywall click → onboarding | `PaywallGate.onWatchClick` → `/onboarding?intent=fan&redirect=/live` |
+| Onboarding (unauthenticated) → login | `Onboarding.tsx` Navigate URL embeds `intent` + `redirect` |
+| Login (post-signin) → onboarding | `Login.tsx` `useEffect` reads `intentParam` and forwards |
+| Google OAuth callback → app | `Login.tsx` `redirectTo` carries `intent` + `redirect` back to `/login` |
+
+This was bug #4 of the audit (Google OAuth path was missed in PR #461).
+
 ### Enforcement (all run in CI on every PR)
 
 - **Source-level regression tests**:

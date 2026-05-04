@@ -60,10 +60,22 @@ const LoginPage = () => {
     setGoogleSubmitting(true);
     try {
       const supabase = requireSupabaseClient();
+      // Preserve ?intent= and ?redirect= through the OAuth round-trip so the
+      // fan paywall flow lands the user back on the correct onboarding variant.
+      // Supabase resolves redirectTo via its allowlist; pointing back to
+      // /login keeps the flow inside our shell and the SIGNED_IN useEffect
+      // forwards the user to /onboarding (with intent) or the redirect target.
+      const callbackParams = new URLSearchParams();
+      if (intentParam) callbackParams.set('intent', intentParam);
+      if (redirectTo) callbackParams.set('redirect', redirectTo);
+      const postLoginRedirect = callbackParams.toString()
+        ? `${window.location.origin}/login?${callbackParams.toString()}`
+        : `${window.location.origin}/login`;
+
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: 'https://sbbl-hq.icu/auth/v1/callback',
+          redirectTo: postLoginRedirect,
         },
       });
       if (oauthError) {
