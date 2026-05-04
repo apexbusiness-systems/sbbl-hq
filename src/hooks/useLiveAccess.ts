@@ -102,7 +102,7 @@ export function useLiveAccess() {
         }
       }
 
-      if (!cancelled) setAccess(Boolean(view?.requires_payment) ? 'paywall' : 'paywall');
+      if (!cancelled) setAccess('paywall');
     }
 
     setAccess('loading');
