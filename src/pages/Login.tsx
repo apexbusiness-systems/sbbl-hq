@@ -27,23 +27,26 @@ const LoginPage = () => {
   const { containerRef: turnstileRef, resolveToken, ready: captchaReady } = useTurnstile();
   const navigate = useNavigate();
 
-  // Redirect after login — respect ?redirect= param from /register flow.
+  // Redirect after login — respect ?redirect= and ?intent= params.
+  // ?intent=fan is preserved so /onboarding renders the fan branch (no bio/avatar).
   // Wait for loading to settle so profile/roles are known before deciding
   // between /onboarding and the target page (avoids wrong redirect flash).
   const redirectTo = urlParams.get('redirect');
+  const intentParam = urlParams.get('intent');
   useEffect(() => {
     if (!isSignedIn || loading) return;
     if (needsOnboarding) {
-      // Pass the original redirect target through onboarding so fans land on
-      // /live (or their intended page) immediately after setup completes.
-      const onboardingUrl = redirectTo
-        ? `/onboarding?redirect=${encodeURIComponent(redirectTo)}`
-        : '/onboarding';
-      navigate(onboardingUrl);
+      // Build onboarding URL preserving both intent and redirect so fans land
+      // on their intended page (e.g. /live) immediately after setup completes.
+      const params = new URLSearchParams();
+      if (intentParam) params.set('intent', intentParam);
+      if (redirectTo) params.set('redirect', redirectTo);
+      const qs = params.toString();
+      navigate(qs ? `/onboarding?${qs}` : '/onboarding');
     } else {
       navigate(redirectTo || '/live');
     }
-  }, [isSignedIn, loading, needsOnboarding, navigate, redirectTo]);
+  }, [isSignedIn, loading, needsOnboarding, navigate, redirectTo, intentParam]);
 
   const switchMode = (next: Mode) => {
     setMode(next);

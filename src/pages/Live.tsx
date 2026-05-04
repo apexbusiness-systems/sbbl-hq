@@ -11,6 +11,7 @@ import { useLiveAccess } from '@/hooks/useLiveAccess';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
 import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
+import { PaywallGate } from '@/components/live/PaywallGate';
 import { ViewerPreflight } from '@/components/preflight/ViewerPreflight';
 import { TokenWalletBadge } from '@/components/tokens/TokenWalletBadge';
 import { TokenPurchaseModal } from '@/components/tokens/TokenPurchaseModal';
@@ -311,6 +312,22 @@ function AdminStreamOverlay({
         setTimeout(() => { onGoLive?.(); }, 500);
         toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
         if (nextLive) setOpen(false);
+      }
+
+      // Sync stream_sessions + stream_sources so non-admin RLS queries resolve.
+      // This is additive — it runs after the primary stream_admin_config write.
+      // Non-fatal: a failure here does not roll back the go-live action.
+      try {
+        const supabase = getSupabaseClient();
+        if (supabase) {
+          await supabase.rpc('admin_sync_broadcast_to_sessions', {
+            p_game_id:       activeGameId ?? null,
+            p_stream_url:    nextLive ? (normalizedUrl || null) : null,
+            p_is_going_live: nextLive,
+          });
+        }
+      } catch {
+        // Non-fatal: primary broadcast state already saved above.
       }
     } catch (err) {
       toast.error(`Failed to save config: ${err instanceof Error ? err.message : String(err)}`);
@@ -752,6 +769,39 @@ const LivePage = () => {
   const [initialPollDone, setInitialPollDone] = useState(false);
   const [initialPollError, setInitialPollError] = useState(false);
 
+  // ── Broadcast oracle (non-admin path) ──────────────────────────────────────
+  // get_active_broadcast() resolves all paywall signals server-side.
+  // stream_url is withheld for unpermitted users — no client-side-only guard.
+  // Admin users skip this and use fetchAdminStreamConfig directly.
+  const broadcastQuery = useQuery({
+    queryKey: ['get-active-broadcast', streamNonce],
+    queryFn: async () => {
+      const supabase = getSupabaseClient();
+      if (!supabase) return null;
+      const { data, error } = await supabase.rpc('get_active_broadcast');
+      if (error) throw new Error(error.message);
+      return data as {
+        is_live: boolean;
+        stream_url: string | null;
+        title: string | null;
+        active_game_id: string | null;
+        live_started_at: string | null;
+        requires_payment: boolean;
+        is_subscribed: boolean;
+        has_entitlement: boolean;
+        user_registered: boolean;
+      } | null;
+    },
+    enabled: !isSuperAdmin,
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+  });
+  const broadcast = broadcastQuery.data ?? null;
+
+  const handleBroadcastRefetch = () => {
+    setStreamNonce(n => n + 1);
+  };
+
   // Auto-sync stream status from backend
   useEffect(() => {
     let active = true;
@@ -1143,9 +1193,10 @@ const LivePage = () => {
   }
 
   // Fan who registered but hasn't completed onboarding must finish it before
-  // reaching the PPV paywall.
+  // reaching the PPV paywall. Pass intent=fan so the onboarding form hides
+  // bio/avatar fields and calls complete_fan_onboarding() instead.
   if (!authLoading && needsOnboarding) {
-    return <Navigate to="/onboarding?redirect=/live" replace />;
+    return <Navigate to="/onboarding?intent=fan&redirect=/live" replace />;
   }
 
   const sidebar = (
@@ -1309,6 +1360,27 @@ const LivePage = () => {
                     onRetry={() => void preflightQuery.refetch()}
                   />
                 </div>
+              ) : !isSuperAdmin && broadcast?.is_live && !broadcast?.stream_url ? (
+                // Broadcast is live but user is not permitted server-side.
+                // RULE 2: anon → register CTA.
+                // RULE 5: registered non-subscriber → code + purchase panels.
+                !user ? (
+                  <PaywallGate
+                    isAnon
+                    title={broadcast.title}
+                    isLive={broadcast.is_live}
+                    onWatchClick={() => {
+                      window.location.assign('/onboarding?intent=fan&redirect=/live');
+                    }}
+                  />
+                ) : (
+                  <PaywallGate
+                    gameId={broadcast.active_game_id}
+                    title={broadcast.title}
+                    isLive={broadcast.is_live}
+                    onSuccess={handleBroadcastRefetch}
+                  />
+                )
               ) : (liveGame || fallbackBroadcastGame) ? (
                 <div
                   style={{
