@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
+import { ROUTER_FUTURE } from '@/test/utils/router';
 import { describe, expect, it, vi } from 'vitest';
 import TeamsPage from '@/pages/Teams';
 
@@ -34,7 +35,7 @@ describe('teams page', () => {
     const client = new QueryClient();
     render(
       <QueryClientProvider client={client}>
-        <MemoryRouter>
+        <MemoryRouter future={ROUTER_FUTURE}>
           <TeamsPage />
         </MemoryRouter>
       </QueryClientProvider>,

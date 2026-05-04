@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { ROUTER_FUTURE } from '@/test/utils/router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LivePage from '@/pages/Live';
 
@@ -96,7 +97,7 @@ describe('Live page moderation controls', () => {
   it('lets super admins hide/restore comments and reset reactions', async () => {
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { gcTime: 0 } } })}>
-        <MemoryRouter>
+        <MemoryRouter future={ROUTER_FUTURE}>
           <LivePage />
         </MemoryRouter>
       </QueryClientProvider>,
