@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { ROUTER_FUTURE } from '@/test/utils/router';
+
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 
@@ -29,7 +31,7 @@ describe('LeagueBadge component', () => {
   it('renders logo and label for each league', () => {
     for (const l of LEAGUE_REGISTRY) {
       const { unmount } = render(
-        <MemoryRouter>
+        <MemoryRouter future={ROUTER_FUTURE}>
           <LeagueBadge leagueId={l.id} />
         </MemoryRouter>,
       );
@@ -41,7 +43,7 @@ describe('LeagueBadge component', () => {
 
   it('uses correct badge CSS class from registry', () => {
     const { container } = render(
-      <MemoryRouter>
+      <MemoryRouter future={ROUTER_FUTURE}>
         <LeagueBadge leagueId="wbl" />
       </MemoryRouter>,
     );
@@ -51,7 +53,7 @@ describe('LeagueBadge component', () => {
 
   it('falls back to text-only when logo fails', () => {
     const { container } = render(
-      <MemoryRouter>
+      <MemoryRouter future={ROUTER_FUTURE}>
         <LeagueBadge leagueId="sbbl" />
       </MemoryRouter>,
     );
@@ -66,7 +68,7 @@ describe('LeagueBadge component', () => {
 
   it('supports md size variant', () => {
     const { container } = render(
-      <MemoryRouter>
+      <MemoryRouter future={ROUTER_FUTURE}>
         <LeagueBadge leagueId="tgifbl" size="md" />
       </MemoryRouter>,
     );
