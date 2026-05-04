@@ -19,8 +19,8 @@ The Universal Stream Ingest ensures that operators can proceed with streaming li
 3. Operator can securely start streaming without `Stream URL is invalid` or similar error flags rejecting the save action.
 
 ## 4. Fallback Handling
-If a link causes an unplayable stream (RTMP, Facebook, Kick, Instagram Live, X Spaces):
-1. `StreamPlayer` short-circuits **before** ReactPlayer mounts and renders a typed advisory panel ("Facebook Stream Not Supported", "RTMP Stream Detected", etc.) with a concrete next step (configure HLS / YouTube / Twitch / Vimeo).
+If a link causes an unplayable stream (RTMP, Kick, Instagram Live, X Spaces):
+1. `StreamPlayer` short-circuits **before** ReactPlayer mounts and renders a typed advisory panel ("RTMP Stream Detected", etc.) with a concrete next step (configure HLS / YouTube / Twitch / Vimeo). Facebook URLs are handled separately via sandboxed iframe embed (see §5).
 2. Operators see real-time player errors on the admin stream preview.
 3. The operator can patch a new URL and `Save` without resetting the livestream layout.
 
@@ -38,8 +38,7 @@ This matrix is generated and asserted by `npm run simulate:broadcast`. It MUST s
 | Vimeo | `vimeo` | accept | ReactPlayer (embed → `player.vimeo.com`) |
 | WHEP (low-latency WebRTC) | `whep` | accept | WhepPlayer |
 | RTMP | `rtmp` | accept | **advisory:rtmp** |
-| Facebook (page, `fb.watch`) | `facebook` | accept | **advisory:facebook** |
-| Facebook plugin embed (`/plugins/video.php`) | `facebook` | **reject** | advisory:facebook |
+| Facebook (page, `fb.watch`, videos) | `facebook` | accept | **iframe:plugins/video.php** |
 | Kick | `kick` | accept | **advisory:unembeddable** |
 | Instagram Live | `instagram` | accept | **advisory:unembeddable** |
 | X Spaces | `x-spaces` | accept | **advisory:unembeddable** |

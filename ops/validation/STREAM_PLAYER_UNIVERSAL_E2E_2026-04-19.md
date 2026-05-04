@@ -17,7 +17,7 @@ by pushing it through the existing MediaMTX WHEP fan-out via WHIP ingest.
 | Twitch channel | `twitch.tv/<channel>` | ReactPlayer Twitch wrapper + widened `parent` allow-list | n/a (external) |
 | YouTube video | `youtube.com/watch?v=...` / `youtu.be/...` | ReactPlayer YT iframe | n/a (external) |
 | Vimeo | `vimeo.com/<id>` | ReactPlayer Vimeo wrapper | n/a (external) |
-| Facebook Live | `facebook.com/.../videos/<id>` | ReactPlayer file player | n/a (external) |
+| Facebook Live | `facebook.com/.../videos/<id>`, `fb.watch` | `plugins/video.php` sandboxed iframe (no SDK) | n/a (external) |
 | Dailymotion | `dailymotion.com/video/<id>` / `dai.ly/<id>` | ReactPlayer | n/a (external) |
 | HLS live | `*.m3u8` (with or without signed-URL suffix) | hls.js via ReactPlayer + tolerant query-aware detection | n/a |
 | DASH | `*.mpd` | dash.js via ReactPlayer | n/a |
