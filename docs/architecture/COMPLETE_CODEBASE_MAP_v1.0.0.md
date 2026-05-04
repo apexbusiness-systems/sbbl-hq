@@ -133,7 +133,7 @@ use-toast.ts	Toast notification hook
 use-streamforge.ts	StreamForge QoE telemetry hook
 Key Components
 Component	Description
-LiveStreamPlayer	Main video player (YouTube embed, WHEP/WebRTC, direct URL)
+LiveStreamPlayer	Main video player (YouTube embed, WHEP/WebRTC, Facebook via plugins/video.php iframe, direct URL)
 WhepPlayer	WebRTC WHEP player (Eyevinn library)
 LiveGate	PPV paywall enforcement around live content
 RouteGuards	RequireAuth + RequireAdmin HOCs

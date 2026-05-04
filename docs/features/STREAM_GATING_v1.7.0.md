@@ -149,12 +149,18 @@ the 48-hour window without re-purchasing.
 
 ## Facebook Embed Security
 
-| Viewer Role | Overlay | Interaction |
-|-------------|---------|-------------|
-| super_admin | None | Full FB embed interactivity |
-| All others | Transparent `pointer-events: all` | Blocked — no feed, no navigation |
+Facebook URLs are rendered via the official `plugins/video.php` sandboxed iframe.
+ReactPlayer **never** mounts for Facebook URLs — the `isFacebook` branch in
+`StreamPlayer` (LiveStreamPlayer.tsx) short-circuits before ReactPlayer initializes,
+preventing `connect.facebook.net/sdk.js` from ever being requested.
 
-Detection: `/facebook\.com|fb\.watch/i.test(playbackUrl)` in `LiveStreamPlayer.tsx`.
+| CSP directive | Value | Reason |
+|---|---|---|
+| `frame-src` | `https://www.facebook.com` | allows the iframe |
+| `script-src` | *(absent)* | FB SDK never loads |
+| `connect-src` | *(absent)* | no FB network calls |
+
+Detection: `urlType === 'facebook'` via `url-detector.ts` (`detectStreamUrlType`).
 
 ## Session Status Lifecycle
 
@@ -183,9 +189,11 @@ never selected regardless of game configuration.
 ## CSP Directives (stream-relevant)
 
 ```
-frame-src:  https://www.facebook.com https://web.facebook.com https://www.youtube.com
-            https://player.vimeo.com https://challenges.cloudflare.com https://js.stripe.com
-media-src:  'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net
+frame-src:  https://www.facebook.com https://www.youtube.com https://www.youtube-nocookie.com
+            https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com
+            https://challenges.cloudflare.com https://js.stripe.com
+media-src:  'self' blob: https://*.googlevideo.com https://*.ytimg.com
+            https://*.twitch.tv https://*.twitchsvc.net
 ```
 
 ## Database Schema (ppv_invites)

@@ -1,5 +1,17 @@
 # CHANGELOG
 
+## 2026-05-04 — v1.4.1 — Facebook Live playback via plugins/video.php iframe
+
+- Facebook stream URLs are now playable. The `isFacebook` branch in
+  `LiveStreamPlayer.tsx` renders a `plugins/video.php` sandboxed iframe
+  instead of the "not supported" advisory panel.
+- CSP: `frame-src` gains `https://www.facebook.com`; `script-src` unchanged
+  (FB SDK still blocked).
+- `live-stream-player-regressions.test.ts` and `worker-ops-health.test.ts`
+  updated to assert the iframe implementation.
+
+---
+
 ## 2026-04-19 — v1.3.0 — Universal Stream Player, WHIP Ingest, Zero-Friction Broadcast
 
 - **Universal URL detection**: `src/lib/stream/url-detector.ts` recognizes

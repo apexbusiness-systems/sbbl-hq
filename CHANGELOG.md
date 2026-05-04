@@ -6,6 +6,21 @@ Versioning follows [semantic versioning](https://semver.org) with UTC date stamp
 
 ---
 
+## 2026-05-04 — v1.4.1 — Facebook Live playback via iframe embed
+
+- **Facebook URLs now play** via the official `plugins/video.php` sandboxed iframe.
+  Paste a `facebook.com/…/videos/…` or `fb.watch` URL into Broadcast Controls and
+  it renders immediately — no SDK, no CSP violation, no advisory.
+- **CSP** (`src/worker/index.ts`): `https://www.facebook.com` added to `frame-src`
+  only. `connect.facebook.net` remains absent from `script-src` permanently.
+- **Invariant preserved**: `isFacebook` early-return in `LiveStreamPlayer.tsx`
+  is unchanged — ReactPlayer never sees a Facebook URL.
+- **Tests updated**: `live-stream-player-regressions.test.ts` now asserts
+  `plugins/video.php` iframe + `encodeURIComponent(url)`; `worker-ops-health.test.ts`
+  asserts FB SDK blocked + `frame-src` allows `facebook.com`.
+
+---
+
 ## 2026-04-29 — v1.4.0 — Live Player Hardening (BASELINE REFERENCE BUILD)
 
 > **This is the canonical baseline build for the live-stream player.**

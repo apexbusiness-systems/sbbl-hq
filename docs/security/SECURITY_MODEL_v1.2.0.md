@@ -50,7 +50,7 @@ All responses include:
 - `X-Content-Type-Options: nosniff`
 - `X-Frame-Options: DENY`
 - `X-XSS-Protection: 1; mode=block`
-- `Content-Security-Policy` with strict directives (self, Cloudflare challenges, Stripe, Supabase)
+- `Content-Security-Policy` with strict directives (self, Cloudflare challenges, Stripe, Supabase); `frame-src` includes `https://www.facebook.com` for the `plugins/video.php` sandboxed iframe embed — `connect.facebook.net` (FB SDK) is intentionally absent from `script-src`
 - `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`
 
 ## Defensive Migration Patterns
