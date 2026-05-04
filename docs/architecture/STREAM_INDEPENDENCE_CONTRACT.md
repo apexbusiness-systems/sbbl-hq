@@ -79,7 +79,7 @@ This contract decouples **streams** from **games** so that:
 |-------|-----------|----------|
 | 1. Human doctrine | CLAUDE.md Rule #4 | `CLAUDE.md` |
 | 2. Static CI gate | pglast AST parser scans migration diffs | `.github/workflows/stream-contract-gate.yml` |
-| 3. Runtime tests | Vitest stage-test battery | `src/test/stream-independence-stage*.test.ts` |
+| 3. Runtime tests | Vitest chaos battery | `src/test/stream-chaos-battery.test.ts` |
 | 4. Armageddon suite | Adversarial invariant probes | `src/test/armageddon-stream-invariants.test.ts` |
 | 5. Observability | Sentry span `stream.access.v2` + alerts | Sentry project `sbbl-hq-worker` |
 
