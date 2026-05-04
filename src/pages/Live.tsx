@@ -726,6 +726,11 @@ const LivePage = () => {
   // real game + PPV entitlement.
   const hasPrivilegedBroadcastAccess =
     roles.includes('player') || roles.includes('paid_fan') || isSuperAdmin;
+  // Entitled fan path: when stream runs camera-only (broadcast alias),
+  // users with active PPV entitlement must still receive a playable container.
+  // Without this, paid fans can see "No Live Broadcast Available" despite
+  // valid access because fallbackBroadcastGame only admitted privileged roles.
+  const hasBroadcastFallbackAccess = hasPrivilegedBroadcastAccess || access === 'paid';
   const [liveGame, setLiveGame] = useState<Game | null>(null);
   // Incremented each time the admin saves a Go Live / End Stream action.
   // Used as React key on PlayerErrorBoundary to force a fresh session fetch
@@ -885,7 +890,7 @@ const LivePage = () => {
     // Camera-only live mode has no real game row; use "broadcast" alias routes.
     // Accessible to any privileged role (player, paid_fan, super_admin). Regular
     // fans still see "No Active Broadcast" and must wait for a real game + PPV.
-    if (!hasPrivilegedBroadcastAccess || !isStreamLive || liveGame) return null;
+    if (!hasBroadcastFallbackAccess || !isStreamLive || liveGame) return null;
     return {
       id: 'broadcast',
       leagueId: 'sbbl',
@@ -899,7 +904,7 @@ const LivePage = () => {
       score: { home: 0, away: 0 },
       ppvPrice: 0,
     };
-  }, [hasPrivilegedBroadcastAccess, isStreamLive, liveGame]);
+  }, [hasBroadcastFallbackAccess, isStreamLive, liveGame]);
   const showPreflight = isViewerPreflightEnabled() && !!activeGameId && activeGameId !== 'broadcast' && !preflightReady;
   const tokenEnabled = isFanTokenSystemEnabled();
   const biometricsEnabled = isBiometricOverlayEnabled();
