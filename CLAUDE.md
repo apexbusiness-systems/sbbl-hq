@@ -107,7 +107,7 @@ This rule is enforced by:
 - **CI AST gate** (`.github/workflows/stream-contract-gate.yml`) â pglast
   parser scans migration diffs for forbidden `NOT NULL` on `game_id`.
 - **Armageddon test battery** (`src/test/armageddon-stream-invariants.test.ts`).
-- **Vitest stage tests** (`src/test/stream-independence-stage*.test.ts`).
+- **Vitest chaos battery** (`src/test/stream-chaos-battery.test.ts`).
 - **Sentry alert** on `stream.access.v2` error rate > 0.1%.
 
 ### 5. Live Player Invariants — do not regress v1.4.0
