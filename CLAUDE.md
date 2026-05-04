@@ -148,14 +148,14 @@ Pattern reference: `hardCapTimerId` and `autoRetryTimerRef` in `LiveStreamPlayer
 
 #### 5.3 — Unembeddable URLs must bail before ReactPlayer mounts
 
-Provider types that cannot play under our locked-down CSP MUST short-circuit
-in `StreamPlayer` with an advisory panel, mirroring the existing RTMP branch:
+Provider types that cannot play through ReactPlayer under our locked-down CSP
+MUST short-circuit in `StreamPlayer` before ReactPlayer mounts:
 
-| Type | Why blocked |
+| Type | Handling |
 |---|---|
-| `rtmp` | Browsers cannot decode RTMP. |
-| `facebook` | `connect.facebook.net/sdk.js` is intentionally not in our `script-src` (killed in `89d9696` to stop the CacheFirst storm). |
-| `kick`, `instagram`, `x-spaces` | No public embed surface compatible with our CSP. |
+| `rtmp` | Advisory panel — browsers cannot decode RTMP. |
+| `facebook` | **`plugins/video.php` iframe** — no FB SDK; `frame-src` allows `facebook.com`; `connect.facebook.net` remains blocked in `script-src`. |
+| `kick`, `instagram`, `x-spaces` | Advisory panel — no public embed surface compatible with our CSP. |
 
 Forbidden:
 
@@ -168,8 +168,8 @@ Forbidden:
 Required:
 
 ```ts
-// CORRECT — advisory before mount, ReactPlayer never sees the URL.
-if (isFacebook) return <FacebookAdvisoryPanel />;
+// CORRECT — short-circuit before mount; Facebook rendered via sandboxed iframe.
+if (isFacebook) return <FacebookIframeEmbed url={url} />;
 ```
 
 #### 5.4 — `react-player` must be lazy-loaded

@@ -185,11 +185,9 @@ function StreamPlayer({
   const isVimeo = urlType === 'vimeo';
   const isWhep = urlType === 'whep';
   const isRtmp = urlType === 'rtmp';
-  // Facebook + the other walled-garden providers cannot play in our locked-down
-  // CSP. ReactPlayer's facebook provider attempts to load
-  // connect.facebook.net/sdk.js (blocked by script-src) and then falls through
-  // to FilePlayer, which loads the URL as <video src> and dies with
-  // "no supported sources". Detect and bail with a clear advisory instead.
+  // Facebook: short-circuit before ReactPlayer so the FB SDK never loads.
+  // Rendered via plugins/video.php iframe — no connect.facebook.net request.
+  // Kick/Instagram/X-Spaces: no public embed surface; still show advisory.
   const isFacebook = urlType === 'facebook';
   const isUnembeddable =
     urlType === 'kick' || urlType === 'instagram' || urlType === 'x-spaces';
@@ -329,20 +327,21 @@ function StreamPlayer({
     );
   }
 
-  // Facebook URLs cannot play under our CSP (the FB SDK is intentionally
-  // blocked). Bail before ReactPlayer mounts so we never trigger the
-  // connect.facebook.net script-src violation or the "no supported sources"
-  // fallthrough into FilePlayer.
+  // Facebook: use the official plugins/video.php sandboxed iframe — no FB SDK
+  // ever loads (connect.facebook.net remains blocked in script-src). ReactPlayer
+  // never mounts for this branch; the frame-src CSP allows facebook.com only.
   if (isFacebook) {
     return (
-      <div className="absolute inset-0 bg-black flex flex-col items-center justify-center gap-3 px-6 text-center" data-testid="stream-player">
-        <AlertTriangle className="w-10 h-10 text-amber-400" />
-        <p className="text-sm font-semibold text-white">Facebook Stream Not Supported</p>
-        <p className="text-xs text-white/60 max-w-xs leading-relaxed">
-          Facebook URLs cannot be embedded under the SBBL HQ content policy.
-          Configure an HLS endpoint, or a YouTube / Twitch / Vimeo URL, in
-          Broadcast Controls.
-        </p>
+      <div className="absolute inset-0 bg-black" data-testid="stream-player">
+        <iframe
+          src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false&allowfullscreen=true&autoplay=true`}
+          className="w-full h-full"
+          style={{ border: 'none', overflow: 'hidden' }}
+          scrolling="no"
+          allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share; fullscreen"
+          allowFullScreen
+          title="Facebook Live Stream"
+        />
       </div>
     );
   }

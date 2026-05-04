@@ -6425,7 +6425,7 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
-  // Facebook is explicitly NOT included — it is a blocked stream source.
+  // Facebook is allowed in frame-src only — plugins/video.php iframe embed, no SDK.
   // WHEP (WebRTC egress) connections to stream.sbbl-hq.icu are covered by the
   // *.sbbl-hq.icu wildcard in connect-src; media-src blob: covers WebRTC tracks.
   headers.set('Content-Security-Policy',
@@ -6439,7 +6439,7 @@ function addSecurityHeaders(res: Response): Response {
     "img-src 'self' data: blob: https: https://static-cdn.jtvnw.net; " +
     "font-src 'self' data: https://fonts.gstatic.com; " +
     "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://www.youtube.com wss://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://api.twitch.tv wss://pubsub-edge.twitch.tv https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://cloudflareinsights.com https://static.cloudflareinsights.com; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com https://www.facebook.com; " +
     "media-src 'self' blob: https://*.googlevideo.com https://*.ytimg.com https://*.twitch.tv https://*.twitchsvc.net; " +
     "worker-src 'self' blob:; " +
     "frame-ancestors 'none'; " +
