@@ -105,6 +105,14 @@ const transientRateLimits = new Map<string, number[]>();
 const streamUrlCache = new Map<string, { url: string; expiresAtMs: number }>();
 const STREAM_URL_CACHE_TTL_MS = 30_000;
 
+const ALLOWED_ORIGINS = [
+  "https://sbbl-hq.icu",
+  "https://www.sbbl-hq.icu",
+  "http://localhost:5173",
+  "capacitor://localhost",
+  "http://localhost",
+];
+
 // Per-isolate cached admin Supabase client.  Cloudflare Workers reuse isolate
 // memory across requests, so we avoid creating a new client on every fetch.
 let _cachedAdmin: SupabaseClient | null = null;
@@ -4745,9 +4753,13 @@ async function handleStreamProxy(ctx: HandlerCtx) {
   if (!upstream.ok) return new Response("Upstream error", { status: upstream.status });
 
   const headers = new Headers(upstream.headers);
-  headers.set("Access-Control-Allow-Origin", new URL(ctx.req.url).origin);
-  headers.set("Access-Control-Allow-Credentials", "true");
-  headers.set("Vary", "Origin");
+
+  const origin = ctx.req.headers.get("Origin");
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Credentials", "true");
+    headers.set("Vary", "Origin");
+  }
 
   if (!isManifest) {
     return new Response(upstream.body, {
