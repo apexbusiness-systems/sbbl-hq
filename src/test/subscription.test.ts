@@ -31,6 +31,20 @@ describe('player subscription access', () => {
     expect(isPlayerSubscriptionActive('2026-03-01T00:00:00.000Z', now)).toBe(false);
     expect(isPlayerSubscriptionActive(null, now)).toBe(false);
     expect(isPlayerSubscriptionActive('not-a-date', now)).toBe(false);
+    expect(isPlayerSubscriptionActive('', now)).toBe(false);
+  });
+
+  it('handles subscription boundary cases', () => {
+    const now = new Date('2026-03-27T12:00:00.000Z');
+
+    // Exactly now - should be inactive (strictly greater than)
+    expect(isPlayerSubscriptionActive('2026-03-27T12:00:00.000Z', now)).toBe(false);
+
+    // 1ms in the future - should be active
+    expect(isPlayerSubscriptionActive('2026-03-27T12:00:00.001Z', now)).toBe(true);
+
+    // 1ms in the past - should be inactive
+    expect(isPlayerSubscriptionActive('2026-03-27T11:59:59.999Z', now)).toBe(false);
   });
 
   it('gates premium access correctly for each role', () => {

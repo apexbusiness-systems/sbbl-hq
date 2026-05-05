@@ -105,6 +105,14 @@ const transientRateLimits = new Map<string, number[]>();
 const streamUrlCache = new Map<string, { url: string; expiresAtMs: number }>();
 const STREAM_URL_CACHE_TTL_MS = 30_000;
 
+const ALLOWED_ORIGINS = [
+  "https://sbbl-hq.icu",
+  "https://www.sbbl-hq.icu",
+  "http://localhost:5173",
+  "capacitor://localhost",
+  "http://localhost",
+];
+
 // Per-isolate cached admin Supabase client.  Cloudflare Workers reuse isolate
 // memory across requests, so we avoid creating a new client on every fetch.
 let _cachedAdmin: SupabaseClient | null = null;
@@ -4745,9 +4753,13 @@ async function handleStreamProxy(ctx: HandlerCtx) {
   if (!upstream.ok) return new Response("Upstream error", { status: upstream.status });
 
   const headers = new Headers(upstream.headers);
-  headers.set("Access-Control-Allow-Origin", new URL(ctx.req.url).origin);
-  headers.set("Access-Control-Allow-Credentials", "true");
-  headers.set("Vary", "Origin");
+
+  const origin = ctx.req.headers.get("Origin");
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Credentials", "true");
+    headers.set("Vary", "Origin");
+  }
 
   if (!isManifest) {
     return new Response(upstream.body, {
@@ -7426,15 +7438,21 @@ async function handleScoresCsvImport(ctx: HandlerCtx) {
   let failed = 0;
   const errors: string[] = [];
 
-  for (const row of rows) {
-    try {
-      // Resolve league uuid if league_id code provided
-      let leagueUuid: string | null = null;
-      if (row.league_id) {
-        const { data: lr } = await ctx.admin.from("leagues").select("id").ilike("code", row.league_id).maybeSingle();
-        leagueUuid = lr?.id ?? null;
-      }
-      const { error } = await ctx.admin.from("games").insert({
+  // Resolve league UUIDs in bulk to avoid N+1 query pattern
+  const leagueMap = new Map<string, string>();
+  const uniqueCodes = Array.from(new Set(rows.map((r) => r.league_id).filter(Boolean) as string[]));
+  if (uniqueCodes.length > 0) {
+    const { data: leagues } = await ctx.admin.from("leagues").select("id, code").in("code", uniqueCodes);
+    leagues?.forEach((l) => {
+      if (l.code) leagueMap.set(l.code.toLowerCase(), l.id);
+    });
+  }
+
+  let bulkSuccess = false;
+  try {
+    const payload = rows.map((row) => {
+      const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
+      return {
         category: row.category || "league",
         league_id: leagueUuid,
         participant1_label: row.home_label || null,
@@ -7445,12 +7463,43 @@ async function handleScoresCsvImport(ctx: HandlerCtx) {
         game_date: row.game_date || null,
         event_name: row.event_name || null,
         notes: row.notes || null,
-      });
-      if (error) { failed++; errors.push(`${row.home_label} vs ${row.away_label}: ${error.message}`); }
-      else inserted++;
-    } catch (e) {
-      failed++;
-      errors.push(e instanceof Error ? e.message : "unknown");
+      };
+    });
+
+    const { error } = await ctx.admin.from("games").insert(payload);
+    if (error) throw error;
+    bulkSuccess = true;
+    inserted = rows.length;
+  } catch (bulkErr) {
+    // Fallback to iterative on failure to capture individual row errors
+  }
+
+  if (!bulkSuccess) {
+    for (const row of rows) {
+      try {
+        const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
+        const { error } = await ctx.admin.from("games").insert({
+          category: row.category || "league",
+          league_id: leagueUuid,
+          participant1_label: row.home_label || null,
+          participant2_label: row.away_label || null,
+          home_score: row.home_score !== "" && row.home_score != null ? Number(row.home_score) : null,
+          away_score: row.away_score !== "" && row.away_score != null ? Number(row.away_score) : null,
+          status: row.status || "final",
+          game_date: row.game_date || null,
+          event_name: row.event_name || null,
+          notes: row.notes || null,
+        });
+        if (error) {
+          failed++;
+          errors.push(`${row.home_label || "Unknown"} vs ${row.away_label || "Unknown"}: ${error.message}`);
+        } else {
+          inserted++;
+        }
+      } catch (e) {
+        failed++;
+        errors.push(e instanceof Error ? e.message : "unknown");
+      }
     }
   }
 
