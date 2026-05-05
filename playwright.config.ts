@@ -4,7 +4,7 @@ const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${port}`;
 
 export default defineConfig({
-  testDir: './e2e',
+  testDir: '.',
   timeout: 30_000,
   expect: { timeout: 15_000 },
   fullyParallel: true,
