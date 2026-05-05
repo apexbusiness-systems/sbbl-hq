@@ -5514,7 +5514,12 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
   }
 
   const orderId = orderData.id;
-  const orderItemsData = [];
+  const orderItemsData: Array<{
+    order_id: string;
+    product_id: string;
+    quantity: number;
+    unit_price_cents: number;
+  }> = [];
 
   const params = new URLSearchParams({
     "payment_method_types[]": "card",
