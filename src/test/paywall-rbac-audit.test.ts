@@ -33,6 +33,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
+  handleBroadcastSessionStart,
   handlePlaybackSession,
   handleStreamSessionHeartbeat,
   handleInviteRedeem,
@@ -492,98 +493,102 @@ describe('Suite 1 — RBAC Access Matrix (handlePlaybackSession)', () => {
   });
 });
 
-// ── Suite 2: Broadcast Alias Access ────────────────────────────────────────
+// ── Suite 2: Broadcast Session Access (via handleBroadcastSessionStart) ────
+// Broadcast is independent of games. Access = registration only.
+// handlePlaybackSession rejects the 'broadcast' alias — use /api/broadcast/session.
 
-describe('Suite 2 — Broadcast Alias Access (gameId=null)', () => {
-  it('2.1 player + broadcast alias → 200', async () => {
+describe('Suite 2 — Broadcast Session Access (/api/broadcast/session)', () => {
+  it('2.1 registered user + live broadcast → 200', async () => {
     const state = baseState({
-      user_role_assignments: [{ user_id: 'player-bc', role: 'player' }],
+      profiles: [{ user_id: 'reg-user-bc', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
     });
-    const res = await handlePlaybackSession({
-      req: new Request('https://local/api/streams/broadcast/session', {
+    const res = await handleBroadcastSessionStart({
+      req: new Request('https://local/api/broadcast/session', {
         method: 'POST',
         headers: {
-          'x-idempotency-key': 'idem-player-bc-xyz12',
-          'x-sbbl-user-id-verified': 'player-bc',
+          'x-idempotency-key': 'idem-reg-bc-xyz1234',
+          'x-sbbl-user-id-verified': 'reg-user-bc',
         },
-        body: JSON.stringify({ sessionKey: 'bc-session-player' }),
+        body: JSON.stringify({ sessionKey: 'bc-session-reg-1' }),
       }),
-      params: { gameId: 'broadcast' },
+      params: {},
       env: ENV,
       admin: buildAdmin(state) as never,
     });
     expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; session: { id: string } };
+    expect(body.ok).toBe(true);
+    expect(body.session?.id).toBeTruthy();
   });
 
-  it('2.2 paid_fan + broadcast alias → 200', async () => {
+  it('2.2 unregistered user + live broadcast → 403 forbidden', async () => {
     const state = baseState({
-      user_role_assignments: [{ user_id: 'paidfan-bc', role: 'paid_fan' }],
+      profiles: [{ user_id: 'unreg-bc', onboarding_completed_at: null }],
     });
-    const res = await handlePlaybackSession({
-      req: new Request('https://local/api/streams/broadcast/session', {
+    const res = await handleBroadcastSessionStart({
+      req: new Request('https://local/api/broadcast/session', {
         method: 'POST',
         headers: {
-          'x-idempotency-key': 'idem-paidfan-bc-xyz1',
-          'x-sbbl-user-id-verified': 'paidfan-bc',
+          'x-idempotency-key': 'idem-unreg-bc-xyz12',
+          'x-sbbl-user-id-verified': 'unreg-bc',
         },
-        body: JSON.stringify({ sessionKey: 'bc-session-paidfan' }),
+        body: JSON.stringify({ sessionKey: 'bc-session-unreg-1' }),
       }),
-      params: { gameId: 'broadcast' },
+      params: {},
       env: ENV,
       admin: buildAdmin(state) as never,
     });
-    expect(res.status).toBe(200);
-  });
-
-  it('2.3 fan with PPV entitlement (game-specific) + broadcast alias → 403', async () => {
-    // PPV entitlements are game-scoped. Broadcast has no game, so the
-    // can_user_view_stream RPC is not called (no gameId); only roles grant access.
-    const state = baseState();
-    const res = await handlePlaybackSession({
-      req: new Request('https://local/api/streams/broadcast/session', {
-        method: 'POST',
-        headers: {
-          'x-idempotency-key': 'idem-ent-bc-xyz12345',
-          'x-sbbl-user-id-verified': 'entitled-user',
-        },
-        body: JSON.stringify({ sessionKey: 'bc-session-fan' }),
-      }),
-      params: { gameId: 'broadcast' },
-      env: ENV,
-      admin: buildAdmin(state) as never,
-    });
-    // entitled-user passes the RPC but has no privileged role.
-    // Broadcast requires a privileged role (not PPV), so 403.
     expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'forbidden' });
   });
 
-  it('2.4 broadcast alias + stream offline → 403 stream_offline', async () => {
+  it('2.3 registered user + offline broadcast → 403 stream_offline', async () => {
     const state = baseState({
       stream_admin_config: [{
         id: true,
         collection_id: 'https://cdn.example/live.m3u8',
         title: 'SBBL Live',
-        is_live: false, // ← offline
+        is_live: false,
         active_game_id: null,
       }],
-      user_role_assignments: [{ user_id: 'player-offline', role: 'player' }],
+      profiles: [{ user_id: 'reg-user-offline', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
     });
-    const res = await handlePlaybackSession({
-      req: new Request('https://local/api/streams/broadcast/session', {
+    const res = await handleBroadcastSessionStart({
+      req: new Request('https://local/api/broadcast/session', {
         method: 'POST',
         headers: {
           'x-idempotency-key': 'idem-offline-bc-xyz1',
-          'x-sbbl-user-id-verified': 'player-offline',
+          'x-sbbl-user-id-verified': 'reg-user-offline',
         },
         body: JSON.stringify({ sessionKey: 'bc-session-offline' }),
       }),
-      params: { gameId: 'broadcast' },
+      params: {},
       env: ENV,
       admin: buildAdmin(state) as never,
     });
     expect(res.status).toBe(403);
-    const body = await res.json() as { error: string };
-    expect(body.error).toBe('stream_offline');
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'stream_offline' });
+  });
+
+  it('2.4 handlePlaybackSession rejects broadcast alias — must use /api/broadcast/*', async () => {
+    const state = baseState();
+    for (const gameId of [null, 'broadcast'] as (string | null)[]) {
+      const res = await handlePlaybackSession({
+        req: new Request('https://local/api/streams/broadcast/session', {
+          method: 'POST',
+          headers: {
+            'x-idempotency-key': `idem-guard-${gameId ?? 'null'}`,
+            'x-sbbl-user-id-verified': 'player-bc',
+          },
+          body: JSON.stringify({ sessionKey: `bc-guard-${gameId ?? 'null'}` }),
+        }),
+        params: { gameId },
+        env: ENV,
+        admin: buildAdmin(state) as never,
+      });
+      expect(res.status).toBe(400);
+      await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'use_broadcast_endpoint' });
+    }
   });
 });
 

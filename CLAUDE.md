@@ -374,6 +374,58 @@ If a regression test fails on your branch, **read the failing assertion**.
 Each one maps to a real production incident from v1.3.x. Disabling the
 test is never the right answer.
 
+### 7. Broadcast Stream Independence — HARD FREEZE, DO NOT TOUCH
+
+**This is a hard owner rule. The broadcast stream is a standalone media
+resource owned exclusively by the operator. It is NEVER tied to a game,
+a PPV entitlement, or any other entity.**
+
+The following invariants are permanent. No agent, PR, or migration may
+violate them without explicit written approval from the repo owner:
+
+#### 7.1 — `/api/broadcast/*` is frozen to agents
+
+The route family `POST /api/broadcast/access`, `POST /api/broadcast/session`,
+`POST /api/broadcast/session/heartbeat`, and `POST /api/broadcast/session/end`
+are **off-limits for modification** unless the repo owner explicitly directs
+a change. Do not:
+
+- Add `game_id`, `gameId`, or any game parameter to these routes.
+- Add PPV, entitlement, or invite-code logic to these routes.
+- Rename or move these routes.
+- Add authentication layers beyond the existing `requireAuth`.
+
+#### 7.2 — Broadcast access = registration only
+
+The only requirement to watch a broadcast is a completed SBBL HQ account
+(`onboarding_completed_at IS NOT NULL`). There is no PPV, no game
+entitlement, no `can_user_view_stream` call, and no `stream_entitlements`
+row involved. This is intentional.
+
+#### 7.3 — `LiveStreamPlayer` must route `game.id === 'broadcast'` to `/api/broadcast/*`
+
+When `game.id === 'broadcast'`, all session API calls in `LiveStreamPlayer.tsx`
+MUST target the canonical broadcast endpoints:
+
+```ts
+// CORRECT
+const endpoint = game.id === 'broadcast'
+  ? '/api/broadcast/session'
+  : `/api/streams/${game.id}/session`;
+```
+
+Do NOT route the broadcast alias through `/api/streams/broadcast/*`. The
+legacy alias routes exist only for backward compatibility and are not
+guaranteed to remain.
+
+#### 7.4 — No further modifications without owner approval
+
+If you are an agent reading this: **stop**. Do not plan, propose, or
+implement any change to the broadcast stream system unless the operator
+has explicitly asked for it in this session. Adding "improvements",
+"additional access control", or "game-binding features" to the broadcast
+path will break live events and is not authorized.
+
 ## Architecture at a glance
 
 ```
