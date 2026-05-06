@@ -35,18 +35,15 @@ export function useLiveAccess() {
     }
 
     async function resolve() {
-      // Keep active_game_id lookup for test-backed entitlement scoping invariants.
-      const { data: cfg } = await supabase
-        .from('stream_admin_config')
-        .select('is_live, title, active_game_id')
-        .single();
-
       // Server-authoritative oracle: returns paywall flags and withholds stream_url unless permitted.
+      // active_game_id is included in the response — no direct stream_admin_config read needed
+      // (Rule 6.1: non-admin clients must not read stream_admin_config directly).
       const { data: broadcast } = await supabase.rpc('get_active_broadcast');
       const view = (broadcast as {
         is_live?: boolean | null;
         title?: string | null;
         stream_url?: string | null;
+        active_game_id?: string | null;
         requires_payment?: boolean | null;
         has_entitlement?: boolean | null;
         is_subscribed?: boolean | null;
@@ -83,8 +80,7 @@ export function useLiveAccess() {
         return;
       }
 
-
-      const activeGameId = (cfg as { active_game_id?: string | null } | null)?.active_game_id ?? null;
+      const activeGameId = view?.active_game_id ?? null;
       if (activeGameId) {
         const { data: entitlements } = await supabase
           .from('stream_entitlements')
