@@ -13,3 +13,9 @@
 ## 2025-05-14 - [Performance] Optimized Store Checkout Loop
 **Learning:** During array `.reduce()` operations in React components (like cart or checkout totals), using `.find()` inside the reducer creates an unexpected $O(N^2)$ algorithmic bottleneck, particularly when de-duplicating items by properties like `name` or `id`.
 **Action:** Always replace nested `.find()` operations inside a `.reduce()` loop with an intermediate accumulator of type `Record<string, T>` to enable $O(1)$ property-based dictionary lookups.
+## 2026-05-06 - [React Rendering Loop Optimization]
+**Learning:** Found `reduce` calculations running inline within a React component's rendering flow, which triggers an O(N) operation on every single re-render. Since `useMemo` caches derived data and skips execution unless its dependencies change, it is optimal for replacing un-memoized loops.
+**Action:** Extract large or repeated O(N) functional loops (like `.map` or `.reduce`) from directly inside returned TSX elements into  hooks above the render, especially when the resulting calculations don't change between re-renders.
+## 2026-05-06 - [React Rendering Loop Optimization]
+**Learning:** Found reduce calculations running inline within a React component's rendering flow, which triggers an O(N) operation on every single re-render. Since useMemo caches derived data and skips execution unless its dependencies change, it is optimal for replacing un-memoized loops.
+**Action:** Extract large or repeated O(N) functional loops (like .map or .reduce) from directly inside returned TSX elements into useMemo hooks above the render, especially when the resulting calculations don't change between re-renders.
