@@ -261,10 +261,10 @@ export async function setStreamLive(
  * Falls back gracefully if the endpoint is not yet deployed.
  */
 export async function goLive(
-  payload: { isLive: boolean; collectionId: string; title: string },
+  payload: { isLive: boolean; collectionId: string; title: string; activeGameId?: string | null },
   token: string | null,
 ) {
-  return apiFetch<{ ok: boolean; isLive: boolean; collectionId: string; title: string; updatedAt: string }>(
+  return apiFetch<{ ok: boolean; isLive: boolean; collectionId: string; title: string; activeGameId: string | null; updatedAt: string }>(
     '/ops/streams/go-live',
     {
       method: 'POST',
