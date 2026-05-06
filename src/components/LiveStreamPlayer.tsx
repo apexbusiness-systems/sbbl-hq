@@ -615,6 +615,8 @@ interface LiveStreamPlayerProps {
   hasPremiumPlayerAccess: boolean;
   /** Whether admin has set stream to live */
   isStreamLive?: boolean;
+  /** Server oracle already confirmed this viewer may watch this broadcast. */
+  serverGrantedAccess?: boolean;
 }
 
 export function LiveStreamPlayer({
@@ -623,6 +625,7 @@ export function LiveStreamPlayer({
   roles,
   hasPremiumPlayerAccess,
   isStreamLive,
+  serverGrantedAccess = false,
 }: Readonly<LiveStreamPlayerProps>) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
@@ -660,13 +663,13 @@ export function LiveStreamPlayer({
 
   const hasRoleAccess = isPlayer || isPaidFan || isSuperAdmin;
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
-  const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
+  const hasAccess = hasRoleAccess || serverGrantedAccess || ppvEntitled || inviteGranted;
 
   // ── Fetch stream entitlement (skip if role already grants access) ─────────
   // Pass null instead of explicit token — apiFetch auto-fetches a fresh JWT
   // via getAuthToken(), preventing stale-token 401 loops.
   useEffect(() => {
-    if (!userId || hasRoleAccess) {
+    if (!userId || hasRoleAccess || serverGrantedAccess) {
       setAccessChecked(true);
       return;
     }
@@ -677,7 +680,7 @@ export function LiveStreamPlayer({
       })
       .catch(() => { /* network error — stay in preview; user can retry purchase */ })
       .finally(() => setAccessChecked(true));
-  }, [userId, game.id, hasRoleAccess]);
+  }, [userId, game.id, hasRoleAccess, serverGrantedAccess]);
 
   // Retry key: incrementing this re-triggers the session effect after the
   // user clicks "Retry" on the player error screen, without requiring a full
