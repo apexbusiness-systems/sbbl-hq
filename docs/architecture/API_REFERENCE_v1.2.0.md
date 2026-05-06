@@ -1,9 +1,18 @@
-<!-- Version: v1.2.0 | Date: 2026-04-05 | Status: Current -->
+<!-- Version: v1.3.0 | Date: 2026-05-06 | Status: Current -->
 # SBBL Worker API Reference
 
-**Version:** v1.2.0
-**Previous:** v1.1.0 (2026-04-04)
-**Last Updated:** 2026-04-05
+**Version:** v1.3.0
+**Previous:** v1.2.0 (2026-04-05)
+**Last Updated:** 2026-05-06
+
+**Changelog (v1.2.0 → v1.3.0):**
+- Added **Broadcast** section documenting the `/api/broadcast/*` route
+  family (open-broadcast access, session, heartbeat, end). These routes
+  are independent of games and PPV — see CLAUDE.md Rule 7 and
+  `BROADCAST_PAYWALL_SYSTEM.md §10` for the freeze policy.
+- Clarified that `/api/streams/:gameId/*` is PPV/game-specific only.
+  The `'broadcast'` gameId alias is rejected by `handlePlaybackSession`
+  with `400 use_broadcast_endpoint` as of v1.3.0.
 
 Base: Worker routes in `src/worker/index.ts`.
 
@@ -55,15 +64,44 @@ All mutating methods (`POST/PUT/PATCH/DELETE`) require a valid idempotency key v
 - `GET /api/stats` — Stats dashboard (RPC `get_stats_dashboard`).
 - `GET /api/leaderboards` — Leaderboards (RPC `get_leaderboards`).
 
-### Streams (Authenticated)
-- `GET /api/streams/:gameId/access` — Check user's stream access.
+### Broadcast — Open Broadcast (Authenticated, FROZEN — see CLAUDE.md Rule 7)
+
+These routes own the open-broadcast path. They have zero game coupling.
+Access requirement: `onboarding_completed_at IS NOT NULL` (completed fan
+onboarding). No PPV, no entitlement rows, no `can_user_view_stream`.
+
+- `GET /api/broadcast/access` — `{ ok, hasAccess: boolean }`. Returns
+  `hasAccess=false` when stream is offline regardless of registration status.
+- `POST /api/broadcast/session` — Start or refresh a broadcast viewing session.
+  Body: `{ sessionKey: string (≥8 chars) }`.
+  Returns: `{ ok, playback: { url, type, heartbeatIntervalSec, maxExpiresAt }, session: { id, maxExpiresAt } }`.
+  Super admins bypass all checks and get the URL even when `is_live=false`.
+  One-device enforcement: a new session displaces the previous active session
+  for the same user; the displaced device's next heartbeat gets `session_not_found`.
+- `POST /api/broadcast/session/heartbeat` — Extend session TTL. Body: `{ sessionId }`.
+  Returns: `{ ok, expiresAt }`. Returns `404 session_not_found` if session is
+  missing, expired, or displaced.
+- `POST /api/broadcast/session/end` — Teardown session. Body: `{ sessionId }`.
+
+> **Do NOT add `game_id`, PPV, or entitlement logic to these routes.**
+> See `BROADCAST_PAYWALL_SYSTEM.md §10` and `STREAM_INDEPENDENCE_CONTRACT.md §7`.
+
+### Streams — PPV / Game-Specific (Authenticated)
+
+`:gameId` must be a real UUID from the `games` table. Passing `'broadcast'`
+or omitting gameId returns `400 use_broadcast_endpoint` — use `/api/broadcast/*`.
+
+- `GET /api/streams/:gameId/access` — Check PPV entitlement for a game.
+  Returns `{ ok, hasAccess: boolean }` via `can_user_view_stream` RPC.
 - `POST /api/streams/:gameId/purchase` — Create Stripe PPV checkout. Turnstile-protected.
-- `POST /api/streams/:gameId/session` — Create secure playback session. Returns `{ playback: { url, expiresAt, heartbeatIntervalSec }, session: { id, gameId } }`.
+- `POST /api/streams/:gameId/session` — Create secure playback session for a PPV game.
+  Returns `{ playback: { url, expiresAt, heartbeatIntervalSec }, session: { id, gameId } }`.
 - `POST /api/streams/:gameId/session/heartbeat` — Keep session alive. TTL: 70s.
 - `POST /api/streams/:gameId/session/end` — Teardown session.
 - `GET /api/streams/:gameId/comments` — Recent chat messages.
 - `POST /api/streams/:gameId/comments` — Post chat message. Rate-limited (10/user/30s, 20/IP/30s).
 - `POST /api/streams/:gameId/react` — Post reaction (fire/heart/clap).
+- `GET /api/streams/:gameId/replay/status` — Replay availability, embargo state, and price.
 
 ### Invites
 - `POST /api/invite/generate` — Generate single-use fan invite. Eligible: player, paid_fan, super_admin.
