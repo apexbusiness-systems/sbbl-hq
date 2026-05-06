@@ -680,6 +680,12 @@ const OpsPage = () => {
 
   const jobs = useMemo(() => historyQuery.data?.jobs ?? bootstrapQuery.data?.importHistory ?? [], [historyQuery.data?.jobs, bootstrapQuery.data?.importHistory]);
   const latestSummary = useMemo(() => jobs.slice(0, 5), [jobs]);
+
+  // ⚡ Bolt Performance Optimization: Extract expensive O(N) array reduction
+  // from the render loop into useMemo to prevent recalculating metric sums on every render.
+  const successfulRows = useMemo(() => jobs.reduce((acc, j) => acc + (j.inserted_rows || 0), 0), [jobs]);
+  const failedRows = useMemo(() => jobs.reduce((acc, j) => acc + (j.failed_rows || 0), 0), [jobs]);
+
   const reauthRequired = useMemo(
     () =>
       [
@@ -755,8 +761,8 @@ const OpsPage = () => {
 
       <TabsContent value="overview"><div className="grid md:grid-cols-3 gap-4">
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Import jobs</p><p className="stat-numeral text-3xl">{jobs.length}</p></div>
-          <div className="panel p-4"><p className="text-xs text-muted-foreground">Recent successful rows</p><p className="stat-numeral text-3xl">{jobs.reduce((acc, j) => acc + (j.inserted_rows || 0), 0)}</p></div>
-          <div className="panel p-4"><p className="text-xs text-muted-foreground">Failed rows</p><p className="stat-numeral text-3xl text-destructive">{jobs.reduce((acc, j) => acc + (j.failed_rows || 0), 0)}</p></div>
+          <div className="panel p-4"><p className="text-xs text-muted-foreground">Recent successful rows</p><p className="stat-numeral text-3xl">{successfulRows}</p></div>
+          <div className="panel p-4"><p className="text-xs text-muted-foreground">Failed rows</p><p className="stat-numeral text-3xl text-destructive">{failedRows}</p></div>
           <div className="panel p-4 md:col-span-3">
             <h2 className="font-display text-xl mb-2">Recent Actions</h2>
             {latestSummary.length === 0 ? <p className="text-sm text-muted-foreground">No imports yet.</p> : latestSummary.map((job) => <p key={job.id} className="text-sm">{job.job_type} · {job.status} · {job.inserted_rows}/{job.total_rows}</p>)}
