@@ -4002,6 +4002,30 @@ async function handleStreamQoeHealth(ctx: HandlerCtx): Promise<Response> {
 export async function handleStreamAccess({ req, admin }: HandlerCtx) {
   const userId = requireAuth(req);
   const gameId = new URL(req.url).pathname.split("/")[3]; // /api/streams/:gameId/access
+
+  // Open broadcast alias: access is registration-based, not entitlement-based.
+  // Mirrors get_active_broadcast()'s open-broadcast branch (v_has_entitlement = v_registered).
+  if (gameId === "broadcast") {
+    const cfgRes = await admin
+      .from("stream_admin_config")
+      .select("is_live")
+      .eq("id", true)
+      .maybeSingle();
+    if (!cfgRes.data?.is_live) {
+      return json({ ok: true, hasAccess: false, gameId, userId });
+    }
+    const profileRes = await admin
+      .from("profiles")
+      .select("onboarding_completed_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const isRegistered = Boolean(
+      (profileRes.data as { onboarding_completed_at?: string | null } | null)
+        ?.onboarding_completed_at,
+    );
+    return json({ ok: true, hasAccess: isRegistered, gameId, userId });
+  }
+
   const { data, error } = await admin.rpc("can_user_view_stream", {
     p_game_id: gameId,
     p_user_id: userId,
@@ -4209,12 +4233,23 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   const hasPrivilegedRole = roles.some(
     (role) => role === "player" || role === "paid_fan",
   );
-  // Camera-only broadcast alias (gameId=null) is accessible to any privileged
-  // role — roster players and paid fans (season pass). PPV is game-specific
-  // and does not apply when there is no game. Regular fans are expected to
-  // purchase PPV for a specific game instead.
   let hasAccess = hasPrivilegedRole;
-  if (!hasAccess && gameId) {
+  if (!hasAccess && gameId === null) {
+    // Open broadcast alias: grant access to any registered user.
+    // Mirrors get_active_broadcast()'s open-broadcast branch (v_has_entitlement = v_registered).
+    // Privileged roles already passed above; this covers registered fans whose
+    // access was confirmed server-side by get_active_broadcast() returning stream_url.
+    const profileRes = await ctx.admin
+      .from("profiles")
+      .select("onboarding_completed_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    hasAccess = Boolean(
+      (profileRes.data as { onboarding_completed_at?: string | null } | null)
+        ?.onboarding_completed_at,
+    );
+  } else if (!hasAccess && gameId) {
+    // PPV game: check entitlement or invite redemption.
     const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
       p_game_id: gameId,
       p_user_id: userId,

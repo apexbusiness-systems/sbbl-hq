@@ -7,6 +7,7 @@ import {
   handlePlaybackSession,
   handlePostComment,
   handleResetReactions,
+  handleStreamAccess,
   handleStreamReactions,
   handleStreamSessionHeartbeat,
 } from '@/worker/index';
@@ -47,6 +48,10 @@ function createQuery(table: string, state: Record<string, Row[]>) {
       };
       const builder: any = {
         eq(col: string, val: unknown) {
+          colFilters.push((r) => r[col] === val);
+          return builder;
+        },
+        is(col: string, val: unknown) {
           colFilters.push((r) => r[col] === val);
           return builder;
         },
@@ -459,5 +464,120 @@ describe('stream hardening worker handlers', () => {
       admin: createAdmin(state),
     } as any);
     await expect(countsRes.json()).resolves.toMatchObject({ ok: true, fire: 0, heart: 0, clap: 0 });
+  });
+
+  // ── M-01 Broadcast Audit — Regression tests for fan-view stream gap ────────
+  // Root cause: handleStreamAccess and handlePlaybackSession both denied registered
+  // fans on the 'broadcast' alias (open broadcast, no active_game_id). The worker
+  // only checked hasPrivilegedRole (player/paid_fan) and can_user_view_stream for
+  // the null gameId path — registered fans had neither an entitlement row nor a
+  // privileged role, so both endpoints returned 403/false even though
+  // get_active_broadcast() had already granted them stream_url server-side.
+
+  it('handleStreamAccess grants hasAccess=true to a registered fan on open broadcast alias', async () => {
+    const state = {
+      stream_admin_config: [{ id: true, is_live: true, collection_id: 'https://stream.example/live.m3u8' }],
+      profiles: [{ user_id: 'registered-fan', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
+    } as Record<string, Row[]>;
+
+    const res = await handleStreamAccess({
+      req: new Request('https://local/api/streams/broadcast/access', {
+        headers: { 'x-sbbl-user-id-verified': 'registered-fan' },
+      }),
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: true });
+  });
+
+  it('handleStreamAccess denies hasAccess=false when broadcast is offline', async () => {
+    const state = {
+      stream_admin_config: [{ id: true, is_live: false, collection_id: 'https://stream.example/live.m3u8' }],
+      profiles: [{ user_id: 'registered-fan', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
+    } as Record<string, Row[]>;
+
+    const res = await handleStreamAccess({
+      req: new Request('https://local/api/streams/broadcast/access', {
+        headers: { 'x-sbbl-user-id-verified': 'registered-fan' },
+      }),
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: false });
+  });
+
+  it('handleStreamAccess denies hasAccess=false to unregistered user on open broadcast', async () => {
+    const state = {
+      stream_admin_config: [{ id: true, is_live: true, collection_id: 'https://stream.example/live.m3u8' }],
+      profiles: [{ user_id: 'unregistered-user', onboarding_completed_at: null }],
+    } as Record<string, Row[]>;
+
+    const res = await handleStreamAccess({
+      req: new Request('https://local/api/streams/broadcast/access', {
+        headers: { 'x-sbbl-user-id-verified': 'unregistered-user' },
+      }),
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: false });
+  });
+
+  it('handlePlaybackSession grants session to a registered fan on open broadcast alias', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      stream_admin_config: [{ id: true, collection_id: 'https://stream.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_access_sessions: [],
+      profiles: [{ user_id: 'registered-fan', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
+    } as Record<string, Row[]>;
+
+    const res = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'fan-broadcast-session-1',
+          'x-sbbl-user-id-verified': 'registered-fan',
+        },
+        body: JSON.stringify({ sessionKey: 'fan-session-key-1' }),
+      }),
+      params: { gameId: 'broadcast' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, any>;
+    expect(body.ok).toBe(true);
+    expect(body.session?.id).toBeTruthy();
+  });
+
+  it('handlePlaybackSession still denies unregistered fan on open broadcast alias', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      stream_admin_config: [{ id: true, collection_id: 'https://stream.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_access_sessions: [],
+      profiles: [{ user_id: 'unregistered-fan', onboarding_completed_at: null }],
+    } as Record<string, Row[]>;
+
+    const res = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'fan-broadcast-session-2',
+          'x-sbbl-user-id-verified': 'unregistered-fan',
+        },
+        body: JSON.stringify({ sessionKey: 'fan-session-key-2' }),
+      }),
+      params: { gameId: 'broadcast' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'forbidden' });
   });
 });
