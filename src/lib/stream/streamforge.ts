@@ -286,10 +286,9 @@ export function initQoeSnapshot(
  */
 export function applyQoeEvent(s: QoeSnapshot, ev: QoeEvent): QoeSnapshot {
   const ts = Number.isFinite(ev.ts) ? Math.max(s.lastTs, ev.ts) : s.lastTs;
-  const ring =
-    s.ring.length >= QOE_EVENT_RING_SIZE
-      ? [...s.ring.slice(s.ring.length - QOE_EVENT_RING_SIZE + 1), ev]
-      : [...s.ring, ev];
+  const ring = s.ring.length >= QOE_EVENT_RING_SIZE
+    ? [...s.ring.slice(s.ring.length - QOE_EVENT_RING_SIZE + 1), ev]
+    : [...s.ring, ev];
 
   let firstPlayTs = s.firstPlayTs;
   let rebufferStartTs = s.rebufferStartTs;
@@ -636,7 +635,12 @@ export function shouldWarmReconnect(
     600_000,
     WARM_RECONNECT_COOLDOWN_MS,
   );
-  const threshold = clamp(input.failureThreshold ?? 3, 1, 100, 3);
+  const threshold = clamp(
+    input.failureThreshold ?? 3,
+    1,
+    100,
+    3,
+  );
   if (input.consecutiveFailures < threshold) {
     return { reconnect: false, reason: 'below-threshold' };
   }
@@ -660,8 +664,8 @@ export const KNOWN_STREAM_ORIGINS: readonly string[] = Object.freeze([
   'https://i.ytimg.com',
   'https://player.twitch.tv',
   'https://static-cdn.jtvnw.net',
-  'https://www.facebook.com',
-  'https://static.xx.fbcdn.net',
+  'https://player.vimeo.com',
+  // Facebook is a blocked stream source — intentionally excluded.
 ]);
 
 /**
@@ -849,7 +853,8 @@ export function toHealthReport(agg: AggregatedHealth): HealthReport {
     windowEndTs: agg.windowEndTs,
     samples,
     avgScore: Math.round(avgScore * 100) / 100,
-    avgStartupMs: avgStartupMs !== null ? Math.round(avgStartupMs) : null,
+    avgStartupMs:
+      avgStartupMs !== null ? Math.round(avgStartupMs) : null,
     maxStartupMs: agg.maxStartupMs > 0 ? Math.round(agg.maxStartupMs) : null,
     rebufferRatio: safeRatio(agg.sumRebufferMs, totalMs),
     errorRate: samples > 0 ? agg.withErrors / samples : 0,

@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 80" width="400" height="80" role="img" aria-labelledby="mic-up-title">
+  <title id="mic-up-title">Mic Up Series</title>
+  <desc>SBBL Mic Up Series wordmark — gold on obsidian, microphone icon integrated into the letter U.</desc>
+
+  <!-- Background is transparent; the logo is designed to overlay on #0A0A0A -->
+
+  <!-- MIC UP — heavy condensed treatment -->
+  <g fill="#C9A84C" font-family="'Space Grotesk', system-ui, sans-serif">
+    <!-- M -->
+    <path d="M 10 70 L 10 10 L 24 10 L 40 40 L 56 10 L 70 10 L 70 70 L 58 70 L 58 32 L 44 58 L 36 58 L 22 32 L 22 70 Z"/>
+    <!-- I -->
+    <path d="M 80 10 L 92 10 L 92 70 L 80 70 Z"/>
+    <!-- C -->
+    <path d="M 132 10 Q 110 10 108 40 Q 110 70 132 70 L 142 70 L 142 58 L 132 58 Q 122 58 120 40 Q 122 22 132 22 L 142 22 L 142 10 Z"/>
+
+    <!-- U with integrated microphone capsule -->
+    <!-- Left stroke -->
+    <rect x="170" y="10" width="12" height="44" rx="2"/>
+    <!-- Right stroke -->
+    <rect x="208" y="10" width="12" height="44" rx="2"/>
+    <!-- Bowl -->
+    <path d="M 170 54 Q 170 70 195 70 Q 220 70 220 54 L 208 54 Q 208 58 195 58 Q 182 58 182 54 Z"/>
+
+    <!-- Microphone capsule — sits INSIDE the U, not floating beside it -->
+    <g transform="translate(195 30)">
+      <!-- Capsule body -->
+      <rect x="-6" y="-8" width="12" height="18" rx="6" fill="#E8C76A" stroke="#0A0A0A" stroke-width="1.2"/>
+      <!-- Grille lines -->
+      <line x1="-4" y1="-5" x2="4" y2="-5" stroke="#0A0A0A" stroke-width="0.8"/>
+      <line x1="-4" y1="-2" x2="4" y2="-2" stroke="#0A0A0A" stroke-width="0.8"/>
+      <line x1="-4" y1="1"  x2="4" y2="1"  stroke="#0A0A0A" stroke-width="0.8"/>
+      <!-- Stem -->
+      <path d="M 0 10 Q 0 18 0 22" stroke="#E8C76A" stroke-width="2" fill="none"/>
+      <!-- Base bracket -->
+      <path d="M -8 22 L 8 22" stroke="#E8C76A" stroke-width="2" stroke-linecap="round"/>
+    </g>
+
+    <!-- P -->
+    <path d="M 234 10 L 234 70 L 246 70 L 246 48 L 258 48 Q 276 48 276 29 Q 276 10 258 10 Z M 246 22 L 258 22 Q 264 22 264 29 Q 264 36 258 36 L 246 36 Z"/>
+  </g>
+
+  <!-- SERIES — condensed, smaller, slightly transparent -->
+  <g fill="#C9A84C" opacity="0.85" font-family="'Space Grotesk', system-ui, sans-serif" font-weight="600">
+    <text x="290" y="45" font-size="20" letter-spacing="4">SERIES</text>
+  </g>
+
+  <!-- Underline accent — short gold rule under MIC UP -->
+  <rect x="10" y="74" width="210" height="2" fill="#C9A84C" opacity="0.7"/>
+</svg>

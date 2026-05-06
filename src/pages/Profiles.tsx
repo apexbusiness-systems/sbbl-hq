@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
-import { players, leagues } from '@/data/mock';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { useApp } from '@/contexts/AppContext';
 import { useQuery } from '@tanstack/react-query';
 import { apiFetch } from '@/lib/api/client';
-import { Team } from '@/types';
+import { LEAGUE_REGISTRY, leagueIdFromCode } from '@/lib/leagues';
+import type { PlayerProfile, LeagueId } from '@/types';
+import type { TeamCard } from '@/lib/api/teams';
 import { Award, Lock } from 'lucide-react';
 
 // ProfileView only covers Players and Leagues.
@@ -20,29 +21,72 @@ const ProfilesPage = () => {
   const [view, setView] = useState<ProfileView>('players');
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
 
-  // Fetch teams data so player cards can resolve team names.
+  // Fetch teams data so player cards can resolve team names. /api/teams
+  // returns TeamCard[] (league_code: "SBBL"/"WBL"/"TGIFBL"), not Team[].
   const teamsQuery = useQuery({
     queryKey: ['teams'],
-    queryFn: () => apiFetch<{ ok: boolean; teams: Team[] }>('/api/teams'),
+    queryFn: () => apiFetch<{ ok: boolean; teams: TeamCard[] }>('/api/teams'),
     retry: 1,
     staleTime: 120_000,
   });
 
-  const teams = useMemo(() => {
+  const teams = useMemo<TeamCard[]>(() => {
     const apiData = teamsQuery.data?.teams;
-    if (Array.isArray(apiData) && apiData.length > 0) return apiData;
-    return [];
+    return Array.isArray(apiData) ? apiData : [];
   }, [teamsQuery.data]);
 
   const teamMap = useMemo(() => {
-    const map: Record<string, Team> = {};
+    const map: Record<string, TeamCard> = {};
     teams.forEach((t) => {
       map[t.id] = t;
     });
     return map;
   }, [teams]);
 
-  const detail = selectedPlayer ? players.find((p) => p.id === selectedPlayer) : null;
+  // Players come from the tier-gated /api/stats endpoint (the old
+  // /api/public/stats was consolidated into /api/stats which now handles
+  // both anonymous and authenticated callers and returns tier-appropriate
+  // stat lines). Fetch only when premium so we don't burn network for
+  // users who will see the lock screen anyway.
+  const playersQuery = useQuery({
+    queryKey: ['profiles-players'],
+    queryFn: () =>
+      apiFetch<{ ok: boolean; tier: 'full' | 'minimal'; data: PlayerProfile[] }>(
+        '/api/stats',
+      ),
+    retry: 1,
+    staleTime: 60_000,
+    enabled: hasPremiumPlayerAccess,
+  });
+
+  const players = useMemo<PlayerProfile[]>(() => {
+    const apiData = playersQuery.data?.data;
+    return Array.isArray(apiData) ? apiData : [];
+  }, [playersQuery.data]);
+
+  const leagueStats = useMemo(() => {
+    const counts: Record<LeagueId, { teams: number; players: number }> = {
+      sbbl: { teams: 0, players: 0 },
+      wbl: { teams: 0, players: 0 },
+      tgifbl: { teams: 0, players: 0 },
+    };
+    // TeamCard exposes league_code (UPPER): convert to LeagueId via the
+    // canonical leagueIdFromCode helper so this mapping survives future
+    // code/id renames.
+    teams.forEach((t) => {
+      const id = leagueIdFromCode(t.league_code);
+      if (counts[id]) counts[id].teams++;
+    });
+    players.forEach((p) => {
+      if (counts[p.leagueId]) counts[p.leagueId].players++;
+    });
+    return counts;
+  }, [teams, players]);
+
+  const detail = useMemo(
+    () => (selectedPlayer ? players.find((p) => p.id === selectedPlayer) : null),
+    [selectedPlayer, players],
+  );
 
   // Both tabs are always shown. 'players' is always first and always visible.
   const views: ProfileView[] = ['players', 'leagues'];
@@ -99,12 +143,12 @@ const ProfilesPage = () => {
                     >
                       <div className="p-4 flex items-center gap-3">
                         <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center text-sm font-bold">
-                          #{p.number}
+                          {p.number ? `#${p.number}` : '—'}
                         </div>
                         <div>
                           <p className="font-semibold text-sm">{p.name}</p>
                           <p className="text-xs text-muted-foreground">
-                            {p.position} &middot; {teamMap[p.teamId]?.name}
+                            {p.position || '—'}{p.teamId && teamMap[p.teamId]?.name ? ` · ${teamMap[p.teamId].name}` : ''}
                             &nbsp;&nbsp;
                             <span className="text-foreground font-medium">{p.stats.pts}</span> PPG
                           </p>
@@ -125,7 +169,7 @@ const ProfilesPage = () => {
                         <div>
                           <h3 className="font-bold text-lg">{detail.name}</h3>
                           <p className="text-sm text-muted-foreground">
-                            {detail.position} &middot; {teamMap[detail.teamId]?.name}
+                            {detail.position || '—'}{detail.teamId && teamMap[detail.teamId]?.name ? ` · ${teamMap[detail.teamId].name}` : ''}
                           </p>
                         </div>
                       </div>
@@ -159,24 +203,20 @@ const ProfilesPage = () => {
         {/* Leagues View */}
         {view === 'leagues' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {leagues.map((l) => (
+            {LEAGUE_REGISTRY.map((l) => (
               <div key={l.id} className="panel p-5 space-y-3">
                 <div>
                   <LeagueBadge leagueId={l.id} />
                   <h3 className="font-bold mt-2">{l.name}</h3>
-                  <p className="text-sm text-muted-foreground">{l.description}</p>
+                  <p className="text-sm text-muted-foreground">{l.shortName}</p>
                 </div>
-                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-border">
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border">
                   <div className="text-center">
-                    <p className="text-base font-bold">${l.fee.toLocaleString()}</p>
-                    <p className="text-xs text-muted-foreground">Season Fee</p>
-                  </div>
-                  <div className="text-center">
-                    <p className="text-base font-bold">{teams.filter((t) => t.leagueId === l.id).length}</p>
+                    <p className="text-base font-bold">{leagueStats[l.id]?.teams ?? 0}</p>
                     <p className="text-xs text-muted-foreground">Teams</p>
                   </div>
                   <div className="text-center">
-                    <p className="text-base font-bold">{players.filter((p) => p.leagueId === l.id).length}</p>
+                    <p className="text-base font-bold">{leagueStats[l.id]?.players ?? 0}</p>
                     <p className="text-xs text-muted-foreground">Players</p>
                   </div>
                 </div>

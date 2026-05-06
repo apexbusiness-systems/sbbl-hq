@@ -1,18 +1,21 @@
-## BOLT JOURNAL
+## 2026-04-16 - Store Architecture Hardening
+**Learning:** Migrating from ad-hoc JSON carts to explicit structured tables like `store_orders` and `custom_quote_requests` simplifies Worker webhook handling.
+**Action:** Ensure that new commerce features build against the canonical `store_*` namespace directly to preserve idempotency and referential integrity.
 
-## 2024-05-18 - [Missing useMemo for Expensive Transformations]
-**Learning:** Found an instance in React components (like `Schedules.tsx`) where raw arrays coming from APIs or mock data were being processed (`reduce`, `map`, `filter`) on every single re-render. Since React re-renders can happen frequently due to URL query param changes or nested contexts updates, leaving transformations outside of `useMemo` can lead to degraded performance, particularly with larger data sets.
-**Action:** Always wrap `filter()`, `reduce()`, and `map()` chains in `useMemo` when they are inside a React component's main rendering scope and do not need to be recomputed unless their dependencies change.
+## 2025-05-14 - [Performance] Optimized Ops Batch Product Insertion
+**Learning:** Sequential database inserts in a loop (N+1 query pattern) in Cloudflare Workers significantly increase latency due to multiple round-trips to the database.
+**Action:** Use Supabase's native batch insert capability () to perform multiple insertions in a single database call, reducing I/O overhead and improving response times.
 
-## 2024-05-18 - [Missing useMemo for Expensive Array Sorting]
-**Learning:** Found an instance in React components (like `Teams.tsx`) where raw arrays coming from APIs or mock data were being processed (like `sort()` with mathematical divisions nested inside) directly inside the JSX render loop. This leads to `O(N log N)` work being performed on every re-render.
-**Action:** Always wrap `filter()`, `reduce()`, and `map()` chains or `sort()` operations in `useMemo` when they are inside a React component's main rendering scope and do not need to be recomputed unless their dependencies change.
-## 2024-04-09 - Supabase Migration column rename
-**Learning:** `media_publications` table had its `created_at` column renamed to `sort_at` during the `20260407103137_media_publications.sql` migration, but the subsequent `20260407200000_ingest_pipeline.sql` migration was still referencing `created_at` in the `v_ingest_reconciliation` view definition, causing Supabase Preview CI failures with "ERROR: column mp.created_at does not exist (SQLSTATE 42703)".
-**Action:** Always ensure that subsequent migrations are updated to reflect column renames or schema changes made in previous migrations.
-## 2026-04-11 - [Missing useMemo for Top-Level Array Lookups]
-**Learning:** Found an instance in `Leaderboards.tsx` where  was being executed inside a `.map()` render loop, which results in expensive O(N) recalculations on every render. The  array and `categories` are not state or props, so `[]` is used as the dependency array for `useMemo`, but to be fully future-proof they should be explicitly defined as dependencies.
-**Action:** When pre-computing a lookup map using `useMemo` to prevent expensive O(N) operations inside a React render loop, always verify and include any outer variables (even module-level arrays or statics) in the dependency array to ensure robustness and avoid future stale closure bugs.
-## 2026-04-11 - [Missing useMemo for Top-Level Array Lookups]
-**Learning:** Found an instance in Leaderboards.tsx where .find() was being executed inside a .map() render loop, which results in expensive O(N) recalculations on every render. The teams array and categories are not state or props, so [] is used as the dependency array for useMemo, but to be fully future-proof they should be explicitly defined as dependencies.
-**Action:** When pre-computing a lookup map using useMemo to prevent expensive O(N) operations inside a React render loop, always verify and include any outer variables (even module-level arrays or statics) in the dependency array to ensure robustness and avoid future stale closure bugs.
+## 2025-05-14 - [Performance] Optimized Ops Batch Product Insertion
+**Learning:** Sequential database inserts in a loop (N+1 query pattern) in Cloudflare Workers significantly increase latency due to multiple round-trips to the database.
+**Action:** Use Supabase's native batch insert capability (`insert([...items])`) to perform multiple insertions in a single database call, reducing I/O overhead and improving response times.
+
+## 2025-05-14 - [Performance] Optimized Store Checkout Loop
+**Learning:** During array `.reduce()` operations in React components (like cart or checkout totals), using `.find()` inside the reducer creates an unexpected $O(N^2)$ algorithmic bottleneck, particularly when de-duplicating items by properties like `name` or `id`.
+**Action:** Always replace nested `.find()` operations inside a `.reduce()` loop with an intermediate accumulator of type `Record<string, T>` to enable $O(1)$ property-based dictionary lookups.
+## 2026-05-06 - [React Rendering Loop Optimization]
+**Learning:** Found `reduce` calculations running inline within a React component's rendering flow, which triggers an O(N) operation on every single re-render. Since `useMemo` caches derived data and skips execution unless its dependencies change, it is optimal for replacing un-memoized loops.
+**Action:** Extract large or repeated O(N) functional loops (like `.map` or `.reduce`) from directly inside returned TSX elements into  hooks above the render, especially when the resulting calculations don't change between re-renders.
+## 2026-05-06 - [React Rendering Loop Optimization]
+**Learning:** Found reduce calculations running inline within a React component's rendering flow, which triggers an O(N) operation on every single re-render. Since useMemo caches derived data and skips execution unless its dependencies change, it is optimal for replacing un-memoized loops.
+**Action:** Extract large or repeated O(N) functional loops (like .map or .reduce) from directly inside returned TSX elements into useMemo hooks above the render, especially when the resulting calculations don't change between re-renders.

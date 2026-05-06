@@ -1,4 +1,4 @@
-<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
+<!-- Version: v1.2.0 | Date: 2026-04-17 | Status: Current -->
 # SBBL HQ
 
 Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alberta
@@ -74,17 +74,19 @@ npm run cf:deploy           # production
 npm run cf:deploy:staging   # staging
 ```
 
-## Documentation
+## Docs
 
 All documentation lives in [`docs/`](docs/README.md). Key entry points:
 
 | Category | Document |
 |---|---|
-| Architecture | [Architecture Overview](docs/architecture/ARCHITECTURE_v1.1.0.md) · [DB Schema](docs/architecture/DB_SCHEMA_v1.1.0.md) · [API Reference](docs/architecture/API_REFERENCE_v1.1.0.md) |
-| Security | [Security Model](docs/security/SECURITY_MODEL_v1.1.0.md) · [RLS Matrix](docs/security/RLS_MATRIX_v1.1.0.md) |
-| Operations | [Operations Runbook](docs/operations/OPERATIONS_RUNBOOK_v1.2.0.md) · [External Bindings](docs/operations/EXTERNAL_BINDINGS_v1.0.0.md) |
-| Deployment | [Supabase Setup](docs/deployment/SUPABASE_SETUP_v1.1.0.md) · [Cloudflare Deploy](docs/deployment/DEPLOY_CLOUDFLARE_v1.1.0.md) · [PWA + Capacitor](docs/deployment/PWA_CAPACITOR_SETUP_v1.1.0.md) |
+| Architecture | [Architecture Overview](docs/architecture/ARCHITECTURE_v1.2.0.md) · [DB Schema](docs/architecture/DB_SCHEMA_v1.2.0.md) · [API Reference](docs/architecture/API_REFERENCE_v1.2.0.md) · [Codebase Map](docs/architecture/COMPLETE_CODEBASE_MAP_v1.0.0.md) · [Canonical Data Pipeline](docs/architecture/CANONICAL_DATA_PIPELINE_v1.0.0.md) |
+| Security | [Security Model](docs/security/SECURITY_MODEL_v1.2.0.md) · [RLS Matrix](docs/security/RLS_MATRIX_v1.2.0.md) |
+| Operations | [Operations Runbook](docs/operations/OPERATIONS_RUNBOOK_v1.6.0.md) · [Supabase Monitoring](docs/operations/SUPABASE_MONITORING_RUNBOOK_v1.0.0.md) · [External Bindings](docs/operations/EXTERNAL_BINDINGS_v1.0.0.md) |
+| Deployment | [Supabase Setup](docs/deployment/SUPABASE_SETUP_v1.1.0.md) · [Cloudflare Deploy](docs/deployment/DEPLOY_CLOUDFLARE_v1.2.0.md) · [PWA + Capacitor](docs/deployment/PWA_CAPACITOR_SETUP_v1.1.0.md) |
+| Features | [Stream Gating](docs/features/STREAM_GATING_v1.7.0.md) · [Stats Pipeline](docs/features/STATS_PIPELINE_v1.2.0.md) · [Pipeline Map](docs/features/PIPELINE_MAP_v1.3.0.md) · [Broadcast Overlay & Engagement](docs/features/BROADCAST_OVERLAY_ENGAGEMENT_v1.0.0.md) |
 | Onboarding | [Developer Onboarding](docs/onboarding/DEVELOPER_ONBOARDING_v1.0.0.md) |
-| Quality | [Release Gate Audit](docs/quality/RELEASE_GATE_AUDIT_2026-04-04_v1.1.0.md) |
+| Quality | [Release Gate 2026-04-11](docs/quality/RELEASE_GATE_AUDIT_2026-04-11_v1.4.0.md) · [Livestream Integrity Audit](docs/quality/LIVESTREAM_INGEST_BROADCAST_SYSTEM_INTEGRITY_AUDIT_2026-04-09_v1.0.0.md) |
+| Policies | [One Device](ONE_DEVICE_POLICY.md) · [Paywall Enforcement](PAYWALL_ENFORCEMENT_POLICY.md) · [Resume Policy](RESUME_POLICY.md) · [Stream Test Strategy](STREAM_TEST_STRATEGY.md) |
 
 → **[Full documentation index](docs/README.md)**

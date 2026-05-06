@@ -7,7 +7,6 @@ import type { LeagueId } from '@/types';
 import { Users, Trophy, Briefcase, Activity } from 'lucide-react';
 import { useState, useMemo, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { teams as mockTeams, leagues as mockLeagues } from '@/data/mock';
 
 type TabView = 'standings' | 'rosters' | 'stats';
 
@@ -47,37 +46,7 @@ const TeamsPage = () => {
 
   const filteredTeams = useMemo(() => {
     const apiTeams = teamsQuery.data?.teams;
-    let list: TeamCard[] = [];
-    
-    if (Array.isArray(apiTeams) && apiTeams.length > 0) {
-      list = apiTeams;
-    } else {
-      // Fallback to mock data when API returns empty
-      list = mockTeams.map((t): TeamCard => {
-        const gp = t.record.wins + t.record.losses;
-        return {
-          id: t.id,
-          name: t.name,
-          league_code: t.leagueId.toUpperCase(),
-          league_name: mockLeagues.find(l => l.id === t.leagueId)?.name ?? t.leagueId.toUpperCase(),
-          season_name: 'Season 11',
-          division_name: t.division,
-          roster_count: 0,
-          players: [],
-          coaches: [],
-          stats: {
-            wins: t.record.wins,
-            losses: t.record.losses,
-            gamesPlayed: gp,
-            ptsFor: 0,
-            ptsAgainst: 0,
-            winPct: gp > 0 ? (t.record.wins / gp).toFixed(3) : '.000',
-            diff: 0,
-          },
-        };
-      });
-    }
-
+    const list: TeamCard[] = Array.isArray(apiTeams) ? apiTeams : [];
     if (leagueFilter === 'all') return list;
     const code = getLeagueConfig(leagueFilter).code;
     return list.filter((t) => t.league_code.toLowerCase() === code.toLowerCase());

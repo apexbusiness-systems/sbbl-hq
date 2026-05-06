@@ -51,21 +51,27 @@ export interface StatLine {
   pts: number;
   reb: number;
   ast: number;
-  stl: number;
-  blk: number;
-  fls: number;
-  min: number;
+  // Gated fields — only populated when the viewer's access tier is 'full'.
+  // Fans, anonymous visitors, and players whose subscription has lapsed
+  // receive `undefined` for these from the worker. Treat absence as
+  // "not permitted to view" — do NOT substitute zeros in the UI.
+  stl?: number;
+  blk?: number;
+  fls?: number;
+  min?: number;
 }
 
 export interface Product {
   id: string;
   name: string;
   category: 'tees' | 'hoodies' | 'jerseys' | 'caps' | 'accessories' | 'rewards';
-  price: number;
+  price: number; // in dollars for frontend display
   image: string;
   sizes?: string[];
   colors?: string[];
+  is_custom?: boolean;
   badge?: string;
+  description?: string;
   sale?: boolean;
 }
 

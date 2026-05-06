@@ -1,0 +1,401 @@
+/**
+ * url-detector.ts
+ *
+ * Universal stream URL type detection and normalization.
+ * Accepts any valid video stream URL with zero strictness on format.
+ * The only hard requirements: URL must be parseable and protocol must be
+ * http(s)/rtmp(s) or a recognized stream scheme.
+ *
+ * Supports 13 stream source types. Advisory system provides level-coded
+ * feedback (ok / warn / info) without ever hard-blocking a URL.
+ *
+ * FIX #2: getStreamDeliveryClass() now correctly classifies:
+ *   - All *.sbbl-hq.icu subdomains (not just stream.sbbl-hq.icu)
+ *   - Any URL with a /whep/ path segment
+ */
+import { isYoutubeUrl, toPlayableYoutubeEmbedUrl } from '@/lib/stream/youtube-url';
+
+export type StreamUrlType =
+  | 'youtube'
+  | 'hls'
+  | 'dash'
+  | 'whep'
+  | 'mp4'
+  | 'twitch'
+  | 'vimeo'
+  | 'facebook'
+  | 'kick'
+  | 'rumble'
+  | 'dailymotion'
+  | 'x-spaces'
+  | 'instagram'
+  | 'rtmp'
+  | 'local'
+  | 'unknown';
+
+export type StreamAdvisoryLevel = 'ok' | 'warn' | 'info';
+export type StreamDeliveryClass = 'embed' | 'proxy' | 'unsupported' | 'hls';
+
+export interface StreamAdvisory {
+  level: StreamAdvisoryLevel;
+  message: string;
+}
+
+/**
+ * FIX #2 — getStreamDeliveryClass
+ *
+ * Classify a URL into the delivery class the SBBL HQ player should use.
+ *
+ * Previous bug: only `stream.sbbl-hq.icu` was matched, so
+ * `live.sbbl-hq.icu/whep/stream` fell through to 'unsupported',
+ * causing routing logic to reject or misroute valid WHEP endpoints.
+ *
+ * Fix:
+ *   1. Match ALL *.sbbl-hq.icu subdomains (not just the `stream.` subdomain).
+ *   2. Match any URL whose path contains a standalone /whep/ segment.
+ */
+export function getStreamDeliveryClass(url: string): StreamDeliveryClass {
+  const normalized = url.trim().toLowerCase();
+  if (!normalized) return 'unsupported';
+
+  // Local media — blob:/data: video/file: — plays via native <video> element.
+  if (/^(?:blob:|data:video|file:)/i.test(normalized)) return 'proxy';
+
+  // Embed platforms — served via iframe/player SDK.
+  if (
+    normalized.includes('youtube.com') ||
+    normalized.includes('youtu.be') ||
+    normalized.includes('twitch.tv') ||
+    normalized.includes('vimeo.com') ||
+    normalized.includes('facebook.com') ||
+    normalized.includes('fb.watch')
+  ) {
+    return 'embed';
+  }
+
+  // Proxy/direct playback — HLS, DASH, MP4, or SBBL infrastructure.
+  if (
+    // Tolerate signed/query/filename variants (was: endsWith — broke presigned URLs).
+    /\.m3u8(?:[?#]|$)/i.test(normalized) ||
+    /\.(?:mp4|m4v|mov|webm|ogg|ogv)(?:[?#]|$)/i.test(normalized) ||
+    /\.mpd(?:[?#]|$)/i.test(normalized) ||
+    // FIX #2a — catch ALL sbbl-hq.icu subdomains (was: only stream.sbbl-hq.icu)
+    normalized.includes('sbbl-hq.icu') ||
+    // FIX #2b — catch any URL with a standalone /whep/ path segment
+    /(?:^|\/)whep(?:\/|$)/i.test(url)
+  ) {
+    return 'proxy';
+  }
+
+  return 'unsupported';
+}
+
+/**
+ * Detect the stream URL type from a raw URL string.
+ * Detection order matters — more specific patterns first.
+ */
+export function detectStreamUrlType(url: string): StreamUrlType {
+  if (!url) return 'unknown';
+
+  // blob: / data: / file: — locally-sourced media picked via File API or
+  // drag-drop. Playable only in the admin's own browser; used for preview
+  // before a Go Live that pushes to WHIP ingest for actual broadcast.
+  if (/^(?:blob:|data:video|file:)/i.test(url)) return 'local';
+
+  // RTMP/RTMPS — must check before generic https checks
+  if (/^rtmps?:\/\//i.test(url)) return 'rtmp';
+
+  // WHEP — WebRTC-HTTP Egress Protocol
+  // Match a /whep segment as a standalone path component (not a substring of
+  // a longer segment), or an explicit ?whep= / &whep= query parameter.
+  // Examples that match: /whep/live  /live/whep  /api/whep
+  // Examples that DON'T: /badwhep/stream  /whepfoo/bar
+  if (
+    /(?:^|\/)whep(?:\/|$)/i.test(url) ||   // path segment: /whep/ or /whep$
+    /[?&]whep[=&]/i.test(url) ||            // query param: ?whep= or &whep=
+    /[?&]whep$/i.test(url)                  // query param at end: ?whep
+  ) {
+    return 'whep';
+  }
+
+  // HLS — .m3u8 anywhere in the path (tolerant of signed-URL query suffixes
+  // with tokens, expiry params, and arbitrary filename suffixes).
+  if (/\.m3u8(?:[?#]|$)/i.test(url) || /\/[^?#]*\.m3u8/i.test(url)) return 'hls';
+
+  // DASH
+  if (/\.mpd(?:[?#]|$)/i.test(url)) return 'dash';
+
+  // Direct video files — accept the full set of browser-playable containers
+  // (mp4, m4v, mov, webm, ogg/ogv). Presigned S3 URLs with ?X-Amz-* suffixes,
+  // Cloudflare R2 signed URLs, and YouTube-style ?v= params all pass.
+  if (/\.(?:mp4|m4v|mov|webm|ogg|ogv)(?:[?#]|$)/i.test(url)) {
+    return 'mp4';
+  }
+
+  // Platform detection — order by expected usage frequency
+  if (isYoutubeUrl(url)) return 'youtube';
+  if (/(?:^|[./])twitch\.tv(?:\/|$)/i.test(url)) return 'twitch';
+  if (/(?:^|[./])vimeo\.com(?:\/|$)/i.test(url)) return 'vimeo';
+  if (/(?:^|[./])(?:facebook\.com|fb\.watch|fb\.me|fbcdn\.net)(?:\/|$)/i.test(url)) return 'facebook';
+  if (/(?:^|[./])kick\.com(?:\/|$)/i.test(url)) return 'kick';
+  if (/(?:^|[./])rumble\.com(?:\/|$)/i.test(url)) return 'rumble';
+  if (/(?:^|[./])(?:dailymotion\.com|dai\.ly)(?:\/|$)/i.test(url)) return 'dailymotion';
+  if (/(?:^|[./])(?:x\.com|twitter\.com)\/i\/(?:broadcasts|spaces)(?:\/|$)/i.test(url)) return 'x-spaces';
+  if (/(?:^|[./])instagram\.com\/(?:live|.*\/live)(?:\/|$)/i.test(url)) return 'instagram';
+
+  return 'unknown';
+}
+
+export interface PlayableUrl {
+  url: string;
+  type: StreamUrlType;
+  warning?: string;
+}
+
+/**
+ * Extract a Twitch channel name from common twitch.tv URL formats.
+ * e.g. https://www.twitch.tv/channelname → channelname
+ */
+function extractTwitchChannel(url: string): string | null {
+  try {
+    const parsed = new URL(url.trim());
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    if (parts.length === 0) return null;
+    const first = parts[0].toLowerCase();
+    if (['directory', 'videos', 'p', 'settings', 'search'].includes(first)) return null;
+    return parts[0];
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract a Vimeo video ID from common vimeo.com URL formats.
+ * e.g. https://vimeo.com/123456789 → 123456789
+ */
+function extractVimeoId(url: string): string | null {
+  try {
+    const parsed = new URL(url.trim());
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    for (const part of parts) {
+      if (/^\d{5,}$/.test(part)) return part;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Convert a raw stream URL to a playable form.
+ * - YouTube URLs are normalized to canonical watch URL.
+ * - Twitch URLs are normalized to the player embed format.
+ * - Vimeo URLs are normalized to player.vimeo.com embed format.
+ * - RTMP URLs carry an advisory warning (cannot play in browser).
+ * - All other URLs are returned as-is (no blocking).
+ */
+export function toPlayableUrl(raw: string): PlayableUrl {
+  const trimmed = raw.trim();
+  if (!trimmed) return { url: '', type: 'unknown' };
+
+  const type = detectStreamUrlType(trimmed);
+
+  if (type === 'local') {
+    return {
+      url: trimmed,
+      type: 'local',
+      warning: 'Local file plays in this browser only. To broadcast to viewers, use the WHIP ingest button.',
+    };
+  }
+
+  if (type === 'rtmp') {
+    return {
+      url: trimmed,
+      type: 'rtmp',
+      warning: 'RTMP cannot play in browser. Use an HLS endpoint instead.',
+    };
+  }
+
+  if (type === 'youtube') {
+    const embedUrl = toPlayableYoutubeEmbedUrl(trimmed);
+    return { url: embedUrl ?? trimmed, type: 'youtube' };
+  }
+
+  if (type === 'twitch') {
+    // WHY: ReactPlayer's Twitch wrapper only matches canonical twitch.tv/<channel>
+    // URLs. Returning the player.twitch.tv embed form defeats that matcher, so the
+    // URL falls through to FilePlayer and is loaded as <video src>, triggering the
+    // cross-origin CORS block + "no supported sources" error on /live. The parent=
+    // requirement is fulfilled by the Twitch JS SDK from config.twitch.options.parent
+    // (see LiveStreamPlayer.tsx), not by query params we inject here.
+    let channel = extractTwitchChannel(trimmed);
+    if (!channel) {
+      // Recover channel from legacy player.twitch.tv/?channel=… URLs written by
+      // earlier builds, so stored rows self-heal without a migration.
+      try {
+        const parsed = new URL(trimmed);
+        if (parsed.hostname.toLowerCase() === 'player.twitch.tv') {
+          channel = parsed.searchParams.get('channel');
+        }
+      } catch {
+        /* non-parseable URL: fall through */
+      }
+    }
+    if (channel) {
+      return { url: `https://www.twitch.tv/${channel}`, type: 'twitch' };
+    }
+    return { url: trimmed, type: 'twitch' };
+  }
+
+  if (type === 'vimeo') {
+    const vimeoId = extractVimeoId(trimmed);
+    if (vimeoId) {
+      return { url: `https://player.vimeo.com/video/${vimeoId}`, type: 'vimeo' };
+    }
+    return { url: trimmed, type: 'vimeo' };
+  }
+
+  if (type === 'facebook') {
+    return {
+      url: trimmed,
+      type: 'facebook',
+      warning: 'Facebook stream URLs are not supported. Use YouTube, Twitch, Vimeo, or HLS instead.',
+    };
+  }
+
+  return { url: trimmed, type };
+}
+
+export type CanonicalizeResult =
+  | { ok: true; url: string; wasNormalized: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Canonicalize a stream source URL for persistence.
+ *
+ * Platform embed URLs (YouTube /embed/, Twitch player, Vimeo player) are
+ * converted to their canonical watch/channel forms so that toPlayableUrl()
+ * can later re-embed them correctly without double-embedding. Facebook plugin
+ * embeds are rejected outright — there is no reliable reverse mapping.
+ *
+ * All other valid URLs pass through unchanged (wasNormalized: false).
+ */
+export function canonicalizeStreamSourceUrl(raw: string): CanonicalizeResult {
+  const trimmed = raw.trim();
+  if (!trimmed) return { ok: false, error: 'Stream URL is required.' };
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return { ok: false, error: 'Invalid URL.' };
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const path = parsed.pathname.toLowerCase();
+
+  // YouTube /embed/ → canonical watch URL (reuse existing validator)
+  if (
+    (host.endsWith('youtube.com') || host.endsWith('youtube-nocookie.com')) &&
+    path.startsWith('/embed/')
+  ) {
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const videoId = parts[1];
+    if (videoId && /^[a-zA-Z0-9_-]{11}$/.test(videoId)) {
+      return { ok: true, url: `https://www.youtube.com/watch?v=${videoId}`, wasNormalized: true };
+    }
+    return { ok: false, error: 'YouTube embed URL has invalid video ID.' };
+  }
+
+  // Twitch player embed → canonical channel URL
+  if (host === 'player.twitch.tv') {
+    const channel = parsed.searchParams.get('channel');
+    if (channel) {
+      return { ok: true, url: `https://www.twitch.tv/${channel}`, wasNormalized: true };
+    }
+    return { ok: false, error: 'Twitch player URL missing channel parameter.' };
+  }
+
+  // Vimeo player embed → canonical vimeo.com URL
+  if (host === 'player.vimeo.com' && path.startsWith('/video/')) {
+    const parts = parsed.pathname.split('/').filter(Boolean);
+    const videoId = parts[1];
+    if (videoId && /^\d{5,}$/.test(videoId)) {
+      return { ok: true, url: `https://vimeo.com/${videoId}`, wasNormalized: true };
+    }
+    return { ok: false, error: 'Vimeo player URL has invalid video ID.' };
+  }
+
+  // Facebook plugin embeds — no reliable reverse mapping, reject explicitly
+  if (host.endsWith('facebook.com') && path.includes('/plugins/')) {
+    return {
+      ok: false,
+      error: 'Facebook plugin embed URLs cannot be saved. Use the original video URL.',
+    };
+  }
+
+  return { ok: true, url: trimmed, wasNormalized: false };
+}
+
+/** Human-readable label for each stream URL type */
+export const STREAM_TYPE_LABELS: Record<StreamUrlType, string> = {
+  youtube: 'YouTube',
+  hls: 'HLS',
+  dash: 'DASH',
+  whep: 'WHEP',
+  mp4: 'MP4',
+  twitch: 'Twitch',
+  vimeo: 'Vimeo',
+  facebook: 'Facebook',
+  kick: 'Kick',
+  rumble: 'Rumble',
+  dailymotion: 'Dailymotion',
+  'x-spaces': 'X Spaces',
+  instagram: 'IG Live',
+  rtmp: 'RTMP',
+  local: 'Local File',
+  unknown: 'Stream',
+};
+
+/**
+ * Centralized advisory system for stream URL types.
+ * Returns level-coded feedback for the admin UI.
+ * NEVER blocks — only advises.
+ */
+export function getStreamTypeAdvisory(type: StreamUrlType): StreamAdvisory {
+  switch (type) {
+    case 'rtmp':
+      return { level: 'warn', message: 'RTMP cannot play in browser — use an HLS endpoint instead.' };
+    case 'facebook':
+      return { level: 'warn', message: 'Facebook stream URLs are not supported. Use YouTube, Twitch, Vimeo, or HLS instead.' };
+    case 'instagram':
+      return { level: 'warn', message: 'Instagram Live does not support external embedding.' };
+    case 'kick':
+      return { level: 'warn', message: 'Kick does not provide embeddable player URLs. Consider an HLS restream.' };
+    case 'rumble':
+      return { level: 'warn', message: 'Rumble embedding may be restricted. Verify playback after going live.' };
+    case 'dailymotion':
+      return { level: 'ok', message: 'Dailymotion stream detected.' };
+    case 'x-spaces':
+      return { level: 'warn', message: 'X Spaces does not support external embedding.' };
+    case 'youtube':
+      return { level: 'ok', message: 'YouTube stream detected — auto-normalized.' };
+    case 'hls':
+      return { level: 'ok', message: 'HLS stream — universal browser support.' };
+    case 'dash':
+      return { level: 'ok', message: 'DASH stream detected.' };
+    case 'whep':
+      return { level: 'info', message: 'WHEP/WebRTC — ultra-low latency mode active.' };
+    case 'twitch':
+      return { level: 'ok', message: 'Twitch stream detected — auto-configured.' };
+    case 'vimeo':
+      return { level: 'ok', message: 'Vimeo stream detected — auto-configured.' };
+    case 'mp4':
+      return { level: 'ok', message: 'Direct video file detected.' };
+    case 'local':
+      return { level: 'info', message: 'Local file — plays in this browser. Use Broadcast to share with viewers.' };
+    case 'unknown':
+    default:
+      return { level: 'ok', message: '' };
+  }
+}

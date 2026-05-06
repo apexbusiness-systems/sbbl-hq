@@ -3,7 +3,7 @@
  * Renders the live-stream broadcast area with a multi-layer access gate:
  *
  *   Unregistered (no auth.user)           → registration wall → /register?redirect=/live
- *   player role                           → free access always → Switcher Studio player
+ *   player role                           → free access always → branded app player
  *   paid_fan | super_admin                → free access + invite generator → player
  *   fan with PPV entitlement (Stripe)     → access → player
  *   fan with redeemed invite              → access → player
@@ -12,16 +12,21 @@
  * IP locking and single-use enforcement happen server-side in /api/invite/redeem.
  * No role/entitlement data is trusted from the client.
  *
- * Uses Switcher Studio's script-based embed player.
+ * Uses ReactPlayer for live stream playback (YouTube, HLS, etc.).
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { Lock, Play, Ticket, Copy, Check, KeyRound } from 'lucide-react';
+import { Lock, Play, Pause, Ticket, Copy, Check, KeyRound, Volume2, VolumeX, Maximize, AlertTriangle } from 'lucide-react';
+import ReactPlayer from 'react-player/lazy';
 import { toast } from 'sonner';
-import ReactPlayer from 'react-player';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
+import { IDEMPOTENCY_HEADER, createIdempotencyKey } from '@/lib/api/idempotency';
+import { isYoutubeUrl } from '@/lib/stream/youtube-url';
+import { detectStreamUrlType, toPlayableUrl } from '@/lib/stream/url-detector';
+import type { StreamUrlType } from '@/lib/stream/url-detector';
+import { WhepPlayer } from '@/components/WhepPlayer';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { useStreamForge } from '@/hooks/use-streamforge';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
@@ -127,29 +132,471 @@ function AccessCodeRedeem({
   );
 }
 
+/** Maps YouTube IFrame API numeric error codes to human-readable messages. */
+const YOUTUBE_ERROR_MESSAGES: Partial<Record<number, string>> = {
+  2:   'Invalid stream URL — check the link in broadcast controls.',
+  5:   'This video cannot play in an embedded player.',
+  100: 'Video not found or set to private.',
+  101: 'Stream owner has disabled embedding. Try a different source URL.',
+  150: 'Stream owner has disabled embedding. Try a different source URL.',
+};
+
+function parsePlayerError(
+  err: unknown,
+  data: { error?: number } | null | undefined,
+): string {
+  if (data != null && typeof data.error === 'number') {
+    return (
+      YOUTUBE_ERROR_MESSAGES[data.error] ??
+      `Stream error (YouTube code ${data.error}). Try a different URL.`
+    );
+  }
+  if (err instanceof Event) {
+    const video = (err as Event & { target?: HTMLVideoElement }).target;
+    const code = video?.error?.code;
+    if (code === 2) return 'Network error while loading stream. Check your connection.';
+    if (code === 3) return 'Stream format is not supported by this browser.';
+    if (code === 4) return 'Stream source is unavailable or the URL is invalid.';
+  }
+  if (err instanceof Error) return `Stream error: ${err.message}`;
+  return 'Stream connection failed — check the URL in broadcast controls or try again.';
+}
+
+function StreamPlayer({
+  url,
+  isSuperAdmin: _isSuperAdmin,
+  providerHint,
+  onReady,
+  onPlay,
+  onError,
+}: Readonly<{
+  url: string;
+  isSuperAdmin: boolean;
+  providerHint?: StreamUrlType | null;
+  onReady: () => void;
+  onPlay: () => void;
+  onError: (message: string) => void;
+}>) {
+  const urlType = detectStreamUrlType(url);
+  const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
+  // Playback URLs may be signed/proxied and hide provider hostnames; use the
+  // upstream source hint from session/game config to preserve provider logic.
+  const isTwitch = urlType === 'twitch' || providerHint === 'twitch';
+  const isVimeo = urlType === 'vimeo';
+  const isWhep = urlType === 'whep';
+  const isRtmp = urlType === 'rtmp';
+  // Facebook: short-circuit before ReactPlayer so the FB SDK never loads.
+  // Rendered via plugins/video.php iframe — no connect.facebook.net request.
+  // Kick/Instagram/X-Spaces: no public embed surface; still show advisory.
+  const isFacebook = urlType === 'facebook';
+  const isUnembeddable =
+    urlType === 'kick' || urlType === 'instagram' || urlType === 'x-spaces';
+  // HLS and DASH use ReactPlayer with explicit forcing flags
+  const forceHls = urlType === 'hls';
+  const forceDash = urlType === 'dash';
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  // Twitch autoplay is fragile under provider visibility checks; start paused
+  // and require a user gesture for deterministic playback.
+  const [playing, setPlaying] = useState(!isTwitch);
+  const [hasUserStarted, setHasUserStarted] = useState(!isTwitch);
+  // Start muted so cross-origin autoplay is permitted by Chrome. Unmuted
+  // autoplay is blocked for cross-origin iframes regardless of
+  // Permissions-Policy — the browser requires a user gesture.
+  const [muted, setMuted] = useState(true);
+  // True once the stream fires its first onPlay event. Used to gate the
+  // tap-to-unmute overlay so it never appears before playback has started.
+  const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
+  // Twitch's embed SDK measures iframe dimensions/visibility at creation time.
+  // If it initializes while the aspect-ratio box is still resolving, Twitch
+  // latches a 0×0 or off-viewport state and disables autoplay permanently.
+  // Gate mount until the host is both sized and in viewport.
+  const [containerReady, setContainerReady] = useState(false);
+  useEffect(() => {
+    const host = containerRef.current;
+    if (!host) return;
+
+    let raf = 0;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let activated = false;
+
+    const promoteWhenVisible = () => {
+      if (activated) return;
+      const rect = host.getBoundingClientRect();
+      // Require practical embed dimensions + viewport intersection before mount.
+      const hasPlayableSize = rect.width >= 200 && rect.height >= 120;
+      const inViewport =
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth;
+      if (hasPlayableSize && inViewport) {
+        activated = true;
+        setContainerReady(true);
+      }
+    };
+
+    const schedulePromote = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(promoteWhenVisible);
+    };
+
+    schedulePromote();
+    const resizeObserver = new ResizeObserver(schedulePromote);
+    resizeObserver.observe(host);
+    const intersectionObserver = new IntersectionObserver(schedulePromote, { threshold: [0, 0.01] });
+    intersectionObserver.observe(host);
+    window.addEventListener('resize', schedulePromote);
+    window.addEventListener('scroll', schedulePromote, { passive: true });
+
+    // Safety net: never leave the player unmounted indefinitely.
+    timeoutId = setTimeout(() => {
+      if (!activated) {
+        activated = true;
+        setContainerReady(true);
+      }
+    }, 2000);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      resizeObserver.disconnect();
+      intersectionObserver.disconnect();
+      if (timeoutId) clearTimeout(timeoutId);
+      window.removeEventListener('resize', schedulePromote);
+      window.removeEventListener('scroll', schedulePromote);
+    };
+  }, []);
+  const [volume, setVolume] = useState(0.8);
+  const [playedFraction, setPlayedFraction] = useState(0);
+  const [playedSeconds, setPlayedSeconds] = useState(0);
+  const [durationSeconds, setDurationSeconds] = useState(0);
+  // Auto-retry: allow one silent retry on transient errors before showing error UI
+  const retryCountRef = useRef(0);
+  const autoRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reactPlayerRef = useRef<ReactPlayer | null>(null);
+  const MAX_AUTO_RETRIES = 1;
+
+  useEffect(() => {
+    return () => {
+      if (autoRetryTimerRef.current) {
+        clearTimeout(autoRetryTimerRef.current);
+        autoRetryTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Force unified in-app controls for all providers.
+  const showNativeControls = false;
+  const canSeek = Number.isFinite(durationSeconds) && durationSeconds > 0 && !isWhep && !isRtmp;
+
+  const formatClock = (total: number) => {
+    const safe = Number.isFinite(total) && total > 0 ? Math.floor(total) : 0;
+    const h = Math.floor(safe / 3600);
+    const m = Math.floor((safe % 3600) / 60);
+    const s = safe % 60;
+    return h > 0
+      ? `${String(h)}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+      : `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  };
+
+  const handleFullscreen = async () => {
+    const host = containerRef.current;
+    if (!host) return;
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await host.requestFullscreen();
+      }
+    } catch (err) {
+      onError(`Fullscreen unavailable: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  // RTMP URLs cannot play in the browser — show advisory overlay
+  if (isRtmp) {
+    return (
+      <div className="absolute inset-0 bg-black flex flex-col items-center justify-center gap-3 px-6 text-center" data-testid="stream-player">
+        <AlertTriangle className="w-10 h-10 text-amber-400" />
+        <p className="text-sm font-semibold text-white">RTMP Stream Detected</p>
+        <p className="text-xs text-white/60 max-w-xs leading-relaxed">
+          RTMP cannot play directly in the browser. Configure an HLS endpoint
+          (e.g. <code className="text-amber-400">https://…/live/stream.m3u8</code>) in Broadcast Controls.
+        </p>
+      </div>
+    );
+  }
+
+  // Facebook: use the official plugins/video.php sandboxed iframe — no FB SDK
+  // ever loads (connect.facebook.net remains blocked in script-src). ReactPlayer
+  // never mounts for this branch; the frame-src CSP allows facebook.com only.
+  if (isFacebook) {
+    return (
+      <div className="absolute inset-0 bg-black" data-testid="stream-player">
+        <iframe
+          src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false&allowfullscreen=true&autoplay=true`}
+          className="w-full h-full"
+          style={{ border: 'none', overflow: 'hidden' }}
+          scrolling="no"
+          allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share; fullscreen"
+          allowFullScreen
+          title="Facebook Live Stream"
+        />
+      </div>
+    );
+  }
+
+  // Other walled-garden providers (Kick, Instagram Live, X Spaces) advertise
+  // no public embed surface compatible with our CSP; treat them like Facebook.
+  if (isUnembeddable) {
+    const label =
+      urlType === 'kick' ? 'Kick'
+      : urlType === 'instagram' ? 'Instagram Live'
+      : 'X Spaces';
+    return (
+      <div className="absolute inset-0 bg-black flex flex-col items-center justify-center gap-3 px-6 text-center" data-testid="stream-player">
+        <AlertTriangle className="w-10 h-10 text-amber-400" />
+        <p className="text-sm font-semibold text-white">{label} Not Supported</p>
+        <p className="text-xs text-white/60 max-w-xs leading-relaxed">
+          {label} does not provide an embeddable player URL. Configure an HLS
+          endpoint, or a YouTube / Twitch / Vimeo URL, in Broadcast Controls.
+        </p>
+      </div>
+    );
+  }
+
+  // WHEP — WebRTC low-latency player
+  if (isWhep) {
+    return (
+      <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
+        <WhepPlayer
+          whepUrl={url}
+          retryIntervalMs={10_000}
+          maxRetries={5}
+          onStatusChange={(status) => {
+            if (status === 'live') { onReady(); onPlay(); }
+            if (status === 'error') onError('WebRTC connection failed — the stream may not have started yet.');
+          }}
+        />
+      </div>
+    );
+  }
+
+  // HLS / DASH / YouTube / Twitch / Vimeo / direct / unknown — use ReactPlayer
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
+  // Twitch rejects embeds whose `parent` list does not include the actual
+  // document origin. A single entry fails on www/apex/localhost. Union the
+  // known SBBL surface areas with the current host so every environment
+  // (production, preview domains, local dev) loads without manual rewiring.
+  const twitchParents = Array.from(new Set([
+    currentHost,
+    'sbbl-hq.icu',
+    'www.sbbl-hq.icu',
+    'localhost',
+  ].filter(Boolean)));
+
+  // A URL is "proxy-authenticated" when it's served from our own sbbl-hq.icu
+  // infrastructure behind the sbbl_proxy_auth cookie. External CDN videos
+  // (league highlights, direct MP4s on a public bucket) respond with
+  // `Access-Control-Allow-Origin: *` which is incompatible with credentialed
+  // requests — browsers will reject playback with a CORS error. Detect and
+  // downgrade to anonymous CORS so every public video URL plays seamlessly.
+  const isProxyAuthedUrl = /\.sbbl-hq\.icu(?:\/|$)/i.test(url) || url.startsWith('/');
+  const isLocalBlob = urlType === 'local' || url.startsWith('blob:') || url.startsWith('data:') || url.startsWith('file:');
+  const reactPlayerConfig = {
+    youtube: {
+      playerVars: {
+        rel: 0,
+        iv_load_policy: 3,
+        modestbranding: 1,
+        controls: 0,
+        disablekb: 1,
+        fs: 0,
+        // FIX: origin must match the host to prevent YouTube iframe API
+        // postMessage cross-origin errors that crash the embed entirely.
+        // Without this, the YT iframe tries to postMessage to youtube.com
+        // instead of sbbl-hq.icu, which the browser blocks.
+        origin: typeof window !== 'undefined' ? window.location.origin : 'https://sbbl-hq.icu',
+      },
+    },
+    twitch: {
+      options: {
+        // REQUIRED: Twitch embeds will not load without every allowed parent.
+        // https://dev.twitch.tv/docs/embed/everything/#required-parameters
+        parent: twitchParents,
+        // Explicitly disable provider-level autoplay; playback starts from an
+        // explicit user gesture to avoid Twitch visibility-gated failures.
+        autoplay: false,
+        // Keep muted true in embed options so Twitch starts cleanly once the
+        // viewer clicks Start Stream and playback begins.
+        muted: true,
+        playsinline: true,
+      },
+    },
+    file: {
+      ...(forceHls ? { forceHLS: true } : {}),
+      ...(forceDash ? { forceDASH: true } : {}),
+      hlsOptions: {
+        // withCredentials only for proxy-authed URLs — external CDNs respond
+        // with ACAO: * which browsers reject under credentialed mode.
+        xhrSetup: (xhr: XMLHttpRequest) => {
+          xhr.withCredentials = isProxyAuthedUrl;
+        },
+      },
+      // blob: URLs: omit crossOrigin entirely (no cross-origin request at all).
+      // Proxy-authed URLs: use-credentials so sbbl_proxy_auth cookie attaches.
+      // Everything else (public CDNs, Twitch VODs, league highlight links):
+      // anonymous so the browser does not demand credentialed CORS headers.
+      ...(isLocalBlob
+        ? {}
+        : { attributes: { crossOrigin: isProxyAuthedUrl ? 'use-credentials' : 'anonymous' } }),
+    },
+  };
+  // Mount the player only after the host element has practical dimensions
+  // and is in the viewport. Twitch's embed SDK runs its visibility checks
+  // synchronously at init: if the iframe is 0×0 or off-viewport when the
+  // SDK initializes, it latches autoplay-disabled with errors like
+  // "minimum requirements for autoplay were not met: style visibility, size,
+  // viewport visibility" and never recovers without a remount.
+  const shouldRenderPlayer = containerReady;
+
+  return (
+    <div
+      ref={containerRef}
+      className="absolute inset-0 bg-black"
+      style={{ width: '100%', height: '100%', minWidth: 400, minHeight: 300 }}
+      data-testid="stream-player"
+      data-container-ready={containerReady ? 'true' : 'false'}
+    >
+      {shouldRenderPlayer && (
+        <ReactPlayer
+          ref={(instance) => { reactPlayerRef.current = instance; }}
+          url={url}
+          width="100%"
+          height="100%"
+          playing={hasUserStarted ? playing : false}
+          controls={showNativeControls}
+          muted={muted}
+          volume={volume}
+          onReady={() => { retryCountRef.current = 0; onReady(); }}
+          onDuration={(seconds) => setDurationSeconds(seconds)}
+          onProgress={({ played, playedSeconds: elapsed }) => {
+            setPlayedFraction(played);
+            setPlayedSeconds(elapsed);
+          }}
+          onPlay={() => { setPlaying(true); retryCountRef.current = 0; setHasStartedPlaying(true); onPlay(); }}
+          onPause={() => setPlaying(false)}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onError={(err: any, data: any) => {
+            // Auto-retry: on first transient error, retry silently after 3s
+            // to avoid killing the player for 20k viewers on a single hiccup.
+            if (retryCountRef.current < MAX_AUTO_RETRIES) {
+              retryCountRef.current += 1;
+              setPlaying(false);
+              if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current);
+              autoRetryTimerRef.current = setTimeout(() => {
+                autoRetryTimerRef.current = null;
+                setPlaying(true);
+              }, 3_000);
+              return;
+            }
+            onError(parsePlayerError(err, data));
+          }}
+          config={reactPlayerConfig}
+        />
+      )}
+      {/* Tap-to-unmute overlay — only shown after the stream fires its first
+          onPlay event, so it never appears during the connecting spinner. */}
+      {shouldRenderPlayer && muted && hasStartedPlaying && (
+        <button
+          type="button"
+          onClick={() => setMuted(false)}
+          className="absolute top-3 left-1/2 -translate-x-1/2 z-30 inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-xs font-bold uppercase tracking-wider text-black shadow-lg hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+          aria-label="Tap to unmute audio"
+          data-testid="tap-to-unmute"
+        >
+          <VolumeX className="w-4 h-4" />
+          Tap to unmute
+        </button>
+      )}
+      {isTwitch && !hasUserStarted && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/35">
+          <button
+            type="button"
+            onClick={() => {
+              setMuted(true);
+              setHasUserStarted(true);
+              setPlaying(true);
+            }}
+            className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-5 py-3 text-sm font-bold uppercase tracking-wider text-black shadow-lg hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+            aria-label="Start Twitch playback"
+          >
+            <Play className="h-4 w-4" />
+            Start Stream
+          </button>
+        </div>
+      )}
+      {/* Block iframe click-through for YouTube/Vimeo only.
+          Twitch's embed SDK validates iframe visibility at init — an opaque
+          overlay on top of the Twitch iframe causes the SDK to fail its
+          viewport-visibility check and permanently disable autoplay.
+          Twitch retains its own native controls and context menu. */}
+      {(isYoutube || isVimeo) && (
+        <div
+          className="absolute inset-0 z-10"
+          aria-hidden="true"
+          onContextMenu={(e) => e.preventDefault()}
+        />
+      )}
+      <div
+        className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm"
+        onContextMenu={(e) => e.preventDefault()}
+      >
+          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
+            {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+          </button>
+          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label={muted ? 'Unmute' : 'Mute'} onClick={() => setMuted(v => !v)}>
+            {muted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+          <input aria-label="Volume" type="range" min={0} max={1} step={0.05} value={volume}
+            onChange={(e) => { const n = Number(e.target.value); setMuted(n === 0); setVolume(n); }}
+            className="w-24 accent-amber-500" />
+          <input
+            aria-label="Seek"
+            type="range"
+            min={0}
+            max={1}
+            step={0.001}
+            value={playedFraction}
+            disabled={!canSeek}
+            onChange={(e) => {
+              const nextFraction = Number(e.target.value);
+              setPlayedFraction(nextFraction);
+              const player = reactPlayerRef.current;
+              if (player && canSeek) player.seekTo(nextFraction, 'fraction');
+            }}
+            className="flex-1 accent-amber-500 disabled:opacity-40"
+          />
+          <span className="text-[10px] text-white/70 tabular-nums min-w-[82px] text-right">
+            {formatClock(playedSeconds)} / {formatClock(durationSeconds)}
+          </span>
+          <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
+            aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
+            <Maximize className="w-4 h-4" />
+          </button>
+      </div>
+    </div>
+  );
+}
+
 const PPV_PRICE_CAD = 4.99;
 const ALBERTA_GST = 0.05;
 /** Tax-inclusive price shown to Alberta viewers */
 const PPV_PRICE_TOTAL = Math.round(PPV_PRICE_CAD * (1 + ALBERTA_GST) * 100) / 100;
 
-// Legacy Switcher Studio config removed.
-// ReactPlayer stream URL is configured via AdminStreamControls.
 
-/**
- * Normalize Facebook Live URLs:
- * - Strip fbclid tracking parameter that breaks embed playback
- * - Ensure /live/ suffix is present for direct FB Live embeds
- */
-function normalizeFacebookUrl(url: string): string {
-  try {
-    const u = new URL(url);
-    if (!u.hostname.includes('facebook.com')) return url;
-    u.searchParams.delete('fbclid');
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
 
 const DEVICE_TOKEN_KEY = 'sbbl:stream-device-token:v1';
 
@@ -168,6 +615,8 @@ interface LiveStreamPlayerProps {
   hasPremiumPlayerAccess: boolean;
   /** Whether admin has set stream to live */
   isStreamLive?: boolean;
+  /** Server oracle already confirmed this viewer may watch this broadcast. */
+  serverGrantedAccess?: boolean;
 }
 
 export function LiveStreamPlayer({
@@ -189,8 +638,8 @@ export function LiveStreamPlayer({
 
 
   const [playbackUrl, setPlaybackUrl] = useState('');
+  const [playbackTypeHint, setPlaybackTypeHint] = useState<StreamUrlType | null>(null);
   const [playbackLoading, setPlaybackLoading] = useState(false);
-  const [playerReady, setPlayerReady] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
@@ -211,18 +660,15 @@ export function LiveStreamPlayer({
   const isPaidFan   = roles.includes('paid_fan');
   const isSuperAdmin = roles.includes('super_admin');
 
-  // Detect Facebook stream URLs so we can lock down the embed for non-admins
-  const isFacebookStream = /facebook\.com|fb\.watch/i.test(playbackUrl);
-
   const hasRoleAccess = isPlayer || isPaidFan || isSuperAdmin;
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
-  const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
+  const hasAccess = hasRoleAccess || serverGrantedAccess || ppvEntitled || inviteGranted;
 
   // ── Fetch stream entitlement (skip if role already grants access) ─────────
   // Pass null instead of explicit token — apiFetch auto-fetches a fresh JWT
   // via getAuthToken(), preventing stale-token 401 loops.
   useEffect(() => {
-    if (!userId || hasRoleAccess) {
+    if (!userId || hasRoleAccess || serverGrantedAccess) {
       setAccessChecked(true);
       return;
     }
@@ -233,7 +679,13 @@ export function LiveStreamPlayer({
       })
       .catch(() => { /* network error — stay in preview; user can retry purchase */ })
       .finally(() => setAccessChecked(true));
-  }, [userId, game.id, hasRoleAccess]);
+  }, [userId, game.id, hasRoleAccess, serverGrantedAccess]);
+
+  // Retry key: incrementing this re-triggers the session effect after the
+  // user clicks "Retry" on the player error screen, without requiring a full
+  // page reload.  Previously clicking Retry only cleared the error state but
+  // never re-ran the effect, so the player stayed blank forever.
+  const [retryKey, setRetryKey] = useState(0);
 
   // Start playback session — all API calls use null token so apiFetch
   // auto-refreshes the JWT, preventing stale-token 401 loops.
@@ -248,8 +700,8 @@ export function LiveStreamPlayer({
     let sessionIdForCleanup: string | null = null;
     let consecutiveFailures = 0;
     setPlaybackLoading(true);
-    setPlayerReady(false);
     setPlayerError(null);
+    setPlaybackTypeHint(null);
     setHeartbeatFailures(0);
     const deviceToken = getOrCreateDeviceToken();
     const sessionKey = `playback-${game.id}-${deviceToken}`;
@@ -260,10 +712,27 @@ export function LiveStreamPlayer({
           session: { id: string; maxExpiresAt?: string };
         }>(`/api/streams/${game.id}/session`, {
           method: 'POST',
+          headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('stream-session') },
           body: JSON.stringify({ sessionKey }),
         }, null);
         if (!active) return;
-        setPlaybackUrl(normalizeFacebookUrl(res.playback.url));
+        const rawResolved =
+          res.playback.url ||
+          (import.meta.env.VITE_STREAM_URL as string | undefined) ||
+          '';
+        // RC-3: Surface a named error if no URL is available after all fallbacks
+        if (!rawResolved.trim()) {
+          setPlayerError(
+            isSuperAdmin
+              ? 'No stream URL configured — add one in Broadcast Controls'
+              : 'Stream starting soon',
+          );
+          return;
+        }
+        const rawType = detectStreamUrlType(rawResolved);
+        const { url: resolvedUrl, type: normalizedType } = toPlayableUrl(rawResolved);
+        setPlaybackTypeHint(normalizedType === 'unknown' ? rawType : normalizedType);
+        setPlaybackUrl(resolvedUrl);
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
 
@@ -271,7 +740,8 @@ export function LiveStreamPlayer({
         if (res.session.maxExpiresAt) {
           const msUntilCap = new Date(res.session.maxExpiresAt).getTime() - Date.now();
           if (msUntilCap > 0) {
-            setTimeout(() => {
+            hardCapTimerId = globalThis.setTimeout(() => {
+              hardCapTimerId = null;
               if (!active) return;
               if (heartbeatId) { clearInterval(heartbeatId); heartbeatId = null; }
               toast.error('Your 6-hour viewing session has ended. Purchase a new pass to continue.');
@@ -313,12 +783,29 @@ export function LiveStreamPlayer({
               }
             });
         }, hbMs);
-      } catch {
-        // Silent for super admin — the worker super-admin fast-path should
-        // never fail, and if it does the admin will see it in dev-tools. For
-        // regular users, surface the generic error.
-        if (active && !isSuperAdmin) {
-          toast.error('Unable to start secure playback session.');
+      } catch (err: unknown) {
+        if (!active) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        // Map known worker error codes to actionable messages.
+        // Previously super-admin errors were silently swallowed, causing a
+        // blank black screen with no indication of what was wrong.
+        if (msg === 'empty_stream_url') {
+          setPlayerError(
+            isSuperAdmin
+              ? 'No stream URL configured — open Broadcast Controls to add one'
+              : 'Stream starting soon',
+          );
+        } else if (msg === 'stream_offline') {
+          setPlayerError(
+            isSuperAdmin ? 'Stream is marked offline' : 'Stream is starting soon',
+          );
+        } else {
+          setPlayerError(
+            isSuperAdmin
+              ? `Could not start session: ${msg} — check Broadcast Controls`
+              : 'Unable to start secure playback session.',
+          );
+          if (!isSuperAdmin) toast.error('Unable to start secure playback session.');
         }
       } finally {
         if (active) setPlaybackLoading(false);
@@ -328,6 +815,7 @@ export function LiveStreamPlayer({
     return () => {
       active = false;
       if (heartbeatId) clearInterval(heartbeatId);
+      if (hardCapTimerId) clearTimeout(hardCapTimerId);
       if (sessionIdForCleanup) {
         void apiFetch(`/api/streams/${game.id}/session/end`, {
           method: 'POST',
@@ -335,7 +823,9 @@ export function LiveStreamPlayer({
         }, null).catch(() => {});
       }
     };
-  }, [hasAccess, userId, game.id, isSuperAdmin]);
+    // retryKey is intentionally included: clicking Retry bumps it to re-run
+    // the session start without a full page reload.
+  }, [hasAccess, userId, game.id, isSuperAdmin, retryKey]);
 
   // ── Gate 1: Unregistered ─────────────────────────────────────────────────
   if (!userId) {
@@ -374,8 +864,11 @@ export function LiveStreamPlayer({
 
   // ── Gate 2: Access granted → Player ──────────────────────
   if (hasAccess) {
+    const providerHint = playbackTypeHint && playbackTypeHint !== 'unknown'
+      ? playbackTypeHint
+      : null;
     return (
-      <div className="absolute inset-0 flex flex-col relative z-0">
+      <div className="absolute inset-0 flex flex-col z-0">
         {/* Stream Player Area */}
         {playbackLoading ? (
           <div className="absolute inset-0 flex items-center justify-center bg-black">
@@ -389,78 +882,22 @@ export function LiveStreamPlayer({
             <p className="text-sm text-white/80 font-medium mb-1">Stream Unavailable</p>
             <p className="text-xs text-white/50 mb-4">{playerError}</p>
             <button
-              onClick={() => { setPlayerError(null); setPlayerReady(false); }}
+              onClick={() => { setPlayerError(null); setRetryKey(k => k + 1); }}
               className="px-4 py-2 text-xs font-display font-bold uppercase tracking-wider bg-amber-500 text-black rounded hover:bg-amber-400 transition-colors"
             >
               Retry
             </button>
           </div>
         ) : playbackUrl ? (
-          <div className="absolute inset-0 pointer-events-auto">
-            {!playerReady && (
-              <div className="absolute inset-0 flex items-center justify-center bg-black z-10">
-                <div className="w-6 h-6 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
-              </div>
-            )}
-            <ReactPlayer
-              url={playbackUrl}
-              playing={true}
-              muted={true}
-              controls={true}
-              width="100%"
-              height="100%"
-              onReady={() => {
-                setPlayerReady(true);
-                sf.reportEvent('playing');
-                sf.recordSuccess();
-              }}
-              onPlay={() => sf.reportEvent('play')}
-              onBuffer={() => {
-                setPlayerReady(true);
-                sf.reportEvent('waiting');
-              }}
-              onBufferEnd={() => sf.reportEvent('playing')}
-              onError={(e) => {
-                console.error('[ReactPlayer] Stream error:', e);
-                sf.reportEvent('error');
-                sf.recordFailure();
-                setPlayerError('The stream source could not be loaded. The URL may be invalid or the stream may have ended.');
-              }}
-              config={{
-                twitch: {
-                  options: {
-                    parent: ['sbbl-hq.icu', 'www.sbbl-hq.icu', 'localhost'],
-                    muted: true,
-                  }
-                },
-                youtube: {
-                  playerVars: { modestbranding: 1, rel: 0, showinfo: 0, controls: 1, mute: 1 }
-                },
-                facebook: {
-                  appId: import.meta.env.VITE_FACEBOOK_APP_ID || '',
-                  version: 'v18.0',
-                  playerId: 'sbbl-fb-player',
-                }
-              }}
-              style={{ position: 'absolute', top: 0, left: 0 }}
-            />
-            {/* Block Facebook UI navigation for non-super-admin viewers.
-                The video autoplays via playing={true} so they can still watch;
-                this overlay only prevents clicking into Facebook's feed/related
-                videos. Super admins get the full embed for monitoring purposes. */}
-            {isFacebookStream && !isSuperAdmin && (
-              <div
-                className="absolute inset-0 z-10"
-                aria-hidden="true"
-                style={{ pointerEvents: 'all', background: 'transparent', cursor: 'default' }}
-              />
-            )}
-          </div>
-        ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-black gap-3">
-            <p className="text-sm text-muted-foreground">Live game found, but no playable stream URL is configured.</p>
-          </div>
-        )}
+          <StreamPlayer
+            url={playbackUrl}
+            isSuperAdmin={isSuperAdmin}
+            providerHint={providerHint}
+            onReady={() => { sf.reportEvent('play'); sf.recordSuccess(); }}
+            onPlay={() => sf.reportEvent('playing')}
+            onError={(message) => { setPlayerError(message); sf.recordFailure(); }}
+          />
+        ) : null}
 
         {/* Connection lost / displaced banner — circuit breaker triggered.
             Suppressed for super admin: they never get displaced or kicked. */}
@@ -566,6 +1003,21 @@ export function LiveStreamPlayer({
                 {generatingInvite ? 'Generating…' : 'Generate Fan Invite'}
               </button>
             )}
+          </div>
+        )}
+
+        {/* RBAC role badge — bottom-left, visible when stream is playing */}
+        {playbackUrl && !playerError && !playbackLoading && (
+          <div className="absolute bottom-4 left-4 z-10 pointer-events-none select-none">
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest backdrop-blur-sm border ${
+              isSuperAdmin
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400/90'
+                : isPlayer
+                  ? 'bg-blue-500/10 border-blue-500/30 text-blue-300/80'
+                  : 'bg-white/5 border-white/15 text-white/50'
+            }`}>
+              {isSuperAdmin ? 'Admin Access' : isPlayer ? 'Player Access' : 'Fan Access'}
+            </span>
           </div>
         )}
 

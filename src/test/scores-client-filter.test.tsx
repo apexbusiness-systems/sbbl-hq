@@ -13,6 +13,8 @@
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
+import { ROUTER_FUTURE } from '@/test/utils/router';
+
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import ScoresPage from '@/pages/Scores';
 
@@ -85,7 +87,7 @@ function renderScores(search = '') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[`/scores${search}`]}>
+      <MemoryRouter future={ROUTER_FUTURE} initialEntries={[`/scores${search}`]}>
         <ScoresPage />
       </MemoryRouter>
     </QueryClientProvider>,

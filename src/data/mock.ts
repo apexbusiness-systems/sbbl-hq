@@ -95,15 +95,70 @@ export const players: PlayerProfile[] = [
 ];
 
 export const games: Game[] = [
-  { id: 'g1', leagueId: 'sbbl', homeTeam: teams[0], awayTeam: teams[1], venue: 'Panalay Arena', court: 'Court 1', date: '2026-03-29', time: '14:00', status: 'live', score: { home: 67, away: 62 }, ppvPrice: 2.5 },
-  { id: 'g2', leagueId: 'wbl', homeTeam: teams[3], awayTeam: teams[24], venue: 'La Liga Sports Complex', court: 'Main Court', date: '2026-03-28', time: '16:00', status: 'upcoming', ppvPrice: 2.5 },
-  { id: 'g3', leagueId: 'tgifbl', homeTeam: teams[27], awayTeam: teams[4], venue: 'Tat Stadium', court: 'Court A', date: '2026-03-27', time: '19:00', status: 'final', score: { home: 88, away: 79 }, ppvPrice: 2.5 },
-  { id: 'g4', leagueId: 'sbbl', homeTeam: teams[2], awayTeam: teams[5], venue: 'Panalay Arena', court: 'Court 2', date: '2026-03-30', time: '10:00', status: 'upcoming', ppvPrice: 2.5 },
-  { id: 'g5', leagueId: 'wbl', homeTeam: teams[24], awayTeam: teams[3], venue: 'La Liga Sports Complex', court: 'Court 2', date: '2026-04-04', time: '15:00', status: 'upcoming', ppvPrice: 2.5 },
-  { id: 'g6', leagueId: 'sbbl', homeTeam: teams[1], awayTeam: teams[2], venue: 'Panalay Arena', court: 'Court 1', date: '2026-03-22', time: '14:00', status: 'final', score: { home: 75, away: 71 }, ppvPrice: 2.5 },
-];
+  { id: 'g1', leagueId: 'sbbl', homeTeam: teams[0], awayTeam: teams[1], venue: 'Panalay Arena', court: 'Court 1', date: '2026-03-29', time: '14:00', status: 'live', score: { home: 67, away: 62 }, ppvPrice: 2.50 },
+  { id: 'g2', leagueId: 'wbl', homeTeam: teams[3], awayTeam: teams[24], venue: 'La Liga Sports Complex', court: 'Main Court', date: '2026-03-28', time: '16:00', status: 'upcoming', ppvPrice: 2.50 },
+  { id: 'g3', leagueId: 'tgifbl', homeTeam: teams[27], awayTeam: teams[4], venue: 'Tat Stadium', court: 'Court A', date: '2026-03-27', time: '19:00', status: 'final', score: { home: 88, away: 79 }, ppvPrice: 2.50 },
+  { id: 'g4', leagueId: 'sbbl', homeTeam: teams[2], awayTeam: teams[5], venue: 'Panalay Arena', court: 'Court 2', date: '2026-03-30', time: '10:00', status: 'upcoming', ppvPrice: 2.50 },
+  { id: 'g5', leagueId: 'wbl', homeTeam: teams[24], awayTeam: teams[3], venue: 'La Liga Sports Complex', court: 'Court 2', date: '2026-04-04', time: '15:00', status: 'upcoming', ppvPrice: 2.50 },
+  { id: 'g6', leagueId: 'sbbl', homeTeam: teams[1], awayTeam: teams[2], venue: 'Panalay Arena', court: 'Court 1', date: '2026-03-22', time: '14:00', status: 'final', score: { home: 75, away: 71 }, ppvPrice: 2.50 },
+];;
 
 export const products: Product[] = [
+  {
+    id: 'custom-oy-phoenix',
+    name: 'OY Phoenix Custom Jersey',
+    category: 'jerseys',
+    price: 0,
+    image: '/images/store/custom/oy-phoenix.jpg',
+    sizes: ['YS', 'YXL', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL'],
+    is_custom: true,
+  },
+  {
+    id: 'custom-reborn',
+    name: 'REBORN Custom Jersey',
+    category: 'jerseys',
+    price: 0,
+    image: '/images/store/custom/reborn.jpg',
+    sizes: ['YS', 'YXL', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL'],
+    is_custom: true,
+  },
+  {
+    id: 'custom-jrg',
+    name: 'JRG Custom Jersey',
+    category: 'jerseys',
+    price: 0,
+    image: '/images/store/custom/jrg.jpg',
+    sizes: ['YS', 'YXL', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL'],
+    is_custom: true,
+  },
+  {
+    id: 'custom-pinoy-northstars',
+    name: 'Pinoy Northstars Custom Jersey',
+    category: 'jerseys',
+    price: 0,
+    image: '/images/store/custom/pinoy-northstars.jpg',
+    sizes: ['YS', 'YXL', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL'],
+    is_custom: true,
+  },
+  {
+    id: 'custom-quadros',
+    name: 'Quadros Custom Jersey',
+    category: 'jerseys',
+    price: 0,
+    image: '/images/store/custom/quadros.jpg',
+    sizes: ['YS', 'YXL', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL'],
+    is_custom: true,
+  },
+  {
+    id: 'custom-montanyosa',
+    name: 'Montanyosa Custom Jersey',
+    category: 'jerseys',
+    price: 0,
+    image: '/images/store/custom/montanyosa.jpg',
+    sizes: ['YS', 'YXL', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL'],
+    is_custom: true,
+  },
+
   { id: 'prod1', name: 'SBBL HQ Official Jersey', category: 'jerseys', price: 45, image: storeJersey, sizes: ['S', 'M', 'L', 'XL', '2XL'], colors: ['Black/Gold', 'White/Gold'], sale: true },
   { id: 'prod2', name: 'APEX Hoodie', category: 'hoodies', price: 55, image: storeHoodie, sizes: ['S', 'M', 'L', 'XL'], colors: ['Black', 'Charcoal'], sale: true },
   { id: 'prod3', name: 'Championship Cap', category: 'caps', price: 25, image: storeCap, colors: ['Black/Gold', 'Black/Silver'] },

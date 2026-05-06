@@ -83,6 +83,21 @@ The core schema is established in `supabase/migrations/202603270001_core_schema.
 | `api_idempotency_keys` | Worker request deduplication |
 | `rls_audit` | **RLS auto-enforcement audit log** — records every table that has RLS auto-enabled by the DDL event trigger. Admin-read-only. (20260404200000) |
 
+### Broadcast & Engagement (20260417100000)
+
+| Table | Purpose |
+|---|---|
+| `overlay_game_state` | One row per game — period/clock/score/fouls/timeouts/possession/bonus + sponsor-bug flag. Feeds `/overlay/:gameId`. Public read, admin write. Auto-created by `trg_ensure_overlay_state`. |
+| `sponsor_slots` | Sponsor assets (name, tagline, logo, colors, weight, league scope, start/end windows). |
+| `sponsor_impressions` | Append-only impression + click log. |
+| `engagement_polls` | Polls, predictions, trivia with jsonb `options`. Status enum: `draft\|open\|locked\|closed`. |
+| `engagement_poll_votes` | Cast votes. UNIQUE `(poll_id, user_id)` enforces one vote per user. |
+| `gamification_points` | Append-only points ledger; `get_gamification_leaderboard(p_limit)` RPC returns top-N with display names. |
+| `watch_parties` | Host-created rooms keyed by 6-char `join_code`. |
+| `watch_party_members` | UNIQUE `(watch_party_id, user_id)`. |
+| `ai_weekly_digest` | Cached narrative recap. UNIQUE `(league_id, week_start)` upserted by worker. |
+| `obs_commands` | FIFO queue consumed by on-site `obs-agent`. Status: `pending\|acked\|failed`. |
+
 ## Performance Indexes (10K+ Concurrent Users)
 
 Migration `20260404100000_performance_indexes_10k_concurrent.sql` adds 30+ indexes across hot-path tables:

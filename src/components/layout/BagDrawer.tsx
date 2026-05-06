@@ -2,7 +2,8 @@ import { useState, useMemo } from 'react';
 import { useBag } from '@/contexts/BagContext';
 import { useAuth } from '@/hooks/use-auth';
 import { apiFetch } from '@/lib/api/client';
-import { products } from '@/data/mock';
+import { useQuery } from '@tanstack/react-query';
+import { Product } from '@/types';
 import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -11,12 +12,20 @@ export const BagDrawer = () => {
   const { session } = useAuth();
   const [checkingOut, setCheckingOut] = useState(false);
 
+  const productsQuery = useQuery({
+    queryKey: ['public-products'],
+    queryFn: () => apiFetch<{ ok: boolean; data: Product[] }>('/api/public/products'),
+    staleTime: 60_000,
+  });
+
+  const products = useMemo(() => productsQuery.data?.data ?? [], [productsQuery.data]);
+
   const productMap = useMemo(() => {
     return products.reduce((acc, p) => {
       acc[p.id] = p;
       return acc;
     }, {} as Record<string, typeof products[0]>);
-  }, []);
+  }, [products]);
 
   if (!bagOpen) return null;
 
@@ -27,13 +36,18 @@ export const BagDrawer = () => {
 
   const handleCheckout = async () => {
     if (!session) { toast.error('Sign in to complete your purchase.'); return; }
-    const lineItems = bagItems.reduce<Array<{ id: string; name: string; price: number; qty: number }>>((acc, id) => {
-      const product = products.find(p => p.id === id);
+    // ⚡ Bolt Performance Optimization: Use O(1) productMap lookup and intermediate Record to avoid O(N^2) find operations
+    const lineItemsMap = bagItems.reduce<Record<string, { id: string; name: string; price: number; qty: number }>>((acc, id) => {
+      const product = productMap[id];
       if (!product || product.price === 0) return acc; // skip reward/free items
-      const existing = acc.find(i => i.name === product.name);
-      if (existing) { existing.qty += 1; } else { acc.push({ id: product.id, name: product.name, price: product.price, qty: 1 }); }
+      if (acc[product.name]) {
+        acc[product.name].qty += 1;
+      } else {
+        acc[product.name] = { id: product.id, name: product.name, price: product.price, qty: 1 };
+      }
       return acc;
-    }, []);
+    }, {});
+    const lineItems = Object.values(lineItemsMap);
     if (!lineItems.length) { toast.error('No purchasable items in bag.'); return; }
     setCheckingOut(true);
     try {

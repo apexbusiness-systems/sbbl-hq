@@ -93,34 +93,34 @@ export default defineConfig(({ mode }) => {
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
-          // Serve /offline as the fallback for navigation requests that miss
-          // both the network and the app-shell-navigations cache.
-          navigateFallback: '/offline',
-          // Only apply the fallback to app routes — never to API, auth, or assets.
-          navigateFallbackDenylist: [
-            /^\/api\//,
-            /^\/rest\/v1\//,
-            /^\/auth\//,
-            /^\/storage\//,
-            /^\/functions\//,
-            /^\/assets\//,
-          ],
+          // No navigateFallback — no /offline page exists. Navigation misses fall
+          // through to the network (NetworkFirst ensures fresh CSP headers are
+          // always delivered; stale shell would carry old CSP blocking YouTube API).
           runtimeCaching: [
-            // App shell navigations: Stale-While-Revalidate
+            // App shell navigations: NetworkFirst with 3s timeout.
+            // Critical: always fetches a fresh response so Cloudflare delivers
+            // up-to-date Content-Security-Policy headers (required for YouTube
+            // IFrame API script-src allowlisting). Falls back to cache on
+            // network timeout/offline only.
             {
               urlPattern: ({ request }) => request.mode === 'navigate',
-              handler: 'StaleWhileRevalidate',
+              handler: 'NetworkFirst',
               options: {
                 cacheName: 'app-shell-navigations',
+                networkTimeoutSeconds: 3,
                 expiration: { maxEntries: 50, maxAgeSeconds: 60 * 60 * 24 * 7 }, // 1 week
               },
             },
             // Hashed JS/CSS/Fonts: Cache-First
+            // Same-origin only. Cross-origin scripts (provider SDKs) under
+            // CacheFirst throw `no-response` on CSP/network failure and storm
+            // the console; let them fall through to the browser default.
             {
-              urlPattern: ({ request }) =>
-                request.destination === 'script' ||
-                request.destination === 'style' ||
-                request.destination === 'font',
+              urlPattern: ({ request, sameOrigin }) =>
+                sameOrigin &&
+                (request.destination === 'script' ||
+                  request.destination === 'style' ||
+                  request.destination === 'font'),
               handler: 'CacheFirst',
               options: {
                 cacheName: 'static-assets',

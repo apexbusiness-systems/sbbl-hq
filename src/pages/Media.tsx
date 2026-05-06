@@ -74,9 +74,13 @@ const MediaPage = () => {
       ? [...allMedia, ...posterProjection]
       : allMedia;
 
-    const dedupedById = baseList.filter((item, idx, arr) =>
-      arr.findIndex(candidate => candidate.id === item.id) === idx,
-    );
+    // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
+    const seen = new Set<string>();
+    const dedupedById = baseList.filter(item => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
 
     return dedupedById.filter(m => {
       const leagueMatch = leagueFilter === 'all' || m.leagueId === leagueFilter;
@@ -85,7 +89,10 @@ const MediaPage = () => {
     });
   }, [allMedia, posterProjection, leagueFilter, typeFilter]);
 
-  const shareAsset = shareModal ? [...allMedia, ...posterProjection].find(m => m.id === shareModal) : null;
+  const shareAsset = useMemo(() =>
+    shareModal ? [...allMedia, ...posterProjection].find(m => m.id === shareModal) : null
+  , [shareModal, allMedia, posterProjection]);
+
   const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
 
   const resolveAspectRatio = (id: string, mediaType: MediaAsset['type']) => {
@@ -217,16 +224,18 @@ const MediaPage = () => {
                 <div key={m.id} className="panel overflow-hidden group flex flex-col">
                   {/* ── Image cell: per-card adaptive ratio (portrait/landscape) ── */}
                   <div className="relative overflow-hidden bg-[#0a0a0a]" style={{ aspectRatio: resolveAspectRatio(m.id, m.type) }}>
-                    {/* Ambient blur fill — fills dead space for non-portrait content, adds depth for all */}
-                    <img
-                      src={m.thumbnail}
-                      alt=""
-                      aria-hidden
-                      loading="lazy"
-                      decoding="async"
-                      fetchPriority="low"
-                      className="absolute inset-0 w-full h-full object-cover scale-125 blur-3xl opacity-30 pointer-events-none select-none"
-                    />
+                    {/* Ambient blur fill (skip LCP card to reduce first-render paint cost) */}
+                    {!isLcpCandidate && (
+                      <img
+                        src={m.thumbnail}
+                        alt=""
+                        aria-hidden
+                        loading="lazy"
+                        decoding="async"
+                        fetchPriority="low"
+                        className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-25 pointer-events-none select-none"
+                      />
+                    )}
                     {/* Sharp primary image — cover+top for portrait, contain for landscape */}
                     <img
                       src={m.thumbnail}

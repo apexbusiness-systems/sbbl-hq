@@ -1,10 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from 'vitest';
 import {
+  handleListComments,
+  handleModerateComment,
   handlePublicStreamStatus,
   handlePlaybackSession,
-  handleStreamSessionHeartbeat,
   handlePostComment,
+  handleResetReactions,
+  handleStreamAccess,
+  handleStreamReactions,
+  handleStreamSessionHeartbeat,
 } from '@/worker/index';
 
 type Row = Record<string, unknown>;
@@ -13,6 +18,7 @@ function createQuery(table: string, state: Record<string, Row[]>) {
   const filters: Array<(row: Row) => boolean> = [];
   const api: any = {
     eq(col: string, val: unknown) { filters.push((r) => r[col] === val); return api; },
+    is(col: string, val: unknown) { filters.push((r) => r[col] === val); return api; },
     gt(col: string, val: unknown) { filters.push((r) => String(r[col]) > String(val)); return api; },
     in(col: string, vals: unknown[]) { filters.push((r) => vals.includes(r[col])); return api; },
     order() { return api; },
@@ -45,6 +51,10 @@ function createQuery(table: string, state: Record<string, Row[]>) {
           colFilters.push((r) => r[col] === val);
           return builder;
         },
+        is(col: string, val: unknown) {
+          colFilters.push((r) => r[col] === val);
+          return builder;
+        },
         neq(col: string, val: unknown) {
           colFilters.push((r) => r[col] !== val);
           // neq terminates the displacement chain — apply patch now
@@ -52,6 +62,7 @@ function createQuery(table: string, state: Record<string, Row[]>) {
           return { error: null };
         },
         select: () => {
+          applyPatch();
           // select after update chain — find updated target for maybeSingle/single
           const rows = state[table] ?? [];
           const target = rows.find((r) => colFilters.every((fn) => fn(r)));
@@ -59,6 +70,17 @@ function createQuery(table: string, state: Record<string, Row[]>) {
             maybeSingle: async () => ({ data: target ?? null, error: null }),
             single: async () => ({ data: target ?? null, error: target ? null : { message: 'not_found' } }),
           };
+        },
+      };
+      return builder;
+    },
+    delete: () => {
+      const colFilters: Array<(r: Row) => boolean> = [];
+      const builder: any = {
+        eq(col: string, val: unknown) {
+          colFilters.push((r) => r[col] === val);
+          state[table] = (state[table] ?? []).filter((r) => !colFilters.every((fn) => fn(r)));
+          return { error: null };
         },
       };
       return builder;
@@ -176,7 +198,12 @@ describe('stream hardening worker handlers', () => {
     } as any);
     expect(allowed.status).toBe(200);
     const body = await allowed.json() as Record<string, any>;
-    expect(body.playback.url).toContain('https://playback.example');
+    // Ensure the URL was rewritten to use the local proxy
+    expect(body.playback.url).toContain('/api/streams/');
+    expect(body.playback.url).toContain('/proxy/');
+
+    // Crucial: Ensure the true origin is completely hidden from the client payload
+    expect(body.playback.url).not.toContain('playback.example');
   });
 
   it('session heartbeat refreshes active presence', async () => {
@@ -257,6 +284,40 @@ describe('stream hardening worker handlers', () => {
     expect((state.stream_access_sessions[0].status)).toBe('displaced');
   });
 
+  it('playback refresh preserves original maxExpiresAt for same idempotency key', async () => {
+    const originalCap = new Date(Date.now() + (2 * 60 * 60 * 1000)).toISOString();
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      games: [{ id: 'game-1', status: 'live' }],
+      stream_admin_config: [{ id: true, collection_id: 'https://playback.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_access_sessions: [{
+        id: 'sess-fixed-cap',
+        game_id: 'game-1',
+        user_id: 'allowed-user',
+        status: 'active',
+        expires_at: new Date(Date.now() + 30_000).toISOString(),
+        max_expires_at: originalCap,
+        idempotency_key: 'stable-session-key',
+      }],
+    } as Record<string, Row[]>;
+
+    const res = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/game-1/session', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'idempotency-key-923456789', 'x-sbbl-user-id-verified': 'allowed-user' },
+        body: JSON.stringify({ sessionKey: 'stable-session-key' }),
+      }),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, any>;
+    expect(body.session.maxExpiresAt).toBe(originalCap);
+  });
+
   it('chat validation blocks invalid input and enforces message length', async () => {
     const state = {
       api_idempotency_keys: [],
@@ -313,5 +374,210 @@ describe('stream hardening worker handlers', () => {
     } as any);
     expect(res.status).toBe(403);
     await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'active_session_required' });
+  });
+
+  it('league_admin can hide/restore chat comments and include hidden rows when requested', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [{ user_id: 'league-admin-user', role: 'league_admin' }],
+      stream_chat_messages: [{
+        id: 'chat-1',
+        game_id: 'game-1',
+        user_id: 'viewer-1',
+        message: 'flag me',
+        status: 'active',
+      }],
+    } as Record<string, Row[]>;
+
+    const moderateRes = await handleModerateComment({
+      req: new Request('https://local/ops/streams/game-1/comments/chat-1', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'moderate-comment-1', 'x-sbbl-user-id-verified': 'league-admin-user' },
+        body: JSON.stringify({ action: 'hide' }),
+      }),
+      params: { gameId: 'game-1', commentId: 'chat-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+    expect(moderateRes.status).toBe(200);
+
+    const listRes = await handleListComments({
+      req: new Request('https://local/api/streams/game-1/comments?limit=20'),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+    expect(listRes.status).toBe(200);
+    await expect(listRes.json()).resolves.toMatchObject({ ok: true, comments: [] });
+
+    const listIncludingHidden = await handleListComments({
+      req: new Request('https://local/api/streams/game-1/comments?limit=20&includeHidden=1', {
+        headers: { 'x-sbbl-roles-verified': 'league_admin' },
+      }),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+    await expect(listIncludingHidden.json()).resolves.toMatchObject({
+      ok: true,
+      comments: [{ id: 'chat-1', status: 'hidden' }],
+    });
+
+    const restoreRes = await handleModerateComment({
+      req: new Request('https://local/ops/streams/game-1/comments/chat-1', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'moderate-comment-2', 'x-sbbl-user-id-verified': 'league-admin-user' },
+        body: JSON.stringify({ action: 'restore' }),
+      }),
+      params: { gameId: 'game-1', commentId: 'chat-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+    await expect(restoreRes.json()).resolves.toMatchObject({ ok: true, status: 'active' });
+  });
+
+  it('super_admin can reset reactions and counts return zero', async () => {
+    const state = {
+      user_role_assignments: [{ user_id: 'super-admin-user', role: 'super_admin' }],
+      stream_reactions: [
+        { game_id: 'game-1', user_id: 'viewer-a', reaction_type: 'fire' },
+        { game_id: 'game-1', user_id: 'viewer-b', reaction_type: 'heart' },
+      ],
+    } as Record<string, Row[]>;
+
+    const resetRes = await handleResetReactions({
+      req: new Request('https://local/ops/streams/game-1/reactions/reset', {
+        method: 'POST',
+        headers: { 'x-idempotency-key': 'reset-reactions-1', 'x-sbbl-user-id-verified': 'super-admin-user' },
+        body: '{}',
+      }),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+    expect(resetRes.status).toBe(200);
+
+    const countsRes = await handleStreamReactions({
+      req: new Request('https://local/api/streams/game-1/reactions'),
+      params: { gameId: 'game-1' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+    await expect(countsRes.json()).resolves.toMatchObject({ ok: true, fire: 0, heart: 0, clap: 0 });
+  });
+
+  // ── M-01 Broadcast Audit — Regression tests for fan-view stream gap ────────
+  // Root cause: handleStreamAccess and handlePlaybackSession both denied registered
+  // fans on the 'broadcast' alias (open broadcast, no active_game_id). The worker
+  // only checked hasPrivilegedRole (player/paid_fan) and can_user_view_stream for
+  // the null gameId path — registered fans had neither an entitlement row nor a
+  // privileged role, so both endpoints returned 403/false even though
+  // get_active_broadcast() had already granted them stream_url server-side.
+
+  it('handleStreamAccess grants hasAccess=true to a registered fan on open broadcast alias', async () => {
+    const state = {
+      stream_admin_config: [{ id: true, is_live: true, collection_id: 'https://stream.example/live.m3u8' }],
+      profiles: [{ user_id: 'registered-fan', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
+    } as Record<string, Row[]>;
+
+    const res = await handleStreamAccess({
+      req: new Request('https://local/api/streams/broadcast/access', {
+        headers: { 'x-sbbl-user-id-verified': 'registered-fan' },
+      }),
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: true });
+  });
+
+  it('handleStreamAccess denies hasAccess=false when broadcast is offline', async () => {
+    const state = {
+      stream_admin_config: [{ id: true, is_live: false, collection_id: 'https://stream.example/live.m3u8' }],
+      profiles: [{ user_id: 'registered-fan', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
+    } as Record<string, Row[]>;
+
+    const res = await handleStreamAccess({
+      req: new Request('https://local/api/streams/broadcast/access', {
+        headers: { 'x-sbbl-user-id-verified': 'registered-fan' },
+      }),
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: false });
+  });
+
+  it('handleStreamAccess denies hasAccess=false to unregistered user on open broadcast', async () => {
+    const state = {
+      stream_admin_config: [{ id: true, is_live: true, collection_id: 'https://stream.example/live.m3u8' }],
+      profiles: [{ user_id: 'unregistered-user', onboarding_completed_at: null }],
+    } as Record<string, Row[]>;
+
+    const res = await handleStreamAccess({
+      req: new Request('https://local/api/streams/broadcast/access', {
+        headers: { 'x-sbbl-user-id-verified': 'unregistered-user' },
+      }),
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: false });
+  });
+
+  it('handlePlaybackSession grants session to a registered fan on open broadcast alias', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      stream_admin_config: [{ id: true, collection_id: 'https://stream.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_access_sessions: [],
+      profiles: [{ user_id: 'registered-fan', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
+    } as Record<string, Row[]>;
+
+    const res = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'fan-broadcast-session-1',
+          'x-sbbl-user-id-verified': 'registered-fan',
+        },
+        body: JSON.stringify({ sessionKey: 'fan-session-key-1' }),
+      }),
+      params: { gameId: 'broadcast' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, any>;
+    expect(body.ok).toBe(true);
+    expect(body.session?.id).toBeTruthy();
+  });
+
+  it('handlePlaybackSession still denies unregistered fan on open broadcast alias', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      stream_admin_config: [{ id: true, collection_id: 'https://stream.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_access_sessions: [],
+      profiles: [{ user_id: 'unregistered-fan', onboarding_completed_at: null }],
+    } as Record<string, Row[]>;
+
+    const res = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'fan-broadcast-session-2',
+          'x-sbbl-user-id-verified': 'unregistered-fan',
+        },
+        body: JSON.stringify({ sessionKey: 'fan-session-key-2' }),
+      }),
+      params: { gameId: 'broadcast' },
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'forbidden' });
   });
 });

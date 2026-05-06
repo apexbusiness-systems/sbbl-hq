@@ -22,7 +22,7 @@ describe("interaction-layer stream invariants", () => {
 
     const decision = decideOneDeviceAccess({
       now,
-      entitlementExpiresAt: now + 6 * 60 * 60 * 1000,
+      entitlementExpiresAt: now + 48 * 60 * 60 * 1000,
       existingSession: existing,
       candidateFingerprint: {
         deviceTokenHash: "d1",
