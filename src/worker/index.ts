@@ -5047,6 +5047,7 @@ async function handleGoLive(ctx: HandlerCtx) {
     isLive?: boolean;
     collectionId?: string;
     title?: string;
+    activeGameId?: string | null;
   } | null;
 
   if (!body || typeof body.isLive !== "boolean") {
@@ -5084,6 +5085,14 @@ async function handleGoLive(ctx: HandlerCtx) {
   if (typeof body.title === "string" && body.title.trim()) {
     patch.title = body.title.trim();
   }
+  if (body.activeGameId === null) {
+    patch.active_game_id = null;
+  } else if (typeof body.activeGameId === "string" && body.activeGameId.trim()) {
+    const activeGameId = body.activeGameId.trim();
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(activeGameId)) return json({ ok: false, error: "invalid_active_game_id" }, 400);
+    patch.active_game_id = activeGameId;
+  }
   if (body.isLive) {
     patch.live_started_at = nowIso;
     patch.live_ended_at = null;
@@ -5094,7 +5103,7 @@ async function handleGoLive(ctx: HandlerCtx) {
   const { data, error } = await ctx.admin
     .from("stream_admin_config")
     .upsert(patch, { onConflict: "id" })
-    .select("collection_id,title,is_live,updated_at")
+    .select("collection_id,title,is_live,active_game_id,updated_at")
     .single();
 
   if (error) {
@@ -5124,6 +5133,7 @@ async function handleGoLive(ctx: HandlerCtx) {
     isLive: Boolean(data.is_live),
     collectionId: String(data.collection_id ?? ""),
     title: String(data.title ?? ""),
+    activeGameId: data.active_game_id ? String(data.active_game_id) : null,
     updatedAt: String(data.updated_at ?? nowIso),
   });
 }
