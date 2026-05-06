@@ -358,21 +358,136 @@ the form hides bio/avatar. Three round-trip points must preserve it:
 
 This was bug #4 of the audit (Google OAuth path was missed in PR #461).
 
+#### 6.9 — Worker endpoints MUST mirror the DB oracle for open broadcasts (M-01)
+
+**Root cause (M-01 audit, 2026-05-06):** `get_active_broadcast()` correctly
+grants registered fans access to an open (camera-only) broadcast and returns
+`stream_url`. But two worker endpoints independently denied those same fans,
+producing a blank player screen with no error — the worst kind of silent
+failure.
+
+**`handleStreamAccess` (`GET /api/streams/broadcast/access`)**
+
+For `gameId === 'broadcast'` do **not** call `can_user_view_stream`. That
+function looks for `stream_entitlements` / `ppv_invites` rows, which do not
+exist for registration-based open broadcasts.
+
+```ts
+// BANNED — silently returns { hasAccess: false } for all registered fans
+// on open broadcasts because no entitlement row exists.
+const result = await can_user_view_stream('broadcast', userId);
+return { hasAccess: result };
+
+// CORRECT — mirrors the DB oracle: any registered fan may watch.
+if (gameId === 'broadcast') {
+  const { data: cfg } = await admin.from('stream_admin_config').select('is_live').single();
+  if (!cfg?.is_live) return { hasAccess: false };
+  const { data: profile } = await admin.from('profiles')
+    .select('onboarding_completed_at').eq('id', userId).single();
+  return { hasAccess: profile?.onboarding_completed_at != null };
+}
+```
+
+**`handlePlaybackSession` (`POST /api/streams/broadcast/session`)**
+
+For `gameId === null` (the broadcast alias path), the privileged-role check
+(`roles.includes('player') || roles.includes('paid_fan')`) is insufficient —
+it excludes all regular registered fans.
+
+```ts
+// BANNED — hasAccess remains false for regular registered fans.
+const hasAccess = hasPrivilegedRole;
+
+// CORRECT — also grant access to registered fans (mirrors DB oracle).
+const { data: profile } = await admin.from('profiles')
+  .select('onboarding_completed_at').eq('id', userId).single();
+const isRegisteredFan = profile?.onboarding_completed_at != null;
+const hasAccess = hasPrivilegedRole || isRegisteredFan;
+```
+
+**Known tech debt (S1 — LOW):** `useLiveAccess.ts` reads `stream_admin_config`
+directly at line 39 to obtain `active_game_id`. Per rule 6.1 this should come
+from `get_active_broadcast()`, which already returns `active_game_id`. The hook
+is chrome-only (guarded by `Live.tsx:1458`) so it is low risk, but it is a
+tracked contract violation.
+
+**Regression tests:** `src/test/worker-stream-hardening.test.ts` — 5 tests
+covering the broadcast alias access paths for both handlers.
+
 ### Enforcement (all run in CI on every PR)
 
 - **Source-level regression tests**:
   `src/test/live-stream-player-regressions.test.ts` (11 assertions,
   one per invariant above; mutation-tested).
+- **Worker broadcast access tests**:
+  `src/test/worker-stream-hardening.test.ts` (5 assertions for the open
+  broadcast / `gameId === 'broadcast'` paths in `handleStreamAccess` and
+  `handlePlaybackSession`).
 - **Pipeline simulation**: `npm run simulate:broadcast` walks 19
   representative URLs through the full ingest pipeline. Add a scenario
   to `scripts/simulate-broadcast.ts` whenever you add a new provider
   type or a new branch in `StreamPlayer`.
 - **ESLint** (`no-restricted-imports`): blocks bare `react-player`.
 - **Vitest**: `src/test/live-page-*.test.tsx` covers each access-gate path.
+- **Stream independence AST gate**: `.github/workflows/stream-contract-gate.yml`
+  blocks any migration that adds `NOT NULL` to `game_id` on streams /
+  stream_assignments / stream_entitlements.
 
 If a regression test fails on your branch, **read the failing assertion**.
 Each one maps to a real production incident from v1.3.x. Disabling the
 test is never the right answer.
+
+### 7. Broadcast Stream Independence — HARD FREEZE, DO NOT TOUCH
+
+**This is a hard owner rule. The broadcast stream is a standalone media
+resource owned exclusively by the operator. It is NEVER tied to a game,
+a PPV entitlement, or any other entity.**
+
+The following invariants are permanent. No agent, PR, or migration may
+violate them without explicit written approval from the repo owner:
+
+#### 7.1 — `/api/broadcast/*` is frozen to agents
+
+The route family `POST /api/broadcast/access`, `POST /api/broadcast/session`,
+`POST /api/broadcast/session/heartbeat`, and `POST /api/broadcast/session/end`
+are **off-limits for modification** unless the repo owner explicitly directs
+a change. Do not:
+
+- Add `game_id`, `gameId`, or any game parameter to these routes.
+- Add PPV, entitlement, or invite-code logic to these routes.
+- Rename or move these routes.
+- Add authentication layers beyond the existing `requireAuth`.
+
+#### 7.2 — Broadcast access = registration only
+
+The only requirement to watch a broadcast is a completed SBBL HQ account
+(`onboarding_completed_at IS NOT NULL`). There is no PPV, no game
+entitlement, no `can_user_view_stream` call, and no `stream_entitlements`
+row involved. This is intentional.
+
+#### 7.3 — `LiveStreamPlayer` must route `game.id === 'broadcast'` to `/api/broadcast/*`
+
+When `game.id === 'broadcast'`, all session API calls in `LiveStreamPlayer.tsx`
+MUST target the canonical broadcast endpoints:
+
+```ts
+// CORRECT
+const endpoint = game.id === 'broadcast'
+  ? '/api/broadcast/session'
+  : `/api/streams/${game.id}/session`;
+```
+
+Do NOT route the broadcast alias through `/api/streams/broadcast/*`. The
+legacy alias routes exist only for backward compatibility and are not
+guaranteed to remain.
+
+#### 7.4 — No further modifications without owner approval
+
+If you are an agent reading this: **stop**. Do not plan, propose, or
+implement any change to the broadcast stream system unless the operator
+has explicitly asked for it in this session. Adding "improvements",
+"additional access control", or "game-binding features" to the broadcast
+path will break live events and is not authorized.
 
 ## Architecture at a glance
 
@@ -454,6 +569,18 @@ npm run build       # production build (vite)
 CI runs all of these. Do not merge red.
 
 ## Incident history (relevant to this guide)
+
+- **2026-05-06** — M-01: Open broadcast fan-view gap. Registered fans who
+  passed the `get_active_broadcast()` oracle (which correctly returned
+  `stream_url`) still saw a blank player because two worker endpoints
+  independently denied them: `handleStreamAccess` called
+  `can_user_view_stream('broadcast', userId)` (no entitlement rows exist for
+  registration-based open broadcasts → always `false`); `handlePlaybackSession`
+  gated on `hasPrivilegedRole` (player/paid_fan only). Both handlers were fixed
+  to mirror the oracle — grant access to any user whose
+  `profiles.onboarding_completed_at IS NOT NULL`. See rule **6.9** and
+  `src/test/worker-stream-hardening.test.ts`.
+
 
 - **2026-04-16** â Live data regression. Store/Leaderboards/Scores/
   Stats/Live silently showed mock data because

@@ -1,12 +1,25 @@
-# Broadcast & Paywall System — v1.0.0
+# Broadcast & Paywall System — v1.1.0
 
-**Status:** Production · Hardened by PR #461 (2026-05-04) + PR #462 audit hotfix
+**Status:** Production · Stable
+**Previous version:** v1.0.0 (2026-05-04)
+**Version:** v1.1.0 (2026-05-06)
 **Owners:** Streaming team
-**Last reviewed:** 2026-05-04
+**Last reviewed:** 2026-05-06
+
+**Changelog (v1.0.0 → v1.1.0):**
+- Added §10 — Broadcast Stream Independence (HARD FREEZE). The open-broadcast
+  path (`/api/broadcast/*`) is now fully decoupled from games, PPV, and
+  entitlements. `handlePlaybackSession` rejects the `'broadcast'` alias and
+  `null` gameId — those requests must use `/api/broadcast/*`.
+- Updated §4 Worker API surface to document the canonical `/api/broadcast/*`
+  route family.
+- Updated §7 Migrations to include `20260506*` stream-independence commits.
+- Updated §9 gotchas — removed stale `broadcast → null` normalization note.
+- Added E2E acceptance test reference (`src/test/broadcast-access-e2e.test.ts`).
 
 This document is the canonical reference for the SBBL HQ broadcast pipeline,
 paywall, PPV code redemption, and fan onboarding system. **Read it before
-editing any of the surfaces listed in §6 of `CLAUDE.md`.**
+editing any of the surfaces listed in §6–7 of `CLAUDE.md`.**
 
 ---
 
@@ -209,7 +222,23 @@ The component is the ONLY surface that calls `redeem_ppv_invite()`. The
 purchase flow re-uses the existing `/api/streams/:gameId/purchase` Stripe
 endpoint — DO NOT duplicate or modify the payment path.
 
-### 6.3 `Onboarding.tsx`
+### 6.3 `LiveStreamPlayer.tsx` — broadcast routing
+
+When `game.id === 'broadcast'`, the player calls the `/api/broadcast/*`
+canonical endpoints. **Never** route through `/api/streams/broadcast/*`
+(legacy aliases remain for backward compatibility only):
+
+| Action | Endpoint |
+|---|---|
+| Access check | `GET /api/broadcast/access` |
+| Session start | `POST /api/broadcast/session` |
+| Heartbeat | `POST /api/broadcast/session/heartbeat` |
+| Session end | `POST /api/broadcast/session/end` |
+
+For a real game UUID, the player uses `/api/streams/:gameId/*` (PPV path).
+The two paths are mutually exclusive and must never be merged.
+
+### 6.4 `Onboarding.tsx`
 
 | Branch | Triggered when | RPC called |
 |---|---|---|
@@ -221,7 +250,7 @@ Bio + avatar fields are gated by `{!isFan && ...}`. The fan branch never
 collects them and `complete_fan_onboarding()` will reject any attempt to
 write them at the SQL layer.
 
-### 6.4 `Login.tsx`
+### 6.5 `Login.tsx`
 
 Preserves `?intent=` and `?redirect=` through:
 
@@ -246,11 +275,17 @@ Preserves `?intent=` and `?redirect=` through:
 | `20260504000700_add_admin_broadcast_sync_function.sql` | `admin_sync_broadcast_to_sessions()` |
 | `20260504100000_hotfix_broadcast_paywall_audit.sql` | **Audit hotfix:** rebuilds `get_active_broadcast` (named args) and `redeem_ppv_invite` (UUID-cast guard) |
 
+**No new migrations were added in v1.1.0.** All changes are in the worker and
+frontend layers only. The DB schema is unchanged.
+
 ---
 
 ## 8. Acceptance test matrix
 
-The following scenarios MUST pass before any change to this system ships:
+The following scenarios MUST pass before any change to this system ships.
+**Run `npm test` — all 100 test files (1090+ assertions) must be green.**
+The broadcast-specific suite is `src/test/broadcast-access-e2e.test.ts`
+(15 assertions, all user classes A–E).
 
 ```
 S1.  Admin presses Go Live → stream_admin_config.is_live=true
@@ -308,13 +343,65 @@ S18. Google OAuth sign-in from /login?intent=fan&redirect=/live:
   React state. Safe today (admin and viewer flows are mutually exclusive
   per page load via `enabled: !isSuperAdmin`) but worth refactoring if
   you add hybrid roles.
-- **`'broadcast'` sentinel:** The string `'broadcast'` is used in three
-  places to mean "no real game bound to this broadcast":
-  - `Live.tsx`: `activeGameId ?? 'broadcast'` for comp code generation
-  - `worker/index.ts`: `rawGameId === 'broadcast' ? null : rawGameId`
-    normalization in playback session handlers
-  - `ppv_invites.game_id`: stored as TEXT
-  Keep these in sync if you rename the sentinel.
+- **`'broadcast'` sentinel in `ppv_invites.game_id`:** The string
+  `'broadcast'` stored in `ppv_invites.game_id` (TEXT column) signals an
+  open-broadcast comp code with no game binding. `redeem_ppv_invite()`
+  detects this with a UUID-cast guard and returns `status='open_broadcast'`
+  without creating an entitlement row. Do NOT remove this guard.
+- **`handlePlaybackSession` rejects `'broadcast'` and null gameId** (v1.1.0):
+  Both `params.gameId === null` and `params.gameId === 'broadcast'` return
+  `400 use_broadcast_endpoint`. All open-broadcast traffic must go through
+  `/api/broadcast/*`. This replaced the old `broadcast → null` normalization
+  hack.
 - **`stream_admin_config.collection_id`:** Misleadingly named — actually
   stores the stream URL. Renaming requires coordinated migration +
   worker + frontend update; not worth it.
+
+---
+
+## 10. Broadcast Stream Independence — HARD FREEZE
+
+> **Do not modify this section or its enforcement targets without explicit
+> written approval from the repo owner (JR).**
+
+The open broadcast route family is atomically independent of games, PPV,
+and entitlements. It is the operator's exclusive media channel.
+
+### 10.1 Route ownership
+
+| Route | Handler | Owned since |
+|---|---|---|
+| `POST /api/broadcast/access` | `handleBroadcastStreamAccess` | v1.1.0 (2026-05-06) |
+| `POST /api/broadcast/session` | `handleBroadcastSessionStart` | v1.1.0 (2026-05-06) |
+| `POST /api/broadcast/session/heartbeat` | `handleBroadcastHeartbeatRoute` | v1.1.0 (2026-05-06) |
+| `POST /api/broadcast/session/end` | `handleBroadcastSessionEndRoute` | v1.1.0 (2026-05-06) |
+
+Legacy aliases at `/api/streams/broadcast/*` remain for backward
+compatibility but delegate to the same handlers above.
+
+### 10.2 Access model (unchangeable)
+
+```
+Requirement to watch an open broadcast:
+  onboarding_completed_at IS NOT NULL   ← the ONLY check
+
+No PPV. No game. No entitlement row. No can_user_view_stream call.
+```
+
+### 10.3 Enforcement
+
+- **CLAUDE.md Rule 7:** Hard freeze documented in the agent guide.
+- **Tests:** `src/test/broadcast-access-e2e.test.ts` — 15 assertions
+  covering all 5 user classes (registered fan, player, super admin,
+  unregistered, offline stream).
+- **Guard in `handlePlaybackSession`:** Returns `400 use_broadcast_endpoint`
+  for `gameId === null` or `gameId === 'broadcast'` — prevents accidental
+  routing through the PPV path.
+
+### 10.4 What agents must NOT do to these routes
+
+- Add `game_id`, `gameId`, or any game parameter.
+- Add PPV or entitlement logic.
+- Add `can_user_view_stream` calls.
+- Rename or move the routes.
+- Add additional authentication beyond `requireAuth(req)`.

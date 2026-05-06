@@ -673,7 +673,10 @@ export function LiveStreamPlayer({
       return;
     }
 
-    apiFetch<{ hasAccess: boolean }>(`/api/streams/${game.id}/access`, {}, null)
+    const accessEndpoint = game.id === 'broadcast'
+      ? '/api/broadcast/access'
+      : `/api/streams/${game.id}/access`;
+    apiFetch<{ hasAccess: boolean }>(accessEndpoint, {}, null)
       .then(res => {
         if (res.hasAccess) setPpvEntitled(true);
       })
@@ -710,7 +713,7 @@ export function LiveStreamPlayer({
         const res = await apiFetch<{
           playback: { url: string; heartbeatIntervalSec: number; maxExpiresAt?: string };
           session: { id: string; maxExpiresAt?: string };
-        }>(`/api/streams/${game.id}/session`, {
+        }>(game.id === 'broadcast' ? '/api/broadcast/session' : `/api/streams/${game.id}/session`, {
           method: 'POST',
           headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('stream-session') },
           body: JSON.stringify({ sessionKey }),
@@ -749,7 +752,7 @@ export function LiveStreamPlayer({
           }
         }
         heartbeatId = globalThis.setInterval(() => {
-          void apiFetch(`/api/streams/${game.id}/session/heartbeat`, {
+          void apiFetch(game.id === 'broadcast' ? '/api/broadcast/session/heartbeat' : `/api/streams/${game.id}/session/heartbeat`, {
             method: 'POST',
             body: JSON.stringify({ sessionId: res.session.id }),
           }, null)
@@ -817,7 +820,7 @@ export function LiveStreamPlayer({
       if (heartbeatId) clearInterval(heartbeatId);
       if (hardCapTimerId) clearTimeout(hardCapTimerId);
       if (sessionIdForCleanup) {
-        void apiFetch(`/api/streams/${game.id}/session/end`, {
+        void apiFetch(game.id === 'broadcast' ? '/api/broadcast/session/end' : `/api/streams/${game.id}/session/end`, {
           method: 'POST',
           body: JSON.stringify({ sessionId: sessionIdForCleanup }),
         }, null).catch(() => {});

@@ -1,8 +1,16 @@
 # Broadcast & Paywall — Operating Protocol
 
 **Companion to:** [`docs/architecture/BROADCAST_PAYWALL_SYSTEM.md`](../architecture/BROADCAST_PAYWALL_SYSTEM.md)
-**Hard rules:** [`CLAUDE.md` §6](../../CLAUDE.md)
-**Status:** Production · v1.0.0
+**Hard rules:** [`CLAUDE.md` §6 + §7](../../CLAUDE.md)
+**Version:** v1.1.0 (2026-05-06)
+**Previous:** v1.0.0 (2026-05-04)
+**Status:** Production · Stable
+
+**Changelog (v1.0.0 → v1.1.0):**
+- Added §Broadcast Stream Independence quick-reference block.
+- Added forbidden patterns for routing broadcast through the PPV path.
+- Added required pattern for calling `/api/broadcast/session` from client.
+- Smoke test step 9 added (broadcast session chain test).
 
 This protocol is for **agents and engineers working on the broadcast and
 paywall system day-to-day.** It is the action-oriented shortcut for the
@@ -11,10 +19,39 @@ when you need depth.
 
 ---
 
+## ⚠️ Broadcast Stream Independence — READ FIRST
+
+> **HARD FREEZE. Do not modify the `/api/broadcast/*` route family without
+> explicit written approval from JR (repo owner).**
+
+The open broadcast is an independent media resource. It is never tied to
+a game, a PPV purchase, or an entitlement row.
+
+| Route | Access requirement |
+|---|---|
+| `POST /api/broadcast/access` | `onboarding_completed_at IS NOT NULL` |
+| `POST /api/broadcast/session` | same — returns `playback.url` |
+| `POST /api/broadcast/session/heartbeat` | active session |
+| `POST /api/broadcast/session/end` | any authenticated user |
+
+**Super admin** gets the URL even when `is_live=false` (preview mode).
+All other users are blocked when offline.
+
+`handlePlaybackSession` rejects `gameId === null` and `gameId === 'broadcast'`
+with `400 use_broadcast_endpoint`. These must call `/api/broadcast/session`.
+
+**Tests:** `src/test/broadcast-access-e2e.test.ts` — run it before any
+change to `handleBroadcastSessionStart`, `handleBroadcastStreamAccess`, or
+`LiveStreamPlayer` broadcast routing.
+
+---
+
 ## Quick reference: which surface owns what
 
 | Surface | Owns | Touch only when… |
 |---|---|---|
+| `handleBroadcastStreamAccess` | Open-broadcast access check | **FROZEN — see §above** |
+| `handleBroadcastSessionStart` | Open-broadcast session + URL delivery | **FROZEN — see §above** |
 | `get_active_broadcast()` RPC | All non-admin viewer access decisions, server-side stream_url gating | Adding a new access signal (e.g. trial state, geo-block) |
 | `redeem_ppv_invite()` RPC | Code validation, invite consumption, entitlement creation | Adding a new code type or expiry rule |
 | `complete_fan_onboarding()` RPC | Fan profile creation (display_name only) | NEVER add bio or avatar to fan path |
@@ -96,6 +133,11 @@ viewers; collecting more reduces conversion and adds GDPR/CASL surface.
 ## Forbidden patterns (will block in code review)
 
 ```ts
+// ❌ Routing broadcast through the PPV session handler — returns 400
+await apiFetch('/api/streams/broadcast/session', { method: 'POST', ... });
+// ❌ Adding game_id to /api/broadcast/* — violates independence contract
+// ❌ Calling can_user_view_stream from handleBroadcastSessionStart
+
 // ❌ Reading stream URL directly bypasses server-side gating
 const { data } = await supabase.from('stream_admin_config')
   .select('collection_id').single();
@@ -127,6 +169,11 @@ redirectTo: 'https://sbbl-hq.icu/auth/v1/callback'  // intent lost on round-trip
 ## Required patterns
 
 ```ts
+// ✅ Open broadcast — use the dedicated route, never /api/streams/broadcast/*
+const sessionEndpoint = game.id === 'broadcast'
+  ? '/api/broadcast/session'
+  : `/api/streams/${game.id}/session`;
+
 // ✅ Single oracle for all non-admin access decisions
 const { data: broadcast } = await supabase.rpc('get_active_broadcast');
 
@@ -176,6 +223,16 @@ await supabase.auth.signInWithOAuth({
 
 ---
 
+## Automated tests (run before any change to this system)
+
+```bash
+npm test                                              # 100 files, 1090+ assertions
+npm test -- src/test/broadcast-access-e2e.test.ts    # 15 broadcast-specific assertions
+npm run simulate:broadcast                            # 19 provider-type scenarios
+```
+
+All three must show zero failures before a change ships.
+
 ## Smoke test (manual, ~5 min)
 
 Run before merging any change to this system.
@@ -197,6 +254,10 @@ Run before merging any change to this system.
    users within 15s.
 8. **Admin End Stream:** Click End Stream → verify viewers see "No Active
    Broadcast" within 15s.
+9. **Broadcast session chain (automated):** Run
+   `npm test -- src/test/broadcast-access-e2e.test.ts` — all 15 assertions
+   must pass. This covers registered fan → URL delivery, super admin bypass,
+   unregistered denial, displaced session, and offline-stream guard.
 
 ---
 
