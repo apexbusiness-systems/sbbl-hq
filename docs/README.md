@@ -1,8 +1,8 @@
-<!-- Version: v2.4.0 | Date: 2026-04-16 | Status: Current -->
+<!-- Version: v2.5.0 | Date: 2026-05-06 | Status: Current -->
 # SBBL HQ — Documentation Hub
 
-**Version:** v2.4.0
-**Last Updated:** 2026-04-16
+**Version:** v2.5.0
+**Last Updated:** 2026-05-06
 **Maintainer:** APEX Business Systems Ltd. — Engineering Lead
 
 > Single source of truth for all SBBL HQ engineering, operational, and product documentation.
@@ -89,6 +89,7 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
+| [OMNIHUB SECURITY BLOCKERS 2026-05-06](./quality/OMNIHUB_SECURITY_BLOCKERS_2026-05-06_v1.0.0.md) | v1.0.0 | Phase 0 → Phase 1 blocker gate for open APEX-OmniHub RLS, CVE, and XSS security PRs |
 | [RELEASE GATE AUDIT 2026-04-11](./quality/RELEASE_GATE_AUDIT_2026-04-11_v1.4.0.md) | v1.4.0 | Comp codes + 20K chaos battery — gate decision: GO |
 | [RELEASE GATE AUDIT 2026-04-09](./quality/RELEASE_GATE_AUDIT_2026-04-09_v1.3.0.md) | v1.3.0 | Final RC gate run — lint/typecheck/tests/build all PASS; gate decision: GO |
 | [LIVESTREAM INTEGRITY AUDIT 2026-04-09](./quality/LIVESTREAM_INGEST_BROADCAST_SYSTEM_INTEGRITY_AUDIT_2026-04-09_v1.0.0.md) | v1.0.0 | 20K-oriented livestream/ingest/broadcast integrity audit (Rev B) |
@@ -180,6 +181,7 @@ These policy documents live at the repo root and are linked here for discoverabi
 
 - `npm run typecheck`, `npm run lint`, `npm run test`, `npm run build` all pass with zero errors.
 - All RLS policies active on every `public` schema table — verified by `rls_audit` log.
+- No unresolved external CRITICAL/HIGH security blockers in APEX-OmniHub — verified by the OmniHub security blocker gate.
 - PWA service worker generated — 47+ precached entries.
 - Sentry DSN configured and error tracking confirmed active.
 - Stripe webhook idempotency table seeded and endpoint verified.
