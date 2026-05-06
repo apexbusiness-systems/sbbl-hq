@@ -4002,30 +4002,8 @@ async function handleStreamQoeHealth(ctx: HandlerCtx): Promise<Response> {
 export async function handleStreamAccess({ req, admin }: HandlerCtx) {
   const userId = requireAuth(req);
   const gameId = new URL(req.url).pathname.split("/")[3]; // /api/streams/:gameId/access
-
-  // Open broadcast alias: access is registration-based, not entitlement-based.
-  // Mirrors get_active_broadcast()'s open-broadcast branch (v_has_entitlement = v_registered).
-  if (gameId === "broadcast") {
-    const cfgRes = await admin
-      .from("stream_admin_config")
-      .select("is_live")
-      .eq("id", true)
-      .maybeSingle();
-    if (!cfgRes.data?.is_live) {
-      return json({ ok: true, hasAccess: false, gameId, userId });
-    }
-    const profileRes = await admin
-      .from("profiles")
-      .select("onboarding_completed_at")
-      .eq("user_id", userId)
-      .maybeSingle();
-    const isRegistered = Boolean(
-      (profileRes.data as { onboarding_completed_at?: string | null } | null)
-        ?.onboarding_completed_at,
-    );
-    return json({ ok: true, hasAccess: isRegistered, gameId, userId });
-  }
-
+  // Broadcast access lives at /api/broadcast/access — not here.
+  // This handler only handles game-specific PPV entitlement checks.
   const { data, error } = await admin.rpc("can_user_view_stream", {
     p_game_id: gameId,
     p_user_id: userId,
@@ -4127,8 +4105,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   // to null so all downstream code treats it as a null gameId consistently.
   // Without this, 'broadcast' would be passed as a gameId string to Supabase
   // queries that expect a UUID, causing 500 errors from invalid UUID format.
-  const rawGameId = ctx.params.gameId ?? null;
-  const gameId: string | null = rawGameId === 'broadcast' ? null : rawGameId;
+  const gameId: string | null = ctx.params.gameId ?? null;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionKey?: string;
     playbackMode?: 'live' | 'replay';
@@ -4230,25 +4207,19 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     }, 200, cookieHeaders);
   }
 
+  // Broadcast (no game) must use /api/broadcast/session — not this handler.
+  // Covers both null (missing gameId) and the 'broadcast' alias string that
+  // legacy clients may still send. Prevents them from being routed through
+  // the PPV/entitlement path for open broadcasts.
+  if (gameId === null || gameId === "broadcast") {
+    return json({ ok: false, error: "use_broadcast_endpoint" }, 400);
+  }
+
   const hasPrivilegedRole = roles.some(
     (role) => role === "player" || role === "paid_fan",
   );
   let hasAccess = hasPrivilegedRole;
-  if (!hasAccess && gameId === null) {
-    // Open broadcast alias: grant access to any registered user.
-    // Mirrors get_active_broadcast()'s open-broadcast branch (v_has_entitlement = v_registered).
-    // Privileged roles already passed above; this covers registered fans whose
-    // access was confirmed server-side by get_active_broadcast() returning stream_url.
-    const profileRes = await ctx.admin
-      .from("profiles")
-      .select("onboarding_completed_at")
-      .eq("user_id", userId)
-      .maybeSingle();
-    hasAccess = Boolean(
-      (profileRes.data as { onboarding_completed_at?: string | null } | null)
-        ?.onboarding_completed_at,
-    );
-  } else if (!hasAccess && gameId) {
+  if (!hasAccess) {
     // PPV game: check entitlement or invite redemption.
     const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
       p_game_id: gameId,
@@ -4260,13 +4231,6 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   if (!hasAccess) return json({ ok: false, error: "forbidden" }, 403);
 
   const cfg = await getOrCreateStreamConfig(ctx.admin);
-
-  // RC-2: For the broadcast alias (no real game), enforce is_live for non-admins.
-  // Super admins already return above via the fast-path. Privileged roles
-  // (player/paid_fan) still need the stream to be online.
-  if (gameId === null && !cfg.is_live && playbackMode !== "replay") {
-    return json({ ok: false, error: "stream_offline" }, 403);
-  }
 
   // WS7: Replay Embargo & Monetization (belt-and-suspenders — the
   // primary gate runs at the top of the handler on body.playbackMode;
@@ -4959,8 +4923,110 @@ export async function handleResetReactions(ctx: HandlerCtx) {
   return json({ ok: true, gameId, reset: true });
 }
 
-async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
-  return handlePlaybackSession({ ...ctx, params: { ...ctx.params, gameId: null } });
+// ── Broadcast-standalone handlers ────────────────────────────────────────────
+// Livestreams are independent of games. These handlers own the entire
+// broadcast session lifecycle with zero game coupling. Do NOT add gameId
+// parameters, PPV entitlement checks, or any game-specific logic here.
+// The only access rule for an open broadcast: stream is live + user is registered.
+// See CLAUDE.md Rule 7 — these handlers are frozen; do not modify without
+// explicit owner instruction.
+
+export async function handleBroadcastStreamAccess({ req, admin }: HandlerCtx) {
+  const userId = requireAuth(req);
+  const cfgRes = await admin
+    .from("stream_admin_config")
+    .select("is_live")
+    .eq("id", true)
+    .maybeSingle();
+  if (!cfgRes.data?.is_live) {
+    return json({ ok: true, hasAccess: false });
+  }
+  const profileRes = await admin
+    .from("profiles")
+    .select("onboarding_completed_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const isRegistered = Boolean(
+    (profileRes.data as { onboarding_completed_at?: string | null } | null)
+      ?.onboarding_completed_at,
+  );
+  return json({ ok: true, hasAccess: isRegistered });
+}
+
+export async function handleBroadcastSessionStart(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const body = (await ctx.req.json().catch(() => null)) as {
+    sessionKey?: string;
+  } | null;
+  if (!body?.sessionKey || body.sessionKey.length < 8) {
+    return json({ ok: false, error: "session_key_required" }, 400);
+  }
+
+  const cfg = await getOrCreateStreamConfig(ctx.admin);
+
+  // Super admin: no access checks, synthetic session so they can preview before going live.
+  const roles = await getUserRolesFromDB(userId, ctx.admin);
+  if (roles.includes("super_admin")) {
+    const playbackUrl =
+      String(cfg.collection_id ?? "").trim() ||
+      String(ctx.env.VITE_STREAM_URL ?? "").trim();
+    const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
+    return json({
+      ok: true,
+      playback: { type: "url", url: playbackUrl, heartbeatIntervalSec: 25, maxExpiresAt },
+      session: { id: crypto.randomUUID(), maxExpiresAt },
+    });
+  }
+
+  if (!cfg.is_live) {
+    return json({ ok: false, error: "stream_offline" }, 403);
+  }
+
+  const playbackUrl =
+    String(cfg.collection_id ?? "").trim() ||
+    String(ctx.env.VITE_STREAM_URL ?? "").trim();
+  if (!playbackUrl) {
+    return json({ ok: false, error: "stream_not_configured" }, 409);
+  }
+
+  // Registered users may watch an open broadcast — no entitlement row required.
+  const profileRes = await ctx.admin
+    .from("profiles")
+    .select("onboarding_completed_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const isRegistered = Boolean(
+    (profileRes.data as { onboarding_completed_at?: string | null } | null)
+      ?.onboarding_completed_at,
+  );
+  if (!isRegistered) return json({ ok: false, error: "forbidden" }, 403);
+
+  const session = await createOrRefreshPlaybackSession(
+    ctx,
+    null,
+    userId,
+    body.sessionKey,
+  );
+  return json({
+    ok: true,
+    playback: {
+      type: "url",
+      url: playbackUrl,
+      heartbeatIntervalSec: 25,
+      maxExpiresAt: session.maxExpiresAt,
+    },
+    session: { id: session.id, maxExpiresAt: session.maxExpiresAt },
+  });
+}
+
+// Heartbeat and end delegate to the game-agnostic handlers with null gameId.
+// Sessions for broadcasts are stored with game_id = null — no game coupling.
+async function handleBroadcastHeartbeatRoute(ctx: HandlerCtx) {
+  return handleStreamSessionHeartbeat({ ...ctx, params: { ...ctx.params, gameId: null } });
+}
+async function handleBroadcastSessionEndRoute(ctx: HandlerCtx) {
+  return handleStreamSessionEnd({ ...ctx, params: { ...ctx.params, gameId: null } });
 }
 
 /**
@@ -6048,15 +6114,20 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     path: "/api/streams/:gameId/access",
     handler: handleStreamAccess,
   },
-  // IMPORTANT: literal "broadcast" routes MUST come before the parameterized
-  // :gameId routes. The router does a linear first-match scan; if :gameId is
-  // registered first it captures "broadcast" as a gameId parameter, which then
-  // fails the DB upsert (invalid UUID → 500). Literal paths always beat params.
-  {
-    method: "POST",
-    path: "/api/streams/broadcast/session",
-    handler: handleBroadcastPlaybackSession,
-  },
+  // ── Broadcast routes (game-independent) ──────────────────────────────────
+  // These are the canonical routes for open livestreams. Streams are NOT
+  // coupled to games. Do not add gameId logic here — see CLAUDE.md Rule 7.
+  { method: "GET",  path: "/api/broadcast/access",              handler: handleBroadcastStreamAccess },
+  { method: "POST", path: "/api/broadcast/session",             handler: handleBroadcastSessionStart },
+  { method: "POST", path: "/api/broadcast/session/heartbeat",   handler: handleBroadcastHeartbeatRoute },
+  { method: "POST", path: "/api/broadcast/session/end",         handler: handleBroadcastSessionEndRoute },
+  // Legacy aliases — kept so old clients don't 404. Primary routes are /api/broadcast/* above.
+  // IMPORTANT: literal paths MUST come before :gameId to prevent "broadcast"
+  // being captured as an invalid UUID parameter (router is first-match).
+  { method: "POST", path: "/api/streams/broadcast/session",             handler: handleBroadcastSessionStart },
+  { method: "POST", path: "/api/streams/broadcast/session/heartbeat",   handler: handleBroadcastHeartbeatRoute },
+  { method: "POST", path: "/api/streams/broadcast/session/end",         handler: handleBroadcastSessionEndRoute },
+  // ── Game-specific PPV stream routes ───────────────────────────────────────
   {
     method: "POST",
     path: "/api/streams/:gameId/session",
@@ -6069,18 +6140,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "POST",
-    path: "/api/streams/broadcast/session/heartbeat",
-    handler: handleBroadcastHeartbeat,
-  },
-  {
-    method: "POST",
     path: "/api/streams/:gameId/session/heartbeat",
     handler: handleStreamSessionHeartbeat,
-  },
-  {
-    method: "POST",
-    path: "/api/streams/broadcast/session/end",
-    handler: handleBroadcastSessionEnd,
   },
   {
     method: "POST",
