@@ -1,0 +1,113 @@
+name: Broadcast Test Gate
+
+on:
+  pull_request:
+    paths:
+      - 'src/worker/index.ts'
+      - 'src/pages/Live.tsx'
+      - 'src/components/LiveStreamPlayer.tsx'
+      - 'src/hooks/useLiveAccess.ts'
+      - 'src/lib/stream/**'
+      - 'src/lib/constants/**'
+      - 'supabase/migrations/**'
+      - 'src/test/broadcast-*.test.ts'
+      - 'tests/e2e/broadcast-live-e2e.spec.ts'
+  workflow_dispatch:
+
+concurrency:
+  group: broadcast-test-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://ezanilxygnpucwkwpsoc.supabase.co' }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'test-anon-key' }}
+      VITE_DEFAULT_LEAGUE: SBBL
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run new broadcast Vitest modules
+        run: |
+          npx vitest run \
+            src/test/broadcast-ingest-pipeline.test.ts \
+            src/test/broadcast-access-matrix.test.ts \
+            src/test/broadcast-stress-realworld.test.ts \
+            --reporter=verbose --max-workers=1 --pool=forks
+      - name: Run existing broadcast and paywall regressions
+        run: |
+          npx vitest run \
+            src/test/paywall-rbac-audit.test.ts \
+            src/test/worker-stream-hardening.test.ts \
+            src/test/live-page-server-granted-broadcast.test.tsx \
+            src/test/live-stream-player-regressions.test.ts \
+            src/test/armageddon-stream-invariants.test.ts \
+            --reporter=verbose --max-workers=1 --pool=forks
+      - name: Upload test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-vitest-artifacts
+          path: test-results/
+          if-no-files-found: ignore
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://ezanilxygnpucwkwpsoc.supabase.co' }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'test-anon-key' }}
+      VITE_DEFAULT_LEAGUE: SBBL
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build app
+        run: npm run build
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Run broadcast E2E
+        run: npx playwright test tests/e2e/broadcast-live-e2e.spec.ts --project=chromium
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-playwright-report
+          path: playwright-report/
+          if-no-files-found: ignore
+      - name: Upload Playwright test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-playwright-test-results
+          path: test-results/
+          if-no-files-found: ignore
+
+  simulate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run broadcast simulation
+        run: npm run simulate:broadcast
