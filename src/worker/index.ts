@@ -5039,7 +5039,7 @@ async function handleBroadcastSessionEndRoute(ctx: HandlerCtx) {
  * Body: { isLive: boolean, collectionId: string, title: string }
  * Requires: super_admin
  */
-async function handleGoLive(ctx: HandlerCtx) {
+export async function handleGoLive(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireSuperAdminSession(ctx.req, ctx.admin);
 
