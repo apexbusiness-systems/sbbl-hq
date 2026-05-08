@@ -11,7 +11,7 @@
  * Suite B-5  PPV entitlement path (stream_entitlements row)
  * Suite B-6  invite-based access (ppv_invites path)
  * Suite B-7  one-device displacement — new session displaces old
- * Suite B-8  stream_offline gate — non-admin blocked when is_live=false
+ * Suite B-8  broadcast alias rejection gate
  * Suite B-9  can_user_view_stream RPC static contract verification
  */
 
@@ -443,9 +443,12 @@ describe('B-7: one-device displacement', () => {
   });
 });
 
-// ── B-8: stream_offline gate ──────────────────────────────────────────────────
-describe('B-8: stream_offline gate for broadcast alias', () => {
-  it('player receives stream_offline 403 when is_live=false and gameId=broadcast', async () => {
+// ── B-8: broadcast alias rejection gate ─────────────────────────────────────
+// Worker comment: "Broadcast (no game) must use /api/broadcast/session — not
+// handlePlaybackSession." When gameId==='broadcast', the worker immediately
+// returns 400 use_broadcast_endpoint before reaching any stream_offline logic.
+describe('B-8: broadcast alias rejection gate', () => {
+  it('handlePlaybackSession returns 400 use_broadcast_endpoint for gameId=broadcast', async () => {
     const state = baseLiveState();
     state.stream_admin_config = [{ id: true, collection_id: 'https://live.example/stream.m3u8', is_live: false }];
     state.user_role_assignments = [{ user_id: 'player-user', role: 'player' }];
@@ -464,9 +467,9 @@ describe('B-8: stream_offline gate for broadcast alias', () => {
       env,
       admin: buildAdmin(state),
     } as any);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(400);
     const body = await res.json() as Record<string, unknown>;
-    expect(body.error).toBe('stream_offline');
+    expect(body.error).toBe('use_broadcast_endpoint');
   });
 });
 
