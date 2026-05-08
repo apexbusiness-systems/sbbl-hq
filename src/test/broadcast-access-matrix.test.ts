@@ -309,18 +309,20 @@ describe('B-3: registered fan — can_user_view_stream RPC gate', () => {
 describe('B-4: unauthenticated caller — always 403', () => {
   it('request with no x-sbbl-user-id-verified header is denied', async () => {
     const state = baseLiveState();
-    const res = await handlePlaybackSession({
+
+    await expect(handlePlaybackSession({
       req: new Request('https://local/api/streams/game-1/session', {
         method: 'POST',
-        headers: { 'x-idempotency-key': 'b4-anon-key-12345' },
+        headers: {
+          'x-idempotency-key': 'b4-anon-key-12345',
+          'content-type': 'application/json',
+        },
         body: JSON.stringify({ sessionKey: 'sk-anon-12345678' }),
       }),
       params: { gameId: 'game-1' },
       env,
       admin: buildAdmin(state),
-    } as any);
-    // requireAuth throws → handler returns 500 or 400; either way NOT 200
-    expect(res.status).not.toBe(200);
+    } as any)).rejects.toThrow('unauthorized');
   });
 });
 
@@ -454,6 +456,7 @@ describe('B-8: stream_offline gate for broadcast alias', () => {
         headers: {
           'x-idempotency-key': 'b8-offline-key-1234',
           'x-sbbl-user-id-verified': 'player-user',
+          'content-type': 'application/json',
         },
         body: JSON.stringify({ sessionKey: 'sk-offline-12345' }),
       }),
