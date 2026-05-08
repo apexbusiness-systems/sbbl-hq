@@ -8,7 +8,7 @@ const screenshotDir = 'test-results/broadcast-live-e2e';
 type Persona = 'anon' | 'admin' | 'fan' | 'paid_fan' | 'player';
 type BroadcastMode = 'open-player' | 'open-paywall' | 'ppv-unpaid' | 'ppv-entitled';
 
-test.use({ screenshot: 'only-on-failure' });
+test.use({ screenshot: 'only-on-failure', serviceWorkers: 'block' });
 // This spec mutates auth storage and route mocks per persona; keep it serial
 // so full-suite CI cannot interleave persona state inside one worker file.
 test.describe.configure({ mode: 'serial' });
