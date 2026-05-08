@@ -1,28 +1,60 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export type Row = Record<string, any>;
+export type Row = Record<string, unknown>;
 export type TestState = Record<string, Row[]>;
+
+type RpcOverride = (payload: Row) => Promise<{ data: unknown; error: { message: string } | null }> | { data: unknown; error: { message: string } | null };
+type QueryResponse<T> = { data: T; error: { message: string } | null };
+type MaybeSingleBuilder = {
+  maybeSingle: () => Promise<QueryResponse<Row | null>>;
+  single: () => Promise<QueryResponse<Row | null>>;
+};
+type UpdateBuilder = {
+  eq: (col: string, value: unknown) => UpdateBuilder;
+  is: (col: string, value: unknown) => UpdateBuilder;
+  neq: (col: string, value: unknown) => { error: null };
+  select: () => MaybeSingleBuilder;
+};
+type QueryApi = {
+  eq: (col: string, value: unknown) => QueryApi;
+  is: (col: string, value: unknown) => QueryApi;
+  neq: (col: string, value: unknown) => QueryApi;
+  gt: (col: string, value: unknown) => QueryApi;
+  in: (col: string, values: unknown[]) => QueryApi;
+  order: () => QueryApi;
+  limit: () => QueryApi;
+  select: () => QueryApi;
+  maybeSingle: () => Promise<QueryResponse<Row | null>>;
+  single: () => Promise<QueryResponse<Row | null>>;
+  then: (resolve: (value: QueryResponse<Row[]>) => unknown) => Promise<unknown>;
+  insert: (row: Row) => { select?: () => { single: () => Promise<QueryResponse<Row>> }; error: null };
+  update: (patch: Row) => UpdateBuilder;
+  upsert: (row: Row) => { select: () => { single: () => Promise<QueryResponse<Row | null>> } };
+};
 
 export const testEnv = {
   SUPABASE_URL: 'https://example.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: 'service-role-key-with-enough-length-for-tests',
   VITE_STREAM_URL: 'https://cdn.example.com/live/default.m3u8',
   OMNIHUB_SIGNING_SECRET: 'test-signing-secret',
-} as any;
+} as unknown as Env;
 
 function rowMatches(row: Row, filters: Array<(row: Row) => boolean>) {
   return filters.every((fn) => fn(row));
 }
 
-export function createAdmin(state: TestState, options: { upsertErrorTable?: string; rpc?: Record<string, (payload: Row) => any> } = {}): SupabaseClient {
-  function query(table: string) {
+export function createAdmin(
+  state: TestState,
+  options: { upsertErrorTable?: string; rpc?: Record<string, RpcOverride> } = {},
+): SupabaseClient {
+  function query(table: string): QueryApi {
     const filters: Array<(row: Row) => boolean> = [];
-    const api: any = {
-      eq(col: string, value: any) { filters.push((row) => row[col] === value); return api; },
-      is(col: string, value: any) { filters.push((row) => value === null ? row[col] == null : row[col] === value); return api; },
-      neq(col: string, value: any) { filters.push((row) => row[col] !== value); return api; },
-      gt(col: string, value: any) { filters.push((row) => String(row[col]) > String(value)); return api; },
-      in(col: string, values: any[]) { filters.push((row) => values.includes(row[col])); return api; },
+    const api: QueryApi = {
+      eq(col, value) { filters.push((row) => row[col] === value); return api; },
+      is(col, value) { filters.push((row) => (value === null ? row[col] == null : row[col] === value)); return api; },
+      neq(col, value) { filters.push((row) => row[col] !== value); return api; },
+      gt(col, value) { filters.push((row) => String(row[col]) > String(value)); return api; },
+      in(col, values) { filters.push((row) => values.includes(row[col])); return api; },
       order() { return api; },
       limit() { return api; },
       select() { return api; },
@@ -31,32 +63,40 @@ export function createAdmin(state: TestState, options: { upsertErrorTable?: stri
         const row = (state[table] ?? []).find((item) => rowMatches(item, filters));
         return row ? { data: row, error: null } : { data: null, error: { message: 'not_found' } };
       },
-      then: async (resolve: (value: any) => any) => resolve({ data: (state[table] ?? []).filter((row) => rowMatches(row, filters)), error: null }),
-      insert(row: Row) {
+      then: async (resolve) => resolve({ data: (state[table] ?? []).filter((row) => rowMatches(row, filters)), error: null }),
+      insert(row) {
         if (table === 'api_idempotency_keys') return { error: null };
         const normalized = { ...row, id: row.id ?? crypto.randomUUID() };
         state[table] = [...(state[table] ?? []), normalized];
         return { select: () => ({ single: async () => ({ data: normalized, error: null }) }), error: null };
       },
-      update(patch: Row) {
+      update(patch) {
         const updateFilters = [...filters];
-        const builder: any = {
-          eq(col: string, value: any) { updateFilters.push((row) => row[col] === value); return builder; },
-          is(col: string, value: any) { updateFilters.push((row) => value === null ? row[col] == null : row[col] === value); return builder; },
-          neq(col: string, value: any) {
+        const applyPatch = () => {
+          (state[table] ?? []).forEach((row) => {
+            if (rowMatches(row, updateFilters)) Object.assign(row, patch);
+          });
+        };
+        const builder: UpdateBuilder = {
+          eq(col, value) { updateFilters.push((row) => row[col] === value); return builder; },
+          is(col, value) { updateFilters.push((row) => (value === null ? row[col] == null : row[col] === value)); return builder; },
+          neq(col, value) {
             updateFilters.push((row) => row[col] !== value);
-            (state[table] ?? []).forEach((row) => { if (rowMatches(row, updateFilters)) Object.assign(row, patch); });
+            applyPatch();
             return { error: null };
           },
           select: () => {
-            (state[table] ?? []).forEach((row) => { if (rowMatches(row, updateFilters)) Object.assign(row, patch); });
+            applyPatch();
             const row = (state[table] ?? []).find((item) => rowMatches(item, updateFilters));
-            return { maybeSingle: async () => ({ data: row ?? null, error: null }), single: async () => ({ data: row ?? null, error: row ? null : { message: 'not_found' } }) };
+            return {
+              maybeSingle: async () => ({ data: row ?? null, error: null }),
+              single: async () => ({ data: row ?? null, error: row ? null : { message: 'not_found' } }),
+            };
           },
         };
         return builder;
       },
-      upsert(row: Row) {
+      upsert(row) {
         if (options.upsertErrorTable === table) {
           return { select: () => ({ single: async () => ({ data: null, error: { message: 'forced_upsert_error' } }) }) };
         }
@@ -72,18 +112,20 @@ export function createAdmin(state: TestState, options: { upsertErrorTable?: stri
     };
     return api;
   }
-  return {
+
+  const admin = {
     from: (table: string) => query(table),
     rpc: async (name: string, payload: Row) => {
       if (options.rpc?.[name]) return options.rpc[name](payload);
       if (name === 'can_user_view_stream') {
-        const ent = (state.stream_entitlements ?? []).find((row) => row.user_id === payload.p_user_id && row.game_id === payload.p_game_id && row.status === 'active' && (!row.expires_at || new Date(row.expires_at).getTime() > Date.now()));
+        const ent = (state.stream_entitlements ?? []).find((row) => row.user_id === payload.p_user_id && row.game_id === payload.p_game_id && row.status === 'active' && (!row.expires_at || new Date(String(row.expires_at)).getTime() > Date.now()));
         return { data: Boolean(ent), error: null };
       }
       if (name === 'consume_stream_rate_limit') return { data: true, error: null };
       return { data: null, error: null };
     },
-  } as any;
+  };
+  return admin as unknown as SupabaseClient;
 }
 
 export function authedRequest(path: string, userId: string, body: Row, init: RequestInit = {}) {

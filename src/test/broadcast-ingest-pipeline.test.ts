@@ -10,6 +10,10 @@ import { ENTITLEMENT } from '@/lib/constants/ENTITLEMENT_CONSTANTS';
 import { handleGoLive, handleInviteGenerate } from '@/worker/index';
 import { authedRequest, baseState, createAdmin, testEnv } from './broadcast-test-utils';
 
+type GoLiveCtx = Parameters<typeof handleGoLive>[0];
+type InviteGenerateCtx = Parameters<typeof handleInviteGenerate>[0];
+type GoLiveResponse = { ok: boolean; isLive?: boolean; collectionId?: string; title?: string; activeGameId?: string | null; code?: string };
+
 type Scenario = {
   name: string;
   url: string;
@@ -65,7 +69,7 @@ describe('broadcast ingest URL classification', () => {
 
 describe('broadcast Go-Live handler', () => {
   beforeEach(() => {
-    (globalThis as any).caches = { default: { delete: async () => true } };
+    (globalThis as unknown as { caches: { default: { delete: () => Promise<boolean> } } }).caches = { default: { delete: async () => true } };
   });
 
   function stateWithAdmin() {
@@ -74,43 +78,43 @@ describe('broadcast Go-Live handler', () => {
 
   it('valid YouTube URL + title returns 200', async () => {
     const state = stateWithAdmin();
-    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true, collectionId: 'https://youtube.com/watch?v=BjcQrDA9koY', title: 'Finals' }), env: testEnv, params: {}, admin: createAdmin(state) } as any);
+    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true, collectionId: 'https://youtube.com/watch?v=BjcQrDA9koY', title: 'Finals' }), env: testEnv, params: {}, admin: createAdmin(state) } as GoLiveCtx);
     expect(res.status).toBe(200);
-    const body = await res.json() as any;
+    const body = await res.json() as GoLiveResponse;
     expect(body).toMatchObject({ ok: true, isLive: true, title: 'Finals' });
   });
 
   it('missing isLive returns 400', async () => {
-    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { collectionId: 'https://youtube.com/watch?v=BjcQrDA9koY' }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin()) } as any);
+    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { collectionId: 'https://youtube.com/watch?v=BjcQrDA9koY' }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin()) } as GoLiveCtx);
     expect(res.status).toBe(400);
   });
 
   it('non-boolean isLive returns 400', async () => {
-    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: 'true' }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin()) } as any);
+    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: 'true' }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin()) } as GoLiveCtx);
     expect(res.status).toBe(400);
   });
 
   it('invalid activeGameId returns 400', async () => {
-    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true, activeGameId: 'game-1' }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin()) } as any);
+    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true, activeGameId: 'game-1' }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin()) } as GoLiveCtx);
     expect(res.status).toBe(400);
   });
 
   it('null activeGameId is accepted for open broadcast', async () => {
-    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true, activeGameId: null }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin()) } as any);
+    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true, activeGameId: null }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin()) } as GoLiveCtx);
     expect(res.status).toBe(200);
-    expect((await res.json() as any).activeGameId).toBeNull();
+    expect((await res.json() as GoLiveResponse).activeGameId).toBeNull();
   });
 
   it('valid UUID activeGameId is accepted for PPV broadcast', async () => {
     const gameId = '11111111-1111-4111-8111-111111111111';
-    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true, activeGameId: gameId }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin()) } as any);
+    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true, activeGameId: gameId }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin()) } as GoLiveCtx);
     expect(res.status).toBe(200);
-    expect((await res.json() as any).activeGameId).toBe(gameId);
+    expect((await res.json() as GoLiveResponse).activeGameId).toBe(gameId);
   });
 
   it('isLive false transitions offline', async () => {
     const state = stateWithAdmin();
-    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: false }), env: testEnv, params: {}, admin: createAdmin(state) } as any);
+    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: false }), env: testEnv, params: {}, admin: createAdmin(state) } as GoLiveCtx);
     expect(res.status).toBe(200);
     expect(state.stream_admin_config[0].is_live).toBe(false);
     expect(state.stream_admin_config[0].live_ended_at).toBeTruthy();
@@ -118,13 +122,13 @@ describe('broadcast Go-Live handler', () => {
 
   it('dangerous collectionId is sanitized', async () => {
     const state = stateWithAdmin();
-    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true, collectionId: 'javascript:alert(1)' }), env: testEnv, params: {}, admin: createAdmin(state) } as any);
+    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true, collectionId: 'javascript:alert(1)' }), env: testEnv, params: {}, admin: createAdmin(state) } as GoLiveCtx);
     expect(res.status).toBe(200);
-    expect((await res.json() as any).collectionId).toBe('');
+    expect((await res.json() as GoLiveResponse).collectionId).toBe('');
   });
 
   it('Supabase upsert error returns 500', async () => {
-    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin(), { upsertErrorTable: 'stream_admin_config' }) } as any);
+    const res = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', { isLive: true }), env: testEnv, params: {}, admin: createAdmin(stateWithAdmin(), { upsertErrorTable: 'stream_admin_config' }) } as GoLiveCtx);
     expect(res.status).toBe(500);
   });
 
@@ -132,8 +136,8 @@ describe('broadcast Go-Live handler', () => {
     const state = stateWithAdmin();
     const body = { isLive: true, collectionId: 'https://cdn.example.com/live.m3u8', title: 'Repeat' };
     const admin = createAdmin(state);
-    const first = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', body), env: testEnv, params: {}, admin } as any);
-    const second = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', body), env: testEnv, params: {}, admin } as any);
+    const first = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', body), env: testEnv, params: {}, admin } as GoLiveCtx);
+    const second = await handleGoLive({ req: authedRequest('/ops/streams/go-live', 'admin', body), env: testEnv, params: {}, admin } as GoLiveCtx);
     expect([first.status, second.status]).toEqual([200, 200]);
     expect(state.stream_admin_config).toHaveLength(1);
     expect(state.stream_admin_config[0].collection_id).toBe(body.collectionId);
@@ -144,15 +148,15 @@ describe('comp code generation handler', () => {
   it('super_admin can generate comp code with canonical validity window', async () => {
     const gameId = '11111111-1111-4111-8111-111111111111';
     const state = baseState({ user_role_assignments: [{ user_id: 'admin', role: 'super_admin' }], games: [{ id: gameId }] });
-    const res = await handleInviteGenerate({ req: authedRequest('/api/invite/generate', 'admin', { gameId }), env: testEnv, params: {}, admin: createAdmin(state) } as any);
+    const res = await handleInviteGenerate({ req: authedRequest('/api/invite/generate', 'admin', { gameId }), env: testEnv, params: {}, admin: createAdmin(state) } as InviteGenerateCtx);
     expect(res.status).toBe(200);
-    const body = await res.json() as any;
+    const body = await res.json() as GoLiveResponse;
     expect(body.code).toMatch(/^[0-9a-f-]{36}$/i);
     expect(ENTITLEMENT.MANUAL_COMP_VALIDITY_HOURS).toBe(48);
   });
 
   it('non-super_admin without eligible role is denied', async () => {
-    const res = await handleInviteGenerate({ req: authedRequest('/api/invite/generate', 'fan', { gameId: '11111111-1111-4111-8111-111111111111' }), env: testEnv, params: {}, admin: createAdmin(baseState({ user_role_assignments: [{ user_id: 'fan', role: 'fan' }] })) } as any);
+    const res = await handleInviteGenerate({ req: authedRequest('/api/invite/generate', 'fan', { gameId: '11111111-1111-4111-8111-111111111111' }), env: testEnv, params: {}, admin: createAdmin(baseState({ user_role_assignments: [{ user_id: 'fan', role: 'fan' }] })) } as InviteGenerateCtx);
     expect(res.status).toBe(403);
   });
 });

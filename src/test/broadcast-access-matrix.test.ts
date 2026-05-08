@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { handleBroadcastSessionStart, handlePlaybackSession } from '@/worker/index';
 import { authedRequest, baseState, createAdmin, testEnv, type TestState } from './broadcast-test-utils';
 
+type BroadcastSessionCtx = Parameters<typeof handleBroadcastSessionStart>[0];
+type PlaybackSessionCtx = Parameters<typeof handlePlaybackSession>[0];
+
 const gameId = '11111111-1111-4111-8111-111111111111';
 const wrongGameId = '22222222-2222-4222-8222-222222222222';
 const future = () => new Date(Date.now() + 60_000).toISOString();
@@ -14,11 +17,11 @@ function withUser(state: TestState, userId: string, role = 'fan', onboarded = tr
 }
 
 async function startBroadcast(state: TestState, userId: string, sessionKey = `session-${userId}`) {
-  return handleBroadcastSessionStart({ req: authedRequest('/api/broadcast/session', userId, { sessionKey }), env: testEnv, params: {}, admin: createAdmin(state) } as any);
+  return handleBroadcastSessionStart({ req: authedRequest('/api/broadcast/session', userId, { sessionKey }), env: testEnv, params: {}, admin: createAdmin(state) } as BroadcastSessionCtx);
 }
 
 async function startPpv(state: TestState, userId: string, sessionKey = `session-${userId}`) {
-  return handlePlaybackSession({ req: authedRequest(`/api/streams/${gameId}/session`, userId, { sessionKey }), env: testEnv, params: { gameId }, admin: createAdmin(state) } as any);
+  return handlePlaybackSession({ req: authedRequest(`/api/streams/${gameId}/session`, userId, { sessionKey }), env: testEnv, params: { gameId }, admin: createAdmin(state) } as PlaybackSessionCtx);
 }
 
 describe('broadcast access matrix — open broadcast', () => {
@@ -53,7 +56,7 @@ describe('broadcast access matrix — open broadcast', () => {
   });
 
   it('anonymous users are denied', async () => {
-    await expect(handleBroadcastSessionStart({ req: new Request('https://worker.test/api/broadcast/session', { method: 'POST', headers: { 'content-type': 'application/json', 'x-idempotency-key': 'anon-key-12345678' }, body: JSON.stringify({ sessionKey: 'anon-session' }) }), env: testEnv, params: {}, admin: createAdmin(baseState()) } as any)).rejects.toThrow('unauthorized');
+    await expect(handleBroadcastSessionStart({ req: new Request('https://worker.test/api/broadcast/session', { method: 'POST', headers: { 'content-type': 'application/json', 'x-idempotency-key': 'anon-key-12345678' }, body: JSON.stringify({ sessionKey: 'anon-session' }) }), env: testEnv, params: {}, admin: createAdmin(baseState()) } as BroadcastSessionCtx)).rejects.toThrow('unauthorized');
   });
 
   it('offline stream does not grant live session', async () => {
@@ -63,8 +66,8 @@ describe('broadcast access matrix — open broadcast', () => {
 
   it('missing or short sessionKey returns 400', async () => {
     const state = withUser(baseState(), 'fan', 'fan');
-    const missing = await handleBroadcastSessionStart({ req: authedRequest('/api/broadcast/session', 'fan', {}), env: testEnv, params: {}, admin: createAdmin(state) } as any);
-    const short = await handleBroadcastSessionStart({ req: authedRequest('/api/broadcast/session', 'fan', { sessionKey: 'short' }), env: testEnv, params: {}, admin: createAdmin(state) } as any);
+    const missing = await handleBroadcastSessionStart({ req: authedRequest('/api/broadcast/session', 'fan', {}), env: testEnv, params: {}, admin: createAdmin(state) } as BroadcastSessionCtx);
+    const short = await handleBroadcastSessionStart({ req: authedRequest('/api/broadcast/session', 'fan', { sessionKey: 'short' }), env: testEnv, params: {}, admin: createAdmin(state) } as BroadcastSessionCtx);
     expect([missing.status, short.status]).toEqual([400, 400]);
   });
 });
