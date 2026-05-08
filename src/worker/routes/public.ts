@@ -142,11 +142,12 @@ export async function handlePublicHome({ req, admin }: HandlerCtx) {
     .slice(0, 5)
     .map(enrichGame);
 
-  const activeSeason = (seasonsRes.data ?? []).find(
-    (s: Record<string, unknown>) => {
-      const sLeagues = s.leagues as { code?: string } | null;
-      return (sLeagues?.code ?? "").toUpperCase() === leagueCode;
-    },
+  // FAST PATH: If we resolved activeLeagueId, match by ID directly (O(1) comparison vs string allocations)
+  const activeSeason = (seasonsRes.data ?? []).find((s: Record<string, unknown>) =>
+    activeLeagueId
+      ? s.league_id === activeLeagueId
+      : ((s.leagues as { code?: string } | null)?.code ?? "").toUpperCase() ===
+        leagueCode,
   ) as { id: string; name: string; status: string } | undefined;
 
   return json({
