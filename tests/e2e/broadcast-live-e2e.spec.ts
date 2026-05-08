@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { test, expect, type Page, type BrowserContext } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 const GAME_ID = '11111111-1111-4111-8111-111111111111';
 const SUPABASE_REST = '**/rest/v1/**';
@@ -9,6 +9,9 @@ type Persona = 'anon' | 'admin' | 'fan' | 'paid_fan' | 'player';
 type BroadcastMode = 'open-player' | 'open-paywall' | 'ppv-unpaid' | 'ppv-entitled';
 
 test.use({ screenshot: 'only-on-failure' });
+// This spec mutates auth storage and route mocks per persona; keep it serial
+// so full-suite CI cannot interleave persona state inside one worker file.
+test.describe.configure({ mode: 'serial' });
 
 test.beforeEach(async ({ page }, testInfo) => {
   const consoleErrors: string[] = [];
@@ -26,10 +29,17 @@ test.beforeEach(async ({ page }, testInfo) => {
   await testInfo.attach('failed-api-bodies', { body: () => Buffer.from(responseBodies.join('\n---\n')), contentType: 'text/plain' });
 });
 
-async function installPersona(context: BrowserContext, persona: Persona) {
-  if (persona === 'anon') return;
-  await context.addInitScript(({ personaName }) => {
+async function installPersona(page: Page, persona: Persona) {
+  await page.addInitScript(({ personaName }) => {
     const ref = 'ezanilxygnpucwkwpsoc';
+    // Keep this spec isolated when the full E2E suite runs before/after other auth scenarios.
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    void navigator.serviceWorker?.getRegistrations?.().then((registrations) => {
+      for (const registration of registrations) void registration.unregister();
+    });
+    if (personaName === 'anon') return;
+
     const userId = `${personaName}-user`;
     const session = {
       access_token: `${personaName}-token`,
@@ -57,6 +67,9 @@ async function mockNetwork(page: Page, persona: Persona, mode: BroadcastMode = '
   });
   await page.route(SUPABASE_REST, async (route) => {
     const url = route.request().url();
+    if (url.includes('/rpc/get_active_broadcast')) {
+      return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ is_live: true, stream_url: streamUrl, title: 'E2E Broadcast', active_game_id: activeGameId, live_started_at: new Date().toISOString(), requires_payment: mode.startsWith('ppv'), is_subscribed: persona === 'paid_fan', has_entitlement: mode === 'ppv-entitled', user_registered: Boolean(userId) }) });
+    }
     if (url.includes('/profiles')) {
       return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(userId ? [{ id: `${userId}-profile`, user_id: userId, display_name: persona, onboarding_completed_at: new Date().toISOString(), subscription_ends_at: null }] : []) });
     }
@@ -83,22 +96,26 @@ async function mockNetwork(page: Page, persona: Persona, mode: BroadcastMode = '
   await page.route('**/ops/streams/config', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, config: { collectionId: 'https://www.youtube.com/watch?v=BjcQrDA9koY', title: 'E2E Broadcast', source: 'main', isLive: false, viewerCount: 0 } }) }));
 }
 
-async function openLive(page: Page, context: BrowserContext, persona: Persona, mode: BroadcastMode = 'open-player') {
-  await installPersona(context, persona);
+async function openLive(page: Page, persona: Persona, mode: BroadcastMode = 'open-player') {
+  await installPersona(page, persona);
   await mockNetwork(page, persona, mode);
+  const readyResponse = persona === 'admin'
+    ? page.waitForResponse('**/ops/streams/config').catch(() => null)
+    : page.waitForResponse('**/rest/v1/rpc/get_active_broadcast**').catch(() => null);
   await page.goto('/live');
+  await readyResponse;
 }
 
 test.describe('Admin Go-Live', () => {
-  test('admin can open /live and see stream controls', async ({ page, context }) => {
-    await openLive(page, context, 'admin');
+  test('admin can open /live and see stream controls', async ({ page }) => {
+    await openLive(page, 'admin');
     await page.getByRole('button', { name: /Stream controls/ }).click();
     await expect(page.getByText('Stream URL', { exact: true }).first()).toBeVisible();
     await expect(page.getByRole('button', { name: /Go Live|End Stream/ })).toBeVisible();
   });
 
-  test('admin entering URL and clicking Go Live sends correct /ops/streams/go-live payload', async ({ page, context }) => {
-    await openLive(page, context, 'admin');
+  test('admin entering URL and clicking Go Live sends correct /ops/streams/go-live payload', async ({ page }) => {
+    await openLive(page, 'admin');
     await page.getByRole('button', { name: /Stream controls/ }).click();
     let posted: { isLive?: boolean; collectionId?: string; title?: string; activeGameId?: string | null } | null = null;
     await page.route('**/ops/streams/go-live', async (route) => {
@@ -115,30 +132,30 @@ test.describe('Admin Go-Live', () => {
 });
 
 test.describe('Fan watch and paywall', () => {
-  test('registered fan with server-granted stream_url sees player', async ({ page, context }) => {
-    await openLive(page, context, 'fan', 'open-player');
+  test('registered fan with server-granted stream_url sees player', async ({ page }) => {
+    await openLive(page, 'fan', 'open-player');
     await expect(page.getByTestId('stream-player')).toBeVisible();
     await page.screenshot({ path: `${screenshotDir}/fan-player-success.png`, fullPage: true });
   });
 
-  test('registered fan with stream_url null sees paywall/access gate', async ({ page, context }) => {
-    await openLive(page, context, 'fan', 'open-paywall');
+  test('registered fan with stream_url null sees paywall/access gate', async ({ page }) => {
+    await openLive(page, 'fan', 'open-paywall');
     await expect(page.getByText(/Purchase Access|Have a Free Access Code|Register to Watch/).first()).toBeVisible();
     await page.screenshot({ path: `${screenshotDir}/fan-paywall-success.png`, fullPage: true });
   });
 
-  test('anonymous visitor sees auth/paywall prompt', async ({ page, context }) => {
-    await openLive(page, context, 'anon', 'open-paywall');
+  test('anonymous visitor sees auth/paywall prompt', async ({ page }) => {
+    await openLive(page, 'anon', 'open-paywall');
     await expect(page.getByText(/Register to Watch|Create Free Account/)).toBeVisible();
   });
 
-  test('PPV unpaid fan sees purchase/paywall prompt', async ({ page, context }) => {
-    await openLive(page, context, 'fan', 'ppv-unpaid');
+  test('PPV unpaid fan sees purchase/paywall prompt', async ({ page }) => {
+    await openLive(page, 'fan', 'ppv-unpaid');
     await expect(page.getByText(/Purchase Access|Have a Free Access Code/).first()).toBeVisible();
   });
 
-  test('PPV entitled fan sees player', async ({ page, context }) => {
-    await openLive(page, context, 'fan', 'ppv-entitled');
+  test('PPV entitled fan sees player', async ({ page }) => {
+    await openLive(page, 'fan', 'ppv-entitled');
     await expect(page.getByTestId('stream-player')).toBeVisible();
   });
 });
@@ -151,11 +168,11 @@ test.describe('Security and runtime health', () => {
     expect(workerSource).toContain('return addSecurityHeaders(new Response(assetRes.body');
   });
 
-  test('anon /live load has zero unexpected runtime TypeError or ReferenceError', async ({ page, context }) => {
+  test('anon /live load has zero unexpected runtime TypeError or ReferenceError', async ({ page }) => {
     const runtimeErrors: string[] = [];
     page.on('pageerror', (err) => runtimeErrors.push(err.message));
     page.on('console', (msg) => { if (msg.type() === 'error' && /(TypeError|ReferenceError)/.test(msg.text())) runtimeErrors.push(msg.text()); });
-    await openLive(page, context, 'anon', 'open-paywall');
+    await openLive(page, 'anon', 'open-paywall');
     await expect(page.getByText(/Register to Watch|Create Free Account/)).toBeVisible();
     expect(runtimeErrors).toEqual([]);
   });
