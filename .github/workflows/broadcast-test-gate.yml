@@ -1,0 +1,37 @@
+name: Broadcast Test Gate
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Run Broadcast Test Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci || npm install
+        
+      - name: Run Broadcast Tests
+        run: |
+          npx vitest run src/test/broadcast-ingest-pipeline.test.ts src/test/broadcast-access-matrix.test.ts src/test/broadcast-stress-load.test.ts --reporter verbose > broadcast-test-results.txt 2>&1
+        env:
+          STRESS: 1
+          
+      - name: Archive test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: broadcast-test-results
+          path: broadcast-test-results.txt
