@@ -62,6 +62,26 @@ export function isMicUpSeriesEnabled(): boolean {
   return parseFlag(env().VITE_FEATURE_MIC_UP_SERIES);
 }
 
+export function isShadowEventLedgerEnabled(): boolean {
+  return parseFlag(env().VITE_FEATURE_SHADOW_EVENT_LEDGER);
+}
+
+export function isShadowGameProjectionEnabled(): boolean {
+  return parseFlag(env().VITE_FEATURE_SHADOW_GAME_PROJECTION);
+}
+
+export function isBroadcastOverlayV2Enabled(): boolean {
+  return parseFlag(env().VITE_FEATURE_BROADCAST_OVERLAY_V2);
+}
+
+export function isSponsorAnalyticsV2Enabled(): boolean {
+  return parseFlag(env().VITE_FEATURE_SPONSOR_ANALYTICS_V2);
+}
+
+export function isEntitlementTokensV2Enabled(): boolean {
+  return parseFlag(env().VITE_FEATURE_ENTITLEMENT_TOKENS_V2);
+}
+
 /** Test seam — drop the cache so overrides from vi.stubEnv() take effect. */
 export function __resetFeatureFlagCacheForTests(): void {
   _cached = null;

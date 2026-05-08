@@ -10,12 +10,13 @@
  * bug render. Polls the worker every 1 s and animates the clock locally.
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { fetchOverlay, type OverlayPayload } from '@/lib/api/overlay';
 import { trackSponsorEvent } from '@/lib/api/sponsors';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import CheerMeter from '@/components/CheerMeter';
+import { isBroadcastOverlayV2Enabled } from '@/lib/feature-flags';
 
 function formatClock(seconds: number): string {
   const safe = Math.max(0, Math.floor(seconds));
@@ -27,6 +28,31 @@ function formatClock(seconds: number): string {
     return `${ss}.${tenths}`;
   }
   return `${mm}:${ss.toString().padStart(2, '0')}`;
+}
+
+type OverlayCard =
+  | 'scorebug'
+  | 'lower-third'
+  | 'lineup'
+  | 'game-state'
+  | 'sponsor'
+  | 'postgame'
+  | 'matchup'
+  | 'stat-leader';
+
+function parseOverlayCard(value: string | null): OverlayCard {
+  switch (value) {
+    case 'lower-third':
+    case 'lineup':
+    case 'game-state':
+    case 'sponsor':
+    case 'postgame':
+    case 'matchup':
+    case 'stat-leader':
+      return value;
+    default:
+      return 'scorebug';
+  }
 }
 
 function teamShort(name: string): string {
@@ -45,6 +71,7 @@ export default function OverlayPage() {
   const { gameId } = useParams<{ gameId: string }>();
   const [params] = useSearchParams();
   const theme = params.get('theme') ?? 'default';
+  const card = parseOverlayCard(params.get('card'));
 
   const [payload, setPayload] = useState<OverlayPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -176,6 +203,22 @@ export default function OverlayPage() {
     game.participant2_label ??
     (game.event_name ? 'Away' : 'Away');
   const leagueCode = game.leagues?.code ?? '';
+
+  if (isBroadcastOverlayV2Enabled() && card !== 'scorebug') {
+    return (
+      <OverlayV2Card
+        card={card}
+        gameId={gameId}
+        homeName={homeName}
+        awayName={awayName}
+        leagueCode={leagueCode}
+        overlay={overlay}
+        game={game}
+        sponsor={sponsor}
+        liveClock={liveClock}
+      />
+    );
+  }
 
   return (
     <div
@@ -483,6 +526,163 @@ function TeamBlock({
       >
         {score}
       </span>
+    </div>
+  );
+}
+
+
+type OverlayV2CardProps = {
+  card: OverlayCard;
+  gameId: string;
+  homeName: string;
+  awayName: string;
+  leagueCode: string;
+  overlay: OverlayPayload['overlay'];
+  game: OverlayPayload['game'];
+  sponsor: OverlayPayload['sponsor'];
+  liveClock: number;
+};
+
+function OverlayV2Card({
+  card,
+  gameId,
+  homeName,
+  awayName,
+  leagueCode,
+  overlay,
+  game,
+  sponsor,
+  liveClock,
+}: OverlayV2CardProps) {
+  const homeScore = overlay?.home_score ?? game.home_score ?? 0;
+  const awayScore = overlay?.away_score ?? game.away_score ?? 0;
+  const panelTitle = card.replace('-', ' ').toUpperCase();
+  const basePanel: CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    pointerEvents: 'none',
+    background: 'transparent',
+    color: '#fff',
+    fontFamily: 'Inter, system-ui, sans-serif',
+  };
+  const cardStyle: CSSProperties = {
+    position: 'absolute',
+    left: 48,
+    bottom: 48,
+    width: 680,
+    borderRadius: 18,
+    padding: 28,
+    background: 'linear-gradient(135deg, rgba(5,8,14,0.94), rgba(20,24,34,0.72))',
+    border: '1px solid rgba(255,255,255,0.14)',
+    boxShadow: '0 18px 70px rgba(0,0,0,0.48)',
+    backdropFilter: 'blur(12px)',
+  };
+
+  const Header = () => (
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center', marginBottom: 18 }}>
+      <div style={{ fontSize: 12, letterSpacing: '0.2em', color: '#ffb020', fontWeight: 900 }}>{leagueCode || 'SBBL HQ'} · {panelTitle}</div>
+      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.72)' }}>Game {gameId.slice(0, 8)}</div>
+    </div>
+  );
+
+  let body: ReactNode;
+  switch (card) {
+    case 'lower-third':
+      body = (
+        <>
+          <Header />
+          <div style={{ fontSize: 42, fontWeight: 950 }}>{overlay?.lower_third_text ?? overlay?.last_event_text ?? 'Live Game Update'}</div>
+          <div style={{ marginTop: 8, fontSize: 18, color: 'rgba(255,255,255,0.74)' }}>{overlay?.lower_third_subtext ?? `${awayName} at ${homeName}`}</div>
+        </>
+      );
+      break;
+    case 'lineup':
+      body = (
+        <>
+          <Header />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+            <RosterColumn title={awayName} values={['Starting five pending', 'Bench managed in HQ', 'No premium controls exposed']} />
+            <RosterColumn title={homeName} values={['Starting five pending', 'Bench managed in HQ', 'Read-only OBS panel']} />
+          </div>
+        </>
+      );
+      break;
+    case 'game-state':
+      body = (
+        <>
+          <Header />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24 }}>
+            <Metric label={teamShort(awayName)} value={awayScore} />
+            <Metric label={overlay?.period_label ?? 'Q1'} value={formatClock(liveClock)} />
+            <Metric label={teamShort(homeName)} value={homeScore} />
+          </div>
+        </>
+      );
+      break;
+    case 'sponsor':
+      body = (
+        <>
+          <Header />
+          <div style={{ fontSize: 16, letterSpacing: '0.18em', textTransform: 'uppercase', color: 'rgba(255,255,255,0.68)' }}>Presented by</div>
+          <div style={{ marginTop: 8, fontSize: 48, fontWeight: 950 }}>{sponsor?.name ?? 'SBBL HQ Partners'}</div>
+          {sponsor?.tagline && <div style={{ marginTop: 8, fontSize: 20, color: 'rgba(255,255,255,0.76)' }}>{sponsor.tagline}</div>}
+        </>
+      );
+      break;
+    case 'postgame':
+      body = (
+        <>
+          <Header />
+          <div style={{ fontSize: 24, color: '#ffb020', fontWeight: 900 }}>FINAL</div>
+          <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', fontSize: 44, fontWeight: 950 }}>
+            <span>{awayName} {awayScore}</span>
+            <span>{homeName} {homeScore}</span>
+          </div>
+        </>
+      );
+      break;
+    case 'matchup':
+      body = (
+        <>
+          <Header />
+          <div style={{ fontSize: 52, fontWeight: 950 }}>{awayName}</div>
+          <div style={{ margin: '8px 0', fontSize: 22, color: '#ffb020', fontWeight: 900 }}>VS</div>
+          <div style={{ fontSize: 52, fontWeight: 950 }}>{homeName}</div>
+          <div style={{ marginTop: 14, fontSize: 16, color: 'rgba(255,255,255,0.7)' }}>{game.event_name ?? 'Live basketball broadcast'}</div>
+        </>
+      );
+      break;
+    case 'stat-leader':
+      body = (
+        <>
+          <Header />
+          <div style={{ fontSize: 20, color: 'rgba(255,255,255,0.7)' }}>Stat leader card</div>
+          <div style={{ marginTop: 8, fontSize: 42, fontWeight: 950 }}>{overlay?.last_event_text ?? 'Awaiting first stat marker'}</div>
+          <div style={{ marginTop: 12, fontSize: 16, color: '#ffb020' }}>{awayName} {awayScore} · {homeName} {homeScore}</div>
+        </>
+      );
+      break;
+    default:
+      body = null;
+  }
+
+  return <div data-testid={`overlay-v2-${card}`} style={basePanel}><div style={cardStyle}>{body}</div></div>;
+}
+
+function RosterColumn({ title, values }: { title: string; values: string[] }) {
+  return (
+    <div style={{ borderLeft: '4px solid #ffb020', paddingLeft: 14 }}>
+      <div style={{ fontSize: 24, fontWeight: 900, marginBottom: 10 }}>{title}</div>
+      {values.map((value) => <div key={value} style={{ fontSize: 16, color: 'rgba(255,255,255,0.76)', margin: '6px 0' }}>{value}</div>)}
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string | number }) {
+  return (
+    <div style={{ minWidth: 150, textAlign: 'center' }}>
+      <div style={{ fontSize: 13, letterSpacing: '0.18em', color: 'rgba(255,255,255,0.65)' }}>{label}</div>
+      <div style={{ marginTop: 6, fontSize: 48, fontWeight: 950, fontVariantNumeric: 'tabular-nums' }}>{value}</div>
     </div>
   );
 }
