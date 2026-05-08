@@ -460,7 +460,7 @@ describe('A-8: broadcast route registration', () => {
     ['"GET"',  '"/api/streams/status"',     'handlePublicStreamStatus'],
     ['"GET"',  '"/ops/streams/config"',      'handleGetStreamConfig'],
     ['"POST"', '"/ops/streams/config"',      'handleUpdateStreamConfig'],
-    ['"POST"', '"/ops/streams/live"',        'handleSetStreamStatus'],
+    ['"POST"', '"/ops/streams/status"',      'handleSetStreamStatus'],
   ] as const;
 
   routes.forEach(([method, path, handler]) => {
