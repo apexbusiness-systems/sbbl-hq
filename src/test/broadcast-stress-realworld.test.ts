@@ -1,23 +1,39 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { describe, expect, it } from 'vitest';
 import { handleBroadcastSessionStart } from '@/worker/index';
 import { testEnv, type Row } from './broadcast-test-utils';
 
+type BroadcastSessionCtx = Parameters<typeof handleBroadcastSessionStart>[0];
+type QueryResponse<T> = { data: T; error: { message: string } | null };
+type StressQueryApi = {
+  select: () => StressQueryApi;
+  eq: (col: string, value: unknown) => StressQueryApi;
+  is: (col: string, value: unknown) => StressQueryApi;
+  neq: (col: string, value: unknown) => { error: null };
+  maybeSingle: () => Promise<QueryResponse<Row | null>>;
+  insert: () => { error: null };
+  update: () => StressQueryApi;
+  upsert: (row: Row) => { select: () => { single: () => Promise<QueryResponse<Row>> } };
+  then: (resolve: (value: QueryResponse<Row[]>) => unknown) => Promise<unknown>;
+};
+type PlaybackBody = { playback?: { url?: unknown } };
+
 const describeStress = process.env.STRESS === '1' ? describe : describe.skip;
 
-function createStressAdmin(state: Record<string, Row[]>) {
+function createStressAdmin(state: Record<string, Row[]>): SupabaseClient {
   let sessionSeq = 0;
-  return {
-    from(table: string) {
+  const admin = {
+    from(table: string): StressQueryApi {
       const filters: Array<(row: Row) => boolean> = [];
-      const api: any = {
+      const api: StressQueryApi = {
         select: () => api,
-        eq(col: string, value: unknown) { filters.push((row) => row[col] === value); return api; },
-        is(col: string, value: unknown) { filters.push((row) => value === null ? row[col] == null : row[col] === value); return api; },
-        neq(col: string, value: unknown) { filters.push((row) => row[col] !== value); return { error: null }; },
+        eq(col, value) { filters.push((row) => row[col] === value); return api; },
+        is(col, value) { filters.push((row) => (value === null ? row[col] == null : row[col] === value)); return api; },
+        neq(col, value) { filters.push((row) => row[col] !== value); return { error: null }; },
         maybeSingle: async () => ({ data: (state[table] ?? []).find((row) => filters.every((fn) => fn(row))) ?? null, error: null }),
         insert: () => ({ error: null }),
         update: () => api,
-        upsert(row: Row) {
+        upsert(row) {
           const rows = state[table] = state[table] ?? [];
           const existing = rows.find((item) => item.user_id === row.user_id && (item.game_id ?? null) === (row.game_id ?? null) && item.idempotency_key === row.idempotency_key);
           const target = existing ?? { id: `stress-session-${sessionSeq += 1}` };
@@ -25,11 +41,12 @@ function createStressAdmin(state: Record<string, Row[]>) {
           if (!existing) rows.push(target);
           return { select: () => ({ single: async () => ({ data: target, error: null }) }) };
         },
-        then: async (resolve: (value: unknown) => unknown) => resolve({ data: (state[table] ?? []).filter((row) => filters.every((fn) => fn(row))), error: null }),
+        then: async (resolve) => resolve({ data: (state[table] ?? []).filter((row) => filters.every((fn) => fn(row))), error: null }),
       };
       return api;
     },
-  } as any;
+  };
+  return admin as unknown as SupabaseClient;
 }
 
 describeStress('broadcast stress real-world simulation', () => {
@@ -55,11 +72,11 @@ describeStress('broadcast stress real-world simulation', () => {
         },
         body: JSON.stringify({ sessionKey: `device-session-${i}` }),
       });
-      return handleBroadcastSessionStart({ req, env: testEnv, params: {}, admin } as any);
+      return handleBroadcastSessionStart({ req, env: testEnv, params: {}, admin } as BroadcastSessionCtx);
     }));
 
     const statuses = responses.map((res) => res.status);
-    const bodies = await Promise.all(responses.map((res) => res.json() as Promise<any>));
+    const bodies = await Promise.all(responses.map((res) => res.json() as Promise<PlaybackBody>));
     const probeLatencies: number[] = [];
     for (let i = 0; i < 50; i += 1) {
       const probeId = `probe-${i}`;
@@ -71,7 +88,7 @@ describeStress('broadcast stress real-world simulation', () => {
         body: JSON.stringify({ sessionKey: `probe-session-${i}` }),
       });
       const started = performance.now();
-      const probe = await handleBroadcastSessionStart({ req, env: testEnv, params: {}, admin } as any);
+      const probe = await handleBroadcastSessionStart({ req, env: testEnv, params: {}, admin } as BroadcastSessionCtx);
       expect(probe.status).toBe(200);
       probeLatencies.push(performance.now() - started);
     }

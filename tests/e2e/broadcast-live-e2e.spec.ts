@@ -100,10 +100,10 @@ test.describe('Admin Go-Live', () => {
   test('admin entering URL and clicking Go Live sends correct /ops/streams/go-live payload', async ({ page, context }) => {
     await openLive(page, context, 'admin');
     await page.getByRole('button', { name: /Stream controls/ }).click();
-    let posted: any = null;
+    let posted: { isLive?: boolean; collectionId?: string; title?: string; activeGameId?: string | null } | null = null;
     await page.route('**/ops/streams/go-live', async (route) => {
       posted = route.request().postDataJSON();
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, isLive: true, collectionId: posted.collectionId, title: posted.title, activeGameId: posted.activeGameId ?? null }) });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, isLive: true, collectionId: posted?.collectionId, title: posted?.title, activeGameId: posted?.activeGameId ?? null }) });
     });
     await page.getByPlaceholder(/Paste any link/).fill('https://youtube.com/live/BjcQrDA9koY?feature=share');
     await page.getByPlaceholder(/SBBL Finals/).fill('Browser Go Live');
