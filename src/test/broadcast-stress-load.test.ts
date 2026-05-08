@@ -319,15 +319,20 @@ describe('C-4: rate limit RPC failure → in-memory fallback', () => {
 
 // ── C-5: Session expiry rejected by heartbeat ─────────────────────────────────
 describe('C-5: expired session rejected by heartbeat', () => {
-  it('heartbeat on expired session returns 404 session_not_found', async () => {
+  it('heartbeat on max_expires_at-elapsed session returns 403 session_expired', async () => {
+    // The worker heartbeat handler does NOT filter on expires_at.
+    // It queries the session by id+user_id+game_id, checks status==='active',
+    // then enforces max_expires_at cap (line 4573 of index.ts).
+    // To trigger the expiry gate we must set max_expires_at in the past.
     const state = liveState({
       stream_access_sessions: [{
         id: 'expired-sess',
         game_id: 'game-1',
         user_id: 'player-exp',
         status: 'active',
-        // expires_at in the past
         expires_at: new Date(Date.now() - 60_000).toISOString(),
+        // Cap elapsed — this is what the worker actually checks.
+        max_expires_at: new Date(Date.now() - 1_000).toISOString(),
       }],
     });
 
@@ -345,9 +350,10 @@ describe('C-5: expired session rejected by heartbeat', () => {
       admin: buildAdmin(state),
     } as any);
 
-    expect(res.status).toBe(404);
+    // Worker returns 403 session_expired when max_expires_at cap is reached
+    expect(res.status).toBe(403);
     const body = await res.json() as Record<string, unknown>;
-    expect(body.error).toBe('session_not_found');
+    expect(body.error).toBe('session_expired');
   });
 
   it('displaced session returns 404 session_not_found', async () => {
