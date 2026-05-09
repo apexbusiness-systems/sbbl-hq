@@ -7,9 +7,9 @@ const MUTATION_IDEMPOTENCY_RE = [
 ];
 
 // Sliding-window buckets keyed by rate-limit token.
-const runtimeRateLimit = new Map<string, number[]>();
+export const runtimeRateLimit = new Map<string, number[]>();
 // OOM guard: evict the oldest entry when the map exceeds this size.
-const RUNTIME_RATE_LIMIT_MAX = 50_000;
+export let RUNTIME_RATE_LIMIT_MAX = 50_000;
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
@@ -39,7 +39,7 @@ function requiresMutationIdempotency(pathname: string, method: string) {
 }
 
 // Sliding-window rate limiter with OOM guard.
-function enforceInMemoryRateLimit(key: string, limit: number, windowMs: number): boolean {
+export function enforceInMemoryRateLimit(key: string, limit: number, windowMs: number): boolean {
   const now = Date.now();
   const bucket = runtimeRateLimit.get(key) ?? [];
   const next = bucket.filter((ts) => now - ts < windowMs);
@@ -49,9 +49,14 @@ function enforceInMemoryRateLimit(key: string, limit: number, windowMs: number):
   }
   next.push(now);
   if (runtimeRateLimit.size >= RUNTIME_RATE_LIMIT_MAX) {
-    // Evict the oldest inserted key (Map preserves insertion order).
-    const oldest = runtimeRateLimit.keys().next().value;
-    if (oldest !== undefined) runtimeRateLimit.delete(oldest);
+    // Batch evict the oldest 500 entries to avoid calling
+    // keys().next() on every request once the limit is reached.
+    const iterator = runtimeRateLimit.keys();
+    for (let i = 0; i < 500; i++) {
+      const { value, done } = iterator.next();
+      if (done) break;
+      runtimeRateLimit.delete(value);
+    }
   }
   runtimeRateLimit.set(key, next);
   return true;
