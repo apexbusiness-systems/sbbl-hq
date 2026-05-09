@@ -1,18 +1,9 @@
-import { describe, it, expect, beforeEach, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import * as RateLimiter from '../validation-contract-wrapper';
 
 describe('enforceInMemoryRateLimit', () => {
-  const originalMax = RateLimiter.RUNTIME_RATE_LIMIT_MAX;
-
   beforeEach(() => {
     RateLimiter.runtimeRateLimit.clear();
-    // @ts-ignore - modifying exported let
-    RateLimiter.RUNTIME_RATE_LIMIT_MAX = originalMax;
-  });
-
-  afterAll(() => {
-    // @ts-ignore
-    RateLimiter.RUNTIME_RATE_LIMIT_MAX = originalMax;
   });
 
   it('allows requests within the limit', () => {
@@ -37,19 +28,17 @@ describe('enforceInMemoryRateLimit', () => {
   });
 
   it('evicts entries when reaching the max size', () => {
-    // Set a small max for testing
-    // @ts-ignore
-    RateLimiter.RUNTIME_RATE_LIMIT_MAX = 3;
+    const smallMax = 3;
 
-    RateLimiter.enforceInMemoryRateLimit('key1', 5, 1000); // size 1
-    RateLimiter.enforceInMemoryRateLimit('key2', 5, 1000); // size 2
-    RateLimiter.enforceInMemoryRateLimit('key3', 5, 1000); // size 3
+    RateLimiter.enforceInMemoryRateLimit('key1', 5, 1000, smallMax); // size 1
+    RateLimiter.enforceInMemoryRateLimit('key2', 5, 1000, smallMax); // size 2
+    RateLimiter.enforceInMemoryRateLimit('key3', 5, 1000, smallMax); // size 3
 
     expect(RateLimiter.runtimeRateLimit.size).toBe(3);
     expect(RateLimiter.runtimeRateLimit.has('key1')).toBe(true);
 
     // This should trigger batch eviction (500 in prod, but here it will evict all up to 500)
-    RateLimiter.enforceInMemoryRateLimit('key4', 5, 1000);
+    RateLimiter.enforceInMemoryRateLimit('key4', 5, 1000, smallMax);
 
     // It should have evicted all 3 existing keys and added key4
     expect(RateLimiter.runtimeRateLimit.size).toBe(1);
