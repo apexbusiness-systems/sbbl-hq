@@ -105,18 +105,19 @@ export async function handlePublicPollResults({ admin, params }: HandlerCtx) {
   if (pollErr) throw new Error(pollErr.message);
   if (!poll) return json({ ok: false, error: "not_found" }, 404);
 
-  const { data: votes, error: votesErr } = await admin
-    .from("engagement_poll_votes")
-    .select("option_id")
-    .eq("poll_id", pollId);
-  if (votesErr) throw new Error(votesErr.message);
+  const { data: talliesData, error: talliesErr } = await admin.rpc("get_poll_tallies", {
+    p_poll_id: pollId,
+  });
+  if (talliesErr) throw new Error(talliesErr.message);
 
   const tallies: Record<string, number> = {};
-  for (const v of votes ?? []) {
-    const id = String((v as { option_id: string }).option_id);
-    tallies[id] = (tallies[id] ?? 0) + 1;
+  let total = 0;
+  for (const row of (talliesData ?? []) as Array<{ option_id: string; vote_count: number }>) {
+    const id = String(row.option_id);
+    const count = Number(row.vote_count);
+    tallies[id] = count;
+    total += count;
   }
-  const total = (votes ?? []).length;
 
   return json({
     ok: true,
