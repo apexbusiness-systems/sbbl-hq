@@ -68,8 +68,16 @@ const StorePage = () => {
     return mockProducts;
   }, [productsQuery.data]);
 
-  const filtered = category === 'all' ? products : products.filter(p => p.category === category);
-  const detail = selectedProduct ? products.find(p => p.id === selectedProduct) : null;
+  // ⚡ Bolt Performance Optimization: Memoize the filtered array and detail lookup
+  // This prevents expensive O(N) array traversals on every render, such as when
+  // a user clicks to select a different product size or color.
+  const filtered = useMemo(() => {
+    return category === 'all' ? products : products.filter(p => p.category === category);
+  }, [category, products]);
+
+  const detail = useMemo(() => {
+    return selectedProduct ? products.find(p => p.id === selectedProduct) : null;
+  }, [selectedProduct, products]);
 
   const handleSelectProduct = useCallback((id: string, colors?: string[]) => {
     setSelectedProduct(id);
