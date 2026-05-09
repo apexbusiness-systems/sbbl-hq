@@ -361,11 +361,13 @@ export async function handleMyPoints({ req, admin }: HandlerCtx) {
 }
 
 // ── Watch parties ─────────────────────────────────────────────────────────
-function makeJoinCode(): string {
+export function makeJoinCode(): string {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  const bytes = new Uint8Array(6);
+  crypto.getRandomValues(bytes);
   let out = "";
   for (let i = 0; i < 6; i++) {
-    out += alphabet[Math.floor(Math.random() * alphabet.length)];
+    out += alphabet[bytes[i] % alphabet.length];
   }
   return out;
 }
