@@ -1,0 +1,90 @@
+name: Broadcast Evidence Capture
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: broadcast-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  broadcast-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://ezanilxygnpucwkwpsoc.supabase.co' }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'test-anon-key' }}
+      VITE_DEFAULT_LEAGUE: SBBL
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build app
+        run: npm run build
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run broadcast paywall evidence spec
+        run: npx playwright test tests/e2e/broadcast-paywall-evidence.spec.ts --project=chromium --trace=on --reporter=list,html
+
+      - name: Verify broadcast evidence artifacts
+        run: |
+          test -s artifacts/broadcast-evidence/manifest.json
+          node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('artifacts/broadcast-evidence/manifest.json','utf8')); if (m.passFail !== 'PASS') { console.error(m); process.exit(1); } if (!m.screenshots?.length || !m.networkLogs?.length) { console.error('missing evidence artifacts', m); process.exit(1); }"
+          find artifacts/broadcast-evidence/screenshots -type f -name '*.png' -print -quit | grep -q .
+          find artifacts/broadcast-evidence/network-logs -type f -name '*.json' -print -quit | grep -q .
+          find test-results -type f -name '*.zip' -print -quit | grep -q .
+          test -d playwright-report
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-evidence-playwright-report
+          path: playwright-report/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-evidence-screenshots
+          path: artifacts/broadcast-evidence/screenshots/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-evidence-traces
+          path: test-results/**/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload network logs and manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-evidence-network-logs
+          path: |
+            artifacts/broadcast-evidence/manifest.json
+            artifacts/broadcast-evidence/network-logs/
+          if-no-files-found: error
+          retention-days: 14

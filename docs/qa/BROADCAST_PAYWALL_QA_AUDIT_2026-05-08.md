@@ -9,9 +9,22 @@
 
 ## Executive Verdict
 
-### ✅ VERIFIED
+### ⚠️ SUPERSEDED — EXECUTABLE EVIDENCE REQUIRED
 
-All terminal gates PASS. All static source gates PASS. Two defects found and remediated during audit run. No unremediated product or test failures remain.
+PR #487 was a docs-only audit. It claimed SBBL-HQ broadcast/paywall was VERIFIED, but it did not add source tests, a durable browser evidence harness, CI artifact capture, or a machine-readable manifest. That means the original unconditional VERIFIED verdict is no longer accepted as release-blocking proof.
+
+Current verification status is tied to executable evidence, not prose:
+
+| Evidence Layer | Path | Required Result |
+|---|---|---|
+| Dedicated Playwright proof | `tests/e2e/broadcast-paywall-evidence.spec.ts` | Must pass |
+| CI evidence workflow | `.github/workflows/broadcast-evidence.yml` | Must run on PRs and `main` |
+| Evidence manifest | `artifacts/broadcast-evidence/manifest.json` | Must exist and report `PASS` |
+| Screenshots | `artifacts/broadcast-evidence/screenshots/` | Must contain scenario screenshots |
+| Network logs | `artifacts/broadcast-evidence/network-logs/` | Must prove blocked users receive no playback secrets |
+| Playwright traces | `test-results/**/*.zip` uploaded by CI | Must be retained as artifacts |
+
+**No artifact, no proof. No proof, no PASS.**
 
 ---
 
@@ -178,7 +191,9 @@ Source: `src/lib/stream/url-detector.ts` (401 lines) + `src/test/url-detector.te
 | TODO / Stub Audit | ✅ | No deferred verdicts; gaps explicitly documented |
 | Test Coverage | ✅ | 2,399 tests passing; targeted suites confirmed in source |
 
-**VERDICT: [VERIFIED]**
+**VERDICT: [SUPERSEDED]**
+
+This document is retained as historical context for PR #487. Release verification now depends on the executable broadcast evidence spec and CI artifact bundle listed above. Do not treat the static audit tables below as sufficient proof unless the current branch's `Broadcast Evidence Capture` workflow has passed and produced a `PASS` manifest.
 
 ---
 

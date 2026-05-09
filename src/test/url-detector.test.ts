@@ -208,6 +208,55 @@ describe('getStreamDeliveryClass — local + extended extensions', () => {
   });
 });
 
+
+describe('detectStreamUrlType — source-type evidence matrix', () => {
+  it.each([
+    ['YouTube', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'youtube'],
+    ['Twitch', 'https://www.twitch.tv/sbblhq', 'twitch'],
+    ['Vimeo', 'https://vimeo.com/123456789', 'vimeo'],
+    ['HLS .m3u8', 'https://cdn.example.com/live/index.m3u8?token=abc', 'hls'],
+    ['DASH .mpd', 'https://cdn.example.com/live/manifest.mpd', 'dash'],
+    ['MP4', 'https://cdn.example.com/video.mp4', 'mp4'],
+    ['MOV', 'https://cdn.example.com/video.mov', 'mp4'],
+    ['M4V', 'https://cdn.example.com/video.m4v', 'mp4'],
+    ['WEBM', 'https://cdn.example.com/video.webm', 'mp4'],
+    ['WHEP', 'https://media.example.com/whep/session', 'whep'],
+    ['blob/local simulation', 'blob:https://sbbl-hq.icu/local-video', 'local'],
+  ])('classifies %s source URLs', (_label, url, expected) => {
+    expect(detectStreamUrlType(url)).toBe(expected);
+  });
+
+  it.each([
+    ['empty URL', ''],
+    ['malformed URL text', 'not a url at all'],
+    ['javascript protocol', 'javascript:alert(1)'],
+    ['non-video data protocol', 'data:text/html,<script>alert(1)</script>'],
+    ['unsupported extension', 'https://cdn.example.com/archive.zip'],
+  ])('does not classify unsupported or unsafe input: %s', (_label, url) => {
+    expect(detectStreamUrlType(url)).toBe('unknown');
+    expect(getStreamDeliveryClass(url)).toBe('unsupported');
+  });
+
+  it('treats file: URLs as local-only advisory sources, not remote provider sources', () => {
+    expect(detectStreamUrlType('file:///tmp/evidence.mp4')).toBe('local');
+    const playable = toPlayableUrl('file:///tmp/evidence.mp4');
+    expect(playable.type).toBe('local');
+    expect(playable.warning).toMatch(/local file|this browser/i);
+  });
+
+  it.each([
+    'http://localhost:8080/live/stream.m3u8',
+    'http://127.0.0.1/live/stream.m3u8',
+    'http://10.0.0.5/live/stream.mpd',
+    'http://172.16.0.10/live/video.mp4',
+    'http://192.168.1.15/live/video.webm',
+  ])('documents localhost/private IP classification for server-side fetch hardening: %s', (url) => {
+    // The detector is format-only and does not perform server-side fetches.
+    // SSRF/private-network denial belongs at any future server fetch boundary.
+    expect(['hls', 'dash', 'mp4']).toContain(detectStreamUrlType(url));
+  });
+});
+
 describe('advisory + labels', () => {
   it('provides a non-empty label for every known type', () => {
     const types = Object.keys(STREAM_TYPE_LABELS) as Array<keyof typeof STREAM_TYPE_LABELS>;
