@@ -68,6 +68,11 @@ function readBrowserNetwork(): NetworkProfile {
   });
 }
 
+/** Monotonic timestamp in ms. Module-level constant so it is never recreated. */
+function nowMs(): number {
+  return Date.now();
+}
+
 function subscribeToNetwork(cb: (np: NetworkProfile) => void): () => void {
   if (typeof navigator === 'undefined') return () => {};
   const nav = navigator as NavigatorWithConnection;
@@ -172,15 +177,10 @@ export function useStreamForge(
     disabled = false,
   } = options;
 
-  const now = (): number =>
-    typeof performance !== 'undefined' && typeof performance.now === 'function'
-      ? Date.now()
-      : Date.now();
-
   const sessionHash = useMemo(() => hashSessionId(sessionSeed), [sessionSeed]);
 
   const [snapshot, setSnapshot] = useState<QoeSnapshot>(() =>
-    initQoeSnapshot(sessionHash, now(), readBrowserNetwork()),
+    initQoeSnapshot(sessionHash, nowMs(), readBrowserNetwork()),
   );
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
   const lastReconnectTsRef = useRef<number | null>(null);
@@ -199,7 +199,7 @@ export function useStreamForge(
       setSnapshot((prev) =>
         applyQoeEvent(prev, {
           kind,
-          ts: now(),
+          ts: nowMs(),
           ...(extra ?? {}),
         }),
       );
@@ -219,13 +219,13 @@ export function useStreamForge(
     const decision = shouldWarmReconnect({
       consecutiveFailures,
       lastReconnectTs: lastReconnectTsRef.current,
-      now: now(),
+      now: nowMs(),
     });
     return decision.reconnect;
   }, [consecutiveFailures]);
 
   const markWarmReconnect = useCallback(() => {
-    lastReconnectTsRef.current = now();
+    lastReconnectTsRef.current = nowMs();
     setConsecutiveFailures(0);
   }, []);
 
@@ -270,6 +270,13 @@ export function useStreamForge(
     };
   }, [playbackUrl]);
 
+  // The "broadcast" gameId is a non-game placeholder used by the camera-only
+  // admin preview. It has no real aggregation value — every admin's beacons
+  // would land in the same bucket — and it eats the per-IP rate-limit budget,
+  // 429ing legitimate per-game beacons. Treat it as "no telemetry routing".
+  const isPlaceholderGameId = gameId === 'broadcast';
+  const beaconRoutable = Boolean(gameId) && !isPlaceholderGameId;
+
   // ── Beacon shipper ─────────────────────────────────────────────────────
   const buildBeacon = useCallback(() => {
     const s = snapshotRef.current;
@@ -286,33 +293,33 @@ export function useStreamForge(
       rebufferCount: s.rebufferCount,
       errorCount: s.errorCount,
       network: s.network,
-      ts: now(),
+      ts: nowMs(),
     };
   }, [gameId]);
 
   const flushBeacon = useCallback(() => {
     if (disabled) return;
-    if (!gameId) return;
+    if (!beaconRoutable || !gameId) return;
     const beacon = buildBeacon();
     try {
       chosenTransport.send(gameId, beacon);
     } catch {
       /* swallow — beacon delivery is never allowed to break playback */
     }
-  }, [disabled, gameId, buildBeacon, chosenTransport]);
+  }, [disabled, beaconRoutable, gameId, buildBeacon, chosenTransport]);
 
   useEffect(() => {
-    if (disabled || !gameId) return undefined;
+    if (disabled || !beaconRoutable) return undefined;
     const interval = Math.max(5_000, beaconIntervalMs);
     // Also mark heartbeat ticks in the snapshot so playbackMs stays current.
     const id = setInterval(() => {
       setSnapshot((prev) =>
-        applyQoeEvent(prev, { kind: 'heartbeat', ts: now() }),
+        applyQoeEvent(prev, { kind: 'heartbeat', ts: nowMs() }),
       );
       flushBeacon();
     }, interval);
     return () => clearInterval(id);
-  }, [disabled, gameId, beaconIntervalMs, flushBeacon]);
+  }, [disabled, beaconRoutable, beaconIntervalMs, flushBeacon]);
 
   useEffect(() => {
     if (disabled || typeof window === 'undefined') return undefined;

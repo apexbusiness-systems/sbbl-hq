@@ -2,32 +2,63 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import { Play, ShoppingBag, ChevronRight, Trophy, Zap, Shield } from 'lucide-react';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
-import { products, playersOfTheGame } from '@/data/mock';
 import { PotgCard } from '@/components/ui/PotgCard';
 import { useBag } from '@/contexts/BagContext';
+import { useQuery } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { apiFetch } from '@/lib/api/client';
+import { fetchPublicPotg } from '@/lib/api/public';
+import { mapPotgPublicationRows } from '@/lib/potg';
+import type { PlayerOfTheGame, Product } from '@/types';
 
 const AppHomePage = () => {
   const { addToBag } = useBag();
-  const featuredProducts = products.filter(p => p.sale && p.price > 0).slice(0, 3);
+
+  // All home-page data comes from the public worker endpoints. No mock.
+  const productsQuery = useQuery({
+    queryKey: ['public-products'],
+    queryFn: () => apiFetch<{ ok: boolean; data: Product[] }>('/api/public/products'),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const featuredProducts = useMemo<Product[]>(() => {
+    const all = productsQuery.data?.data ?? [];
+    return all.filter((p) => p.badge === 'SALE' && p.price > 0).slice(0, 3);
+  }, [productsQuery.data]);
+
+  const potgQuery = useQuery({
+    queryKey: ['public-potg'],
+    queryFn: () => fetchPublicPotg(),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  });
+  const potgList = useMemo<PlayerOfTheGame[]>(
+    () => mapPotgPublicationRows(potgQuery.data?.data as Record<string, unknown>[] | undefined),
+    [potgQuery.data],
+  );
 
   return (
     <div className="min-h-screen">
 
       {/* ── BRAND HERO ─────────────────────────────────────────── */}
       <section className="relative overflow-hidden bg-[#0A0A0A]" style={{ minHeight: '560px' }}>
-        {/* Photo background */}
-        <picture className="absolute inset-0 w-full h-full">
-          <source media="(min-width: 768px)" srcSet="/assets/hero-desktop.png" />
-          <img
-            src="/assets/hero-mobile.png"
-            alt=""
-            className="w-full h-full object-contain object-center"
-            draggable={false}
-            fetchPriority="high"
-            decoding="sync"
-            loading="eager"
-          />
-        </picture>
+        {/* Photo background — LCP candidate on `/`, so explicit dimensions,
+            responsive srcset, high fetch priority, and async decode keep
+            first paint unblocked while still letting the browser treat this
+            as the largest-content element. */}
+        <img
+          src="/assets/hero-mobile.png"
+          srcSet="/assets/hero-mobile.png 768w, /assets/hero-desktop.png 1920w"
+          sizes="100vw"
+          alt=""
+          width={1920}
+          height={1080}
+          className="absolute inset-0 w-full h-full object-contain object-center"
+          draggable={false}
+          fetchPriority="high"
+          decoding="async"
+          loading="eager"
+        />
         <div className="absolute inset-0 bg-black/45" />
         <div className="absolute inset-0 [background:linear-gradient(to_right,rgba(10,10,10,0.85)_0%,rgba(10,10,10,0.3)_55%,transparent_100%)]" />
         <div className="absolute inset-0 [background:radial-gradient(ellipse_at_20%_65%,rgba(201,168,76,0.18)_0%,transparent_50%)]" />
@@ -130,7 +161,7 @@ const AppHomePage = () => {
       </section>
 
       {/* ── POTG ACROSS ALL LEAGUES ────────────────────────────── */}
-      {playersOfTheGame.length > 0 && (
+      {potgList.length > 0 && (
         <section className="container py-14">
           <div className="flex items-center justify-between mb-6">
             <div>
@@ -144,7 +175,7 @@ const AppHomePage = () => {
             </Link>
           </div>
           <div className="flex gap-4 overflow-x-auto scrollbar-hidden pb-2">
-            {playersOfTheGame.map((potg, i) => (
+            {potgList.map((potg, i) => (
               <PotgCard key={potg.id} potg={potg} featured={i === 0} />
             ))}
           </div>

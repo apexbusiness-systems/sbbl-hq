@@ -1,6 +1,5 @@
 import { useApp } from '@/contexts/AppContext';
 import { LEAGUE_REGISTRY, getLeagueConfig, getLeagueSeasonLabel } from '@/lib/leagues';
-import { SCHEDULE_DATA, type ScheduleDay } from '@/data/schedules';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
 import { Calendar, MapPin, Clock } from 'lucide-react';
@@ -8,6 +7,18 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchPublicSchedule } from '@/lib/api/public';
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+
+type ScheduleGame = { time: string; home: string; away: string };
+type ScheduleCourt = { name: string; games: ScheduleGame[] };
+type ScheduleDay = {
+  leagueId: LeagueId;
+  season: string;
+  week: string;
+  date: string;
+  venue: string;
+  address: string;
+  courts: ScheduleCourt[];
+};
 
 const SchedulesPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -44,13 +55,6 @@ const SchedulesPage = () => {
       setLeagueFilter(activeLeague);
     }
   }, [activeLeague, paramLeague, isValidParam]);
-
-  // ⚡ Bolt Performance Optimization: Memoize the filtered and mapped schedules to avoid O(n) filtering
-  // and O(m) reduce/map operations on every render, especially when the searchParams or other
-  // state triggers a re-render.
-  const filtered = useMemo(() => leagueFilter === 'all'
-    ? SCHEDULE_DATA
-    : SCHEDULE_DATA.filter((s) => s.leagueId === leagueFilter), [leagueFilter]);
 
   // Safely map live schedules into ScheduleDay shape if we have them
   // Group by league and date, then court
@@ -95,7 +99,7 @@ const SchedulesPage = () => {
     }));
   }, [liveSchedules]);
 
-  const displayData = mappedLiveSchedules.length > 0 ? mappedLiveSchedules : filtered;
+  const displayData = mappedLiveSchedules;
 
 
   return (
@@ -128,20 +132,13 @@ const SchedulesPage = () => {
           ))}
         </div>
 
-        {filtered.length === 0 && (
+        {mappedLiveSchedules.length === 0 && !isLoading && (
           <div className="panel p-8 text-center">
             <Calendar className="w-8 h-8 text-primary/40 mx-auto mb-3" />
-            <h2 className="font-display text-lg font-bold">No Schedules Yet</h2>
+            <h2 className="font-display text-lg font-bold">No games scheduled</h2>
             <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
-              Game schedules will appear here as leagues publish their fixtures.
+              Fixtures will appear here as leagues publish their schedules.
             </p>
-          </div>
-        )}
-
-        {mappedLiveSchedules.length === 0 && !isLoading && (
-          <div className="mb-6 p-4 rounded-md border border-border bg-secondary/30 text-sm text-muted-foreground flex items-center gap-3">
-             <Calendar className="w-4 h-4 text-primary" />
-             <span>Showing scheduled season structure. Live game times will be updated when finalized.</span>
           </div>
         )}
 

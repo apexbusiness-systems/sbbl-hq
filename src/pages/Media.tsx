@@ -74,9 +74,13 @@ const MediaPage = () => {
       ? [...allMedia, ...posterProjection]
       : allMedia;
 
-    const dedupedById = baseList.filter((item, idx, arr) =>
-      arr.findIndex(candidate => candidate.id === item.id) === idx,
-    );
+    // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
+    const seen = new Set<string>();
+    const dedupedById = baseList.filter(item => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
 
     return dedupedById.filter(m => {
       const leagueMatch = leagueFilter === 'all' || m.leagueId === leagueFilter;
@@ -85,7 +89,10 @@ const MediaPage = () => {
     });
   }, [allMedia, posterProjection, leagueFilter, typeFilter]);
 
-  const shareAsset = shareModal ? [...allMedia, ...posterProjection].find(m => m.id === shareModal) : null;
+  const shareAsset = useMemo(() =>
+    shareModal ? [...allMedia, ...posterProjection].find(m => m.id === shareModal) : null
+  , [shareModal, allMedia, posterProjection]);
+
   const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
 
   const resolveAspectRatio = (id: string, mediaType: MediaAsset['type']) => {

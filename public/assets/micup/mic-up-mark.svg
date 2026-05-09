@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" width="80" height="80" role="img" aria-labelledby="mic-up-mark-title">
+  <title id="mic-up-mark-title">Mic Up Series mark</title>
+  <desc>Square icon mark of the SBBL Mic Up Series — microphone inside a gold ring on obsidian.</desc>
+  <!-- Background ring -->
+  <circle cx="40" cy="40" r="36" fill="#0A0A0A" stroke="#C9A84C" stroke-width="3"/>
+  <!-- Microphone capsule -->
+  <g transform="translate(40 30)">
+    <rect x="-10" y="-14" width="20" height="30" rx="10" fill="#E8C76A" stroke="#0A0A0A" stroke-width="1.5"/>
+    <line x1="-7" y1="-10" x2="7" y2="-10" stroke="#0A0A0A" stroke-width="1"/>
+    <line x1="-7" y1="-4"  x2="7" y2="-4"  stroke="#0A0A0A" stroke-width="1"/>
+    <line x1="-7" y1="2"   x2="7" y2="2"   stroke="#0A0A0A" stroke-width="1"/>
+    <line x1="-7" y1="8"   x2="7" y2="8"   stroke="#0A0A0A" stroke-width="1"/>
+  </g>
+  <!-- Stem -->
+  <path d="M 40 46 L 40 60" stroke="#C9A84C" stroke-width="3" stroke-linecap="round"/>
+  <!-- Base -->
+  <path d="M 30 66 L 50 66" stroke="#C9A84C" stroke-width="3" stroke-linecap="round"/>
+</svg>

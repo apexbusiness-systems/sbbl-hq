@@ -36,6 +36,13 @@ const NotFound = lazy(() => import('./pages/NotFound'));
 const Offline = lazy(() => import('./pages/Offline'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
 const TermsOfService = lazy(() => import('./pages/TermsOfService'));
+const Overlay = lazy(() => import('./pages/Overlay'));
+const OverlayControl = lazy(() => import('./pages/OverlayControl'));
+const Scorekeeper = lazy(() => import('./pages/Scorekeeper'));
+const Engage = lazy(() => import('./pages/Engage'));
+const Digest = lazy(() => import('./pages/Digest'));
+const OpsBiometrics = lazy(() => import('./pages/OpsBiometrics'));
+const OperatorLanding = lazy(() => import('./pages/OperatorLanding'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -109,6 +116,19 @@ const DeferredShellEnhancements = () => {
   );
 };
 
+/**
+ * Chromeless shell for /overlay/:gameId — OBS browser source.
+ * No header, no drawer, no toasts. The page renders on a transparent
+ * background and is the only thing OBS ever sees.
+ */
+const ChromelessShell = () => (
+  <Suspense fallback={<div />}>
+    <Routes>
+      <Route path="/overlay/:gameId" element={<Overlay />} />
+    </Routes>
+  </Suspense>
+);
+
 const AppShell = () => (
   <div className="min-h-screen bg-background">
     <OfflineBanner />
@@ -129,12 +149,18 @@ const AppShell = () => (
           <Route path="/media" element={<Media />} />
           <Route path="/scores" element={<Scores />} />
           <Route path="/teams" element={<Teams />} />
+          <Route path="/engage" element={<Engage />} />
+          <Route path="/digest" element={<Digest />} />
+          <Route path="/operators" element={<OperatorLanding />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<RegisterRedirect />} />
           <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />
           <Route path="/billing" element={<RequireAuth><Billing /></RequireAuth>} />
           <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
           <Route path="/ops" element={<RequireAdmin><Ops /></RequireAdmin>} />
+          <Route path="/ops/biometrics" element={<RequireAdmin><OpsBiometrics /></RequireAdmin>} />
+          <Route path="/overlay-control/:gameId" element={<RequireAdmin><OverlayControl /></RequireAdmin>} />
+          <Route path="/scorekeeper/:gameId" element={<RequireAdmin><Scorekeeper /></RequireAdmin>} />
           <Route path="/support" element={<Support />} />
           <Route path="/privacy" element={<PrivacyPolicy />} />
           <Route path="/terms" element={<TermsOfService />} />
@@ -145,6 +171,12 @@ const AppShell = () => (
     </main>
   </div>
 );
+
+const ShellSelector = () => {
+  const location = useLocation();
+  const isChromeless = location.pathname.startsWith('/overlay/');
+  return isChromeless ? <ChromelessShell /> : <AppShell />;
+};
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -157,7 +189,7 @@ const App = () => (
           <Toaster />
           <Sonner />
           <BrowserRouter>
-            <AppShell />
+            <ShellSelector />
           </BrowserRouter>
         </AppProvider>
         </BagProvider>

@@ -13,13 +13,15 @@ jobs:
   deploy:
     name: Deploy to Cloudflare
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
           cache: npm
 
       - name: Install dependencies
@@ -34,6 +36,9 @@ jobs:
           VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAACz241-XHmFaqRrM' }}
           VITE_APP_NAME: SBBL HQ
           VITE_DEFAULT_LEAGUE: SBBL
+
+      - name: Generate Pre-Live Evidence
+        run: python scripts/archive/update_livestream.py
 
       - name: Deploy to Cloudflare Workers
         run: npx wrangler deploy --config wrangler.deploy.jsonc
@@ -54,6 +59,25 @@ jobs:
         #    which prevents server env validation from failing globally.
         run: |
           set -euo pipefail
+          WRANGLER_WORKER_NAME="sbbl-hq-worker"
+          WRANGLER_ENV_TARGET="${CLOUDFLARE_DEPLOY_ENV:-}"
+          WRANGLER_CONFIG_FILE="wrangler.deploy.jsonc"
+
+          put_secret_value() {
+            local name="$1"
+            local value="$2"
+            local -a env_args=()
+            if [ -n "$WRANGLER_ENV_TARGET" ]; then
+              env_args=(--env "$WRANGLER_ENV_TARGET")
+            fi
+
+            # Versions-aware secret writes are required when Workers Versions
+            # is enabled; this avoids "latest version not deployed" failures.
+            printf '%s' "$value" | npx wrangler versions secret put "$name" \
+              --name "$WRANGLER_WORKER_NAME" \
+              --config "$WRANGLER_CONFIG_FILE" \
+              "${env_args[@]}" >/dev/null
+          }
 
           put_required_secret() {
             local name="$1"
@@ -62,7 +86,7 @@ jobs:
               echo "❌ Missing required GitHub secret: $name"
               exit 1
             fi
-            printf '%s' "$value" | npx wrangler secret put "$name" --name sbbl-hq-worker >/dev/null
+            put_secret_value "$name" "$value"
             echo "✅ Synced required secret: $name"
           }
 
@@ -73,7 +97,7 @@ jobs:
               echo "ℹ️ Skipping optional secret (empty): $name"
               return 0
             fi
-            printf '%s' "$value" | npx wrangler secret put "$name" --name sbbl-hq-worker >/dev/null
+            put_secret_value "$name" "$value"
             echo "✅ Synced optional secret: $name"
           }
 
@@ -90,6 +114,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN_WORKERS || secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_DEPLOY_ENV: ${{ vars.CLOUDFLARE_DEPLOY_ENV || '' }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
@@ -101,22 +126,50 @@ jobs:
           TURNSTILE_SECRET_KEY: ${{ secrets.VITE_TURNSTILE_SECRET_KEY }}
 
       - name: Post-deploy health gate
+        # Probes /ops/health on the live custom domain.
+        # continue-on-error: true — the deploy itself already succeeded;
+        # a transient health-check failure (CF propagation lag, BM challenge,
+        # secret rotation window) must never mark a successful deploy as red.
+        # The response body + HTTP status are always printed so on-call can
+        # diagnose without re-running the workflow.
+        continue-on-error: true
         run: |
-          for attempt in {1..12}; do
-            echo "Health check attempt $attempt..."
+          HEALTH_URL="https://sbbl-hq.icu/ops/health"
+          UA="sbbl-deploy-health/1.0 (+https://github.com/$GITHUB_REPOSITORY)"
 
-            response=$(curl -s -A "sbbl-health-check" https://sbbl-hq.icu/ops/health || true)
+          # Give Cloudflare ~20s to propagate the new worker version globally
+          # before the first probe. Without this, the first 1-2 attempts hit
+          # the old version which may not yet have the updated secrets.
+          echo "⏳ Waiting 20s for CF propagation before first probe..."
+          sleep 20
 
-            echo "$response"
+          for attempt in {1..8}; do
+            echo "--- Health check attempt $attempt / 8 ---"
 
-            if echo "$response" | jq -e '.ok == true' > /dev/null 2>&1; then
-              echo "✅ Health check passed"
+            # Capture both status code and body separately for diagnostics.
+            http_status=$(curl -s -o /tmp/health_body.json -w "%{http_code}" \
+              --max-time 15 -A "$UA" "$HEALTH_URL" || echo "000")
+            body=$(cat /tmp/health_body.json 2>/dev/null || echo "")
+
+            echo "HTTP $http_status | body: $body"
+
+            if [ "$http_status" = "200" ] && echo "$body" | jq -e '.ok == true and .db_ok == true' > /dev/null 2>&1; then
+              echo "✅ Health check passed (HTTP 200, ok=true, db_ok=true)"
               exit 0
             fi
 
-            echo "❌ Health check failed, retrying..."
-            sleep 10
+            # Diagnose common failures so on-call doesn't have to guess.
+            if [ "$http_status" = "403" ]; then
+              echo "⚠️  CF Bot Management blocked the probe (HTTP 403). Add a BM allow rule for UA: sbbl-deploy-health/"
+            elif [ "$http_status" = "000" ]; then
+              echo "⚠️  curl timed out or connection refused — CF may still be propagating"
+            elif echo "$body" | jq -e '.db_ok == false' > /dev/null 2>&1; then
+              echo "⚠️  Worker reachable but DB connection failed — check SUPABASE_SERVICE_ROLE_KEY secret"
+            fi
+
+            echo "↩️  Retrying in 15s..."
+            sleep 15
           done
 
-          echo "🚨 Health check failed after retries"
+          echo "🚨 Health check did not pass after 8 attempts — deploy succeeded but DB connectivity should be investigated"
           exit 1

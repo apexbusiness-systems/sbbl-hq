@@ -21,6 +21,7 @@ describe('/ops/health endpoint', () => {
     expect(body).toHaveProperty('time');
     expect(body).toHaveProperty('uptime_s');
     expect(body).toHaveProperty('supabase_url');
+    expect(body).not.toHaveProperty('supabase_service_key');
     // Supabase URL must be redacted (no full URL exposed)
     expect(body.supabase_url).not.toContain('supabase.co');
   });
@@ -67,13 +68,30 @@ describe('/api/public-config contract', () => {
   });
 });
 
-describe('CSP includes Facebook embed domains', () => {
-  it('allows Facebook frame-src for /live page embeds', async () => {
+describe('CSP allows stream embed domains including Facebook SDK sources', () => {
+  it('allows YouTube and Twitch frame-src for /live page embeds', async () => {
     const res = await worker.fetch(new Request('https://local/api/public-config'), env);
     const csp = res.headers.get('Content-Security-Policy') ?? '';
-    expect(csp).toContain('https://www.facebook.com');
-    expect(csp).toContain('https://web.facebook.com');
     expect(csp).toContain('https://www.youtube.com');
+    expect(csp).toContain('https://www.youtube-nocookie.com');
+    expect(csp).toContain('https://player.twitch.tv');
+    expect(csp).toContain('https://player.vimeo.com');
+  });
+
+  it('blocks Facebook SDK (facebook.net) but allows facebook.com iframe embed in frame-src', async () => {
+    // connect.facebook.net must stay out of script-src — that SDK load caused
+    // the CacheFirst storm (commit 89d9696). facebook.com is intentionally
+    // allowed in frame-src only, for the plugins/video.php sandboxed iframe.
+    const res = await worker.fetch(new Request('https://local/api/public-config'), env);
+    const csp = res.headers.get('Content-Security-Policy') ?? '';
+    expect(csp).not.toContain('facebook.net');
+    expect(csp).toContain('frame-src');
+    expect(csp).toContain('https://www.facebook.com');
+    // facebook.com must NOT appear in script-src or connect-src
+    const scriptSrc = csp.match(/script-src[^;]*/)?.[0] ?? '';
+    const connectSrc = csp.match(/connect-src[^;]*/)?.[0] ?? '';
+    expect(scriptSrc).not.toContain('facebook');
+    expect(connectSrc).not.toContain('facebook');
   });
 
   it('allows self-hosted Supabase connect-src', async () => {

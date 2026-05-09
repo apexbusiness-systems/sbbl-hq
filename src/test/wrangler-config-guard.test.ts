@@ -85,12 +85,15 @@ describe("deploy.yml guardrails", () => {
     expect(fallbackMatch?.[1]).toMatch(SUPABASE_JWT_REGEX);
   });
 
-  it("must parse /ops/health JSON with jq", () => {
-    expect(deployYml).toContain("jq -e '.ok == true'");
+  it("must parse /ops/health JSON with jq and gate on both ok + db_ok", () => {
+    // We require the predicate to check both `.ok` (worker up) AND
+    // `.db_ok` (worker can reach Supabase). A worker with a broken DB
+    // connection must never mark a deploy healthy.
+    expect(deployYml).toContain("jq -e '.ok == true and .db_ok == true'");
   });
 
   it("must include a retry loop for post-deploy health checks", () => {
-    expect(deployYml).toContain("for attempt in {1..12}; do");
-    expect(deployYml).toContain("sleep 10");
+    expect(deployYml).toContain("for attempt in {1..8}; do");
+    expect(deployYml).toContain("sleep 15");
   });
 });

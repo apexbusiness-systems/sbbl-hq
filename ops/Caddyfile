@@ -1,0 +1,58 @@
+# ops/Caddyfile
+# Caddy reverse proxy for EC2 MediaMTX WHEP streaming endpoint.
+# Deploy to EC2 alongside MediaMTX. Caddy handles TLS + CORS for the
+# WHEP WebRTC egress endpoint so browsers on sbbl-hq.icu can connect.
+#
+# Usage:
+#   caddy run --config /etc/caddy/Caddyfile
+#   caddy reload --config /etc/caddy/Caddyfile
+
+stream.sbbl-hq.icu {
+  # ── CORS preflight for WHEP (egress — viewers) ────────────────────────
+  @whep_options {
+    method OPTIONS
+    path /whep/*
+  }
+  respond @whep_options 204
+
+  header /whep/* {
+    Access-Control-Allow-Origin "https://sbbl-hq.icu"
+    Access-Control-Allow-Methods "POST, PATCH, DELETE, OPTIONS"
+    Access-Control-Allow-Headers "Content-Type, Authorization, If-Match"
+    Access-Control-Expose-Headers "Location, ETag, Link"
+    Access-Control-Max-Age "86400"
+    # Prevent caching of CORS preflight responses
+    -Cache-Control
+  }
+
+  # ── CORS preflight for WHIP (ingest — admin browser publishing) ───────
+  # WHIP (RFC-draft-ietf-wish-whip) lets the admin UI publish the SBBL HQ
+  # broadcast directly from the browser via RTCPeerConnection. MediaMTX
+  # exposes WHIP on the same port as WHEP (default 8889). CORS is required
+  # because the WHIP POST is a cross-origin request from sbbl-hq.icu to
+  # stream.sbbl-hq.icu, and the response carries a Location header that
+  # the browser must read to later DELETE the ingest resource.
+  @whip_options {
+    method OPTIONS
+    path /whip/*
+  }
+  respond @whip_options 204
+
+  header /whip/* {
+    Access-Control-Allow-Origin "https://sbbl-hq.icu"
+    Access-Control-Allow-Methods "POST, PATCH, DELETE, OPTIONS"
+    Access-Control-Allow-Headers "Content-Type, Authorization, If-Match"
+    Access-Control-Expose-Headers "Location, ETag, Link"
+    Access-Control-Max-Age "86400"
+    -Cache-Control
+  }
+
+  # ── Proxy to MediaMTX WebRTC/WHEP server (default port 8889) ─────────
+  reverse_proxy /whep/* localhost:8889
+
+  # ── Proxy to MediaMTX WebRTC/WHIP ingest (same port — WebRTC mux) ─────
+  reverse_proxy /whip/* localhost:8889
+
+  # ── MediaMTX API (optional — restrict to loopback in production) ──────
+  reverse_proxy /api/* localhost:9997
+}

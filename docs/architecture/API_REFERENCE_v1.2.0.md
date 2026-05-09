@@ -1,9 +1,18 @@
-<!-- Version: v1.2.0 | Date: 2026-04-05 | Status: Current -->
+<!-- Version: v1.3.0 | Date: 2026-05-06 | Status: Current -->
 # SBBL Worker API Reference
 
-**Version:** v1.2.0
-**Previous:** v1.1.0 (2026-04-04)
-**Last Updated:** 2026-04-05
+**Version:** v1.3.0
+**Previous:** v1.2.0 (2026-04-05)
+**Last Updated:** 2026-05-06
+
+**Changelog (v1.2.0 → v1.3.0):**
+- Added **Broadcast** section documenting the `/api/broadcast/*` route
+  family (open-broadcast access, session, heartbeat, end). These routes
+  are independent of games and PPV — see CLAUDE.md Rule 7 and
+  `BROADCAST_PAYWALL_SYSTEM.md §10` for the freeze policy.
+- Clarified that `/api/streams/:gameId/*` is PPV/game-specific only.
+  The `'broadcast'` gameId alias is rejected by `handlePlaybackSession`
+  with `400 use_broadcast_endpoint` as of v1.3.0.
 
 Base: Worker routes in `src/worker/index.ts`.
 
@@ -34,6 +43,13 @@ All mutating methods (`POST/PUT/PATCH/DELETE`) require a valid idempotency key v
 - `GET /api/scores` — Public scores with filtering.
 - `GET /api/streams/status?gameId=<id>` — Public stream state `{ isLive, title, viewerCount, gameId }`. No playback URL. Edge-cached (10s TTL).
 - `GET /api/streams/:gameId/reactions` — Reaction counts.
+- `GET /api/public/overlay/:gameId` — Live scoreboard overlay state + active sponsor. `Cache-Control: no-store` (live state). Consumed by `/overlay/:gameId` chromeless OBS page.
+- `GET /api/public/engagement/polls?gameId=<id>` — Open/locked/closed polls, predictions, trivia.
+- `GET /api/public/engagement/polls/:id/results` — Live vote tallies per option.
+- `GET /api/public/engagement/leaderboard` — Top 25 fans by gamification points (via `get_gamification_leaderboard`).
+- `GET /api/public/sponsors?leagueId=<uuid>` — Active sponsors (edge-cached 30 s).
+- `POST /api/public/sponsors/:id/track` — Record `impression` or `click` (fire-and-forget).
+- `GET /api/public/digest?league=<code>` — AI-generated weekly recap. Cached per `(league, week_start)`; falls back to deterministic template when `GROQ_API_KEY` is absent. Edge-cached 5 min.
 
 ### Session & Profile
 - `GET /auth/session` — `{ ok, userId, roles }` or `401`.
@@ -48,19 +64,48 @@ All mutating methods (`POST/PUT/PATCH/DELETE`) require a valid idempotency key v
 - `GET /api/stats` — Stats dashboard (RPC `get_stats_dashboard`).
 - `GET /api/leaderboards` — Leaderboards (RPC `get_leaderboards`).
 
-### Streams (Authenticated)
-- `GET /api/streams/:gameId/access` — Check user's stream access.
+### Broadcast — Open Broadcast (Authenticated, FROZEN — see CLAUDE.md Rule 7)
+
+These routes own the open-broadcast path. They have zero game coupling.
+Access requirement: `onboarding_completed_at IS NOT NULL` (completed fan
+onboarding). No PPV, no entitlement rows, no `can_user_view_stream`.
+
+- `GET /api/broadcast/access` — `{ ok, hasAccess: boolean }`. Returns
+  `hasAccess=false` when stream is offline regardless of registration status.
+- `POST /api/broadcast/session` — Start or refresh a broadcast viewing session.
+  Body: `{ sessionKey: string (≥8 chars) }`.
+  Returns: `{ ok, playback: { url, type, heartbeatIntervalSec, maxExpiresAt }, session: { id, maxExpiresAt } }`.
+  Super admins bypass all checks and get the URL even when `is_live=false`.
+  One-device enforcement: a new session displaces the previous active session
+  for the same user; the displaced device's next heartbeat gets `session_not_found`.
+- `POST /api/broadcast/session/heartbeat` — Extend session TTL. Body: `{ sessionId }`.
+  Returns: `{ ok, expiresAt }`. Returns `404 session_not_found` if session is
+  missing, expired, or displaced.
+- `POST /api/broadcast/session/end` — Teardown session. Body: `{ sessionId }`.
+
+> **Do NOT add `game_id`, PPV, or entitlement logic to these routes.**
+> See `BROADCAST_PAYWALL_SYSTEM.md §10` and `STREAM_INDEPENDENCE_CONTRACT.md §7`.
+
+### Streams — PPV / Game-Specific (Authenticated)
+
+`:gameId` must be a real UUID from the `games` table. Passing `'broadcast'`
+or omitting gameId returns `400 use_broadcast_endpoint` — use `/api/broadcast/*`.
+
+- `GET /api/streams/:gameId/access` — Check PPV entitlement for a game.
+  Returns `{ ok, hasAccess: boolean }` via `can_user_view_stream` RPC.
 - `POST /api/streams/:gameId/purchase` — Create Stripe PPV checkout. Turnstile-protected.
-- `POST /api/streams/:gameId/session` — Create secure playback session. Returns `{ playback: { url, expiresAt, heartbeatIntervalSec }, session: { id, gameId } }`.
+- `POST /api/streams/:gameId/session` — Create secure playback session for a PPV game.
+  Returns `{ playback: { url, expiresAt, heartbeatIntervalSec }, session: { id, gameId } }`.
 - `POST /api/streams/:gameId/session/heartbeat` — Keep session alive. TTL: 70s.
 - `POST /api/streams/:gameId/session/end` — Teardown session.
 - `GET /api/streams/:gameId/comments` — Recent chat messages.
 - `POST /api/streams/:gameId/comments` — Post chat message. Rate-limited (10/user/30s, 20/IP/30s).
 - `POST /api/streams/:gameId/react` — Post reaction (fire/heart/clap).
+- `GET /api/streams/:gameId/replay/status` — Replay availability, embargo state, and price.
 
 ### Invites
 - `POST /api/invite/generate` — Generate single-use fan invite. Eligible: player, paid_fan, super_admin.
-- `POST /api/invite/redeem` — Redeem invite code. IP-locked, 24h expiry. Turnstile-protected.
+- `POST /api/invite/redeem` — Redeem invite code. IP-locked, 48h default expiry (canonical `ENTITLEMENT.MANUAL_COMP_VALIDITY_HOURS`, clamped `[1,168]`). Turnstile-protected.
 
 ### Commerce
 - `GET /api/cart` — User's cart.
@@ -92,6 +137,17 @@ Require `league_admin`, `super_admin`, or `team_manager` role.
 - `POST /api/coach/request` — Coach approval request.
 - `GET /ops/coach/requests` — List coach requests.
 - `POST /ops/coach/:id/resolve` — Resolve coach request.
+- `POST /api/ops/overlay/:gameId/{state,clock,score,foul,period,reset}` — Scoreboard overlay mutations (super_admin / league_admin / team_manager / media_operator). Score/reset mirror to `games.home_score` / `games.away_score`.
+- `POST /api/ops/engagement/polls` — Create poll/prediction/trivia. `POST /api/ops/engagement/polls/:id` updates status/correct option. `POST /api/ops/engagement/polls/:id/grade` awards points idempotently.
+- `GET /api/ops/sponsors` · `POST /api/ops/sponsors` · `POST /api/ops/sponsors/:id` · `POST /api/ops/sponsors/:id/delete` — Sponsor CRUD (super_admin / league_admin).
+- `POST /api/ops/obs/commands` · `GET /api/ops/obs/commands` — Enqueue / list OBS commands (super_admin / league_admin / media_operator).
+- `GET /api/ops/obs/commands/pending` · `POST /api/ops/obs/commands/:id/ack` — On-site `obs-agent` endpoints, auth'd by `Bearer $OBS_AGENT_TOKEN` (not Supabase JWT).
+- `POST /api/ops/digest/:leagueCode/regenerate` — Force-rebuild weekly digest (super_admin / league_admin / media_operator).
+
+Authenticated fan endpoints (non-admin):
+- `POST /api/engagement/polls/:id/vote` — One vote per (poll, user) enforced by unique constraint.
+- `GET /api/engagement/me/points` — Personal points + award history.
+- `POST /api/engagement/watch-parties` · `GET /api/engagement/watch-parties?gameId=<id>` · `POST /api/engagement/watch-parties/:id/join` · `POST /api/engagement/watch-parties/join-by-code` — Watch-party lifecycle.
 
 ### Webhooks
 - `POST /webhooks/stripe` — Stripe webhook (HMAC-SHA256 verified).

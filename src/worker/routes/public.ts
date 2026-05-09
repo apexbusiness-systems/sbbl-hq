@@ -26,7 +26,12 @@ export async function handlePublicSchedule({ req, admin }: HandlerCtx) {
   }
   const { data, error } = await q.order("starts_at", { ascending: true });
   if (error) throw new Error(error.message);
-  return json({ ok: true, data });
+  return new Response(JSON.stringify({ ok: true, data }), {
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "public, s-maxage=60, max-age=30",
+    },
+  });
 }
 
 export async function handlePublicPotg({ admin }: HandlerCtx) {
@@ -38,7 +43,12 @@ export async function handlePublicPotg({ admin }: HandlerCtx) {
     .order("created_at", { ascending: false })
     .limit(20);
   if (error) throw new Error(error.message);
-  return json({ ok: true, data });
+  return new Response(JSON.stringify({ ok: true, data }), {
+    headers: {
+      "content-type": "application/json",
+      "cache-control": "public, s-maxage=30, max-age=15",
+    },
+  });
 }
 
 export async function handlePublicHome({ req, admin }: HandlerCtx) {
@@ -142,30 +152,39 @@ export async function handlePublicHome({ req, admin }: HandlerCtx) {
     .slice(0, 5)
     .map(enrichGame);
 
-  const activeSeason = (seasonsRes.data ?? []).find(
-    (s: Record<string, unknown>) => {
-      const sLeagues = s.leagues as { code?: string } | null;
-      return (sLeagues?.code ?? "").toUpperCase() === leagueCode;
-    },
+  // FAST PATH: If we resolved activeLeagueId, match by ID directly (O(1) comparison vs string allocations)
+  const activeSeason = (seasonsRes.data ?? []).find((s: Record<string, unknown>) =>
+    activeLeagueId
+      ? s.league_id === activeLeagueId
+      : ((s.leagues as { code?: string } | null)?.code ?? "").toUpperCase() ===
+        leagueCode,
   ) as { id: string; name: string; status: string } | undefined;
 
-  return json({
-    ok: true,
-    league: activeLeague,
-    season: activeSeason
-      ? {
-          id: activeSeason.id,
-          name: activeSeason.name,
-          status: activeSeason.status,
-        }
-      : null,
-    teams: leagueTeams,
-    totalTeams: leagueTeams.length,
-    totalRostered: leagueTeams.reduce((sum, t) => sum + t.roster_count, 0),
-    liveGames,
-    upcomingGames,
-    recentGames,
-    totalGames: leagueGames.length,
-    leagues: leagues.map((l) => ({ id: l.id, name: l.name, code: l.code })),
-  });
+  return new Response(
+    JSON.stringify({
+      ok: true,
+      league: activeLeague,
+      season: activeSeason
+        ? {
+            id: activeSeason.id,
+            name: activeSeason.name,
+            status: activeSeason.status,
+          }
+        : null,
+      teams: leagueTeams,
+      totalTeams: leagueTeams.length,
+      totalRostered: leagueTeams.reduce((sum, t) => sum + t.roster_count, 0),
+      liveGames,
+      upcomingGames,
+      recentGames,
+      totalGames: leagueGames.length,
+      leagues: leagues.map((l) => ({ id: l.id, name: l.name, code: l.code })),
+    }),
+    {
+      headers: {
+        "content-type": "application/json",
+        "cache-control": "public, s-maxage=30, max-age=15",
+      },
+    },
+  );
 }

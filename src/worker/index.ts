@@ -4,6 +4,9 @@ import { safeServerEnv } from "@/lib/env";
 import { readIdempotencyKey } from "@/lib/api/idempotency";
 import { normalizeIngress, type IngressSourceType } from "@/lib/omniport";
 import { signSyncPacket, type SyncPacket } from "@/lib/sync-packets";
+import { ENTITLEMENT, ENTITLEMENT_MS } from "@/lib/constants/ENTITLEMENT_CONSTANTS";
+import { selectPlaybackProvider } from "@/lib/playback/selectProvider";
+import { verifyPlaybackToken } from "@/lib/playback/signed-token";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import {
   mergeBeaconIntoAggregate,
@@ -11,6 +14,7 @@ import {
   toHealthReport,
   type AggregatedHealth,
 } from "@/lib/stream/streamforge";
+import { getStreamDeliveryClass, canonicalizeStreamSourceUrl } from "@/lib/stream/url-detector";
 import {
   handlePublicConfig as _handlePublicConfig,
   handlePublicHome as _handlePublicHome,
@@ -21,6 +25,70 @@ import {
   handleQoeIngest,
   handleQoeHealthReport,
 } from "./routes/stream-qoe";
+import {
+  handlePublicOverlay,
+  handleOverlayPatch,
+  handleOverlayClock,
+  handleOverlayScore,
+  handleOverlayFoul,
+  handleOverlayPeriod,
+  handleOverlayReset,
+} from "./routes/overlay";
+import {
+  handlePublicPollsList,
+  handlePublicPollResults,
+  handlePublicEngagementLeaderboard,
+  handleCastVote,
+  handleCreatePoll,
+  handleUpdatePoll,
+  handleGradePoll,
+  handleMyPoints,
+  handleCreateWatchParty,
+  handleListWatchParties,
+  handleJoinWatchParty,
+  handleJoinByCode,
+} from "./routes/engagement";
+import {
+  handleLeaderboardByGame,
+  handleLeaderboardBySeason,
+  handleTokenAward,
+  handleTokenCategories,
+  handleTokenProducts,
+  handleTokenPurchase,
+  handleTokenWallet,
+  handleTokenWebhook,
+} from "./routes/tokens";
+import {
+  handleBiometricIngest,
+  handleBiometricLatest,
+  handleBiometricWebhookIngest,
+} from "./routes/biometrics";
+import { handleLatestMicUpOverlayEvents, handleMicUpOverlayEvent } from "./routes/overlay-events";
+import { handleReplayStatus } from "./routes/replay";
+import {
+  handlePublicSponsors,
+  handleTrackSponsorEvent,
+  handleAdminListSponsors,
+  handleCreateSponsor,
+  handleUpdateSponsor,
+  handleDeleteSponsor,
+} from "./routes/sponsors";
+import {
+  handleEnqueueObsCommand,
+  handleListObsCommands,
+  handleAgentPending,
+  handleAgentAck,
+} from "./routes/obs";
+import { handlePublicDigest, handleRegenerateDigest } from "./routes/digest";
+import {
+  handlePublicHighlights,
+  handleMarkHighlight,
+  handleDeleteHighlight,
+  handleUpdateHighlight,
+  handleReactionAggregate,
+} from "./routes/highlights";
+import { parseStripeSignature, constantTimeEqualHex } from "./stripe-utils";
+export { parseStripeSignature, constantTimeEqualHex };
 
 type HandlerCtx = {
   req: Request;
@@ -34,6 +102,16 @@ type Handler = (ctx: HandlerCtx) => Promise<Response>;
 type Route = { method: string; regex: RegExp; handler: Handler };
 const transientIdempotency = new Map<string, number>();
 const transientRateLimits = new Map<string, number[]>();
+const streamUrlCache = new Map<string, { url: string; expiresAtMs: number }>();
+const STREAM_URL_CACHE_TTL_MS = 30_000;
+
+const ALLOWED_ORIGINS = [
+  "https://sbbl-hq.icu",
+  "https://www.sbbl-hq.icu",
+  "http://localhost:5173",
+  "capacitor://localhost",
+  "http://localhost",
+];
 
 // Per-isolate cached admin Supabase client.  Cloudflare Workers reuse isolate
 // memory across requests, so we avoid creating a new client on every fetch.
@@ -53,8 +131,8 @@ type HeartbeatEntry = {
 };
 const heartbeatQueue: HeartbeatEntry[] = [];
 let heartbeatFlushTimer: ReturnType<typeof setTimeout> | null = null;
-const HEARTBEAT_FLUSH_INTERVAL_MS = 30_000;
-const HEARTBEAT_QUEUE_MAX = 5_000; // OOM guard — drop oldest if queue exceeds this
+const HEARTBEAT_FLUSH_INTERVAL_MS = 5_000; // Flush every 5 seconds instead of 30 to keep batch sizes small (approx ~4000 for 20k users)
+const HEARTBEAT_QUEUE_MAX = 10_000; // Expanded to handle up to 40k+ concurrents safely over 5s
 const HEARTBEAT_MAX_RETRIES = 3;    // Stop retrying after 3 consecutive failures
 let heartbeatConsecutiveFailures = 0;
 
@@ -178,18 +256,151 @@ function getBearerToken(req: Request) {
 }
 
 const textEncoder = new TextEncoder();
+const proxyEncoder = new TextEncoder();
+const PROXY_AUTH_COOKIE = "sbbl_proxy_auth";
 
-export function parseStripeSignature(header: string) {
-  const fields = header.split(",").map((part) => part.trim());
-  const timestamp = fields.find((part) => part.startsWith("t="))?.slice(2);
-  const signatures = fields
-    .filter((part) => part.startsWith("v1="))
-    .map((part) => part.slice(3))
-    .filter(Boolean);
-  return {
-    timestamp: timestamp ? Number(timestamp) : NaN,
-    signatures,
-  };
+type ProxyTokenPayload = {
+  gameId: string;
+  userId: string;
+  sessionId: string;
+  exp: number;
+};
+
+function toBase64Url(input: Uint8Array): string {
+  let binary = "";
+  for (let i = 0; i < input.byteLength; i += 1) binary += String.fromCharCode(input[i]);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function fromBase64Url(input: string): Uint8Array | null {
+  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "===".slice((normalized.length + 3) % 4);
+  try {
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+    return bytes;
+  } catch {
+    return null;
+  }
+}
+
+async function signProxyToken(payload: ProxyTokenPayload, secret: string): Promise<string> {
+  const payloadBytes = proxyEncoder.encode(JSON.stringify(payload));
+  const key = await crypto.subtle.importKey(
+    "raw",
+    proxyEncoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, payloadBytes);
+  return `${toBase64Url(payloadBytes)}.${toBase64Url(new Uint8Array(signature))}`;
+}
+
+async function verifyProxyToken(token: string, secret: string): Promise<ProxyTokenPayload | null> {
+  const [payloadPart, signaturePart] = token.split(".");
+  if (!payloadPart || !signaturePart) return null;
+  const payloadBytes = fromBase64Url(payloadPart);
+  const signatureBytes = fromBase64Url(signaturePart);
+  if (!payloadBytes || !signatureBytes) return null;
+  const key = await crypto.subtle.importKey(
+    "raw",
+    proxyEncoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  const valid = await crypto.subtle.verify("HMAC", key, signatureBytes, payloadBytes);
+  if (!valid) return null;
+  const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as ProxyTokenPayload;
+  if (
+    !payload ||
+    typeof payload.gameId !== "string" ||
+    typeof payload.userId !== "string" ||
+    typeof payload.sessionId !== "string" ||
+    typeof payload.exp !== "number"
+  ) {
+    return null;
+  }
+  if (Math.floor(Date.now() / 1000) >= payload.exp) return null;
+  return payload;
+}
+
+function readCookie(req: Request, name: string): string | null {
+  const cookie = req.headers.get("cookie");
+  if (!cookie) return null;
+  const prefix = `${name}=`;
+  for (const part of cookie.split(";")) {
+    const trimmed = part.trim();
+    if (trimmed.startsWith(prefix)) return decodeURIComponent(trimmed.slice(prefix.length));
+  }
+  return null;
+}
+
+function toProxyPath(pathname: string, gameId: string): string {
+  const prefix = `/api/streams/${gameId}/proxy/`;
+  return pathname.startsWith(prefix) ? pathname.slice(prefix.length) : "";
+}
+
+function toGatewayAbsoluteUrl(input: string, gameId: string): string {
+  if (/^(?:https?:)?\/\//i.test(input)) {
+    try {
+      const parsed = new URL(input, "https://placeholder.local");
+      return `/api/streams/${gameId}/proxy/${parsed.pathname.replace(/^\/+/, "")}${parsed.search}`;
+    } catch {
+      return input;
+    }
+  }
+  if (input.startsWith("/")) return `/api/streams/${gameId}/proxy/${input.replace(/^\/+/, "")}`;
+  return `/api/streams/${gameId}/proxy/${input}`;
+}
+
+function rewriteManifestToGateway(manifest: string, gameId: string): string {
+  const rewrittenAttrs = manifest.replace(
+    /URI="([^"]+)"/g,
+    (_match: string, uri: string) => `URI="${toGatewayAbsoluteUrl(uri, gameId)}"`,
+  );
+  // Single-pass line transform: only non-comment URIs are rewritten.
+  return rewrittenAttrs.replace(
+    /^(?!#)([^\r\n]+)$/gm,
+    (line: string) => toGatewayAbsoluteUrl(line.trim(), gameId),
+  );
+}
+
+function resolveProxyTarget(trueOrigin: string, requestUrl: string, gameId: string): string {
+  const reqUrl = new URL(requestUrl);
+  const proxyPath = toProxyPath(reqUrl.pathname, gameId);
+  const target = new URL(proxyPath, trueOrigin);
+  reqUrl.searchParams.forEach((value, key) => target.searchParams.set(key, value));
+  return target.toString();
+}
+
+async function getStreamUrlForGame(
+  admin: SupabaseClient,
+  gameId: string,
+  env: Env,
+): Promise<string> {
+  const nowMs = Date.now();
+  const cacheHit = streamUrlCache.get(gameId);
+  if (cacheHit && cacheHit.expiresAtMs > nowMs) return cacheHit.url;
+
+  // Resolve via stream_admin_config.collection_id (canonical source — same path
+  // used by handlePlaybackSession). Never reads games.stream_url; raw origin is
+  // never returned to clients (handleStreamProxy proxies it).
+  const cfg = await admin
+    .from("stream_admin_config")
+    .select("collection_id")
+    .eq("id", true)
+    .maybeSingle();
+  if (cfg.error) throw new Error(cfg.error.message);
+  const streamUrl =
+    String((cfg.data as { collection_id?: string } | null)?.collection_id ?? "").trim() ||
+    String(env.VITE_STREAM_URL ?? "").trim();
+  if (!streamUrl) throw new Error("stream_not_configured");
+
+  streamUrlCache.set(gameId, { url: streamUrl, expiresAtMs: nowMs + STREAM_URL_CACHE_TTL_MS });
+  return streamUrl;
 }
 
 async function signHmacSha256(secret: string, payload: string) {
@@ -225,8 +436,8 @@ async function verifyStripeSignature(
 
   const payload = `${parsed.timestamp}.${rawBody}`;
   const expected = await signHmacSha256(secret, payload);
-  return parsed.signatures.some(
-    (candidate) => candidate.toLowerCase() === expected,
+  return parsed.signatures.some((candidate) =>
+    constantTimeEqualHex(candidate.toLowerCase(), expected),
   );
 }
 
@@ -266,6 +477,57 @@ async function verifyTurnstileToken(
 // header is ignored. If JWT verification fails, session is null (unauthenticated).
 let jwksClient: ReturnType<typeof createRemoteJWKSet> | null = null;
 
+// Resolve the roles granted to a verified user.
+//
+// Why this exists as its own function:
+//   Supabase Auth's default JWT does NOT embed our custom `user_role` claim
+//   (it only appears when a Custom Access Token hook writes it, which this
+//   project does not configure). Reading `payload.user_role` alone silently
+//   downgrades every admin / coach / team_manager to the `fan` fallback —
+//   locking them out of Leaderboards and the full stat tier. The source of
+//   truth is `public.user_role_assignments`; every privileged role lives
+//   there. We merge whatever the JWT supplied with what the DB says so
+//   future claim hooks continue to work.
+//
+// Semantics:
+//   - JWT value may be a string ("super_admin") or an array.
+//   - DB lookup may fail (network/DB hiccup) — in that case we fall back to
+//     the JWT value. We deliberately do NOT throw; the user is still
+//     authenticated, they just don't get elevated privileges on this request.
+//   - If both JWT and DB produce no roles, caller gets `["fan"]`.
+export async function resolveUserRoles(
+  admin: SupabaseClient,
+  userId: string,
+  jwtUserRole: unknown,
+): Promise<string[]> {
+  const jwtRoles: string[] = [];
+  if (typeof jwtUserRole === "string" && jwtUserRole.trim()) {
+    jwtRoles.push(jwtUserRole.trim());
+  } else if (Array.isArray(jwtUserRole)) {
+    for (const r of jwtUserRole) {
+      if (typeof r === "string" && r.trim()) jwtRoles.push(r.trim());
+    }
+  }
+
+  let dbRoles: string[] = [];
+  try {
+    const { data, error } = await admin
+      .from("user_role_assignments")
+      .select("role")
+      .eq("user_id", userId);
+    if (!error && Array.isArray(data)) {
+      dbRoles = data
+        .map((row) => (row as { role?: unknown }).role)
+        .filter((r): r is string => typeof r === "string" && r.length > 0);
+    }
+  } catch (lookupErr) {
+    console.error("Role assignment lookup failed:", lookupErr);
+  }
+
+  const merged = new Set<string>([...jwtRoles, ...dbRoles]);
+  return merged.size > 0 ? Array.from(merged) : ["fan"];
+}
+
 async function getSession(req: Request, env: Env) {
   const token = getBearerToken(req);
   if (!token || !env.SUPABASE_URL) return null;
@@ -282,10 +544,13 @@ async function getSession(req: Request, env: Env) {
     });
 
     if (payload && payload.sub) {
-      return {
-        userId: payload.sub,
-        roles: (payload.user_role ? [payload.user_role] : ["fan"]) as string[],
-      };
+      const userId = String(payload.sub);
+      const roles = await resolveUserRoles(
+        getAdminClient(env),
+        userId,
+        payload.user_role,
+      );
+      return { userId, roles };
     }
   } catch (error) {
     console.error("JWT Verification failed:", error);
@@ -300,6 +565,15 @@ function requireAuth(req: Request) {
     throw new Error("unauthorized");
   }
   return userId;
+}
+
+/**
+ * Non-throwing auth reader for read-only public endpoints that can
+ * render richer responses for signed-in callers (e.g. the preflight
+ * snapshot includes entitlement status when known, omits when anon).
+ */
+function optionalAuth(req: Request): string | null {
+  return req.headers.get("x-sbbl-user-id-verified") || null;
 }
 
 async function ensureMutation(req: Request, ctx: HandlerCtx) {
@@ -398,25 +672,165 @@ async function handleMutationAck(ctx: HandlerCtx) {
   });
 }
 
-async function handleStats({ req, admin }: HandlerCtx) {
-  const userId = requireAuth(req);
-  const filters = Object.fromEntries(new URL(req.url).searchParams.entries());
-  const { data, error } = await admin.rpc("get_stats_dashboard", {
+export async function handleStats(ctx: HandlerCtx) {
+  const { tier, userId } = await computeStatAccessTier(ctx);
+  const filters = Object.fromEntries(
+    new URL(ctx.req.url).searchParams.entries(),
+  );
+  const { data, error } = await ctx.admin.rpc("get_stats_dashboard", {
     p_filters: filters,
   });
   if (error) throw new Error(error.message);
-  return json({ ok: true, userId, data }, 200, { "Cache-Control": "public, s-maxage=60, max-age=30" });
+  const rows = Array.isArray((data as { players?: unknown[] })?.players)
+    ? (data as { players: Record<string, unknown>[] }).players
+    : [];
+  const players = rows.map(normalizePublicPlayerRow).map((r) =>
+    applyStatTier(r, tier),
+  );
+  return json(
+    { ok: true, userId, tier, data: players },
+    200,
+    userId
+      ? { "Cache-Control": "private, no-store", Vary: "Authorization" }
+      : { "Cache-Control": "public, s-maxage=30, max-age=15" },
+  );
 }
 
-async function handleLeaderboards({ req, admin }: HandlerCtx) {
-  const userId = requireAuth(req);
-  const filters = Object.fromEntries(new URL(req.url).searchParams.entries());
-  const { data, error } = await admin.rpc("get_leaderboards", {
+// Stat-access tier. Central authority on WHO sees WHICH stat fields.
+//
+//   'full'    — full stat line (pts, reb, ast, stl, blk, fls, min).
+//               Granted to: super_admin, league_admin, coach, team_manager,
+//                           and player with an active subscription
+//                           (profiles.subscription_ends_at > now()).
+//   'minimal' — pts / reb / ast only. Other fields are stripped (undefined).
+//               Granted to: everyone else (anonymous, fan, paid_fan, and
+//               players whose subscription has lapsed).
+//   'denied'  — not permitted to read the endpoint at all. Used by the
+//               Leaderboards route, which is gated strictly to 'full'.
+//
+// Business rationale (CLAUDE.md § Hard Rules):
+//   Leaderboards are a premium feature — only registered paid players,
+//   coaches, admins, and super-admins may view them. The full stat line
+//   is also premium — fans and lapsed players see the free tier only.
+export type StatAccessTier = "full" | "minimal" | "denied";
+
+export const FULL_STAT_ROLES = new Set([
+  "super_admin",
+  "league_admin",
+  "coach",
+  "team_manager",
+]);
+
+export async function computeStatAccessTier(
+  ctx: HandlerCtx,
+): Promise<{ tier: "full" | "minimal"; userId: string | null }> {
+  let userId: string | null = null;
+  try {
+    userId = requireAuth(ctx.req);
+  } catch {
+    // Anonymous viewer — gets minimal tier.
+    return { tier: "minimal", userId: null };
+  }
+
+  const roles = getRolesFromVerifiedSession(ctx.req);
+
+  if (roles.some((r) => FULL_STAT_ROLES.has(r))) {
+    return { tier: "full", userId };
+  }
+
+  if (roles.includes("player")) {
+    const { data } = await ctx.admin
+      .from("profiles")
+      .select("subscription_ends_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const endsAt = (data as { subscription_ends_at?: string | null } | null)
+      ?.subscription_ends_at;
+    if (endsAt && new Date(endsAt).getTime() > Date.now()) {
+      return { tier: "full", userId };
+    }
+  }
+
+  return { tier: "minimal", userId };
+}
+
+// Strip stat fields that exceed the viewer's tier. Mutates a copy, never
+// the source. Keeping this at the boundary ensures gated fields never leak
+// to unauthorized clients even if a future caller forgets to filter.
+export function applyStatTier<T extends { stats: Record<string, number> }>(
+  row: T,
+  tier: StatAccessTier,
+): T {
+  if (tier === "full") return row;
+  const { pts, reb, ast } = row.stats;
+  return { ...row, stats: { pts, reb, ast } as T["stats"] };
+}
+
+export async function handleLeaderboards(ctx: HandlerCtx) {
+  const { tier, userId } = await computeStatAccessTier(ctx);
+  // Leaderboards are gated strictly to the 'full' tier — registered paid
+  // players, coaches, team managers, league admins, and super admins.
+  if (tier !== "full") {
+    return json({ ok: false, error: "forbidden" }, 403, {
+      "Cache-Control": "private, no-store",
+    });
+  }
+  const filters = Object.fromEntries(
+    new URL(ctx.req.url).searchParams.entries(),
+  );
+  // Use get_stats_dashboard because the UI's category tabs require the full
+  // stat line. get_leaderboards only returns pts/reb/ast and would break
+  // STL/BLK/FLS/MIN tabs.
+  const { data, error } = await ctx.admin.rpc("get_stats_dashboard", {
     p_filters: filters,
   });
   if (error) throw new Error(error.message);
-  return json({ ok: true, userId, data }, 200, { "Cache-Control": "public, s-maxage=60, max-age=30" });
+  const rows = Array.isArray((data as { players?: unknown[] })?.players)
+    ? (data as { players: Record<string, unknown>[] }).players
+    : [];
+  const players = rows.map(normalizePublicPlayerRow);
+  return json(
+    { ok: true, userId, tier, data: players },
+    200,
+    { "Cache-Control": "private, no-store", Vary: "Authorization" },
+  );
 }
+
+// Normalize a raw RPC row (stats/leaderboards) into the PlayerProfile shape
+// the public pages (Stats.tsx, Leaderboards.tsx) already consume. The RPCs
+// return pts/reb/ast as top-level fields; the UI expects `stats.{pts,reb,...}`.
+export function normalizePublicPlayerRow(row: Record<string, unknown>) {
+  const leagueCodeRaw = String(row.league_id ?? "").toLowerCase();
+  const leagueId = leagueCodeRaw === "wbl" ? "wbl"
+    : leagueCodeRaw === "tgifbl" ? "tgifbl"
+    : "sbbl";
+  const avatarRaw = row.avatar_url;
+  const avatar =
+    typeof avatarRaw === "string" && avatarRaw.trim().length > 0
+      ? avatarRaw.trim()
+      : "";
+  return {
+    id: String(row.id ?? ""),
+    name: String(row.name ?? "Unknown"),
+    number: Number(row.number ?? 0),
+    position: String(row.position ?? ""),
+    teamId: String(row.team_id ?? ""),
+    teamName: row.team_name ? String(row.team_name) : null,
+    leagueId,
+    avatar,
+    badges: [] as string[],
+    stats: {
+      pts: Number(row.pts ?? 0),
+      reb: Number(row.reb ?? 0),
+      ast: Number(row.ast ?? 0),
+      stl: Number(row.stl ?? 0),
+      blk: Number(row.blk ?? 0),
+      fls: Number(row.fls ?? 0),
+      min: Number(row.min ?? 0),
+    },
+  };
+}
+
 
 async function handleDraft(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
@@ -612,8 +1026,26 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
   } | null;
   if (!body) return json({ ok: false, error: "invalid_body" }, 400);
   const patch: Record<string, unknown> = {};
-  if (typeof body.collectionId === "string")
-    patch.collection_id = body.collectionId.trim();
+  if (typeof body.collectionId === "string") {
+    const trimmedUrl = body.collectionId.trim();
+    let safeUrl = trimmedUrl;
+    if (safeUrl !== "") {
+      try {
+        const parsedUrl = new URL(safeUrl);
+        if (!["https:", "http:", "rtmp:", "rtmps:"].includes(parsedUrl.protocol)) {
+          if (["javascript:", "data:", "file:", "vbscript:"].includes(parsedUrl.protocol)) {
+            safeUrl = "";
+          }
+        }
+      } catch {
+        try {
+          const fallbackUrl = new URL("https://" + safeUrl);
+          safeUrl = fallbackUrl.href;
+        } catch { /* ignore parsing failure */ }
+      }
+    }
+    patch.collection_id = safeUrl;
+  }
   if (typeof body.title === "string") patch.title = body.title.trim();
   if (typeof body.source === "string") patch.source = body.source;
   if (Object.keys(patch).length === 0)
@@ -678,9 +1110,12 @@ async function handleSetStreamStatus(ctx: HandlerCtx) {
   // Bust edge cache immediately so Go Live / End Broadcast is reflected
   // for all viewers on their next 15 s poll (not delayed by TTL).
   // Retry once on failure — stale "offline" after Go Live is a P0 UX issue.
+  // Also clear the in-process streamUrlCache so the next session request
+  // picks up any URL change committed in the same atomic write.
   const cfCachesLive = (caches as unknown as { default: Cache }).default;
   const bustKey = new Request(streamCacheUrl(null));
   cfCachesLive.delete(bustKey).catch(() => { cfCachesLive.delete(bustKey).catch(() => {}); });
+  for (const [k] of streamUrlCache.entries()) { streamUrlCache.delete(k); }
   return json({ ok: true, isLive: body.isLive, at: nowIso });
 }
 
@@ -1146,7 +1581,7 @@ async function handleIngress(ctx: HandlerCtx) {
   }
 }
 
-async function handleSyncDrain(ctx: HandlerCtx) {
+export async function handleSyncDrain(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   requireAuth(ctx.req);
   const limit = Math.max(
@@ -1174,9 +1609,12 @@ async function handleSyncDrain(ctx: HandlerCtx) {
         emitted_at: new Date().toISOString(),
       };
 
+      if (!ctx.env.OMNIHUB_SIGNING_SECRET) {
+        throw new Error("OMNIHUB_SIGNING_SECRET_missing");
+      }
       const signed = await signSyncPacket(
         packet,
-        ctx.env.OMNIHUB_SIGNING_SECRET ?? "dev-signing-secret",
+        ctx.env.OMNIHUB_SIGNING_SECRET,
       );
       const url = ctx.env.OMNIHUB_SYNC_URL;
 
@@ -1298,6 +1736,24 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
         ? metadata.purchase_type
         : null;
 
+
+    if (purchaseType === "store_order" && typeof metadata.order_id === "string") {
+      try {
+        await ctx.admin
+          .from("store_orders")
+          .update({
+            status: "paid",
+            stripe_checkout_session_id: object.id,
+            stripe_payment_intent_id: typeof object.payment_intent === 'string' ? object.payment_intent : null,
+            customer_email: (object.customer_details as Record<string, unknown>)?.email as string | undefined,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", metadata.order_id);
+      } catch (e) {
+        console.error("Failed to update store order", e);
+      }
+    }
+
     // Player registration (subscription): set subscription_ends_at + grant player role
     if (!purchaseType || purchaseType === "player_registration") {
       try {
@@ -1324,13 +1780,14 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
       }
     }
 
-    // PPV purchase: create stream entitlement (6h access window) +
-    // auto-complete onboarding as a free "fan" member so the buyer can
-    // immediately watch without being blocked by the onboarding gate.
+    // PPV purchase: create stream entitlement (48h validity window to
+    // tolerate game-day delays) + auto-complete onboarding as a free "fan"
+    // member so the buyer can immediately watch without being blocked by
+    // the onboarding gate. The session itself remains hard-capped at 6h
+    // once the buyer actually starts watching.
     if (purchaseType === "ppv" && typeof metadata.game_id === "string") {
       try {
-        const expiresAt = new Date();
-        expiresAt.setHours(expiresAt.getHours() + 6);
+        const expiresAt = new Date(Date.now() + ENTITLEMENT_MS.ENTITLEMENT_VALIDITY);
         await ctx.admin.rpc("create_stream_entitlement", {
           p_game_id: metadata.game_id,
           p_user_id: userId,
@@ -1383,26 +1840,8 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
           p_payment_ref: providerRef,
           p_idempotency_key: event.id ?? crypto.randomUUID(),
         });
-        // Also close the cart
-        const { data: orderRow } = await ctx.admin
-          .from("orders")
-          .select("metadata")
-          .eq("id", metadata.order_id)
-          .maybeSingle();
-        const cartId = (orderRow as Record<string, unknown> | null)?.metadata
-          ? (
-              (orderRow as Record<string, unknown>).metadata as Record<
-                string,
-                unknown
-              >
-            )?.cart_id
-          : null;
-        if (typeof cartId === "string") {
-          await ctx.admin
-            .from("carts")
-            .update({ status: "completed" })
-            .eq("id", cartId);
-        }
+        // Note: mark_order_paid now targets store_orders.
+        // We no longer rely on legacy 'orders' and 'carts' tables here.
       } catch {
         /* non-critical */
       }
@@ -1700,38 +2139,36 @@ async function handleImportRoute(
     );
   } else {
     // Iterative fallback if bulk db operation fails
-    for (const row of rows) {
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE);
       try {
         if (kind === "teams") {
-          const { error } = await ctx.admin.from("teams").insert({
+          const payload = batch.map((row) => ({
             league_id: row.league_id,
             season_id: row.season_id,
             division_id: row.division_id || null,
             name: row.name,
             status: "published",
+          }));
+          const { error } = await ctx.admin.from("teams").upsert(payload, {
+            onConflict: "season_id,name",
           });
-          if (error && !String(error.message).includes("duplicate key"))
-            throw error;
-        }
-
-        if (kind === "players") {
-          const { error } = await ctx.admin.from("players").upsert(
-            {
-              user_id: row.user_id,
-              team_id: row.team_id || null,
-              league_id: row.league_id || null,
-              jersey_number: row.jersey_number
-                ? Number(row.jersey_number)
-                : null,
-              position: row.position || null,
-            },
-            { onConflict: "user_id" },
-          );
           if (error) throw error;
-        }
-
-        if (kind === "schedules") {
-          const { error } = await ctx.admin.from("schedule_slots").insert({
+        } else if (kind === "players") {
+          const payload = batch.map((row) => ({
+            user_id: row.user_id,
+            team_id: row.team_id || null,
+            league_id: row.league_id || null,
+            jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
+            position: row.position || null,
+          }));
+          const { error } = await ctx.admin
+            .from("players")
+            .upsert(payload, { onConflict: "user_id" });
+          if (error) throw error;
+        } else if (kind === "schedules") {
+          const payload = batch.map((row) => ({
             league_id: row.league_id,
             season_id: row.season_id,
             venue_id: row.venue_id || null,
@@ -1739,42 +2176,115 @@ async function handleImportRoute(
             starts_at: row.starts_at,
             ends_at: row.ends_at || null,
             status: row.status || "upcoming",
-          });
+          }));
+          const { error } = await ctx.admin
+            .from("schedule_slots")
+            .insert(payload);
           if (error) throw error;
-        }
-
-        if (kind === "events") {
-          const { error } = await ctx.admin.from("league_events").insert({
+        } else if (kind === "events") {
+          const payload = batch.map((row) => ({
             league_id: row.league_id || null,
             season_id: row.season_id || null,
             venue_id: row.venue_id || null,
             title: row.title,
             starts_at: row.starts_at || null,
             metadata: row,
-          });
+          }));
+          const { error } = await ctx.admin
+            .from("league_events")
+            .insert(payload);
           if (error) throw error;
         }
 
-        await ctx.admin.rpc("enqueue_local_domain_event", {
-          p_event_type: `${kind}_imported`,
-          p_entity_type: kind,
-          p_entity_id: null,
-          p_league_id: row.league_id || null,
-          p_payload: row,
-          p_trace_id: crypto.randomUUID(),
-          p_available_at: new Date().toISOString(),
-        });
-        insertedRows += 1;
-      } catch (error) {
-        failedRows += 1;
-        errors.push(error instanceof Error ? error.message : "import_failed");
-        await writeIngressFailure(
-          ctx.admin,
-          `${kind}_import_failed`,
-          row,
-          "admin_mutation",
-          session.userId,
+        await Promise.all(
+          batch.map((row) =>
+            ctx.admin.rpc("enqueue_local_domain_event", {
+              p_event_type: `${kind}_imported`,
+              p_entity_type: kind,
+              p_entity_id: null,
+              p_league_id: row.league_id || null,
+              p_payload: row,
+              p_trace_id: crypto.randomUUID(),
+              p_available_at: new Date().toISOString(),
+            }),
+          ),
         );
+        insertedRows += batch.length;
+      } catch (batchError) {
+        // If a batch fails, fall back to individual rows for this batch to ensure granular error reporting
+        for (const row of batch) {
+          try {
+            if (kind === "teams") {
+              const { error } = await ctx.admin.from("teams").insert({
+                league_id: row.league_id,
+                season_id: row.season_id,
+                division_id: row.division_id || null,
+                name: row.name,
+                status: "published",
+              });
+              if (error && !String(error.message).includes("duplicate key"))
+                throw error;
+            } else if (kind === "players") {
+              const { error } = await ctx.admin.from("players").upsert(
+                {
+                  user_id: row.user_id,
+                  team_id: row.team_id || null,
+                  league_id: row.league_id || null,
+                  jersey_number: row.jersey_number
+                    ? Number(row.jersey_number)
+                    : null,
+                  position: row.position || null,
+                },
+                { onConflict: "user_id" },
+              );
+              if (error) throw error;
+            } else if (kind === "schedules") {
+              const { error } = await ctx.admin.from("schedule_slots").insert({
+                league_id: row.league_id,
+                season_id: row.season_id,
+                venue_id: row.venue_id || null,
+                court_id: row.court_id || null,
+                starts_at: row.starts_at,
+                ends_at: row.ends_at || null,
+                status: row.status || "upcoming",
+              });
+              if (error) throw error;
+            } else if (kind === "events") {
+              const { error } = await ctx.admin.from("league_events").insert({
+                league_id: row.league_id || null,
+                season_id: row.season_id || null,
+                venue_id: row.venue_id || null,
+                title: row.title,
+                starts_at: row.starts_at || null,
+                metadata: row,
+              });
+              if (error) throw error;
+            }
+
+            await ctx.admin.rpc("enqueue_local_domain_event", {
+              p_event_type: `${kind}_imported`,
+              p_entity_type: kind,
+              p_entity_id: null,
+              p_league_id: row.league_id || null,
+              p_payload: row,
+              p_trace_id: crypto.randomUUID(),
+              p_available_at: new Date().toISOString(),
+            });
+            insertedRows += 1;
+          } catch (error) {
+            failedRows += 1;
+            errors.push(
+              error instanceof Error ? error.message : "import_failed",
+            );
+            await writeIngressFailure(
+              ctx.admin,
+              `${kind}_import_failed`,
+              row,
+              "admin_mutation",
+              session.userId,
+            );
+          }
+        }
       }
     }
   }
@@ -2016,11 +2526,12 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   let query = admin
     .from('media_publications')
     .select(
-      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,league_id,render_payload,' +
+      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,sort_order,league_id,render_payload,' +
       'media_assets!inner(id,metadata,created_at),' +
       'leagues:leagues!league_id(id,code,name)'
     )
-    .order('sort_at', { ascending: false })
+    .order('sort_order', { ascending: true, nullsFirst: false })
+    .order('id', { ascending: true })
     .limit(limit);
 
   if (statusFilter && isMediaPublicationStatus(statusFilter)) {
@@ -2051,6 +2562,7 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
       publishedAt: raw.published_at == null ? null : String(raw.published_at),
       scheduledAt: raw.scheduled_at == null ? null : String(raw.scheduled_at),
       sortAt: raw.sort_at == null ? null : String(raw.sort_at),
+      sortOrder: raw.sort_order == null ? null : Number(raw.sort_order),
       leagueId: raw.league_id == null ? null : String(raw.league_id),
       leagueCode: leagueRow.code == null ? null : String(leagueRow.code),
       leagueName: leagueRow.name == null ? null : String(leagueRow.name),
@@ -2152,6 +2664,55 @@ async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
   });
 
   return json({ ok: true, data });
+}
+
+async function handleOpsReorderMediaPublications(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const body = (await ctx.req.json().catch(() => null)) as {
+    items?: Array<{ id?: unknown; sortOrder?: unknown }>;
+  } | null;
+  const items = Array.isArray(body?.items) ? body.items : [];
+
+  if (items.length === 0) return json({ ok: false, error: 'empty_items' }, 400);
+  if (items.length > 200) return json({ ok: false, error: 'too_many_items (max 200)' }, 400);
+
+  const normalized = items.map((item) => ({
+    id: typeof item.id === 'string' ? item.id : '',
+    sortOrder: Number(item.sortOrder),
+  }));
+
+  if (normalized.some((item) => item.id.length === 0 || !Number.isInteger(item.sortOrder) || item.sortOrder < 0)) {
+    return json({ ok: false, error: 'invalid_items' }, 400);
+  }
+
+  const uniqueIds = new Set(normalized.map((item) => item.id));
+  if (uniqueIds.size !== normalized.length) {
+    return json({ ok: false, error: 'duplicate_ids' }, 400);
+  }
+
+  const updates = await Promise.all(
+    normalized.map(async (item) => {
+      const { error } = await ctx.admin
+        .from('media_publications')
+        .update({ sort_order: item.sortOrder })
+        .eq('id', item.id);
+      return { id: item.id, error };
+    }),
+  );
+  const failed = updates.find((row) => row.error);
+  if (failed?.error) throw new Error(failed.error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_reorder_media_publications',
+    ref_type: 'media_publications',
+    ref_id: null,
+    payload: { count: normalized.length, ids: normalized.map((item) => item.id) },
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, updated: normalized.length });
 }
 
 
@@ -2337,7 +2898,7 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
               : undefined;
           const name = splitProfileName(profile);
           return {
-            id: p.id,
+            id: String(p.id),
             user_id: p.user_id,
             jersey_number: p.jersey_number,
             position: p.position,
@@ -2386,10 +2947,15 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
 
 function compilePath(path: string) {
   const keys: string[] = [];
-  const pattern = path.replace(/:([^/]+)/g, (_, key: string) => {
-    keys.push(key);
-    return "([^/]+)";
-  });
+  const pattern = path
+    .replace(/:([^/*]+)/g, (_, key: string) => {
+      keys.push(key);
+      return "([^/]+)";
+    })
+    .replace(/\*/g, () => {
+      keys.push("wildcard");
+      return "(.*)";
+    });
   return { regex: new RegExp(`^${pattern}$`), keys };
 }
 
@@ -2507,6 +3073,194 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
   }
 }
 
+function normalizeTeamToken(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function normalizeTeamLabel(value: string): string {
+  return value
+    .replace(/\b\d+\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function canonicalTeamVariants(teamName: string): string[] {
+  const normalized = normalizeTeamToken(normalizeTeamLabel(teamName));
+  const variants = new Set<string>([normalized]);
+
+  // POTG cards sometimes use shorthand vs roster records.
+  if (normalized === "14ozathletics") variants.add("fourteenounceathletics");
+  if (normalized === "fourteenounceathletics") variants.add("14ozathletics");
+
+  return [...variants];
+}
+
+function extractPotgTeamCandidates(team: string, gameResult: string): string[] {
+  const candidates = new Set<string>();
+  const addCandidate = (value: string) => {
+    const normalized = normalizeTeamLabel(value);
+    if (normalized.length > 0) candidates.add(normalized);
+  };
+
+  addCandidate(team);
+  for (const side of gameResult.split(/\bvs\b/i)) addCandidate(side);
+
+  return [...candidates];
+}
+
+function parsePotgResultSide(side: string): { label: string; score: number | null } {
+  const trimmed = side.trim().replace(/\s+/g, " ");
+  if (!trimmed) return { label: "", score: null };
+
+  // Supports both "Team Name 82" and "82 Team Name" card formats.
+  const trailing = trimmed.match(/^(.*?)(\d{1,3})$/);
+  if (trailing) {
+    return {
+      label: trailing[1].trim(),
+      score: Number.isFinite(Number(trailing[2])) ? Number(trailing[2]) : null,
+    };
+  }
+
+  const leading = trimmed.match(/^(\d{1,3})(.*)$/);
+  if (leading) {
+    return {
+      label: leading[2].trim(),
+      score: Number.isFinite(Number(leading[1])) ? Number(leading[1]) : null,
+    };
+  }
+
+  return { label: trimmed, score: null };
+}
+
+function parsePotgGameResult(gameResult: string): {
+  homeLabel: string;
+  awayLabel: string;
+  homeScore: number | null;
+  awayScore: number | null;
+} | null {
+  const sides = gameResult.split(/\bvs\b/i).map((s) => s.trim()).filter(Boolean);
+  if (sides.length !== 2) return null;
+  const home = parsePotgResultSide(sides[0]);
+  const away = parsePotgResultSide(sides[1]);
+  if (!home.label || !away.label) return null;
+  return {
+    homeLabel: home.label,
+    awayLabel: away.label,
+    homeScore: home.score,
+    awayScore: away.score,
+  };
+}
+
+async function inferPotgLeagueCode(
+  ctx: HandlerCtx,
+  team: string,
+  gameResult: string,
+): Promise<"wbl" | "tgifbl" | "sbbl" | null> {
+  const candidates = extractPotgTeamCandidates(team, gameResult);
+  if (candidates.length === 0) return null;
+
+  const { data: teamRows, error } = await ctx.admin
+    .from("teams")
+    .select("name, leagues:leagues!league_id(code)");
+  if (error || !teamRows) return null;
+
+  const hitsByLeague: Record<string, number> = {};
+  for (const candidate of candidates) {
+    const candidateVariants = canonicalTeamVariants(candidate);
+    for (const row of teamRows as Array<Record<string, unknown>>) {
+      const teamName = String(row.name ?? "");
+      const leagueCode = String((row.leagues as Record<string, unknown> | null)?.code ?? "").toLowerCase();
+      if (!leagueCode) continue;
+      const dbVariants = canonicalTeamVariants(teamName);
+      const isMatch = candidateVariants.some((candidateToken) =>
+        dbVariants.some((dbToken) =>
+          dbToken === candidateToken || dbToken.includes(candidateToken) || candidateToken.includes(dbToken)
+        )
+      );
+      if (isMatch) hitsByLeague[leagueCode] = (hitsByLeague[leagueCode] ?? 0) + 1;
+    }
+  }
+
+  const ranked = Object.entries(hitsByLeague).sort((a, b) => b[1] - a[1]);
+  if (ranked.length === 0) return null;
+  if (ranked.length > 1 && ranked[0][1] === ranked[1][1]) return null;
+
+  const winner = ranked[0][0];
+  return winner === "wbl" || winner === "tgifbl" || winner === "sbbl" ? winner : null;
+}
+
+// POTG publisher guards. Both /ops/potg/submit and /ops/ingest/submit (kind='potg')
+// must refuse to publish when the payload lacks the stat fields the leaderboard
+// pipeline depends on, or when the player isn't rostered to the publication's
+// league. Without these checks, posters land in media_publications with no
+// matching player_game_stats row, leaving the leaderboard with an empty roster
+// (incident 2026-04-18: 12 orphan WBL POTG posters; only Robert Ocampo visible).
+type PotgStatPayload = {
+  playerName?: unknown;
+  team?: unknown;
+  pts?: unknown;
+  rebs?: unknown;
+  assts?: unknown;
+  gameResult?: unknown;
+};
+
+function validatePotgStatFields(meta: PotgStatPayload): string | null {
+  if (!String(meta.playerName ?? "").trim()) return "missing_potg_player_name";
+  if (!String(meta.team ?? "").trim()) return "missing_potg_team";
+  if (!String(meta.gameResult ?? "").trim()) return "missing_potg_game_result";
+  for (const key of ["pts", "rebs", "assts"] as const) {
+    const v = meta[key];
+    if (v === undefined || v === null || v === "") return `missing_potg_${key}`;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return `invalid_potg_${key}`;
+  }
+  return null;
+}
+
+type PotgPlayerResolution =
+  | { ok: true; playerId: string; userId: string }
+  | { ok: false; error: string; details: Record<string, unknown> };
+
+async function resolvePotgPlayer(
+  admin: SupabaseClient,
+  playerName: string,
+  leagueUuid: string,
+): Promise<PotgPlayerResolution> {
+  const trimmed = playerName.trim();
+  const { data: profile } = await admin
+    .from("profiles")
+    .select("user_id")
+    .ilike("display_name", trimmed)
+    .maybeSingle();
+  if (!profile?.user_id) {
+    return { ok: false, error: "potg_player_not_in_profiles", details: { playerName: trimmed } };
+  }
+  const { data: player } = await admin
+    .from("players")
+    .select("id, league_id")
+    .eq("user_id", profile.user_id)
+    .maybeSingle();
+  if (!player?.id) {
+    return {
+      ok: false,
+      error: "potg_player_not_rostered",
+      details: { playerName: trimmed, profileUserId: profile.user_id },
+    };
+  }
+  if (player.league_id !== leagueUuid) {
+    return {
+      ok: false,
+      error: "potg_player_league_mismatch",
+      details: {
+        playerName: trimmed,
+        expectedLeague: leagueUuid,
+        rosteredLeague: player.league_id,
+      },
+    };
+  }
+  return { ok: true, playerId: String(player.id), userId: String(profile.user_id) };
+}
+
 async function handleSubmitPotg(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireAdminSession(ctx.req, ctx.admin);
@@ -2526,24 +3280,98 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     return json({ ok: false, error: "missing_required_fields" }, 400);
   }
 
+  const statErr = validatePotgStatFields(body);
+  if (statErr) {
+    return json({ ok: false, error: statErr }, 400);
+  }
+
+  const requestedLeagueCode = String(body.leagueId).toLowerCase();
+  const inferredLeagueCode = await inferPotgLeagueCode(ctx, body.team, body.gameResult);
+  const effectiveLeagueCode = inferredLeagueCode ?? requestedLeagueCode;
+  const potgDate = body.date ?? new Date().toISOString().split("T")[0];
+  const parsedResult = parsePotgGameResult(body.gameResult ?? "");
+
   // Resolve league code (e.g. 'wbl') to UUID for FK references
   let leagueUuid: string | null = null;
   const { data: leagueLookup } = await ctx.admin
     .from("leagues")
     .select("id")
-    .ilike("code", body.leagueId)
+    .ilike("code", effectiveLeagueCode)
     .maybeSingle();
   leagueUuid = leagueLookup?.id ?? null;
 
-  // Upsert player profile by display name + team within league
-  const { data: profileData } = await ctx.admin
-    .from("profiles")
-    .select("user_id")
-    .ilike("display_name", body.playerName.trim())
-    .maybeSingle();
+  if (!leagueUuid) {
+    return json(
+      { ok: false, error: "potg_unknown_league", leagueId: effectiveLeagueCode },
+      400,
+    );
+  }
 
-  // Upsert into player_game_stats via award_records table if player found,
-  // otherwise write to import_jobs as a pending manual match
+  // Refuse to publish a POTG for a player who isn't rostered to this league.
+  // Without a matching `players` row the leaderboard has nothing to surface
+  // and the poster becomes an orphan (see incident 2026-04-18).
+  const playerResolution = await resolvePotgPlayer(ctx.admin, body.playerName, leagueUuid);
+  if (playerResolution.ok === false) {
+    return json(
+      { ok: false, error: playerResolution.error, details: playerResolution.details },
+      409,
+    );
+  }
+  const playerUserId = playerResolution.userId;
+  const playerId = playerResolution.playerId;
+  const profileData = { user_id: playerUserId };
+
+  // Link POTG to an existing score row when possible; otherwise create
+  // a minimal league game row so Scores and stats tabs can tabulate it.
+  let gameId: string | null = null;
+  if (leagueUuid && parsedResult) {
+    const { data: candidateGames } = await ctx.admin
+      .from("games")
+      .select("id,participant1_label,participant2_label")
+      .eq("league_id", leagueUuid)
+      .eq("category", "league")
+      .eq("game_date", potgDate)
+      .limit(25);
+
+    const targetA = normalizeTeamToken(normalizeTeamLabel(parsedResult.homeLabel));
+    const targetB = normalizeTeamToken(normalizeTeamLabel(parsedResult.awayLabel));
+    const matched = (candidateGames ?? []).find((g) => {
+      const rowA = normalizeTeamToken(
+        normalizeTeamLabel(String(g.participant1_label ?? ""))
+      );
+      const rowB = normalizeTeamToken(
+        normalizeTeamLabel(String(g.participant2_label ?? ""))
+      );
+      return (rowA === targetA && rowB === targetB) || (rowA === targetB && rowB === targetA);
+    });
+
+    if (matched?.id) {
+      gameId = String(matched.id);
+      await ctx.admin.from("games").update({
+        status: "final",
+        participant1_label: parsedResult.homeLabel,
+        participant2_label: parsedResult.awayLabel,
+        home_score: parsedResult.homeScore,
+        away_score: parsedResult.awayScore,
+      }).eq("id", gameId);
+    } else {
+      const { data: newGame } = await ctx.admin.from("games").insert({
+        league_id: leagueUuid,
+        category: "league",
+        status: "final",
+        game_date: potgDate,
+        participant1_label: parsedResult.homeLabel,
+        participant2_label: parsedResult.awayLabel,
+        home_score: parsedResult.homeScore,
+        away_score: parsedResult.awayScore,
+        notes: "Auto-created from POTG submission",
+      }).select("id").single();
+      gameId = newGame?.id ? String(newGame.id) : null;
+    }
+  }
+
+  // Audit row in import_jobs. The player is guaranteed rostered at this point
+  // (resolvePotgPlayer above), so the legacy unmatched-fallback branch is gone.
   const { data: jobData, error: jobError } = await ctx.admin
     .from("import_jobs")
     .insert({
@@ -2556,45 +3384,47 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
         rebs: body.rebs,
         assts: body.assts,
         gameResult: body.gameResult,
-        leagueId: body.leagueId,
-        date: body.date ?? new Date().toISOString().split("T")[0],
+        leagueId: effectiveLeagueCode,
+        date: potgDate,
         imageUrl: body.imageUrl ?? null,
-        matched_profile_id: profileData?.user_id ?? null,
+        matched_profile_id: profileData.user_id,
+        game_id: gameId,
         source: "potg_image_parser",
+        requestedLeagueId: requestedLeagueCode,
+        inferredLeagueId: inferredLeagueCode,
       },
-      status: profileData ? "completed" : "pending_match",
+      status: "completed",
       total_rows: 1,
-      inserted_rows: profileData ? 1 : 0,
-      failed_rows: profileData ? 0 : 0,
-      error_summary: profileData
-        ? null
-        : "Player profile not yet in system — award queued for manual match",
+      inserted_rows: 1,
+      failed_rows: 0,
+      error_summary: null,
     })
     .select("id")
     .single();
 
   if (jobError) throw new Error(jobError.message);
 
-  // player_game_stats requires a non-null game_id FK (games.id).
-  // We don't have a game_id at POTG parse time, so we intentionally skip
-  // this upsert. The import_jobs record carries the full payload; a
-  // subsequent manual-match step will write the stat row once a game_id
-  // is available.
-  // DO NOT add a upsert({ game_id: null }) here — it violates the NOT NULL FK.
-  if (profileData?.user_id) {
-    // stat write deferred — see import_jobs.payload for pending record
+  // Persist player stat row when both player and game are resolvable.
+  if (playerId && gameId) {
+    await ctx.admin.from("player_game_stats").upsert({
+      game_id: gameId,
+      player_id: playerId,
+      pts: Number(body.pts ?? 0),
+      reb: Number(body.rebs ?? 0),
+      ast: Number(body.assts ?? 0),
+    }, { onConflict: "game_id,player_id" });
   }
 
   // Write media_assets + media_publications so the POTG card renders
   // via the canonical publication layer. Only when an image is present.
   if (body.imageUrl) {
     const potgTitle = `POTG — ${body.playerName} (${body.team})`;
-    const potgDate = body.date ?? new Date().toISOString().split("T")[0];
     const potgMeta = {
       type: "poster",
       thumbnail: body.imageUrl,
       date: potgDate,
       potg: true,
+      leagueId: effectiveLeagueCode,
       playerName: body.playerName,
       team: body.team,
       pts: body.pts,
@@ -2615,8 +3445,8 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
       .single();
     if (assetErr) throw new Error(assetErr.message);
 
-    // Project into publication layer — low-confidence POTG is matched=true
-    // if profileData was found; otherwise goes to needs_review via ingest_jobs.
+    // Project into publication layer. The guards above ensure both stat fields
+    // and a rostered player exist, so this is always a fully-formed publication.
     await ctx.admin.from("media_publications").insert({
       media_asset_id: assetData.id,
       surface: "potg",
@@ -2642,7 +3472,7 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     /* non-critical audit log — suppress */
   }
 
-  return json({ ok: true, jobId: jobData.id, matched: !!profileData });
+  return json({ ok: true, jobId: jobData.id, matched: true });
 }
 
 // ── PPV INVITE SYSTEM ────────────────────────────────────────────────────────
@@ -2674,7 +3504,7 @@ async function getUserRolesFromDB(
  * Returns { code: uuid } — the invite ID is the redemption token.
  * On duplicate request for same game returns the existing code (idempotent).
  */
-async function handleInviteGenerate(ctx: HandlerCtx) {
+export async function handleInviteGenerate(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
 
@@ -2772,14 +3602,15 @@ async function handleSuperAdminCompCode(ctx: HandlerCtx) {
   const gameId = body?.gameId?.trim();
   if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
 
-  // Clamp expiry window to [1, 168] hours (1 hour to 7 days). Default 24h
-  // matches the regular invite system. This is the REDEMPTION window — once
-  // redeemed, the playback session is still hard-capped at 6 hours by
-  // createOrRefreshPlaybackSession.
+  // Clamp expiry window to [1, 168] hours (1 hour to 7 days). Default is
+  // ENTITLEMENT.MANUAL_COMP_VALIDITY_HOURS (48h) — the canonical comp-grant
+  // window. This is the REDEMPTION window — once redeemed, the playback
+  // session is still hard-capped at ENTITLEMENT.VIEWING_SESSION_MAX_SECONDS
+  // (6 hours) by createOrRefreshPlaybackSession.
   const rawHours = Number(body?.expiresInHours);
   const hours = Number.isFinite(rawHours) && rawHours > 0
     ? Math.min(168, Math.max(1, rawHours))
-    : 24;
+    : ENTITLEMENT.MANUAL_COMP_VALIDITY_HOURS;
   const expiresAt = new Date(Date.now() + hours * 60 * 60 * 1000).toISOString();
 
   const note = typeof body?.note === "string" ? body.note.trim().slice(0, 200) : null;
@@ -2924,7 +3755,9 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
   // First use: atomically lock the invite to this user + IP
   // The `.is('used_by', null)` filter makes this a compare-and-swap:
   // if a concurrent request already locked it, this update affects 0 rows.
-  const { error: updateErr, count } = await ctx.admin
+  // Use data.length (not count) — Supabase JS only populates count when
+  // the Prefer:count=exact header is sent; without it count is always null.
+  const { data: claimedRows, error: updateErr } = await ctx.admin
     .from("ppv_invites")
     .update({
       used_by: userId,
@@ -2933,12 +3766,13 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
     })
     .eq("id", code)
     .is("used_by", null)
-    .select("id"); // returns rows to detect 0-row update
+    .select("id");
 
   if (updateErr) throw new Error(updateErr.message);
 
-  // count === 0 means a concurrent request locked it first — re-check
-  if (count === 0) {
+  const claimedCount = Array.isArray(claimedRows) ? claimedRows.length : 0;
+  // claimedCount === 0 means a concurrent request locked it first — re-check
+  if (claimedCount === 0) {
     const { data: recheck } = await ctx.admin
       .from("ppv_invites")
       .select("used_by, ip_address")
@@ -2975,7 +3809,7 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
 
 const REACTIONS_CACHE_TTL_S = 5;
 
-async function handleStreamReactions({ req, admin }: HandlerCtx) {
+export async function handleStreamReactions({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   // Support /api/streams/:gameId/reactions and /api/streams/reactions?gameId=...
   const pathGameId = req.url.match(/\/api\/streams\/([^/]+)\/reactions/)?.[1];
@@ -3086,7 +3920,9 @@ async function handleStreamQoeBeacon(ctx: HandlerCtx): Promise<Response> {
   }
 
   const clientIp = getClientIP(ctx.req);
-  if (!enforceInMemoryRateLimit(`qoe:${clientIp}`, 10, 60_000)) {
+  // Scope per (gameId, IP) so a household watching two different live games
+  // does not collide on a shared bucket and 429 each other's beacons.
+  if (!enforceInMemoryRateLimit(`qoe:${gameId}:${clientIp}`, 10, 60_000)) {
     return new Response(null, { status: 429 });
   }
 
@@ -3163,9 +3999,11 @@ async function handleStreamQoeHealth(ctx: HandlerCtx): Promise<Response> {
 
 // ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
 
-async function handleStreamAccess({ req, admin }: HandlerCtx) {
+export async function handleStreamAccess({ req, admin }: HandlerCtx) {
   const userId = requireAuth(req);
   const gameId = new URL(req.url).pathname.split("/")[3]; // /api/streams/:gameId/access
+  // Broadcast access lives at /api/broadcast/access — not here.
+  // This handler only handles game-specific PPV entitlement checks.
   const { data, error } = await admin.rpc("can_user_view_stream", {
     p_game_id: gameId,
     p_user_id: userId,
@@ -3181,7 +4019,7 @@ function parseCommentLimit(url: URL): number {
   return Math.min(100, Math.max(1, Math.floor(raw)));
 }
 
-const SESSION_MAX_DURATION_MS = 6 * 60 * 60 * 1000; // 6 hours hard cap
+const SESSION_MAX_DURATION_MS = ENTITLEMENT_MS.VIEWING_SESSION_MAX; // 6-hour session cap (canonical)
 
 async function createOrRefreshPlaybackSession(
   ctx: HandlerCtx,
@@ -3193,7 +4031,23 @@ async function createOrRefreshPlaybackSession(
   const nowIso = new Date().toISOString();
   const expiresAt = new Date(Date.now() + 70_000).toISOString();
   // Hard 6-hour ceiling — heartbeats may never extend past this
-  const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
+  const defaultMaxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
+  let existingSessionQuery = ctx.admin
+    .from("stream_access_sessions")
+    .select("max_expires_at")
+    .eq("user_id", userId)
+    .eq("idempotency_key", sessionKey)
+    .eq("status", "active");
+  existingSessionQuery =
+    gameId === null
+      ? existingSessionQuery.is("game_id", null)
+      : existingSessionQuery.eq("game_id", gameId);
+  const existingSession = await existingSessionQuery.maybeSingle();
+  if (existingSession.error) throw new Error(existingSession.error.message);
+  const maxExpiresAt = String(
+    (existingSession.data as { max_expires_at?: string } | null)?.max_expires_at ??
+      defaultMaxExpiresAt,
+  );
 
   // One-device enforcement: terminate any existing active session for this
   // user + game before creating the new one.  The displaced device's next
@@ -3247,59 +4101,126 @@ async function createOrRefreshPlaybackSession(
 export async function handlePlaybackSession(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
-  const gameId = ctx.params.gameId ?? null;
+  // Normalize the 'broadcast' alias (camera-only mode with no real game row)
+  // to null so all downstream code treats it as a null gameId consistently.
+  // Without this, 'broadcast' would be passed as a gameId string to Supabase
+  // queries that expect a UUID, causing 500 errors from invalid UUID format.
+  const gameId: string | null = ctx.params.gameId ?? null;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionKey?: string;
+    playbackMode?: 'live' | 'replay';
   } | null;
   if (!body?.sessionKey || body.sessionKey.length < 8) {
     return json({ ok: false, error: "session_key_required" }, 400);
   }
+  const playbackMode: 'live' | 'replay' = body.playbackMode === 'replay' ? 'replay' : 'live';
 
+  // Fetch roles once here so both the super-admin fast-path and the replay gate
+  // can use them without a second DB round-trip.
   const roles = await getUserRolesFromDB(userId, ctx.admin);
   const isSuperAdmin = roles.includes("super_admin");
 
+  // ── WS7 replay gate (embargo + entitlement) ────────────────────────────
+  // Applies only when the client explicitly requests replay playback for a real
+  // game. Super admins bypass this gate (they have full fast-path access below).
+  // Broadcast alias and live mode are unchanged.
+  if (playbackMode === 'replay' && gameId && !isSuperAdmin) {
+    const gRes = await ctx.admin
+      .from("games")
+      .select("replay_mode, replay_monetization_enabled_at")
+      .eq("id", gameId)
+      .maybeSingle();
+    const g = gRes.data as {
+      replay_mode?: 'none' | 'raw' | 'edited';
+      replay_monetization_enabled_at?: string | null;
+    } | null;
+    if (!g || g.replay_mode === 'none') {
+      return json({ ok: false, error: "replay_unavailable" }, 409);
+    }
+    const embargo = g.replay_monetization_enabled_at;
+    if (!embargo || new Date(embargo).getTime() > Date.now()) {
+      return json({ ok: false, error: "replay_embargoed", embargoEndsAt: embargo ?? null }, 409);
+    }
+    // Replay entitlement: a row with replay_tier in ('raw','edited'),
+    // active, not expired. Separate from the live entitlement check the
+    // existing code path performs later.
+    const eRes = await ctx.admin
+      .from("stream_entitlements")
+      .select("status, expires_at")
+      .eq("game_id", gameId)
+      .eq("user_id", userId)
+      .in("replay_tier", ["raw", "edited"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const ent = eRes.data as { status: string | null; expires_at: string | null } | null;
+    const entitled =
+      !!ent &&
+      ent.status === 'active' &&
+      (!ent.expires_at || new Date(ent.expires_at).getTime() > Date.now());
+    if (!entitled) {
+      return json({ ok: false, error: "replay_available_for_purchase" }, 402);
+    }
+  }
+
   // ── Super admin fast-path ──────────────────────────────────────────────
-  // No access checks, no PPV, no "stream_not_configured" 503, no one-device
-  // displacement. Super admin can always start a playback session from any
-  // device at any time regardless of whether a URL is set or a game exists.
-  // If collection_id is empty, the client receives an empty url string and
-  // surfaces its own "configure URL" UX instead of a hard backend failure.
+  // No access checks, no PPV, no one-device displacement, and no DB session
+  // row (entitlement_id NOT NULL makes the upsert impossible for admin).
+  // Returns a synthetic session UUID — the heartbeat fast-path accepts it.
   if (isSuperAdmin) {
     const cfg = await getOrCreateStreamConfig(ctx.admin);
-    const playbackUrl = String(cfg.collection_id ?? "").trim();
-    const session = await createOrRefreshPlaybackSession(
-      ctx,
-      gameId,
-      userId,
-      body.sessionKey,
-      { skipDisplace: true },
-    );
+    const playbackUrl =
+      String(cfg.collection_id ?? "").trim() ||
+      String(ctx.env.VITE_STREAM_URL ?? "").trim();
+    const deliveryClass = getStreamDeliveryClass(playbackUrl);
+    const fakeSessionId = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 70_000).toISOString();
+    const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
+    const cookieHeaders: Record<string, string> = {};
+    let clientPlaybackUrl = playbackUrl;
+    if (deliveryClass === "proxy" && gameId) {
+      const exp = Math.floor(Date.now() / 1000) + 70;
+      const secret = ctx.env.OMNIHUB_SIGNING_SECRET ?? ctx.env.SUPABASE_SERVICE_ROLE_KEY;
+      const token = await signProxyToken(
+        { gameId, userId, sessionId: fakeSessionId, exp },
+        secret,
+      );
+      cookieHeaders["Set-Cookie"] =
+        `${PROXY_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=70`;
+      clientPlaybackUrl = `/api/streams/${gameId}/proxy/master.m3u8`;
+    }
     return json({
       ok: true,
       playback: {
         type: "url",
-        url: playbackUrl,
-        expiresAt: session.expiresAt,
-        maxExpiresAt: session.maxExpiresAt,
+        url: clientPlaybackUrl,
+        deliveryClass,
+        expiresAt,
+        maxExpiresAt,
         heartbeatIntervalSec: 25,
       },
       session: {
-        id: session.id,
+        id: fakeSessionId,
         gameId: gameId ?? null,
-        maxExpiresAt: session.maxExpiresAt,
+        maxExpiresAt,
       },
-    });
+    }, 200, cookieHeaders);
+  }
+
+  // Broadcast (no game) must use /api/broadcast/session — not this handler.
+  // Covers both null (missing gameId) and the 'broadcast' alias string that
+  // legacy clients may still send. Prevents them from being routed through
+  // the PPV/entitlement path for open broadcasts.
+  if (gameId === null || gameId === "broadcast") {
+    return json({ ok: false, error: "use_broadcast_endpoint" }, 400);
   }
 
   const hasPrivilegedRole = roles.some(
     (role) => role === "player" || role === "paid_fan",
   );
-  // Camera-only broadcast alias (gameId=null) is accessible to any privileged
-  // role — roster players and paid fans (season pass). PPV is game-specific
-  // and does not apply when there is no game. Regular fans are expected to
-  // purchase PPV for a specific game instead.
   let hasAccess = hasPrivilegedRole;
-  if (!hasAccess && gameId) {
+  if (!hasAccess) {
+    // PPV game: check entitlement or invite redemption.
     const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
       p_game_id: gameId,
       p_user_id: userId,
@@ -3310,9 +4231,39 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   if (!hasAccess) return json({ ok: false, error: "forbidden" }, 403);
 
   const cfg = await getOrCreateStreamConfig(ctx.admin);
-  const playbackUrl = String(cfg.collection_id ?? "").trim();
+
+  // WS7: Replay Embargo & Monetization (belt-and-suspenders — the
+  // primary gate runs at the top of the handler on body.playbackMode;
+  // this redundant check keeps the invariant locally visible inside
+  // the non-admin branch).
+  if (playbackMode === "replay" && gameId && !isSuperAdmin) {
+    const { data: gameData } = await ctx.admin
+      .from("games")
+      .select("replay_monetization_enabled_at, replay_price, replay_mode")
+      .eq("id", gameId)
+      .maybeSingle();
+
+    if (gameData) {
+      if (!gameData.replay_monetization_enabled_at || new Date(String(gameData.replay_monetization_enabled_at)) > new Date()) {
+        return json({ ok: false, error: "replay_embargoed", message: "Replays are embargoed for 48 hours post-game." }, 403);
+      }
+      // Replay entitlement check
+      if (!hasAccess) {
+        return json({ ok: false, error: "replay_available_for_purchase", price: gameData.replay_price ?? 500 }, 403);
+      }
+    }
+  }
+
+  const playbackUrl =
+    String(cfg.collection_id ?? "").trim() ||
+    String(ctx.env.VITE_STREAM_URL ?? "").trim();
+  // RC-4: Return named 409 (not silent 503) so the frontend can surface it.
   if (!playbackUrl) {
-    return json({ ok: false, error: "stream_not_configured" }, 503);
+    return json({
+      ok: false,
+      error: "stream_not_configured",
+      hint: "Set a stream URL in Broadcast Controls before going live.",
+    }, 409);
   }
   const session = await createOrRefreshPlaybackSession(
     ctx,
@@ -3320,11 +4271,108 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     userId,
     body.sessionKey,
   );
+  const deliveryClass = getStreamDeliveryClass(playbackUrl);
+  const cookieHeaders: Record<string, string> = {};
+  let clientPlaybackUrl = playbackUrl;
+  if (deliveryClass === "proxy" && gameId) {
+    const exp = Math.floor(Date.now() / 1000) + 70;
+    const secret = ctx.env.OMNIHUB_SIGNING_SECRET ?? ctx.env.SUPABASE_SERVICE_ROLE_KEY;
+    const token = await signProxyToken(
+      { gameId, userId, sessionId: session.id, exp },
+      secret,
+    );
+    cookieHeaders["Set-Cookie"] =
+      `${PROXY_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=70`;
+    clientPlaybackUrl = `/api/streams/${gameId}/proxy/master.m3u8`;
+  }
+
+  // ── Playback provider override (signed playback) ──────────────────────
+  // Flag-gated + per-game opt-in. When every condition in
+  // selectPlaybackProvider() is met, the signed URL from NativeHlsProvider
+  // replaces clientPlaybackUrl and a token row is inserted into
+  // stream_playback_tokens for server-side revocation / audit. If any
+  // part of this path fails, we silently fall through to the legacy
+  // clientPlaybackUrl — the feature is strictly additive. Invariant:
+  // the legacy embed URL (playbackUrl) is NEVER returned once the
+  // signed path is selected, per STREAM_GATING_v1.6.0.md.
+  let gameSignedRow: {
+    require_signed_url?: boolean | null;
+    playback_provider?: string | null;
+    playback_asset_id?: string | null;
+    latency_mode?: string | null;
+    replay_quality_tier?: string | null;
+  } | null = null;
+  if (gameId) {
+    const gRes = await ctx.admin
+      .from("games")
+      .select("require_signed_url,playback_provider,playback_asset_id,latency_mode,replay_quality_tier")
+      .eq("id", gameId)
+      .maybeSingle();
+    gameSignedRow = (gRes.data as typeof gameSignedRow) ?? null;
+  }
+  if (gameId && gameSignedRow) {
+    const workerOrigin = new URL(ctx.req.url).origin;
+    const provider = selectPlaybackProvider({
+      game: {
+        require_signed_url: gameSignedRow.require_signed_url ?? null,
+        playback_provider: gameSignedRow.playback_provider ?? null,
+        playback_asset_id: gameSignedRow.playback_asset_id ?? null,
+      },
+      flags: {
+        FEATURE_SIGNED_PLAYBACK_ENABLED: ctx.env.FEATURE_SIGNED_PLAYBACK_ENABLED,
+        FEATURE_NATIVE_HLS_PROVIDER: ctx.env.FEATURE_NATIVE_HLS_PROVIDER,
+      },
+      playbackTokenSecret: ctx.env.PLAYBACK_TOKEN_SECRET,
+      workerOrigin,
+    });
+    if (provider.name === "native_hls") {
+      try {
+        const payload = await provider.resolve({
+          gameId,
+          userId,
+          sessionId: session.id,
+          mode: "live",
+          expiresAt: session.expiresAt,
+          maxExpiresAt: session.maxExpiresAt,
+          game: {
+            id: gameId,
+            playback_asset_id: gameSignedRow.playback_asset_id,
+            require_signed_url: gameSignedRow.require_signed_url,
+            latency_mode: (gameSignedRow.latency_mode as "standard" | "low") ?? "standard",
+            replay_quality_tier: (gameSignedRow.replay_quality_tier as "raw" | "edited") ?? "raw",
+          },
+        });
+        if (payload.signedPlaybackUrl) {
+          await ctx.admin.from("stream_playback_tokens").insert({
+            session_id: session.id,
+            user_id: userId,
+            game_id: gameId,
+            provider: "native_hls",
+            signed_token: payload.signedPlaybackUrl.split("?t=")[1] ?? "",
+            expires_at: session.expiresAt,
+            max_expires_at: session.maxExpiresAt,
+            playback_mode: "live",
+          });
+          clientPlaybackUrl = payload.signedPlaybackUrl;
+          // deliveryClass stays as whatever getStreamDeliveryClass
+          // returned. The client branches on URL format, not this field.
+        }
+      } catch (err) {
+        // Signed-path failure → fall through to legacy. Logged but does
+        // not surface as a user-visible error; the legacy URL is a safe
+        // superset of behavior.
+        Sentry.captureException?.(err);
+      }
+    }
+  }
+
   return json({
     ok: true,
     playback: {
       type: "url",
-      url: playbackUrl,
+      url: clientPlaybackUrl,
+      deliveryClass,
+      playbackMode,
       expiresAt: session.expiresAt,
       maxExpiresAt: session.maxExpiresAt,
       heartbeatIntervalSec: 25,
@@ -3334,7 +4382,225 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       gameId: gameId ?? null,
       maxExpiresAt: session.maxExpiresAt,
     },
+  }, 200, cookieHeaders);
+}
+
+/**
+ * GET /api/streams/:gameId/playback-token/verify?t=<token>
+ *
+ * Stateless-ish verification endpoint for signed playback tokens. Public
+ * read — a verification response leaks nothing beyond ok/reason. Returns
+ * 200 on success, 401 with reason on any failure. Used by internal
+ * tooling, the native HLS proxy (future PR), and the on-call runbook.
+ *
+ * Verification order:
+ *   1. HMAC signature valid (constant-time).
+ *   2. Token not expired (clock check vs. now).
+ *   3. Session row still `active` and the session's `max_expires_at`
+ *      has not elapsed.
+ *   4. Token row not revoked in stream_playback_tokens.
+ *   5. Token's gameId matches the URL path param.
+ */
+export async function handlePlaybackTokenVerify(ctx: HandlerCtx) {
+  const urlGameId = ctx.params.gameId ?? null;
+  const url = new URL(ctx.req.url);
+  const token = url.searchParams.get("t");
+  if (!token) return json({ ok: false, reason: "token_required" }, 400);
+
+  const secret = ctx.env.PLAYBACK_TOKEN_SECRET ?? "";
+  const result = await verifyPlaybackToken(token, secret);
+  // strictNullChecks is off in tsconfig; discriminated-union narrowing on
+  // `result.ok` is unreliable here. Access both shapes via field read and
+  // assert truthiness at runtime. The JWT verifier is the authoritative
+  // gate — we are only reshaping its output for the response.
+  if (!result.ok) {
+    const reason = (result as { reason?: string }).reason ?? "bad_signature";
+    return json({ ok: false, reason }, 401);
+  }
+  const claims = (result as { claims: { gameId: string | null; userId: string; sessionId: string; assetId: string; playbackMode: string; exp: number; mex: number } }).claims;
+
+  if (urlGameId && claims.gameId && urlGameId !== claims.gameId) {
+    return json({ ok: false, reason: "game_mismatch" }, 401);
+  }
+
+  const sessRes = await ctx.admin
+    .from("stream_access_sessions")
+    .select("id,status,max_expires_at")
+    .eq("id", claims.sessionId)
+    .maybeSingle();
+  const sess = sessRes.data as {
+    id: string;
+    status: string | null;
+    max_expires_at: string | null;
+  } | null;
+  if (!sess) return json({ ok: false, reason: "session_not_found" }, 401);
+  if (sess.status !== "active") return json({ ok: false, reason: "session_inactive" }, 401);
+  if (sess.max_expires_at && new Date(sess.max_expires_at).getTime() <= Date.now()) {
+    return json({ ok: false, reason: "session_expired" }, 401);
+  }
+
+  const tokenRes = await ctx.admin
+    .from("stream_playback_tokens")
+    .select("id,revoked_at")
+    .eq("session_id", claims.sessionId)
+    .is("revoked_at", null)
+    .limit(1)
+    .maybeSingle();
+  if (!tokenRes.data) {
+    return json({ ok: false, reason: "token_revoked" }, 401);
+  }
+
+  return json({
+    ok: true,
+    claims: {
+      userId: claims.userId,
+      gameId: claims.gameId,
+      sessionId: claims.sessionId,
+      assetId: claims.assetId,
+      playbackMode: claims.playbackMode,
+      exp: claims.exp,
+      mex: claims.mex,
+    },
   });
+}
+
+/**
+ * GET /api/streams/:gameId/preflight
+ *
+ * Read-only public snapshot used by ViewerPreflight. Designed as a
+ * single round-trip so the UI does not fan out to multiple endpoints
+ * mid-check. Anonymous callers get the skeleton (entitlement=absent,
+ * no session conflict); signed-in callers get real entitlement /
+ * session-conflict data.
+ *
+ * This endpoint is intentionally side-effect-free (no session row
+ * created, no token minted, no counter incremented) so it is safe to
+ * call on every page mount without inflating DB load.
+ *
+ * Shape is kept stable + versioned via the `ok: true` literal; additive
+ * fields may be added in future WS work but never re-typed.
+ */
+export async function handlePlaybackPreflight(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId ?? null;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+
+  const userId = optionalAuth(ctx.req);
+
+  const gRes = await ctx.admin
+    .from("games")
+    .select(
+      "id, status, starts_at, ended_at, replay_mode, replay_monetization_enabled_at, replay_quality_tier, replay_price",
+    )
+    .eq("id", gameId)
+    .maybeSingle();
+  const game = gRes.data as
+    | {
+        id: string;
+        status: string | null;
+        starts_at: string | null;
+        ended_at: string | null;
+        replay_mode: "none" | "raw" | "edited" | null;
+        replay_monetization_enabled_at: string | null;
+        replay_quality_tier: "raw" | "edited" | null;
+        replay_price: number | null;
+      }
+    | null;
+  if (!game) return json({ ok: false, error: "game_not_found" }, 404);
+
+  const now = Date.now();
+  const replayMode = (game.replay_mode ?? "none") as "none" | "raw" | "edited";
+  // Halftime is derived from games.status (authoritative), not a
+  // dedicated column. Missing status → treat as live if tipoff has
+  // passed.
+  let state: "upcoming" | "live" | "halftime" | "ended_replay" | "ended_no_replay" | "unavailable";
+  if (game.ended_at || game.status === "completed" || game.status === "ended") {
+    state = replayMode === "none" ? "ended_no_replay" : "ended_replay";
+  } else if (game.status === "halftime") {
+    state = "halftime";
+  } else if (game.starts_at && new Date(game.starts_at).getTime() > now) {
+    state = "upcoming";
+  } else if (game.starts_at) {
+    state = "live";
+  } else {
+    state = "unavailable";
+  }
+
+  let entitlementStatus: "active" | "absent" | "expired" = "absent";
+  let entitlementExpiresAt: string | null = null;
+  let hasConflict = false;
+  let conflictDeviceLabel: string | null = null;
+  let conflictStartedAt: string | null = null;
+  let replayEntitled = false;
+
+  if (userId) {
+    const eRes = await ctx.admin
+      .from("stream_entitlements")
+      .select("status, expires_at")
+      .eq("game_id", gameId)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const ent = eRes.data as { status: string | null; expires_at: string | null } | null;
+    if (ent) {
+      entitlementExpiresAt = ent.expires_at ?? null;
+      if (ent.status === "active" && (!ent.expires_at || new Date(ent.expires_at).getTime() > now)) {
+        entitlementStatus = "active";
+      } else {
+        entitlementStatus = "expired";
+      }
+    }
+
+    // Session conflict — any `active` row for this user on THIS game
+    // on a different session key indicates another device is streaming.
+    const sRes = await ctx.admin
+      .from("stream_access_sessions")
+      .select("id, created_at, idempotency_key")
+      .eq("user_id", userId)
+      .eq("game_id", gameId)
+      .eq("status", "active")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const sess = sRes.data as
+      | { id: string; created_at: string | null; idempotency_key: string | null }
+      | null;
+    if (sess) {
+      hasConflict = true;
+      conflictDeviceLabel = sess.idempotency_key ? sess.idempotency_key.slice(0, 8) : null;
+      conflictStartedAt = sess.created_at;
+    }
+
+    if (state === "ended_replay") {
+      // Treat a live entitlement as NOT sufficient for replay — the
+      // replay is a separate purchase product. A dedicated replay
+      // entitlement row would be stored via a future replay checkout.
+      replayEntitled = false;
+    }
+  }
+
+  return json(
+    {
+      ok: true,
+      userId,
+      entitlement: { status: entitlementStatus, expiresAt: entitlementExpiresAt },
+      activeSession: { hasConflict, conflictDeviceLabel, conflictStartedAt },
+      game: {
+        id: game.id,
+        state,
+        tipoffAt: game.starts_at,
+        ppvPriceCad: 4.99, // matches handleStreamPurchase hardcoded price
+        replay: {
+          embargoEndsAt: game.replay_monetization_enabled_at ?? null,
+          qualityTier: game.replay_quality_tier ?? null,
+          priceCad: game.replay_price != null ? Number(game.replay_price) : null,
+          entitled: replayEntitled,
+        },
+      },
+    },
+    200,
+    { "Cache-Control": "private, max-age=5" },
+  );
 }
 
 export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
@@ -3460,19 +4726,77 @@ async function handleStreamSessionEnd(ctx: HandlerCtx) {
   return json({ ok: true, ended: Boolean(endRes.data) });
 }
 
-async function handleListComments(ctx: HandlerCtx) {
+async function handleStreamProxy(ctx: HandlerCtx) {
+  const gameId = ctx.params.gameId;
+  if (!gameId) return new Response("Forbidden", { status: 403 });
+
+  const token = readCookie(ctx.req, PROXY_AUTH_COOKIE);
+  if (!token) return new Response("Forbidden", { status: 403 });
+
+  const secret = ctx.env.OMNIHUB_SIGNING_SECRET ?? ctx.env.SUPABASE_SERVICE_ROLE_KEY;
+  const payload = await verifyProxyToken(token, secret);
+  if (!payload || payload.gameId !== gameId) return new Response("Forbidden", { status: 403 });
+
+  const trueOrigin = await getStreamUrlForGame(ctx.admin, gameId, ctx.env);
+  const targetUrl = resolveProxyTarget(trueOrigin, ctx.req.url, gameId);
+  const pathLower = new URL(targetUrl).pathname.toLowerCase();
+  const isManifest = pathLower.endsWith(".m3u8");
+  const isSegment = pathLower.endsWith(".ts") || pathLower.endsWith(".m4s") || pathLower.endsWith(".mp4");
+
+  const upstream = await fetch(targetUrl, {
+    cf: {
+      cacheEverything: true,
+      cacheTtl: isManifest ? 2 : isSegment ? 3600 : 60,
+    },
+  } as RequestInit & { cf: { cacheEverything: boolean; cacheTtl: number } });
+  if (!upstream.ok) return new Response("Upstream error", { status: upstream.status });
+
+  const headers = new Headers(upstream.headers);
+
+  const origin = ctx.req.headers.get("Origin");
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Credentials", "true");
+    headers.set("Vary", "Origin");
+  }
+
+  if (!isManifest) {
+    return new Response(upstream.body, {
+      status: upstream.status,
+      statusText: upstream.statusText,
+      headers,
+    });
+  }
+
+  const manifest = await upstream.text();
+  const rewritten = rewriteManifestToGateway(manifest, gameId);
+  headers.set("content-type", "application/vnd.apple.mpegurl; charset=utf-8");
+  headers.set("cache-control", "public, max-age=2");
+  return new Response(rewritten, {
+    status: upstream.status,
+    statusText: upstream.statusText,
+    headers,
+  });
+}
+
+export async function handleListComments(ctx: HandlerCtx) {
   const gameId = ctx.params.gameId;
   if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
   const url = new URL(ctx.req.url);
   const limit = parseCommentLimit(url);
   const before = url.searchParams.get("before");
+  const wantsHidden = url.searchParams.get("includeHidden") === "1";
+  const roles = getRolesFromVerifiedSession(ctx.req);
+  const canViewHidden = roles.includes("league_admin") || roles.includes("super_admin");
   let query = ctx.admin
     .from("stream_chat_messages")
     .select("id,message,status,created_at,user_id")
     .eq("game_id", gameId)
-    .eq("status", "active")
     .order("created_at", { ascending: false })
     .limit(limit);
+  if (!(wantsHidden && canViewHidden)) {
+    query = query.eq("status", "active");
+  }
   if (before) query = query.lt("created_at", before);
   const res = await query;
   if (res.error) throw new Error(res.error.message);
@@ -3499,12 +4823,21 @@ async function handleListComments(ctx: HandlerCtx) {
       .map((row) => ({
         id: String(row.id),
         message: String(row.message),
+        status: String(row.status) === "hidden" ? "hidden" : "active",
         createdAt: String(row.created_at),
         userId: String(row.user_id),
         userDisplayName: nameByUser.get(String(row.user_id)) ?? "Fan",
       }))
       .reverse(),
   });
+}
+
+async function requireLeagueOrSuperAdmin(req: Request, admin: SupabaseClient) {
+  const session = await requireAdminSession(req, admin);
+  if (!session.roles.includes("league_admin") && !session.roles.includes("super_admin")) {
+    throw new Error("forbidden");
+  }
+  return session;
 }
 
 export async function handlePostComment(ctx: HandlerCtx) {
@@ -3552,8 +4885,257 @@ export async function handlePostComment(ctx: HandlerCtx) {
   });
 }
 
-async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
-  return handlePlaybackSession({ ...ctx, params: { ...ctx.params, gameId: null } });
+export async function handleModerateComment(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const moderator = await requireLeagueOrSuperAdmin(ctx.req, ctx.admin);
+  const gameId = ctx.params.gameId;
+  const commentId = ctx.params.commentId;
+  if (!gameId || !commentId) return json({ ok: false, error: "invalid_params" }, 400);
+  const body = (await ctx.req.json().catch(() => null)) as { action?: "hide" | "restore" } | null;
+  if (!body?.action || !["hide", "restore"].includes(body.action)) {
+    return json({ ok: false, error: "invalid_action" }, 400);
+  }
+  const nextStatus = body.action === "hide" ? "hidden" : "active";
+  const update = await ctx.admin
+    .from("stream_chat_messages")
+    .update({ status: nextStatus, updated_by: moderator.userId, updated_at: new Date().toISOString() })
+    .eq("id", commentId)
+    .eq("game_id", gameId)
+    .select("id")
+    .maybeSingle();
+  if (update.error) throw new Error(update.error.message);
+  if (!update.data) return json({ ok: false, error: "comment_not_found" }, 404);
+  return json({ ok: true, commentId, status: nextStatus });
+}
+
+export async function handleResetReactions(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  await requireLeagueOrSuperAdmin(ctx.req, ctx.admin);
+  const gameId = ctx.params.gameId;
+  if (!gameId) return json({ ok: false, error: "game_id_required" }, 400);
+  const del = await ctx.admin.from("stream_reactions").delete().eq("game_id", gameId);
+  if (del.error) throw new Error(del.error.message);
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheDelete = (cfCaches.default as { delete?: (req: Request) => Promise<boolean> }).delete;
+  if (cacheDelete) {
+    cacheDelete(new Request(`https://sbbl-hq.icu/__cache/reactions?gameId=${gameId}`)).catch(() => {});
+  }
+  return json({ ok: true, gameId, reset: true });
+}
+
+// ── Broadcast-standalone handlers ────────────────────────────────────────────
+// Livestreams are independent of games. These handlers own the entire
+// broadcast session lifecycle with zero game coupling. Do NOT add gameId
+// parameters, PPV entitlement checks, or any game-specific logic here.
+// The only access rule for an open broadcast: stream is live + user is registered.
+// See CLAUDE.md Rule 7 — these handlers are frozen; do not modify without
+// explicit owner instruction.
+
+export async function handleBroadcastStreamAccess({ req, admin }: HandlerCtx) {
+  const userId = requireAuth(req);
+  const cfgRes = await admin
+    .from("stream_admin_config")
+    .select("is_live")
+    .eq("id", true)
+    .maybeSingle();
+  if (!cfgRes.data?.is_live) {
+    return json({ ok: true, hasAccess: false });
+  }
+  const profileRes = await admin
+    .from("profiles")
+    .select("onboarding_completed_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const isRegistered = Boolean(
+    (profileRes.data as { onboarding_completed_at?: string | null } | null)
+      ?.onboarding_completed_at,
+  );
+  return json({ ok: true, hasAccess: isRegistered });
+}
+
+export async function handleBroadcastSessionStart(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const body = (await ctx.req.json().catch(() => null)) as {
+    sessionKey?: string;
+  } | null;
+  if (!body?.sessionKey || body.sessionKey.length < 8) {
+    return json({ ok: false, error: "session_key_required" }, 400);
+  }
+
+  const cfg = await getOrCreateStreamConfig(ctx.admin);
+
+  // Super admin: no access checks, synthetic session so they can preview before going live.
+  const roles = await getUserRolesFromDB(userId, ctx.admin);
+  if (roles.includes("super_admin")) {
+    const playbackUrl =
+      String(cfg.collection_id ?? "").trim() ||
+      String(ctx.env.VITE_STREAM_URL ?? "").trim();
+    const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
+    return json({
+      ok: true,
+      playback: { type: "url", url: playbackUrl, heartbeatIntervalSec: 25, maxExpiresAt },
+      session: { id: crypto.randomUUID(), maxExpiresAt },
+    });
+  }
+
+  if (!cfg.is_live) {
+    return json({ ok: false, error: "stream_offline" }, 403);
+  }
+
+  const playbackUrl =
+    String(cfg.collection_id ?? "").trim() ||
+    String(ctx.env.VITE_STREAM_URL ?? "").trim();
+  if (!playbackUrl) {
+    return json({ ok: false, error: "stream_not_configured" }, 409);
+  }
+
+  // Registered users may watch an open broadcast — no entitlement row required.
+  const profileRes = await ctx.admin
+    .from("profiles")
+    .select("onboarding_completed_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const isRegistered = Boolean(
+    (profileRes.data as { onboarding_completed_at?: string | null } | null)
+      ?.onboarding_completed_at,
+  );
+  if (!isRegistered) return json({ ok: false, error: "forbidden" }, 403);
+
+  const session = await createOrRefreshPlaybackSession(
+    ctx,
+    null,
+    userId,
+    body.sessionKey,
+  );
+  return json({
+    ok: true,
+    playback: {
+      type: "url",
+      url: playbackUrl,
+      heartbeatIntervalSec: 25,
+      maxExpiresAt: session.maxExpiresAt,
+    },
+    session: { id: session.id, maxExpiresAt: session.maxExpiresAt },
+  });
+}
+
+// Heartbeat and end delegate to the game-agnostic handlers with null gameId.
+// Sessions for broadcasts are stored with game_id = null — no game coupling.
+async function handleBroadcastHeartbeatRoute(ctx: HandlerCtx) {
+  return handleStreamSessionHeartbeat({ ...ctx, params: { ...ctx.params, gameId: null } });
+}
+async function handleBroadcastSessionEndRoute(ctx: HandlerCtx) {
+  return handleStreamSessionEnd({ ...ctx, params: { ...ctx.params, gameId: null } });
+}
+
+/**
+ * RC-6: Atomic Go Live / End Stream endpoint.
+ * Merges updateStreamConfig + setStreamLive into a single upsert so the
+ * stream URL and live status are committed atomically — no race window
+ * between the two separate writes where a session fetch could see the old URL.
+ *
+ * POST /ops/streams/go-live
+ * Body: { isLive: boolean, collectionId: string, title: string }
+ * Requires: super_admin
+ */
+export async function handleGoLive(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    isLive?: boolean;
+    collectionId?: string;
+    title?: string;
+    activeGameId?: string | null;
+  } | null;
+
+  if (!body || typeof body.isLive !== "boolean") {
+    return json({ ok: false, error: "is_live_required" }, 400);
+  }
+
+  let safeUrl = typeof body.collectionId === "string" ? body.collectionId.trim() : "";
+  if (safeUrl !== "") {
+    try {
+      const parsedUrl = new URL(safeUrl);
+      if (!["https:", "http:", "rtmp:", "rtmps:"].includes(parsedUrl.protocol)) {
+        if (["javascript:", "data:", "file:", "vbscript:"].includes(parsedUrl.protocol)) {
+          safeUrl = "";
+        }
+      }
+    } catch {
+      try {
+        const fallbackUrl = new URL("https://" + safeUrl);
+        safeUrl = fallbackUrl.href;
+      } catch {
+        // Unparseable, leave verbatim in permissive mode
+      }
+    }
+  }
+  const nowIso = new Date().toISOString();
+  const patch: Record<string, unknown> = {
+    id: true,
+    is_live: body.isLive,
+    updated_by: session.userId,
+    updated_at: nowIso,
+  };
+  if (typeof body.collectionId === "string") {
+    patch.collection_id = safeUrl;
+  }
+  if (typeof body.title === "string" && body.title.trim()) {
+    patch.title = body.title.trim();
+  }
+  if (body.activeGameId === null) {
+    patch.active_game_id = null;
+  } else if (typeof body.activeGameId === "string" && body.activeGameId.trim()) {
+    const activeGameId = body.activeGameId.trim();
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(activeGameId)) return json({ ok: false, error: "invalid_active_game_id" }, 400);
+    patch.active_game_id = activeGameId;
+  }
+  if (body.isLive) {
+    patch.live_started_at = nowIso;
+    patch.live_ended_at = null;
+  } else {
+    patch.live_ended_at = nowIso;
+  }
+
+  const { data, error } = await ctx.admin
+    .from("stream_admin_config")
+    .upsert(patch, { onConflict: "id" })
+    .select("collection_id,title,is_live,active_game_id,updated_at")
+    .single();
+
+  if (error) {
+    return json({ ok: false, error: error.message }, 500);
+  }
+
+  // Bust edge cache so viewers pick up the new live/offline status on their
+  // next 15-second poll without waiting out the 10-second TTL.
+  // We must bust BOTH the global key and the per-game key because clients
+  // that have an activeGameId poll with ?gameId=<uuid> which is a separate
+  // cache entry. Missing either bust causes viewers to see stale status for
+  // up to STREAM_STATUS_TTL_S seconds after Go Live / End Stream.
+  const cfCachesGoLive = (caches as unknown as { default: Cache }).default;
+  // Global (no gameId) cache bust
+  const globalBustKey = new Request(streamCacheUrl(null));
+  cfCachesGoLive.delete(globalBustKey).catch(() => {
+    cfCachesGoLive.delete(globalBustKey).catch(() => {});
+  });
+  // Also bust the stream_url_cache in-process so the next playback session
+  // request picks up the newly saved collectionId immediately.
+  for (const [k] of streamUrlCache.entries()) {
+    streamUrlCache.delete(k);
+  }
+
+  return json({
+    ok: true,
+    isLive: Boolean(data.is_live),
+    collectionId: String(data.collection_id ?? ""),
+    title: String(data.title ?? ""),
+    activeGameId: data.active_game_id ? String(data.active_game_id) : null,
+    updatedAt: String(data.updated_at ?? nowIso),
+  });
 }
 
 async function handleBroadcastHeartbeat(ctx: HandlerCtx) {
@@ -3917,7 +5499,7 @@ async function handlePayOrder(ctx: HandlerCtx) {
     },
     body: new URLSearchParams({
       "payment_method_types[]": "card",
-      "line_items[0][price_data][currency]": "usd",
+      "line_items[0][price_data][currency]": "cad",
       "line_items[0][price_data][product_data][name]": "SBBL HQ Store Order",
       "line_items[0][price_data][unit_amount]": String(
         ((order as Record<string, unknown>).total_amount as number) || 100,
@@ -3950,9 +5532,50 @@ async function handlePayOrder(ctx: HandlerCtx) {
   return json({ ok: true, url: checkout.url, sessionId: checkout.id });
 }
 
+
+// ── STORE QUOTE ─────────────────────────────────────────────────────────────
+async function handleStoreQuote({ req, env, admin }: HandlerCtx) {
+  const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "unknown";
+  if (!enforceInMemoryRateLimit(`store-quote:${ip}`, 5, 60_000)) {
+    return json({ ok: false, error: "rate_limit_exceeded" }, 429);
+  }
+  await ensureMutation(req, { req, env, admin, params: {} });
+  const userId = requireAuth(req);
+
+  const body = (await req.json().catch(() => null)) as {
+    productId: string;
+    name: string;
+    teamName: string;
+    quantity: number;
+    notes?: string;
+  } | null;
+
+  if (!body || !body.productId || !body.name || !body.teamName || !body.quantity) {
+    return json({ ok: false, error: "invalid_payload" }, 400);
+  }
+
+  // Idempotency check handled by ensureMutation middleware using idempotency-key header
+
+  const { error } = await admin
+    .from("custom_quote_requests")
+    .insert({
+      user_id: userId,
+      product_id: body.productId,
+      name: body.name,
+      team_name: body.teamName,
+      quantity: body.quantity,
+      notes: body.notes ?? null,
+      status: "pending"
+    });
+
+  if (error) {
+    return json({ ok: false, error: "failed_to_submit_quote" }, 500);
+  }
+
+  return json({ ok: true });
+}
+
 // ── DIRECT STORE CHECKOUT ─────────────────────────────────────────────────────
-// Accepts line items from the client (no DB variant records required).
-// Used by BagDrawer until real DB products/variants are seeded.
 async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
   const ip = req.headers.get("cf-connecting-ip") || req.headers.get("x-real-ip") || "unknown";
   if (!enforceInMemoryRateLimit(`store-checkout:${ip}`, 10, 60_000)) {
@@ -3982,15 +5605,44 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
 
   // Fetch the canonical products from the database
   const { data: dbProducts, error: dbError } = await admin
-    .from("products")
-    .select("id, name, price")
-    .in("id", productIds);
+    .from("store_products")
+    .select("id, name, price_cents")
+    .in("id", productIds)
+    .eq("active", true)
+    .eq("_deleted", false);
 
   if (dbError || !dbProducts || dbProducts.length === 0) {
     return json({ ok: false, error: "products_not_found" }, 404);
   }
 
   const dbProductMap = new Map(dbProducts.map(p => [p.id, p]));
+
+  let amountSubtotalCents = 0;
+  let validItemsCount = 0;
+
+  // Create an order in store_orders pending payment
+  const { data: orderData, error: orderError } = await admin
+    .from("store_orders")
+    .insert({
+      user_id: userId,
+      amount_subtotal_cents: 0,
+      amount_total_cents: 0,
+      status: "pending"
+    })
+    .select("id")
+    .single();
+
+  if (orderError || !orderData) {
+    return json({ ok: false, error: "failed_to_create_order" }, 500);
+  }
+
+  const orderId = orderData.id;
+  const orderItemsData: Array<{
+    order_id: string;
+    product_id: string;
+    quantity: number;
+    unit_price_cents: number;
+  }> = [];
 
   const params = new URLSearchParams({
     "payment_method_types[]": "card",
@@ -4006,30 +5658,42 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
       reqUrlStr,
     ),
     "metadata[user_id]": userId,
+    "metadata[order_id]": orderId,
     "metadata[purchase_type]": "store_order",
   });
 
-  // price is in PHP whole units — Stripe expects centavos (×100)
-  // Use the price from the database instead of the client payload
-  let validItemsCount = 0;
   body.items.forEach((item) => {
     if (!item.id) return;
     const dbProduct = dbProductMap.get(item.id);
     if (!dbProduct) return; // Skip if product doesn't exist in DB
 
+    const qty = item.qty ?? 1;
+    const lineTotalCents = dbProduct.price_cents * qty;
+    amountSubtotalCents += lineTotalCents;
+
+    orderItemsData.push({
+      order_id: orderId,
+      product_id: dbProduct.id,
+      quantity: qty,
+      unit_price_cents: dbProduct.price_cents
+    });
+
     const idx = validItemsCount++;
-    params.set(`line_items[${idx}][price_data][currency]`, "php");
+    // Stripe expects CAD centavos for our store
+    params.set(`line_items[${idx}][price_data][currency]`, "cad");
     params.set(`line_items[${idx}][price_data][product_data][name]`, dbProduct.name);
-    params.set(
-      `line_items[${idx}][price_data][unit_amount]`,
-      String(Math.round(dbProduct.price * 100)),
-    );
-    params.set(`line_items[${idx}][quantity]`, String(item.qty ?? 1));
+    params.set(`line_items[${idx}][price_data][unit_amount]`, String(dbProduct.price_cents));
+    params.set(`line_items[${idx}][quantity]`, String(qty));
   });
 
   if (validItemsCount === 0) {
+    // Cleanup pending order
+    await admin.from("store_orders").delete().eq("id", orderId);
     return json({ ok: false, error: "no_valid_items_for_checkout" }, 400);
   }
+
+  // Bulk insert order items
+  await admin.from("store_order_items").insert(orderItemsData);
 
   const stripeRes = await fetch("https://api.stripe.com/v1/checkout/sessions", {
     method: "POST",
@@ -4047,6 +5711,14 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
     );
   }
   const session = (await stripeRes.json()) as { url: string; id: string };
+
+  // Update order with session details and total
+  await admin.from("store_orders").update({
+    stripe_checkout_session_id: session.id,
+    amount_subtotal_cents: amountSubtotalCents,
+    amount_total_cents: amountSubtotalCents // Add taxes/shipping here if applicable
+  }).eq("id", orderId);
+
   return json({ ok: true, url: session.url, sessionId: session.id });
 }
 
@@ -4094,12 +5766,13 @@ async function fetchPublicMediaRows(
   let query = admin
     .from("media_publications")
     .select(
-      "id,surface,title,subtitle,status,sort_at,render_payload,league_id," +
+      "id,surface,title,subtitle,status,sort_at,sort_order,render_payload,league_id," +
       "media_assets!inner(id,metadata,created_at)," +
       "leagues:leagues!league_id(code)"
     )
     .eq("status", "published")
-    .order("sort_at", { ascending: false })
+    .order("sort_order", { ascending: true })
+    .order("id", { ascending: true })
     .limit(50);
 
   if (leagueId) query = query.eq("league_id", leagueId);
@@ -4111,70 +5784,128 @@ async function fetchPublicMediaRows(
   if (error) throw new Error(error.message);
   return (data ?? []) as unknown as PublicMediaRow[];
 }
+
+async function getPublicMediaFreshnessVersion(admin: HandlerCtx["admin"]): Promise<string> {
+  // Reorder saves write an audit log entry; latest timestamp acts as a lightweight
+  // cache-busting marker shared by both /media and /media/posters.
+  const { data, error } = await admin
+    .from("audit_logs")
+    .select("created_at")
+    .eq("action", "ops_reorder_media_publications")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  if (error) {
+    console.warn("[public-media] freshness marker lookup failed:", error.message);
+    return "0";
+  }
+  const latest = Array.isArray(data) && data[0] ? String((data[0] as { created_at?: string }).created_at ?? "0") : "0";
+  return latest;
+}
+
+function toPublicMediaCacheKey(req: Request, variant: "media" | "posters", version: string): Request {
+  const url = new URL(req.url);
+  const key = new URL(`https://sbbl-hq.icu/__cache/public/${variant}`);
+  key.search = url.search;
+  key.searchParams.set("__v", version);
+  return new Request(key.toString());
+}
+
+async function respondWithPublicMediaFreshness(
+  req: Request,
+  admin: HandlerCtx["admin"],
+  variant: "media" | "posters",
+  computeData: () => Promise<unknown>,
+): Promise<Response> {
+  const version = await getPublicMediaFreshnessVersion(admin);
+  const isAnonymous = !getBearerToken(req);
+  const cfCaches = caches as unknown as { default: Cache };
+  const cacheKey = toPublicMediaCacheKey(req, variant, version);
+
+  if (isAnonymous) {
+    const hit = await cfCaches.default.match(cacheKey);
+    if (hit) return hit;
+  }
+
+  const data = await computeData();
+  const res = json({ ok: true, data }, 200, {
+    "Cache-Control": "public, s-maxage=300, max-age=120",
+    "x-public-media-version": version,
+  });
+
+  if (isAnonymous) {
+    // Cache key includes version, so any reorder save immediately shifts reads
+    // to a fresh entry without waiting for prior 300s TTL to expire.
+    cfCaches.default.put(cacheKey, res.clone()).catch(() => {});
+  }
+  return res;
+}
+
 async function handlePublicProducts({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
+  // Optional leagueId filter - keep it in signature for backwards compat, though store_products is global.
   const leagueId = url.searchParams.get("leagueId");
-  let query = admin
-    .from("products")
-    .select("id,name,price,status,league_id,metadata")
-    .eq("status", "published")
+
+  const query = admin
+    .from("store_products")
+    .select("id,name,description,category,price_cents,image_url,sizes,colors,badge,is_custom")
+    .eq("active", true)
+    .eq("_deleted", false)
+    .order("name", { ascending: true })
     .limit(100);
-  if (leagueId) query = query.eq("league_id", leagueId);
+
   const { data, error } = await query;
   if (error) throw new Error(error.message);
-  return json({ ok: true, data: data ?? [] }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
+
+  // Transform response to match frontend expectations (or map to frontend Product type)
+  const mapped = (data ?? []).map((p: Record<string, unknown>) => ({
+    id: String(p.id),
+    name: String(p.name),
+    category: String(p.category),
+    price: Number(p.price_cents) / 100, // Frontend expects dollars, backend stores cents
+    image: String(p.image_url),
+    sizes: (p.sizes as string[]) ?? [],
+    colors: (p.colors as string[]) ?? [],
+    badge: p.badge ? String(p.badge) : undefined,
+    is_custom: Boolean(p.is_custom),
+    description: p.description ? String(p.description) : undefined
+  }));
+
+  return json({ ok: true, data: mapped }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
 }
 
 async function handlePublicMedia({ req, admin }: HandlerCtx) {
-  const url = new URL(req.url);
-  const leagueId = url.searchParams.get("leagueId");
-
-  // Canonical render: media_publications is the single public surface.
-  // No direct reads from raw ingest tables (media_assets, ingest_jobs, etc.).
-  let query = admin
-    .from("media_publications")
-    .select(
-      "id,surface,title,subtitle,status,sort_at,render_payload,league_id," +
-      "media_assets!inner(id,metadata,created_at)," +
-      "leagues:leagues!league_id(code)"
-    )
-    .eq("status", "published")
-    .order("sort_at", { ascending: false })
-    .limit(50);
-
-  if (leagueId) query = query.eq("league_id", leagueId);
-  const { data, error } = await query;
-  if (error) throw new Error(error.message);
-
-  const rows = (data ?? []) as unknown as PublicMediaRow[];
-  const mapped = mapPublicMediaRows(rows);
-
-  return json({ ok: true, data: mapped }, 200, {
-    "Cache-Control": "public, s-maxage=300, max-age=120",
+  // Canonical render still reads from media_publications (+ media_assets!inner join)
+  // and keeps Cache-Control at public, s-maxage=300, max-age=120 for anonymous traffic.
+  return respondWithPublicMediaFreshness(req, admin, "media", async () => {
+    const rows = await fetchPublicMediaRows(admin, req);
+    return mapPublicMediaRows(rows);
   });
 }
 
 async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
-  // Poster tab projection: include event/league-wide art and promote photo assets
-  // to poster cards without mutating source records.
-  const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
-  const mapped = mapPublicMediaRows(rows, true).filter((row, index, list) => {
-    const raw = rows[index] ?? {};
-    const payload = (raw.render_payload ?? {}) as Record<string, unknown>;
-    const metadata = (((raw.media_assets as Record<string, unknown> | null) ?? {}).metadata ?? {}) as Record<string, unknown>;
-    const surface = String(raw.surface ?? payload.surface ?? metadata.surface ?? "");
-    const teamName = String(payload.team ?? metadata.team ?? "").trim();
+  return respondWithPublicMediaFreshness(req, admin, "posters", async () => {
+    // Poster tab projection: include event/league-wide art and promote photo assets
+    // to poster cards without mutating source records.
+    const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
 
-    // Exclude team-specific cards (e.g., POTG) — this route is for team-agnostic
-    // event imagery like 1v1/2v2 and league-wide graphics.
-    if (surface === "potg" || teamName.length > 0) return false;
+    // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
+    const seen = new Set<string>();
+    return mapPublicMediaRows(rows, true).filter((row, index) => {
+      const raw = rows[index] ?? {};
+      const payload = (raw.render_payload ?? {}) as Record<string, unknown>;
+      const metadata = (((raw.media_assets as Record<string, unknown> | null) ?? {}).metadata ?? {}) as Record<string, unknown>;
+      const surface = String(raw.surface ?? payload.surface ?? metadata.surface ?? "");
+      const teamName = String(payload.team ?? metadata.team ?? "").trim();
 
-    // Idempotent response: ensure each id appears once even if source rows overlap.
-    return list.findIndex((candidate) => candidate.id === row.id) === index;
-  });
+      // Exclude team-specific cards (e.g., POTG) — this route is for team-agnostic
+      // event imagery like 1v1/2v2 and league-wide graphics.
+      if (surface === "potg" || teamName.length > 0) return false;
 
-  return json({ ok: true, data: mapped }, 200, {
-    "Cache-Control": "public, s-maxage=300, max-age=120",
+      // Idempotent response: ensure each id appears once even if source rows overlap.
+      if (seen.has(row.id)) return false;
+      seen.add(row.id);
+      return true;
+    });
   });
 }
 
@@ -4188,6 +5919,7 @@ async function handlePlayerCheckout({ req, env, admin }: HandlerCtx) {
   if (!env.STRIPE_SECRET_KEY)
     return json({ ok: false, error: "payments_not_configured" }, 503);
   const body = (await req.json().catch(() => null)) as {
+    items?: Array<{ id: string; name: string; price: number; qty?: number }>;
     successUrl?: string;
     cancelUrl?: string;
   } | null;
@@ -4300,18 +6032,12 @@ async function handleOpsHealth({ env, admin }: HandlerCtx) {
     }
   }
 
-  const serviceKeySet = Boolean(env.SUPABASE_SERVICE_ROLE_KEY);
-  const serviceKeyPrefix = serviceKeySet
-    ? env.SUPABASE_SERVICE_ROLE_KEY.substring(0, 10) + "..."
-    : "NOT_SET";
-
   return json({
     ok: true,
     db_ok: dbStatus === "connected",
     version: "2026.04-hardened",
     commit: (env as unknown as Record<string, unknown>).CF_PAGES_COMMIT_SHA ?? "unknown",
     supabase_url: env.SUPABASE_URL ? env.SUPABASE_URL.replace(/https?:\/\//, "").split(".")[0] + "...[redacted]" : "not_set",
-    supabase_service_key: serviceKeyPrefix,
     db_status: dbStatus,
     db_error: dbError,
     time: new Date().toISOString(),
@@ -4398,24 +6124,29 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     path: "/api/streams/:gameId/access",
     handler: handleStreamAccess,
   },
-  // IMPORTANT: literal "broadcast" routes MUST come before the parameterized
-  // :gameId routes. The router does a linear first-match scan; if :gameId is
-  // registered first it captures "broadcast" as a gameId parameter, which then
-  // fails the DB upsert (invalid UUID → 500). Literal paths always beat params.
-  {
-    method: "POST",
-    path: "/api/streams/broadcast/session",
-    handler: handleBroadcastPlaybackSession,
-  },
+  // ── Broadcast routes (game-independent) ──────────────────────────────────
+  // These are the canonical routes for open livestreams. Streams are NOT
+  // coupled to games. Do not add gameId logic here — see CLAUDE.md Rule 7.
+  { method: "GET",  path: "/api/broadcast/access",              handler: handleBroadcastStreamAccess },
+  { method: "POST", path: "/api/broadcast/session",             handler: handleBroadcastSessionStart },
+  { method: "POST", path: "/api/broadcast/session/heartbeat",   handler: handleBroadcastHeartbeatRoute },
+  { method: "POST", path: "/api/broadcast/session/end",         handler: handleBroadcastSessionEndRoute },
+  // Legacy aliases — kept so old clients don't 404. Primary routes are /api/broadcast/* above.
+  // IMPORTANT: literal paths MUST come before :gameId to prevent "broadcast"
+  // being captured as an invalid UUID parameter (router is first-match).
+  { method: "POST", path: "/api/streams/broadcast/session",             handler: handleBroadcastSessionStart },
+  { method: "POST", path: "/api/streams/broadcast/session/heartbeat",   handler: handleBroadcastHeartbeatRoute },
+  { method: "POST", path: "/api/streams/broadcast/session/end",         handler: handleBroadcastSessionEndRoute },
+  // ── Game-specific PPV stream routes ───────────────────────────────────────
   {
     method: "POST",
     path: "/api/streams/:gameId/session",
     handler: handlePlaybackSession,
   },
   {
-    method: "POST",
-    path: "/api/streams/broadcast/session/heartbeat",
-    handler: handleBroadcastHeartbeat,
+    method: "GET",
+    path: "/api/streams/:gameId/proxy/*",
+    handler: handleStreamProxy,
   },
   {
     method: "POST",
@@ -4424,14 +6155,48 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "POST",
-    path: "/api/streams/broadcast/session/end",
-    handler: handleBroadcastSessionEnd,
-  },
-  {
-    method: "POST",
     path: "/api/streams/:gameId/session/end",
     handler: handleStreamSessionEnd,
   },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/playback-token/verify",
+    handler: handlePlaybackTokenVerify,
+  },
+  {
+    method: "GET",
+    path: "/api/streams/:gameId/preflight",
+    handler: handlePlaybackPreflight,
+  },
+  // ── WS4 Fan Token System ──────────────────────────────────────────────
+  // Every route below is no-op (403 fan_tokens_disabled) unless the
+  // worker-side FEATURE_FAN_TOKEN_SYSTEM env flag is 'true'. Webhook is
+  // intentionally unconditional so in-flight Stripe sessions complete
+  // safely if the flag is toggled off mid-purchase.
+  { method: "GET",  path: "/api/tokens/products",                  handler: handleTokenProducts },
+  { method: "GET",  path: "/api/tokens/categories",                handler: handleTokenCategories },
+  { method: "GET",  path: "/api/tokens/wallet",                    handler: handleTokenWallet },
+  { method: "GET",  path: "/api/tokens/leaderboard/season/:seasonId", handler: handleLeaderboardBySeason },
+  { method: "GET",  path: "/api/tokens/leaderboard/:gameId",       handler: handleLeaderboardByGame },
+  { method: "POST", path: "/api/tokens/purchase",                  handler: handleTokenPurchase },
+  { method: "POST", path: "/api/tokens/award",                     handler: handleTokenAward },
+  { method: "POST", path: "/api/tokens/webhook",                   handler: handleTokenWebhook },
+  // ── WS5 Biometric Overlay ─────────────────────────────────────────────
+  // Both routes 403 biometric_disabled unless FEATURE_BIOMETRIC_OVERLAY is
+  // 'true'. Write path additionally requires league_admin / super_admin
+  // and games.event_type in ('1v1','2v2').
+  { method: "POST", path: "/api/streams/:gameId/biometrics",        handler: handleBiometricIngest },
+  { method: "POST", path: "/api/streams/:gameId/biometrics/webhook", handler: handleBiometricWebhookIngest },
+  { method: "GET",  path: "/api/streams/:gameId/biometrics/latest", handler: handleBiometricLatest },
+  // ── WS6 Mic Up Series overlay events ──────────────────────────────────
+  // Admin-triggered overlay events (trash_talk / lower_third / intro_sting).
+  // Gated on FEATURE_MIC_UP_SERIES + games.mic_up_series=true.
+  { method: "POST", path: "/api/streams/:gameId/overlay/event",     handler: handleMicUpOverlayEvent },
+  { method: "GET",  path: "/api/streams/:gameId/overlay/events/latest", handler: handleLatestMicUpOverlayEvents },
+  // ── WS7 Replay monetization ───────────────────────────────────────────
+  // Public read; does NOT leak a playback URL. Clients call the normal
+  // session endpoint with playbackMode='replay' after purchase/entitlement.
+  { method: "GET",  path: "/api/streams/:gameId/replay/status",     handler: handleReplayStatus },
   {
     method: "GET",
     path: "/api/streams/:gameId/comments",
@@ -4441,6 +6206,16 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/api/streams/:gameId/comments",
     handler: handlePostComment,
+  },
+  {
+    method: "POST",
+    path: "/ops/streams/:gameId/comments/:commentId",
+    handler: handleModerateComment,
+  },
+  {
+    method: "POST",
+    path: "/ops/streams/:gameId/reactions/reset",
+    handler: handleResetReactions,
   },
   { method: "GET", path: "/api/cart", handler: handleGetCart },
   { method: "POST", path: "/api/cart/items", handler: handleAddCartItem },
@@ -4476,6 +6251,11 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     method: "POST",
     path: "/api/store/checkout",
     handler: handleDirectStoreCheckout,
+  },
+  {
+    method: "POST",
+    path: "/api/store/quote",
+    handler: handleStoreQuote,
   },
   {
     method: "POST",
@@ -4566,6 +6346,12 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     handler: handleSetStreamStatus,
   },
   {
+    // RC-6: Atomic go-live — updates config + status in a single DB upsert.
+    method: "POST",
+    path: "/ops/streams/go-live",
+    handler: handleGoLive,
+  },
+  {
     method: "POST",
     path: "/ops/streams/comp-code",
     handler: handleSuperAdminCompCode,
@@ -4603,6 +6389,54 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/api/coach/request", handler: handleCoachApprovalRequest },
   { method: "GET", path: "/ops/coach/requests", handler: handleListCoachRequests },
   { method: "POST", path: "/ops/coach/:id/resolve", handler: handleResolveCoachRequest },
+
+  // ── Overlay (scoreboard / OBS browser source) ────────────────────────
+  { method: "GET",  path: "/api/public/overlay/:gameId",         handler: handlePublicOverlay },
+  { method: "POST", path: "/api/ops/overlay/:gameId/state",      handler: handleOverlayPatch },
+  { method: "POST", path: "/api/ops/overlay/:gameId/clock",      handler: handleOverlayClock },
+  { method: "POST", path: "/api/ops/overlay/:gameId/score",      handler: handleOverlayScore },
+  { method: "POST", path: "/api/ops/overlay/:gameId/foul",       handler: handleOverlayFoul },
+  { method: "POST", path: "/api/ops/overlay/:gameId/period",     handler: handleOverlayPeriod },
+  { method: "POST", path: "/api/ops/overlay/:gameId/reset",      handler: handleOverlayReset },
+
+  // ── Engagement (polls, predictions, trivia, gamification) ────────────
+  { method: "GET",  path: "/api/public/engagement/polls",            handler: handlePublicPollsList },
+  { method: "GET",  path: "/api/public/engagement/polls/:id/results", handler: handlePublicPollResults },
+  { method: "GET",  path: "/api/public/engagement/leaderboard",     handler: handlePublicEngagementLeaderboard },
+  { method: "POST", path: "/api/engagement/polls/:id/vote",         handler: handleCastVote },
+  { method: "GET",  path: "/api/engagement/me/points",              handler: handleMyPoints },
+  { method: "POST", path: "/api/engagement/watch-parties",          handler: handleCreateWatchParty },
+  { method: "GET",  path: "/api/engagement/watch-parties",          handler: handleListWatchParties },
+  { method: "POST", path: "/api/engagement/watch-parties/:id/join", handler: handleJoinWatchParty },
+  { method: "POST", path: "/api/engagement/watch-parties/join-by-code", handler: handleJoinByCode },
+  { method: "POST", path: "/api/ops/engagement/polls",              handler: handleCreatePoll },
+  { method: "POST", path: "/api/ops/engagement/polls/:id",          handler: handleUpdatePoll },
+  { method: "POST", path: "/api/ops/engagement/polls/:id/grade",    handler: handleGradePoll },
+
+  // ── Sponsors ────────────────────────────────────────────────────────
+  { method: "GET",  path: "/api/public/sponsors",                handler: handlePublicSponsors },
+  { method: "POST", path: "/api/public/sponsors/:id/track",      handler: handleTrackSponsorEvent },
+  { method: "GET",  path: "/api/ops/sponsors",                   handler: handleAdminListSponsors },
+  { method: "POST", path: "/api/ops/sponsors",                   handler: handleCreateSponsor },
+  { method: "POST", path: "/api/ops/sponsors/:id",               handler: handleUpdateSponsor },
+  { method: "POST", path: "/api/ops/sponsors/:id/delete",        handler: handleDeleteSponsor },
+
+  // ── OBS control ─────────────────────────────────────────────────────
+  { method: "POST", path: "/api/ops/obs/commands",               handler: handleEnqueueObsCommand },
+  { method: "GET",  path: "/api/ops/obs/commands",               handler: handleListObsCommands },
+  { method: "GET",  path: "/api/ops/obs/commands/pending",       handler: handleAgentPending },
+  { method: "POST", path: "/api/ops/obs/commands/:id/ack",       handler: handleAgentAck },
+
+  // ── AI weekly digest ────────────────────────────────────────────────
+  { method: "GET",  path: "/api/public/digest",                  handler: handlePublicDigest },
+  { method: "POST", path: "/api/ops/digest/:leagueCode/regenerate", handler: handleRegenerateDigest },
+
+  // ── Highlights + reaction aggregate ─────────────────────────────────
+  { method: "GET",  path: "/api/public/highlights/:gameId",                  handler: handlePublicHighlights },
+  { method: "GET",  path: "/api/public/streams/:gameId/reactions/aggregate", handler: handleReactionAggregate },
+  { method: "POST", path: "/api/ops/highlights/mark",                        handler: handleMarkHighlight },
+  { method: "POST", path: "/api/ops/highlights/:id",                         handler: handleUpdateHighlight },
+  { method: "POST", path: "/api/ops/highlights/:id/delete",                  handler: handleDeleteHighlight },
 ];
 
 // Lazy-compile: routes are registered via push() throughout the module,
@@ -4624,31 +6458,112 @@ function getCompiled() {
 }
 
 const MAX_BODY_BYTES = 5 * 1024 * 1024; // 5MB request body limit
+const BODY_TOO_LARGE_ERROR = "payload_too_large";
+
+const bodySizeChecks = new WeakMap<Request, Promise<void>>();
+let requestBodyGuardPatched = false;
+
+function contentLengthExceedsLimit(req: Request): boolean {
+  const raw = req.headers.get("content-length");
+  if (!raw) return false;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > MAX_BODY_BYTES;
+}
+
+async function ensureBodyWithinLimit(req: Request): Promise<void> {
+  if (contentLengthExceedsLimit(req)) throw new Error(BODY_TOO_LARGE_ERROR);
+  const pending = bodySizeChecks.get(req);
+  if (pending) return pending;
+
+  const check = (async () => {
+    const cloned = req.clone();
+    const bytes = (await cloned.arrayBuffer()).byteLength;
+    if (bytes > MAX_BODY_BYTES) throw new Error(BODY_TOO_LARGE_ERROR);
+  })();
+  bodySizeChecks.set(req, check);
+  return check;
+}
+
+function withBodySizeGuard(req: Request): Request {
+  const guardedReq = req as Request & {
+    json: Request["json"];
+    text: Request["text"];
+  };
+  const originalJson = req.json.bind(req);
+  const originalText = req.text.bind(req);
+
+  guardedReq.json = async () => {
+    await ensureBodyWithinLimit(req);
+    return originalJson();
+  };
+  guardedReq.text = async () => {
+    await ensureBodyWithinLimit(req);
+    return originalText();
+  };
+  return guardedReq;
+}
+
+function installRequestBodyGuard() {
+  if (requestBodyGuardPatched) return;
+  requestBodyGuardPatched = true;
+  const rawJson = Request.prototype.json;
+  const rawText = Request.prototype.text;
+
+  Request.prototype.json = function jsonWithLimit() {
+    return ensureBodyWithinLimit(this).then(() => rawJson.call(this));
+  };
+  Request.prototype.text = function textWithLimit() {
+    return ensureBodyWithinLimit(this).then(() => rawText.call(this));
+  };
+}
 
 function addSecurityHeaders(res: Response): Response {
   const headers = new Headers(res.headers);
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('X-Frame-Options', 'DENY');
   headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  // Permissions-Policy: deny sensitive hardware by default, BUT delegate
+  // autoplay / fullscreen / picture-in-picture to our embed providers.
+  // Chrome's default `autoplay` policy is `self` — cross-origin iframes
+  // (like embed.twitch.tv) cannot autoplay even when they pass autoplay=true
+  // to their SDK unless the parent document explicitly delegates the feature
+  // to their origin. Without this delegation, the Twitch embed throws:
+  //   "Autoplay disabled. style visibility, size, viewport visibility"
+  // Keep camera / microphone / geolocation denied — passive playback needs
+  // none of them.
+  const embedOrigins = [
+    '"https://player.twitch.tv"',
+    '"https://embed.twitch.tv"',
+    '"https://www.youtube.com"',
+    '"https://www.youtube-nocookie.com"',
+    '"https://player.vimeo.com"',
+  ].join(' ');
+  headers.set(
+    'Permissions-Policy',
+    `camera=(), microphone=(), geolocation=(), ` +
+      `autoplay=(self ${embedOrigins}), ` +
+      `fullscreen=(self ${embedOrigins}), ` +
+      `picture-in-picture=(self ${embedOrigins})`,
+  );
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
-  // Facebook + YouTube + Twitch domains required for /live page stream embeds.
-  // facebook.com/plugins/video.php loads scripts and frames from *.fbcdn.net
-  // and staticxx.facebook.com — both must be allow-listed broadly across
-  // script-src, frame-src, and child-src for the Live embed to render.
+  // Facebook is allowed in frame-src only — plugins/video.php iframe embed, no SDK.
+  // WHEP (WebRTC egress) connections to stream.sbbl-hq.icu are covered by the
+  // *.sbbl-hq.icu wildcard in connect-src; media-src blob: covers WebRTC tracks.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://*.fbcdn.net https://assets.twitch.tv; " +
-    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://connect.facebook.net https://*.facebook.net https://*.facebook.com https://staticxx.facebook.com https://*.fbcdn.net https://assets.twitch.tv; " +
-    "style-src 'self' 'unsafe-inline' https://*.facebook.com https://*.fbcdn.net; " +
-    "img-src 'self' data: blob: https:; " +
-    "font-src 'self' data: https://*.facebook.com https://*.fbcdn.net; " +
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://*.facebook.com https://*.facebook.net https://graph.facebook.com https://*.fbcdn.net wss://*.facebook.com; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.facebook.com https://web.facebook.com https://m.facebook.com https://*.facebook.com https://*.facebook.net https://*.fbcdn.net https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
-    "child-src https://*.facebook.com https://*.fbcdn.net https://*.facebook.net; " +
-    "media-src 'self' blob: https://video.xx.fbcdn.net https://*.fbcdn.net https://*.facebook.com https://*.googlevideo.com https://*.twitch.tv https://*.twitchsvc.net; " +
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://player.twitch.tv https://assets.twitch.tv https://static.cloudflareinsights.com; " +
+    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://player.twitch.tv https://static.cloudflareinsights.com; " +
+    // fonts.googleapis.com serves the @font-face CSS (style-src).
+    // fonts.gstatic.com serves the actual .woff2 files (font-src).
+    // Both are required for Space Grotesk loaded in index.html (canonical brand font).
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+    "img-src 'self' data: blob: https: https://static-cdn.jtvnw.net; " +
+    "font-src 'self' data: https://fonts.gstatic.com; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://www.youtube.com wss://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://api.twitch.tv wss://pubsub-edge.twitch.tv https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://cloudflareinsights.com https://static.cloudflareinsights.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com https://www.facebook.com; " +
+    "media-src 'self' blob: https://*.googlevideo.com https://*.ytimg.com https://*.twitch.tv https://*.twitchsvc.net; " +
     "worker-src 'self' blob:; " +
     "frame-ancestors 'none'; " +
     "base-uri 'self'; " +
@@ -4682,6 +6597,8 @@ function checkRateLimit(ip: string): boolean {
   return true;
 }
 
+installRequestBodyGuard();
+
 export default Sentry.withSentry(
   (env: Env) => ({
     dsn: env.SENTRY_DSN,
@@ -4697,7 +6614,7 @@ export default Sentry.withSentry(
 
     const url = new URL(req.url);
     if (
-      !parsed.ok &&
+      !parsed.ok && url.pathname !== "/ops/health" && url.pathname !== "/ops/metrics-lite" &&
       (url.pathname.startsWith("/api") ||
         url.pathname.startsWith("/auth") ||
         url.pathname.startsWith("/ops") ||
@@ -4725,7 +6642,13 @@ export default Sentry.withSentry(
     // query in EVERY route handler will fail with "Invalid API key".
     // We validate the key format before creating the client.
     if (!env.SUPABASE_SERVICE_ROLE_KEY || env.SUPABASE_SERVICE_ROLE_KEY.length < 20) {
-      if (url.pathname.startsWith("/api") || url.pathname.startsWith("/ops") || url.pathname.startsWith("/auth")) {
+      // /ops/health is a liveness probe — it must respond even before secrets
+      // are propagated (e.g. first deploy, or secret rotation in progress).
+      // Its own try-catch handles DB errors gracefully; no hard block needed.
+      if (
+        url.pathname !== "/ops/health" &&
+        (url.pathname.startsWith("/api") || url.pathname.startsWith("/ops") || url.pathname.startsWith("/auth"))
+      ) {
         return addSecurityHeaders(json({
           ok: false,
           error: "supabase_service_key_missing",
@@ -4739,7 +6662,7 @@ export default Sentry.withSentry(
     // Internal verified headers are set here and ONLY here, after JWT verification.
     // These use a -verified suffix to distinguish them from any client-supplied headers
     // (which were stripped above).
-    const enrichedRequest = new Request(cleanReq, {
+    const enrichedRequest = withBodySizeGuard(new Request(cleanReq, {
       headers: session
         ? {
             ...Object.fromEntries(cleanReq.headers.entries()),
@@ -4747,7 +6670,7 @@ export default Sentry.withSentry(
             "x-sbbl-roles-verified": session.roles.join(","),
           }
         : cleanReq.headers,
-    });
+    }));
 
     for (const route of getCompiled()) {
       if (route.method !== req.method) continue;
@@ -4776,6 +6699,8 @@ export default Sentry.withSentry(
             ? 401
             : message === "forbidden"
               ? 403
+              : message === BODY_TOO_LARGE_ERROR
+                ? 413
               : message.startsWith("Missing or invalid idempotency key") ||
                   message.startsWith("Duplicate idempotency key")
                 ? 400
@@ -4787,6 +6712,14 @@ export default Sentry.withSentry(
           });
         }
         recordMetrics(status, Date.now() - _fetchStart);
+        if (status === 413) {
+          return addSecurityHeaders(
+            json(
+              { ok: false, error: BODY_TOO_LARGE_ERROR, maxBytes: MAX_BODY_BYTES },
+              413,
+            ),
+          );
+        }
         return addSecurityHeaders(json({ ok: false, error: message }, status));
       }
     }
@@ -4802,8 +6735,22 @@ export default Sentry.withSentry(
         if (isHtml) {
           // HTML shell: cache 60s at edge, stale-while-revalidate for viral traffic resilience
           cacheHeaders.set("Cache-Control", "public, max-age=60, s-maxage=300, stale-while-revalidate=600");
+        } else {
+          // Non-HTML static assets (images/fonts/icons/media from /public).
+          // Vite-hashed JS/CSS under /assets/ already carry immutable cache
+          // headers; for un-hashed public files (hero-*, icons, logos, svgs)
+          // we force a 30-day browser cache + 1-year edge cache so the LCP
+          // hero is served from CDN + disk cache on repeat views.
+          const url = new URL(req.url);
+          const path = url.pathname;
+          const isHashedViteAsset = /\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/.test(path);
+          if (!isHashedViteAsset && !cacheHeaders.has("Cache-Control")) {
+            cacheHeaders.set(
+              "Cache-Control",
+              "public, max-age=2592000, s-maxage=31536000, stale-while-revalidate=86400",
+            );
+          }
         }
-        // Hashed assets already have immutable cache headers from Vite build
         return addSecurityHeaders(new Response(assetRes.body, {
           status: assetRes.status,
           statusText: assetRes.statusText,
@@ -4914,6 +6861,35 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     return json({ ok: false, error: "invalid_kind" }, 400);
   }
 
+  // POTG-specific guards. Block before opening an ingest_jobs row so we don't
+  // leave half-finished rows behind on rejection. See incident 2026-04-18.
+  if (body.kind === "potg") {
+    const meta = body.meta ?? {};
+    const statErr = validatePotgStatFields(meta as PotgStatPayload);
+    if (statErr) {
+      return json({ ok: false, error: statErr }, 400);
+    }
+    if (!body.leagueId) {
+      return json({ ok: false, error: "missing_potg_league" }, 400);
+    }
+    const { data: lg } = await ctx.admin
+      .from("leagues").select("id").ilike("code", body.leagueId).maybeSingle();
+    if (!lg?.id) {
+      return json({ ok: false, error: "potg_unknown_league", leagueId: body.leagueId }, 400);
+    }
+    const playerResolution = await resolvePotgPlayer(
+      ctx.admin,
+      String(meta.playerName ?? ""),
+      String(lg.id),
+    );
+    if (playerResolution.ok === false) {
+      return json(
+        { ok: false, error: playerResolution.error, details: playerResolution.details },
+        409,
+      );
+    }
+  }
+
   const idempotencyKey = body.idempotencyKey ?? readIdempotencyKey(ctx.req.headers) ?? null;
 
   // Dedup: if this key was already processed, return the existing job.
@@ -4982,13 +6958,26 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
   await ctx.admin.from("ingest_jobs").update({ state: "validated" }).eq("id", jobId);
 
   // ── Step 3: Write media_asset (state=written) ───────────────────────────
-  const assetMeta = {
+  const assetMeta: Record<string, unknown> = {
     type: "poster",
     thumbnail: publicUrl,
     image_url: publicUrl,
     date: (meta.date as string | undefined) ?? new Date().toISOString().split("T")[0],
     ...meta,
   };
+
+  // Copy POTG stat fields into the publication's render_payload for ALL
+  // leagues. Pre-2026-04-18 this block was guarded to TGIFBL only, so WBL
+  // and SBBL POTG submissions silently lost their stats and produced
+  // orphan posters that broke the leaderboards.
+  if (body.kind === "potg") {
+    assetMeta.pts = Number(meta.pts ?? 0);
+    assetMeta.rebs = Number(meta.rebs ?? 0);
+    assetMeta.assts = Number(meta.assts ?? 0);
+    assetMeta.gameResult = String(meta.gameResult ?? "");
+    assetMeta.playerName = String(meta.playerName ?? body.title ?? "");
+    assetMeta.team = String(meta.team ?? "");
+  }
 
   const { data: asset, error: assetErr } = await ctx.admin
     .from("media_assets")
@@ -5256,14 +7245,18 @@ async function handleOpsBatchProducts(ctx: HandlerCtx) {
   if (!Array.isArray(items) || items.length === 0) {
     return json({ ok: false, error: "items_required" }, 400);
   }
-  for (const item of items.slice(0, 4)) {
-    if (!item.title || !item.price) continue;
-    const { error } = await ctx.admin.from("products").insert({
+  const productsToInsert = items
+    .slice(0, 4)
+    .filter((item) => item.title && item.price)
+    .map((item) => ({
       name: String(item.title),
       price: Number(item.price),
       status: "draft",
       league_id: item.leagueId ?? null,
-    });
+    }));
+
+  if (productsToInsert.length > 0) {
+    const { error } = await ctx.admin.from("products").insert(productsToInsert);
     if (error) throw new Error(error.message);
   }
   await ctx.admin.from("audit_logs").insert({
@@ -5360,6 +7353,7 @@ routes.push(
   { method: "GET",    path: "/ops/list/media",              handler: handleOpsListMediaPublications },
   { method: "PATCH",  path: "/ops/media/publications/:id",  handler: handleOpsPatchMediaPublications },
   { method: "DELETE", path: "/ops/media/publications/:id",  handler: handleOpsDeleteMediaPublications },
+  { method: "POST",   path: "/ops/media/publications/order", handler: handleOpsReorderMediaPublications },
 );
 
 // ── Scores handlers ────────────────────────────────────────────────────────
@@ -5550,15 +7544,21 @@ async function handleScoresCsvImport(ctx: HandlerCtx) {
   let failed = 0;
   const errors: string[] = [];
 
-  for (const row of rows) {
-    try {
-      // Resolve league uuid if league_id code provided
-      let leagueUuid: string | null = null;
-      if (row.league_id) {
-        const { data: lr } = await ctx.admin.from("leagues").select("id").ilike("code", row.league_id).maybeSingle();
-        leagueUuid = lr?.id ?? null;
-      }
-      const { error } = await ctx.admin.from("games").insert({
+  // Resolve league UUIDs in bulk to avoid N+1 query pattern
+  const leagueMap = new Map<string, string>();
+  const uniqueCodes = Array.from(new Set(rows.map((r) => r.league_id).filter(Boolean) as string[]));
+  if (uniqueCodes.length > 0) {
+    const { data: leagues } = await ctx.admin.from("leagues").select("id, code").in("code", uniqueCodes);
+    leagues?.forEach((l) => {
+      if (l.code) leagueMap.set(l.code.toLowerCase(), l.id);
+    });
+  }
+
+  let bulkSuccess = false;
+  try {
+    const payload = rows.map((row) => {
+      const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
+      return {
         category: row.category || "league",
         league_id: leagueUuid,
         participant1_label: row.home_label || null,
@@ -5569,12 +7569,43 @@ async function handleScoresCsvImport(ctx: HandlerCtx) {
         game_date: row.game_date || null,
         event_name: row.event_name || null,
         notes: row.notes || null,
-      });
-      if (error) { failed++; errors.push(`${row.home_label} vs ${row.away_label}: ${error.message}`); }
-      else inserted++;
-    } catch (e) {
-      failed++;
-      errors.push(e instanceof Error ? e.message : "unknown");
+      };
+    });
+
+    const { error } = await ctx.admin.from("games").insert(payload);
+    if (error) throw error;
+    bulkSuccess = true;
+    inserted = rows.length;
+  } catch (bulkErr) {
+    // Fallback to iterative on failure to capture individual row errors
+  }
+
+  if (!bulkSuccess) {
+    for (const row of rows) {
+      try {
+        const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
+        const { error } = await ctx.admin.from("games").insert({
+          category: row.category || "league",
+          league_id: leagueUuid,
+          participant1_label: row.home_label || null,
+          participant2_label: row.away_label || null,
+          home_score: row.home_score !== "" && row.home_score != null ? Number(row.home_score) : null,
+          away_score: row.away_score !== "" && row.away_score != null ? Number(row.away_score) : null,
+          status: row.status || "final",
+          game_date: row.game_date || null,
+          event_name: row.event_name || null,
+          notes: row.notes || null,
+        });
+        if (error) {
+          failed++;
+          errors.push(`${row.home_label || "Unknown"} vs ${row.away_label || "Unknown"}: ${error.message}`);
+        } else {
+          inserted++;
+        }
+      } catch (e) {
+        failed++;
+        errors.push(e instanceof Error ? e.message : "unknown");
+      }
     }
   }
 

@@ -31,6 +31,13 @@ export interface StreamConfig {
   updatedAt?: string;
 }
 
+export interface PublicStreamStatus {
+  ok: boolean;
+  isLive: boolean;
+  title: string;
+  viewerCount: number;
+}
+
 export interface StreamPlaybackSession {
   ok: boolean;
   playback: {
@@ -51,6 +58,7 @@ export interface StreamComment {
   createdAt: string;
   userId: string;
   userDisplayName?: string;
+  status?: 'active' | 'hidden';
 }
 
 export interface StreamSession {
@@ -105,7 +113,7 @@ export interface UserAccessLookup {
 /** Poll current stream status — no auth required */
 export async function fetchPublicStreamStatus(gameId?: string) {
   const qs = gameId ? `?gameId=${encodeURIComponent(gameId)}` : '';
-  return apiFetch<{ ok: boolean; isLive: boolean; title: string; viewerCount: number; collectionId: string }>(
+  return apiFetch<PublicStreamStatus>(
     `/api/streams/status${qs}`,
   );
 }
@@ -155,9 +163,19 @@ export async function endPlaybackSession(
   );
 }
 
-export async function fetchStreamComments(gameId: string, limit = 40) {
+export async function fetchStreamComments(
+  gameId: string,
+  limit = 40,
+  options: { includeHidden?: boolean; token?: string | null } = {},
+) {
+  const params = new URLSearchParams({
+    limit: String(Math.min(100, Math.max(1, limit))),
+  });
+  if (options.includeHidden) params.set('includeHidden', '1');
   return apiFetch<{ ok: boolean; comments: StreamComment[] }>(
-    `/api/streams/${encodeURIComponent(gameId)}/comments?limit=${Math.min(100, Math.max(1, limit))}`,
+    `/api/streams/${encodeURIComponent(gameId)}/comments?${params.toString()}`,
+    {},
+    options.token,
   );
 }
 
@@ -167,6 +185,35 @@ export async function postStreamComment(gameId: string, message: string, token: 
     {
       method: 'POST',
       body: JSON.stringify({ message }),
+    },
+    token,
+  );
+}
+
+export async function moderateStreamComment(
+  gameId: string,
+  commentId: string,
+  action: 'hide' | 'restore',
+  token: string | null,
+) {
+  return apiFetch<{ ok: boolean; commentId: string; status: 'active' | 'hidden' }>(
+    `/ops/streams/${encodeURIComponent(gameId)}/comments/${encodeURIComponent(commentId)}`,
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-comment-${commentId}-${action}`) },
+      body: JSON.stringify({ action }),
+    },
+    token,
+  );
+}
+
+export async function resetStreamReactions(gameId: string, token: string | null) {
+  return apiFetch<{ ok: boolean; gameId: string; reset: true }>(
+    `/ops/streams/${encodeURIComponent(gameId)}/reactions/reset`,
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-reactions-reset-${gameId}`) },
+      body: JSON.stringify({}),
     },
     token,
   );
@@ -207,6 +254,27 @@ export async function setStreamLive(
   );
 }
 
+/**
+ * RC-6: Atomic go-live — updates config + status in a single worker call.
+ * Prevents the race window between updateStreamConfig + setStreamLive where
+ * a session fetch could land in-between and see the old/empty stream URL.
+ * Falls back gracefully if the endpoint is not yet deployed.
+ */
+export async function goLive(
+  payload: { isLive: boolean; collectionId: string; title: string; activeGameId?: string | null },
+  token: string | null,
+) {
+  return apiFetch<{ ok: boolean; isLive: boolean; collectionId: string; title: string; activeGameId: string | null; updatedAt: string }>(
+    '/ops/streams/go-live',
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-go-live-${payload.isLive}-${Date.now()}`) },
+      body: JSON.stringify(payload),
+    },
+    token,
+  );
+}
+
 // ── Super Admin Comp Codes ───────────────────────────────────────────────────
 
 export interface CompCode {
@@ -226,8 +294,8 @@ export interface CompCode {
  */
 export async function generateCompCode(
   gameId: string,
-  options: { note?: string; expiresInHours?: number } = {},
   token: string | null,
+  options: { note?: string; expiresInHours?: number } = {},
 ) {
   return apiFetch<{ ok: boolean; code: string; gameId: string; expiresAt: string; note?: string | null; createdAt: string }>(
     '/ops/streams/comp-code',
@@ -259,8 +327,8 @@ export async function listCompCodes(token: string | null) {
  */
 export async function redeemAccessCode(
   code: string,
-  options: { captchaToken?: string } = {},
   token: string | null,
+  options: { captchaToken?: string } = {},
 ) {
   return apiFetch<{ ok: boolean; granted: boolean; idempotent?: boolean }>(
     '/api/invite/redeem',

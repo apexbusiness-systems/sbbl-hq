@@ -1,0 +1,77 @@
+<!-- Version: v1.0.0 | Date: 2026-04-15 | Status: Current -->
+# CANONICAL DATA PIPELINE — SBBL-HQ
+
+**Version:** v1.0.0
+**Last Updated:** 2026-04-15
+**Owner:** JR (full and absolute control)  
+**App Name:** SBBL-HQ (Sierra Boy Bravo Lima - Headquarters)  
+**Owner:** JR (full and absolute control)  
+**Purpose:** This is the single, authoritative, never-to-be-ignored map of every data upload → ingest → parse → store → render path in SBBL-HQ.  
+It exists to prevent confusion, over-engineering, blockers, and "enshitification" by any agent, developer, or future contributor.
+
+### 1. Core Philosophy (Read This First)
+- SBBL-HQ is a small, two-person operation. There are no large teams, no external investors watching live, and no high-stakes broadcast requirements that justify complex gates or blockers.
+- The pipeline must be **simple, fast, reliable, and non-blocking**.
+- **Rule #1:** No hard blockers. Alerts and logs are allowed. Stopping upload, parsing, or playback is forbidden.
+- **Rule #2:** If something can be done in one file and one step, never use three files and five steps.
+- **Rule #3:** The owner (JR) controls everything. The code exists to serve the owner, not the other way around.
+- **Rule #4:** Any agent or human working on this repo must read this document first and follow it exactly.
+
+### 2. High-Level Flow (Text Diagram)
+User / Admin
+↓
+Upload Request → POST /ops/ingest/presign (signed URL)
+↓
+Direct file upload to Supabase Storage (media bucket)
+↓
+Metadata submit → POST /ops/ingest/submit or POTG-specific route
+↓
+Parsing (CSV parser or OCR/POTG image resize)
+↓
+Write to media_publications table (single source of truth)
+↓
+Public render endpoints (/api/public/media, /api/public/potg, /api/public/schedule)
+↓
+Frontend (MEDIA page, Scores, Leaderboards, Live player)
+text### 3. Detailed Stage-by-Stage Breakdown
+
+**Stage 1: Upload / Ingest**
+- Client requests signed URL via `POST /ops/ingest/presign`
+- File is uploaded directly to Supabase Storage bucket
+- Metadata (title, league, game info, player stats for POTG, etc.) is sent via `POST /ops/ingest/submit` or POTG-specific route
+- All ingest handlers require super_admin role and idempotency_key
+
+**Stage 2: Parsing**
+- CSV files use `src/lib/parseCsv.ts` (RFC-4180 compliant, security-hardened against prototype pollution)
+- POTG/image files use OCR and resize logic (portrait → 560×747 cover, landscape → 747×560, store target → 800×800 square)
+- POTG payload includes playerName, team, pts, rebs, assts, gameResult, leagueId
+
+**Stage 3: Publication / Storage**
+- All parsed data is written to the **media_publications** table (this is the single source of truth)
+- Legacy media_assets table is never written to directly
+- Status machine: uploaded → fingerprinted → classified → parsed → written → projected → published
+- RLS policies: super_admin has full write, public read only on published rows
+
+**Stage 4: Distribution / Rendering**
+- Public endpoints: `/api/public/media`, `/api/public/potg`, `/api/public/schedule`
+- MEDIA page pulls directly from media_publications
+- Livestream uses WHEP/WebRTC stack (test_whep.tsx, test_live.cjs, update_livestream.py)
+
+**Stage 5: Tabulation / Leaderboards / Scores**
+- Scores route: `GET /api/scores` → handleScoresList (league filtering, participant labels, gameDate derivation from created_at when game_date is null)
+- Live stats use streamforge QoE calculations
+- POTG cards display pts, rebs, assts directly from the media_publications row
+
+### 4. Current State and Known Issues (April 15, 2026)
+- Livestream ingest/broadcast is fully implemented but blocked by multiple pre-live checks.
+- TGIF POTG cards on MEDIA page sometimes show missing or incorrect numeric stats because backfill only hydrates names/teams and skips stats fields.
+- CI is currently failing due to a syntax error in src/test/youtube-url.test.ts.
+- No need for complex risk matrices or evidence generators — only two super admins exist.
+
+### 5. Rules for Any Future Changes
+- Always read this document first.
+- Never add new blocking pre-live checks, validation matrices, or evidence generators.
+- Keep everything as simple as possible.
+- If in doubt, do the absolute minimum that makes the feature work.
+
+This document is the single source of truth. Any agent or human working on SBBL-HQ must follow it exactly.

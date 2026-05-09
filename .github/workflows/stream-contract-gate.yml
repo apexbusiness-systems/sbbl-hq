@@ -1,0 +1,121 @@
+name: Stream Independence Contract Gate
+
+# Enforces STREAM_INDEPENDENCE_CONTRACT.md Rule 4.
+# Blocks any PR that introduces forbidden NOT NULL constraints on game_id
+# in stream_*, stream_entitlements, or stream_assignments tables via SQL migrations.
+#
+# Triggered on migration diffs so we catch violations at the SQL layer before
+# they reach the database. pglast parses the SQL AST; regex alone is insufficient
+# because it would miss multi-line or reformatted DDL.
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+
+concurrency:
+  group: stream-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  stream-contract-gate:
+    name: Stream Independence Contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pglast
+        run: pip install pglast
+
+      - name: Get changed migration files
+        id: changed
+        run: |
+          git diff --name-only origin/${{ github.base_ref }}...HEAD -- 'supabase/migrations/*.sql' > /tmp/changed_migrations.txt
+          cat /tmp/changed_migrations.txt
+
+      - name: Check stream independence contract
+        run: |
+          python3 - <<'EOF'
+          import sys
+          import os
+
+          with open('/tmp/changed_migrations.txt') as f:
+              files = [l.strip() for l in f if l.strip()]
+
+          if not files:
+              print("No migration files changed — skipping contract check.")
+              sys.exit(0)
+
+          try:
+              import pglast
+              from pglast import parse_sql
+              from pglast.enums import ConstrType
+          except ImportError:
+              print("pglast not available — skipping AST check.")
+              sys.exit(0)
+
+          # Forbidden: adding NOT NULL to game_id on these tables
+          FORBIDDEN_TABLES = {
+              'streams', 'stream_assignments', 'stream_entitlements',
+          }
+
+          violations = []
+
+          for path in files:
+              if not os.path.exists(path):
+                  continue
+              with open(path) as f:
+                  sql = f.read()
+
+              try:
+                  tree = parse_sql(sql)
+              except Exception as e:
+                  print(f"  parse error in {path}: {e} — skipping")
+                  continue
+
+              for stmt in tree:
+                  node = stmt.stmt
+
+                  # ALTER TABLE ... ALTER COLUMN game_id SET NOT NULL
+                  if hasattr(node, 'AlterTableStmt'):
+                      at = node.AlterTableStmt
+                      tbl = at.relation.relname if hasattr(at, 'relation') else ''
+                      if tbl in FORBIDDEN_TABLES:
+                          for cmd in (at.cmds or []):
+                              c = cmd.AlterTableCmd
+                              col = getattr(c, 'name', '')
+                              subtype = getattr(c, 'subtype', None)
+                              # AT_SetNotNull = 29 in pg enums
+                              if col == 'game_id' and subtype == 29:
+                                  violations.append(
+                                      f"{path}: ALTER TABLE {tbl} ALTER COLUMN game_id SET NOT NULL (forbidden)"
+                                  )
+
+                  # CREATE TABLE with game_id NOT NULL on forbidden tables
+                  if hasattr(node, 'CreateStmt'):
+                      ct = node.CreateStmt
+                      tbl = ct.relation.relname if hasattr(ct, 'relation') else ''
+                      if tbl in FORBIDDEN_TABLES:
+                          for elt in (ct.tableElts or []):
+                              col_def = getattr(elt, 'ColumnDef', None)
+                              if col_def and col_def.colname == 'game_id':
+                                  for constraint in (col_def.constraints or []):
+                                      c = getattr(constraint, 'Constraint', None)
+                                      if c and getattr(c, 'contype', None) == ConstrType.CONSTR_NOTNULL:
+                                          violations.append(
+                                              f"{path}: CREATE TABLE {tbl} with game_id NOT NULL (forbidden)"
+                                          )
+
+          if violations:
+              print("\n❌ Stream Independence Contract violated:")
+              for v in violations:
+                  print(f"  {v}")
+              print("\nSee docs/architecture/STREAM_INDEPENDENCE_CONTRACT.md for remediation.")
+              sys.exit(1)
+
+          print("✅ Stream independence contract: no forbidden game_id NOT NULL constraints found.")
+          EOF

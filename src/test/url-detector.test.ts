@@ -1,0 +1,276 @@
+/**
+ * url-detector.test.ts
+ *
+ * Regression shield for src/lib/stream/url-detector.ts.
+ *
+ * Covers Fix #2 (WHEP misrouting): all *.sbbl-hq.icu subdomains and /whep/
+ * path segments classified correctly, and detectStreamUrlType recognises WHEP
+ * only as a standalone path segment (not a substring like /badwhep/).
+ */
+import { describe, it, expect } from 'vitest';
+import {
+  detectStreamUrlType,
+  getStreamDeliveryClass,
+  toPlayableUrl,
+  STREAM_TYPE_LABELS,
+  getStreamTypeAdvisory,
+} from '@/lib/stream/url-detector';
+
+describe('detectStreamUrlType — WHEP standalone path segment', () => {
+  it.each([
+    'https://stream.sbbl-hq.icu/whep/live',
+    'https://live.sbbl-hq.icu/whep/game-1',
+    'https://broadcast.sbbl-hq.icu/api/whep',
+    'https://mediamtx.example.com/live/whep',
+    'https://origin.example.com/whep',
+  ])('classifies %s as whep', (url) => {
+    expect(detectStreamUrlType(url)).toBe('whep');
+  });
+
+  it.each([
+    'https://stream.sbbl-hq.icu/badwhep/live',
+    'https://stream.sbbl-hq.icu/whepfoo/bar',
+    'https://stream.sbbl-hq.icu/prewhep/stream',
+  ])('does NOT classify %s as whep (substring false-positive guard)', (url) => {
+    expect(detectStreamUrlType(url)).not.toBe('whep');
+  });
+
+  it.each([
+    'https://stream.sbbl-hq.icu/live?whep=1',
+    'https://stream.sbbl-hq.icu/live?other=x&whep=1',
+    'https://stream.sbbl-hq.icu/live?whep',
+  ])('classifies %s as whep via query param', (url) => {
+    expect(detectStreamUrlType(url)).toBe('whep');
+  });
+});
+
+describe('detectStreamUrlType — platform detection', () => {
+  it('detects YouTube watch URLs', () => {
+    expect(detectStreamUrlType('https://www.youtube.com/watch?v=abc123')).toBe('youtube');
+    expect(detectStreamUrlType('https://youtu.be/abc123')).toBe('youtube');
+  });
+
+  it('detects Twitch channel URLs', () => {
+    expect(detectStreamUrlType('https://www.twitch.tv/channelname')).toBe('twitch');
+  });
+
+  it('detects HLS m3u8 files with query strings and fragments', () => {
+    expect(detectStreamUrlType('https://cdn.example.com/live/stream.m3u8')).toBe('hls');
+    expect(detectStreamUrlType('https://cdn.example.com/stream.m3u8?token=abc')).toBe('hls');
+    expect(detectStreamUrlType('https://cdn.example.com/stream.m3u8#frag')).toBe('hls');
+  });
+
+  it('detects DASH mpd files', () => {
+    expect(detectStreamUrlType('https://cdn.example.com/stream.mpd')).toBe('dash');
+  });
+
+  it('detects direct video files — mp4/m4v/mov/webm/ogg/ogv', () => {
+    expect(detectStreamUrlType('https://cdn.example.com/clip.mp4')).toBe('mp4');
+    expect(detectStreamUrlType('https://cdn.example.com/clip.m4v')).toBe('mp4');
+    expect(detectStreamUrlType('https://cdn.example.com/clip.mov')).toBe('mp4');
+    expect(detectStreamUrlType('https://cdn.example.com/clip.webm')).toBe('mp4');
+    expect(detectStreamUrlType('https://cdn.example.com/clip.ogg')).toBe('mp4');
+    expect(detectStreamUrlType('https://cdn.example.com/clip.ogv')).toBe('mp4');
+  });
+
+  it('tolerates signed/query suffixes on MP4 and m3u8 URLs (presigned S3, CDN tokens)', () => {
+    expect(detectStreamUrlType('https://s3.amazonaws.com/bucket/highlight.mp4?X-Amz-Signature=abc&X-Amz-Expires=900')).toBe('mp4');
+    expect(detectStreamUrlType('https://cdn.example.com/live/playlist.m3u8?token=abc&sig=xyz')).toBe('hls');
+    expect(detectStreamUrlType('https://r2.cloudflare.com/bucket/clip.mov?X-Amz-Date=20260419T000000Z')).toBe('mp4');
+  });
+
+  it('detects blob:/data: video/file: as local', () => {
+    expect(detectStreamUrlType('blob:https://sbbl-hq.icu/1234-5678')).toBe('local');
+    expect(detectStreamUrlType('data:video/mp4;base64,AAAA')).toBe('local');
+    expect(detectStreamUrlType('file:///Users/me/highlight.mp4')).toBe('local');
+  });
+
+  it('detects Dailymotion watch URLs', () => {
+    expect(detectStreamUrlType('https://www.dailymotion.com/video/x8abc12')).toBe('dailymotion');
+    expect(detectStreamUrlType('https://dai.ly/x8abc12')).toBe('dailymotion');
+  });
+
+  it('detects RTMP/RTMPS URLs', () => {
+    expect(detectStreamUrlType('rtmp://ingest.example.com/live/streamkey')).toBe('rtmp');
+    expect(detectStreamUrlType('rtmps://ingest.example.com/live/streamkey')).toBe('rtmp');
+  });
+
+  it('returns "unknown" for empty or unrecognised URLs', () => {
+    expect(detectStreamUrlType('')).toBe('unknown');
+    expect(detectStreamUrlType('https://example.com/some/page')).toBe('unknown');
+  });
+});
+
+describe('getStreamDeliveryClass — Fix #2 coverage', () => {
+  it.each([
+    'https://stream.sbbl-hq.icu/whep/live',
+    'https://live.sbbl-hq.icu/whep/game-1',
+    'https://cdn.sbbl-hq.icu/hls/playlist.m3u8',
+    'https://broadcast.sbbl-hq.icu/api/whep',
+  ])('classifies %s as proxy', (url) => {
+    expect(getStreamDeliveryClass(url)).toBe('proxy');
+  });
+
+  it.each([
+    'https://www.youtube.com/watch?v=abc',
+    'https://twitch.tv/channel',
+    'https://vimeo.com/123',
+    'https://facebook.com/live/123',
+  ])('classifies %s as embed', (url) => {
+    expect(getStreamDeliveryClass(url)).toBe('embed');
+  });
+
+  it.each([
+    'https://cdn.example.com/stream.m3u8',
+    'https://cdn.example.com/clip.mp4',
+    'https://cdn.example.com/stream.mpd',
+  ])('classifies direct file %s as proxy', (url) => {
+    expect(getStreamDeliveryClass(url)).toBe('proxy');
+  });
+
+  it('classifies any /whep/ path as proxy regardless of host', () => {
+    expect(getStreamDeliveryClass('https://origin.example.com/whep/live')).toBe('proxy');
+    expect(getStreamDeliveryClass('https://mediamtx.example.com/live/whep')).toBe('proxy');
+  });
+
+  it('returns unsupported for unknown hosts without recognised formats', () => {
+    expect(getStreamDeliveryClass('https://example.com/random/page')).toBe('unsupported');
+  });
+
+  it('treats empty input as unsupported', () => {
+    expect(getStreamDeliveryClass('')).toBe('unsupported');
+    expect(getStreamDeliveryClass('   ')).toBe('unsupported');
+  });
+});
+
+describe('toPlayableUrl', () => {
+  it('carries an RTMP advisory warning', () => {
+    const r = toPlayableUrl('rtmp://ingest.example.com/live/key');
+    expect(r.type).toBe('rtmp');
+    expect(r.warning).toMatch(/RTMP cannot play/i);
+  });
+
+  it('normalises YouTube URLs to canonical watch form preserving video id', () => {
+    // 11-char id required by youtube-url canonicalizer.
+    const r = toPlayableUrl('https://youtu.be/dQw4w9WgXcQ');
+    expect(r.type).toBe('youtube');
+    expect(r.url).toMatch(/watch\?v=dQw4w9WgXcQ/);
+  });
+
+  it('keeps Twitch URLs in canonical twitch.tv/<channel> form so ReactPlayer\'s Twitch wrapper matches', () => {
+    // Regression shield for /live Twitch CORS outage: rewriting to
+    // player.twitch.tv/?channel=… caused ReactPlayer to fall through to
+    // FilePlayer (<video src>) and the browser to CORS-block the media fetch.
+    const r = toPlayableUrl('https://www.twitch.tv/channelname');
+    expect(r.type).toBe('twitch');
+    expect(r.url).toBe('https://www.twitch.tv/channelname');
+    expect(r.url).not.toMatch(/player\.twitch\.tv/);
+  });
+
+  it('recovers channel from legacy player.twitch.tv/?channel=… URLs persisted by earlier builds', () => {
+    const r = toPlayableUrl('https://player.twitch.tv/?channel=sbblhq&parent=sbbl-hq.icu');
+    expect(r.type).toBe('twitch');
+    expect(r.url).toBe('https://www.twitch.tv/sbblhq');
+  });
+
+  it('passes HLS URLs through unchanged', () => {
+    const r = toPlayableUrl('https://cdn.example.com/stream.m3u8');
+    expect(r.type).toBe('hls');
+    expect(r.url).toBe('https://cdn.example.com/stream.m3u8');
+  });
+
+  it('returns empty for empty input without throwing', () => {
+    const r = toPlayableUrl('');
+    expect(r.type).toBe('unknown');
+    expect(r.url).toBe('');
+  });
+
+  it('carries a local-file advisory warning and passes blob: URLs through unchanged', () => {
+    const r = toPlayableUrl('blob:https://sbbl-hq.icu/abc-123');
+    expect(r.type).toBe('local');
+    expect(r.url).toBe('blob:https://sbbl-hq.icu/abc-123');
+    expect(r.warning).toMatch(/local file|plays in this browser/i);
+  });
+});
+
+describe('getStreamDeliveryClass — local + extended extensions', () => {
+  it.each([
+    'blob:https://sbbl-hq.icu/1234',
+    'data:video/webm;base64,AAAA',
+    'file:///Users/me/clip.mp4',
+  ])('classifies local source %s as proxy (plays via <video>)', (url) => {
+    expect(getStreamDeliveryClass(url)).toBe('proxy');
+  });
+
+  it('still classifies m3u8/mp4 with presigned query strings as proxy', () => {
+    expect(getStreamDeliveryClass('https://cdn.example.com/playlist.m3u8?token=abc')).toBe('proxy');
+    expect(getStreamDeliveryClass('https://s3.amazonaws.com/clip.mov?X-Amz-Signature=abc')).toBe('proxy');
+  });
+});
+
+
+describe('detectStreamUrlType — source-type evidence matrix', () => {
+  it.each([
+    ['YouTube', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'youtube'],
+    ['Twitch', 'https://www.twitch.tv/sbblhq', 'twitch'],
+    ['Vimeo', 'https://vimeo.com/123456789', 'vimeo'],
+    ['HLS .m3u8', 'https://cdn.example.com/live/index.m3u8?token=abc', 'hls'],
+    ['DASH .mpd', 'https://cdn.example.com/live/manifest.mpd', 'dash'],
+    ['MP4', 'https://cdn.example.com/video.mp4', 'mp4'],
+    ['MOV', 'https://cdn.example.com/video.mov', 'mp4'],
+    ['M4V', 'https://cdn.example.com/video.m4v', 'mp4'],
+    ['WEBM', 'https://cdn.example.com/video.webm', 'mp4'],
+    ['WHEP', 'https://media.example.com/whep/session', 'whep'],
+    ['blob/local simulation', 'blob:https://sbbl-hq.icu/local-video', 'local'],
+  ])('classifies %s source URLs', (_label, url, expected) => {
+    expect(detectStreamUrlType(url)).toBe(expected);
+  });
+
+  it.each([
+    ['empty URL', ''],
+    ['malformed URL text', 'not a url at all'],
+    ['javascript protocol', 'javascript:alert(1)'],
+    ['non-video data protocol', 'data:text/html,<script>alert(1)</script>'],
+    ['unsupported extension', 'https://cdn.example.com/archive.zip'],
+  ])('does not classify unsupported or unsafe input: %s', (_label, url) => {
+    expect(detectStreamUrlType(url)).toBe('unknown');
+    expect(getStreamDeliveryClass(url)).toBe('unsupported');
+  });
+
+  it('treats file: URLs as local-only advisory sources, not remote provider sources', () => {
+    expect(detectStreamUrlType('file:///tmp/evidence.mp4')).toBe('local');
+    const playable = toPlayableUrl('file:///tmp/evidence.mp4');
+    expect(playable.type).toBe('local');
+    expect(playable.warning).toMatch(/local file|this browser/i);
+  });
+
+  it.each([
+    'http://localhost:8080/live/stream.m3u8',
+    'http://127.0.0.1/live/stream.m3u8',
+    'http://10.0.0.5/live/stream.mpd',
+    'http://172.16.0.10/live/video.mp4',
+    'http://192.168.1.15/live/video.webm',
+  ])('documents localhost/private IP classification for server-side fetch hardening: %s', (url) => {
+    // The detector is format-only and does not perform server-side fetches.
+    // SSRF/private-network denial belongs at any future server fetch boundary.
+    expect(['hls', 'dash', 'mp4']).toContain(detectStreamUrlType(url));
+  });
+});
+
+describe('advisory + labels', () => {
+  it('provides a non-empty label for every known type', () => {
+    const types = Object.keys(STREAM_TYPE_LABELS) as Array<keyof typeof STREAM_TYPE_LABELS>;
+    for (const t of types) expect(STREAM_TYPE_LABELS[t]).toBeTruthy();
+  });
+
+  it('flags WHEP as info-level (low-latency)', () => {
+    const adv = getStreamTypeAdvisory('whep');
+    expect(adv.level).toBe('info');
+    expect(adv.message).toMatch(/WHEP|low.?latency/i);
+  });
+
+  it('warns on RTMP since it cannot play in browser', () => {
+    const adv = getStreamTypeAdvisory('rtmp');
+    expect(adv.level).toBe('warn');
+  });
+});

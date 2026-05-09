@@ -1,24 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
-import { createRemoteJWKSet, jwtVerify } from 'jose';
 import baseWorker from './index';
-
-type JwtSession = {
-  userId: string;
-  roles: string[];
-};
-
-const VALIDATION_ROUTE_RE = [
-  /^\/api\/streams\/[^/]+\/(test-source|test-ingest|validation-status)$/,
-  /^\/ops\/validation-runs(?:\/[^/]+)?$/,
-];
 
 const MUTATION_IDEMPOTENCY_RE = [
   /^\/api\/streams\/[^/]+\/(purchase|access|resume|revoke|expire|comments|reactions)$/,
   /^\/ops\/validation-runs$/,
 ];
 
+// Sliding-window buckets keyed by rate-limit token.
 const runtimeRateLimit = new Map<string, number[]>();
-let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
+// OOM guard: evict the oldest entry when the map exceeds this size.
+const RUNTIME_RATE_LIMIT_MAX = 50_000;
 
 function json(data: unknown, status = 200, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
@@ -38,14 +29,8 @@ function noStoreHeaders() {
   };
 }
 
-function parseBearer(req: Request) {
-  const auth = req.headers.get('authorization');
-  if (!auth?.startsWith('Bearer ')) return null;
-  return auth.slice('Bearer '.length).trim();
-}
-
-function requiresValidationGuard(pathname: string) {
-  return VALIDATION_ROUTE_RE.some((r) => r.test(pathname));
+function readIdempotencyKey(req: Request) {
+  return req.headers.get('x-idempotency-key') ?? req.headers.get('idempotency-key');
 }
 
 function requiresMutationIdempotency(pathname: string, method: string) {
@@ -53,11 +38,8 @@ function requiresMutationIdempotency(pathname: string, method: string) {
   return MUTATION_IDEMPOTENCY_RE.some((r) => r.test(pathname));
 }
 
-function readIdempotencyKey(req: Request) {
-  return req.headers.get('x-idempotency-key') ?? req.headers.get('idempotency-key');
-}
-
-function enforceInMemoryRateLimit(key: string, limit: number, windowMs: number) {
+// Sliding-window rate limiter with OOM guard.
+function enforceInMemoryRateLimit(key: string, limit: number, windowMs: number): boolean {
   const now = Date.now();
   const bucket = runtimeRateLimit.get(key) ?? [];
   const next = bucket.filter((ts) => now - ts < windowMs);
@@ -66,59 +48,13 @@ function enforceInMemoryRateLimit(key: string, limit: number, windowMs: number) 
     return false;
   }
   next.push(now);
+  if (runtimeRateLimit.size >= RUNTIME_RATE_LIMIT_MAX) {
+    // Evict the oldest inserted key (Map preserves insertion order).
+    const oldest = runtimeRateLimit.keys().next().value;
+    if (oldest !== undefined) runtimeRateLimit.delete(oldest);
+  }
   runtimeRateLimit.set(key, next);
   return true;
-}
-
-async function verifySession(req: Request, env: Env): Promise<JwtSession | null> {
-  const token = parseBearer(req);
-  if (!token) return null;
-  if (!env.SUPABASE_URL) return null;
-
-  if (!jwks) {
-    jwks = createRemoteJWKSet(new URL('/auth/v1/.well-known/jwks.json', env.SUPABASE_URL));
-  }
-
-  try {
-    const { payload } = await jwtVerify(token, jwks, {
-      issuer: `${env.SUPABASE_URL}/auth/v1`,
-      audience: 'authenticated',
-    });
-
-    if (!payload.sub) return null;
-    return {
-      userId: String(payload.sub),
-      roles: payload.user_role ? [String(payload.user_role)] : [],
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function isSuperAdmin(userId: string, env: Env) {
-  const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-  const { data, error } = await admin
-    .from('user_role_assignments')
-    .select('role')
-    .eq('user_id', userId)
-    .eq('role', 'super_admin')
-    .limit(1);
-  if (error) return false;
-  return (data ?? []).length > 0;
-}
-
-async function enforceValidationGuard(req: Request, env: Env) {
-  if (env.ENABLE_STREAM_VALIDATION !== 'true') {
-    return new Response('Not Found', { status: 404 });
-  }
-
-  const session = await verifySession(req, env);
-  if (!session) return new Response('Not Found', { status: 404 });
-  const allowed = session.roles.includes('super_admin') || (await isSuperAdmin(session.userId, env));
-  if (!allowed) return new Response('Not Found', { status: 404 });
-  return null;
 }
 
 function withRequestId(req: Request) {
@@ -236,15 +172,12 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
 
+    // Reject mutations that are missing an idempotency key before touching any route.
     if (requiresMutationIdempotency(url.pathname, req.method) && !readIdempotencyKey(req)) {
       return json({ ok: false, error: 'idempotency_key_required' }, 400);
     }
 
-    const validationGuard = requiresValidationGuard(url.pathname)
-      ? await enforceValidationGuard(req, env)
-      : null;
-    if (validationGuard) return validationGuard;
-
+    // /ops/validation-runs CRUD.
     if (url.pathname.startsWith('/ops/validation-runs')) {
       return handleOpsValidationRuns(req, env);
     }
@@ -257,36 +190,39 @@ export default {
       redirect: req.redirect,
     });
 
+    // Per-user + per-IP rate limits for high-frequency write paths.
+    // User ID is read from the pre-verified header — no JWT call required.
     if (req.method === 'POST' && /^\/api\/streams\/[^/]+\/comments$/.test(url.pathname)) {
-      const session = await verifySession(req, env);
-      const rateKey = `comment:${session?.userId ?? 'anon'}:${req.headers.get('cf-connecting-ip') ?? 'unknown'}`;
-      if (!enforceInMemoryRateLimit(rateKey, 8, 10_000)) {
+      const userId = req.headers.get('x-sbbl-user-id-verified') ?? 'anon';
+      const ip = req.headers.get('cf-connecting-ip') ?? 'unknown';
+      if (!enforceInMemoryRateLimit(`comment:${userId}:${ip}`, 8, 10_000)) {
         return json({ ok: false, error: 'rate_limited' }, 429, noStoreHeaders());
       }
     }
 
     if (req.method === 'POST' && /^\/api\/streams\/[^/]+\/reactions$/.test(url.pathname)) {
-      const session = await verifySession(req, env);
-      const rateKey = `reaction:${session?.userId ?? 'anon'}:${req.headers.get('cf-connecting-ip') ?? 'unknown'}`;
-      if (!enforceInMemoryRateLimit(rateKey, 20, 10_000)) {
+      const userId = req.headers.get('x-sbbl-user-id-verified') ?? 'anon';
+      const ip = req.headers.get('cf-connecting-ip') ?? 'unknown';
+      if (!enforceInMemoryRateLimit(`reaction:${userId}:${ip}`, 20, 10_000)) {
         return json({ ok: false, error: 'rate_limited' }, 429, noStoreHeaders());
       }
     }
 
+    // Stable path aliases — /access and /resume both map to the session endpoint.
     if (req.method === 'POST' && /^\/api\/streams\/[^/]+\/access$/.test(url.pathname)) {
       return baseWorker.fetch(rewriteRequest(correlatedReq, url.pathname.replace('/access', '/session')), env);
     }
-
     if (req.method === 'POST' && /^\/api\/streams\/[^/]+\/resume$/.test(url.pathname)) {
       return baseWorker.fetch(rewriteRequest(correlatedReq, url.pathname.replace('/resume', '/session')), env);
     }
-
     if (req.method === 'POST' && /^\/api\/streams\/[^/]+\/reactions$/.test(url.pathname)) {
       return baseWorker.fetch(rewriteRequest(correlatedReq, url.pathname.replace('/reactions', '/react')), env);
     }
 
     const response = await baseWorker.fetch(correlatedReq, env);
 
+    // Stamp no-store + correlation ID on responses that carry session or
+    // entitlement data so CDN/proxies never cache them.
     if (
       /^\/api\/streams\/[^/]+\/(session|access|resume|revoke|expire|purchase)$/.test(url.pathname) ||
       /^\/ops\/validation-runs/.test(url.pathname)
