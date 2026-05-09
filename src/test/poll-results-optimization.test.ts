@@ -28,12 +28,12 @@ describe('handlePublicPollResults optimization', () => {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       maybeSingle
-    }) as any;
+    }) as unknown as typeof ctx.admin.from;
 
-    ctx.admin.rpc = rpc as any;
+    ctx.admin.rpc = rpc as unknown as typeof ctx.admin.rpc;
 
     const response = await handlePublicPollResults(ctx);
-    const body = await response.json() as any;
+    const body = (await response.json()) as { ok: boolean; poll: { id: string }; tallies: Record<string, number>; total_votes: number };
 
     expect(body.ok).toBe(true);
     expect(body.poll.id).toBe(pollId);
@@ -55,12 +55,12 @@ describe('handlePublicPollResults optimization', () => {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
       maybeSingle: vi.fn().mockResolvedValue({ data: { id: pollId }, error: null })
-    }) as any;
+    }) as unknown as typeof ctx.admin.from;
 
-    ctx.admin.rpc = vi.fn().mockResolvedValue({ data: null, error: null }) as any;
+    ctx.admin.rpc = vi.fn().mockResolvedValue({ data: null, error: null }) as unknown as typeof ctx.admin.rpc;
 
     const response = await handlePublicPollResults(ctx);
-    const body = await response.json() as any;
+    const body = (await response.json()) as { ok: boolean; tallies: Record<string, number>; total_votes: number };
 
     expect(body.ok).toBe(true);
     expect(body.tallies).toEqual({});

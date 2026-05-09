@@ -10,7 +10,7 @@ describe('Poll Results Aggregation Benchmark', () => {
     const start = performance.now();
     // Simulate JSON stringifying and parsing which happens in worker-supabase boundary
     const raw = JSON.stringify(votes);
-    const parsed = JSON.parse(raw) as any[];
+    const parsed = JSON.parse(raw) as Array<{ option_id: string }>;
 
     const tallies: Record<string, number> = {};
     for (const v of parsed) {
@@ -34,7 +34,7 @@ describe('Poll Results Aggregation Benchmark', () => {
 
     const start = performance.now();
     const raw = JSON.stringify(talliesData);
-    const parsed = JSON.parse(raw) as any[];
+    const parsed = JSON.parse(raw) as Array<{ option_id: string; vote_count: number }>;
 
     const tallies: Record<string, number> = {};
     let total = 0;
