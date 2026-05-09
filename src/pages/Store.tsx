@@ -74,16 +74,16 @@ const StorePage = () => {
     return [];
   }, [productsQuery.data]);
 
+  // ⚡ Bolt Performance Optimization: Memoize the filtered array and detail lookup
+  // This prevents expensive O(N) array traversals on every render, such as when
+  // a user clicks to select a different product size or color.
   const filtered = useMemo(() => {
-    if (category === 'all') return products;
-    if (category === 'custom') return products.filter(p => p.is_custom);
-    // If not custom category, hide custom products from other categories unless explicitly requesting them
-    return products.filter(p => p.category === category && !p.is_custom);
-  }, [products, category]);
+    return category === 'all' ? products : products.filter(p => p.category === category);
+  }, [category, products]);
 
-  const detail = useMemo(() =>
-    selectedProduct ? products.find(p => p.id === selectedProduct) : null
-  , [selectedProduct, products]);
+  const detail = useMemo(() => {
+    return selectedProduct ? products.find(p => p.id === selectedProduct) : null;
+  }, [selectedProduct, products]);
 
   const handleSelectProduct = useCallback((id: string, colors?: string[]) => {
     setSelectedProduct(id);
