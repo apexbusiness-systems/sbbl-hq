@@ -33,6 +33,21 @@ const LoginPage = () => {
   // between /onboarding and the target page (avoids wrong redirect flash).
   const redirectTo = urlParams.get('redirect');
   const intentParam = urlParams.get('intent');
+
+  useEffect(() => {
+    const oauthParams = new URLSearchParams(location.search);
+    const oauthError = oauthParams.get('error');
+    const oauthErrorDescription = oauthParams.get('error_description');
+    if (!oauthError && !oauthErrorDescription) return;
+
+    const normalizedDetails = `${oauthError ?? ''} ${oauthErrorDescription ?? ''}`.toLowerCase();
+    if (normalizedDetails.includes('org_internal')) {
+      setError('Google sign-in is blocked: this OAuth app is set to Internal-only in Google Cloud. Switch OAuth consent to External and add your Google account as a test user, or publish the app.');
+      return;
+    }
+
+    setError('Google sign-in was denied by the provider. Please try again or use email sign-in.');
+  }, [location.search]);
   useEffect(() => {
     if (!isSignedIn || loading) return;
     if (needsOnboarding) {
@@ -79,7 +94,7 @@ const LoginPage = () => {
         },
       });
       if (oauthError) {
-        setError('Google sign-in could not start. Please try again.');
+        setError('Google sign-in could not start. Please try again or use email sign-in.');
         console.error('Google OAuth error:', oauthError.message);
       }
     } catch (oauthClientError) {
