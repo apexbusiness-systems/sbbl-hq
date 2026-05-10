@@ -119,8 +119,12 @@ const OnboardingPage = () => {
 
         if (rpcError) {
           const rpcMessage = rpcError.message.toLowerCase();
-          // Fallback for environments where the RPC migration was not applied yet.
-          if (rpcMessage.includes('could not find the function') || rpcMessage.includes('schema cache')) {
+          const rpcCode = (rpcError as { code?: string }).code;
+          // Fallback only when the RPC truly does not exist (missing migration/schema cache drift).
+          const isMissingRpc = rpcCode === '42883'
+            || rpcMessage.includes('could not find the function')
+            || rpcMessage.includes('schema cache');
+          if (isMissingRpc) {
             const { error: profileError } = await supabase.from('profiles').upsert({
               user_id: user.id,
               display_name: payload.p_display_name,
