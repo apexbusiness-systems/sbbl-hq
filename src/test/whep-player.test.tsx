@@ -88,7 +88,13 @@ import * as probeModule from '@/lib/stream/whep-probe';
 
 async function tick(ms = 0) {
   await act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
+    if (ms > 0) {
+      vi.advanceTimersByTime(ms);
+    } else {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    }
   });
 }
 
@@ -106,11 +112,12 @@ beforeEach(() => {
   lastPlayer = null;
   loadShouldReject = null;
   vi.mocked(probeModule.probeWhepCors).mockResolvedValue({ ok: true, reason: 'ok' });
-  vi.useFakeTimers({ shouldAdvanceTime: true });
+  vi.useFakeTimers();
 });
 
 afterEach(() => {
   cleanup();
+  vi.runOnlyPendingTimers();
   vi.useRealTimers();
   vi.clearAllMocks();
 });
@@ -192,7 +199,7 @@ describe('WhepPlayer — Fix #3 manual retry', () => {
     render(
       <WhepPlayer
         whepUrl="https://stream.example.com/whep/live"
-        retryIntervalMs={10_000}
+        retryIntervalMs={0}
         maxRetries={1}
       />
     );

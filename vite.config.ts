@@ -112,15 +112,11 @@ export default defineConfig(({ mode }) => {
               },
             },
             // Hashed JS/CSS/Fonts: Cache-First
-            // Same-origin only. Cross-origin scripts (provider SDKs) under
-            // CacheFirst throw `no-response` on CSP/network failure and storm
-            // the console; let them fall through to the browser default.
             {
-              urlPattern: ({ request, sameOrigin }) =>
-                sameOrigin &&
-                (request.destination === 'script' ||
-                  request.destination === 'style' ||
-                  request.destination === 'font'),
+              urlPattern: ({ request }) =>
+                request.destination === 'script' ||
+                request.destination === 'style' ||
+                request.destination === 'font',
               handler: 'CacheFirst',
               options: {
                 cacheName: 'static-assets',
@@ -272,7 +268,7 @@ export default defineConfig(({ mode }) => {
             // ── Media / WebRTC (Live page only) ──────────────────────────────
             // NOTE: react-player calls React.lazy() at module init time.
             // It MUST NOT be separated from React — left to default chunking
-            // so Rollup resolves the React dependency correctly.
+            // so Rollup resolves the React dependency dependency correctly.
             if (id.includes("/node_modules/@eyevinn/")) {
               return "media-vendor";
             }
