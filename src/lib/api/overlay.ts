@@ -83,6 +83,13 @@ export async function controlClock(
   );
 }
 
+export async function updateGameStatus(gameId: string, status: string) {
+  return apiFetch<{ ok: boolean; game: OverlayGameMeta }>(
+    `/api/ops/overlay/${gameId}/status`,
+    { method: 'POST', body: JSON.stringify({ status }) },
+  );
+}
+
 export async function adjustScore(
   gameId: string,
   side: 'home' | 'away',

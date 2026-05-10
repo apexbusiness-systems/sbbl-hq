@@ -4,7 +4,7 @@ import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId, ScoreCategory, ScoreEntry } from '@/types';
 import { useState, useMemo, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { Trophy, Users, Star, Calendar } from 'lucide-react';
 import { fetchScores } from '@/lib/api/scores';
 
@@ -118,6 +118,12 @@ function ScoreCard({ entry }: { readonly entry: ScoreEntry }) {
           )}
         </div>
       )}
+      <Link
+        to={`/scorekeeper/${entry.id}`}
+        className="px-4 py-2 bg-secondary text-foreground text-center text-xs font-bold uppercase hover:bg-primary hover:text-primary-foreground transition-colors border-t border-border/40"
+      >
+        Open Scorekeeper
+      </Link>
     </div>
   );
 }
