@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchPublicSchedule } from '@/lib/api/public';
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { SBBL_WEEK4_MAY_10_2026 } from '@/data/sbblWeek4Schedule';
 
 type ScheduleGame = { time: string; home: string; away: string };
 type ScheduleCourt = { name: string; games: ScheduleGame[] };
@@ -19,6 +20,13 @@ type ScheduleDay = {
   address: string;
   courts: ScheduleCourt[];
 };
+
+
+function formatScheduleTime(input: string): string {
+  const parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) return 'TBA';
+  return parsed.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
 
 const SchedulesPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -61,9 +69,13 @@ const SchedulesPage = () => {
   const mappedLiveSchedules: ScheduleDay[] = useMemo(() => {
     if (!liveSchedules || liveSchedules.length === 0) return [];
 
+    // Normalize known worker payload variants (starts_at/start_time + team labels/ids).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const groupedLive = liveSchedules.reduce((acc: Record<string, any>, curr: any) => {
-      const key = `${curr.league_id}-${curr.start_time.split('T')[0]}`;
+      const startsAt = curr.starts_at || curr.start_time;
+      if (!startsAt || typeof startsAt !== 'string') return acc;
+      const gameDate = startsAt.split('T')[0];
+      const key = `${curr.league_id || 'sbbl'}-${gameDate}`;
       if (!acc[key]) {
         const leagueId = LEAGUE_REGISTRY.some((l) => l.id === curr.league_id)
           ? (curr.league_id as LeagueId)
@@ -71,22 +83,20 @@ const SchedulesPage = () => {
         acc[key] = {
           leagueId,
           season: getLeagueSeasonLabel(leagueId),
-          week: '1',
-          date: curr.start_time.split('T')[0],
+          week: String(curr.week || '1'),
+          date: gameDate,
           venue: curr.venue || 'TBA',
           address: curr.address || 'TBA',
           courts: {}
         };
       }
-      const courtName = curr.court || 'Main Court';
-      if (!acc[key].courts[courtName]) {
-        acc[key].courts[courtName] = [];
-      }
-      const time = new Date(curr.start_time).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+      const courtName = curr.court || curr.court_name || 'Main Court';
+      if (!acc[key].courts[courtName]) acc[key].courts[courtName] = [];
+      const time = formatScheduleTime(startsAt);
       acc[key].courts[courtName].push({
         time,
-        home: curr.home_team_id || 'TBA',
-        away: curr.away_team_id || 'TBA'
+        home: curr.home_team_name || curr.home_team || curr.home_team_id || 'TBA',
+        away: curr.away_team_name || curr.away_team || curr.away_team_id || 'TBA'
       });
       return acc;
     }, {});
@@ -99,7 +109,11 @@ const SchedulesPage = () => {
     }));
   }, [liveSchedules]);
 
-  const displayData = mappedLiveSchedules;
+  const displayData = useMemo(() => {
+    if (leagueFilter !== 'all' && leagueFilter !== 'sbbl') return mappedLiveSchedules;
+    const hasWeek4 = mappedLiveSchedules.some((day) => day.date === SBBL_WEEK4_MAY_10_2026.date && day.leagueId === 'sbbl');
+    return hasWeek4 ? mappedLiveSchedules : [...mappedLiveSchedules, SBBL_WEEK4_MAY_10_2026];
+  }, [mappedLiveSchedules, leagueFilter]);
 
 
   return (
@@ -132,7 +146,7 @@ const SchedulesPage = () => {
           ))}
         </div>
 
-        {mappedLiveSchedules.length === 0 && !isLoading && (
+        {displayData.length === 0 && !isLoading && (
           <div className="panel p-8 text-center">
             <Calendar className="w-8 h-8 text-primary/40 mx-auto mb-3" />
             <h2 className="font-display text-lg font-bold">No games scheduled</h2>
