@@ -563,3 +563,42 @@ export async function handleOverlayReset(ctx: HandlerCtx) {
 
   return json({ ok: true, overlay: data });
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// Game Status control
+// body: { status: 'live' | 'final' | 'upcoming' }
+// ──────────────────────────────────────────────────────────────────────────
+export async function handleOverlayStatus(ctx: HandlerCtx) {
+  await requireOverlayAdmin(ctx);
+  const gameId = ctx.params.gameId ?? "";
+  if (!gameId || !isUuid(gameId)) {
+    return json({ ok: false, error: "invalid_game_id" }, 400);
+  }
+
+  let body: { status?: string };
+  try {
+    body = (await ctx.req.json()) as typeof body;
+  } catch {
+    return json({ ok: false, error: "invalid_json" }, 400);
+  }
+
+  if (!body.status || !["upcoming", "live", "final", "postponed", "review_pending"].includes(body.status)) {
+    return json({ ok: false, error: "invalid_status" }, 400);
+  }
+
+  // Ensure overlay row exists so client doesn't break
+  await ensureOverlayRow(ctx, gameId);
+
+  const { data: game, error } = await ctx.admin
+    .from("games")
+    .update({ status: body.status })
+    .eq("id", gameId)
+    .select(
+      "id,status,category,event_name,participant1_label,participant2_label,home_score,away_score,leagues(code,name),home_team:teams!home_team_id(id,name,logo_url),away_team:teams!away_team_id(id,name,logo_url)"
+    )
+    .single();
+
+  if (error) throw new Error(error.message);
+
+  return json({ ok: true, game });
+}

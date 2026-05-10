@@ -18,6 +18,7 @@ import {
   adjustScore,
   adjustFoul,
   advancePeriod,
+  updateGameStatus,
   type OverlayPayload,
 } from '@/lib/api/overlay';
 
@@ -210,6 +211,8 @@ export default function ScorekeeperPage() {
       undo: { kind: 'period-advance', previousPeriod: currentPeriod },
     });
 
+  const setGameStatus = (status: string) => run(updateGameStatus(gameId, status), `mark game ${status}`);
+
   // ── Undo ──────────────────────────────────────────────────────────────────
   const canUndo = undoStack.length > 0;
 
@@ -260,6 +263,15 @@ export default function ScorekeeperPage() {
       <header className="mb-3 text-sm text-muted-foreground truncate">
         {leagueCode ? `${leagueCode} · ` : ''}
         {awayName} @ {homeName}
+        <div className="mt-1 flex items-center gap-2">
+          <span className={`px-2 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-widest ${
+            game.status === 'live' ? 'bg-live text-white' :
+            game.status === 'final' ? 'bg-muted text-muted-foreground' :
+            'bg-secondary text-foreground'
+          }`}>
+            {game.status}
+          </span>
+        </div>
       </header>
 
       {/* 2. Big score row ──────────────────────────────────────────────── */}
@@ -507,6 +519,31 @@ export default function ScorekeeperPage() {
           </button>
         </div>
       </section>
+      {/* 10. Game Status ───────────────────────────────────────────────── */}
+      <section className="mb-8" aria-label="Game Status">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
+          Game Status
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            aria-label="Set game to Live"
+            className="min-h-[56px] text-lg font-bold border border-border rounded-sm hover:bg-secondary text-live"
+            onClick={() => setGameStatus('live')}
+          >
+            Mark Live
+          </button>
+          <button
+            type="button"
+            aria-label="Set game to Final"
+            className="min-h-[56px] text-lg font-bold border border-border rounded-sm hover:bg-secondary"
+            onClick={() => setGameStatus('final')}
+          >
+            Finalize Game
+          </button>
+        </div>
+      </section>
+
 
       {/* 9. Possession ─────────────────────────────────────────────────── */}
       <section className="mb-3" aria-label="Possession">
