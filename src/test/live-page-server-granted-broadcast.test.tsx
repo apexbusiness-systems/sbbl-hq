@@ -5,6 +5,10 @@ import { ROUTER_FUTURE } from '@/test/utils/router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LivePage from '@/pages/Live';
 
+let publicHomeLiveGames: Array<Record<string, unknown>> = [];
+let activeBroadcastGameId: string | null = null;
+let viewerPreflightEnabled = false;
+
 vi.mock('@/hooks/use-auth', () => ({
   useAuth: () => ({
     user: { id: 'fan-1' },
@@ -20,6 +24,17 @@ vi.mock('@/hooks/useLiveAccess', () => ({
     access: 'paywall',
     config: { isLive: true, videoUrl: null, title: 'Open Broadcast' },
   }),
+}));
+
+vi.mock('@/lib/feature-flags', () => ({
+  isViewerPreflightEnabled: () => viewerPreflightEnabled,
+  isFanTokenSystemEnabled: () => false,
+  isBiometricOverlayEnabled: () => false,
+  isMicUpSeriesEnabled: () => false,
+}));
+
+vi.mock('@/components/preflight/ViewerPreflight', () => ({
+  ViewerPreflight: () => <div data-testid="viewer-preflight" />,
 }));
 
 vi.mock('@/contexts/AppContext', () => ({
@@ -38,6 +53,11 @@ vi.mock('@/contexts/BagContext', () => ({
 
 vi.mock('@/lib/supabase/client', () => ({
   getSupabaseClient: () => ({
+    channel: vi.fn(() => ({
+      on: vi.fn().mockReturnThis(),
+      subscribe: vi.fn().mockReturnThis(),
+    })),
+    removeChannel: vi.fn(),
     rpc: vi.fn(async (name: string) => {
       if (name === 'get_active_broadcast') {
         return {
@@ -45,7 +65,7 @@ vi.mock('@/lib/supabase/client', () => ({
             is_live: true,
             stream_url: 'https://stream.example/live.m3u8',
             title: 'Open Broadcast',
-            active_game_id: null,
+            active_game_id: activeBroadcastGameId,
             live_started_at: '2026-05-06T00:00:00Z',
             requires_payment: false,
             is_subscribed: false,
@@ -89,7 +109,7 @@ vi.mock('@/components/LiveStreamPlayer', () => ({
 vi.mock('@/lib/api/public', () => ({
   fetchPublicHome: vi.fn(async () => ({
     ok: true,
-    data: { liveGames: [], upcomingGames: [] },
+    data: { liveGames: publicHomeLiveGames, upcomingGames: [] },
   })),
 }));
 
@@ -108,10 +128,81 @@ vi.mock('@/lib/api/stream', () => ({
 
 beforeEach(() => {
   vi.useRealTimers();
+  publicHomeLiveGames = [];
+  activeBroadcastGameId = null;
+  viewerPreflightEnabled = false;
 });
 
 describe('Live page server-granted open broadcast', () => {
   it('passes server-granted access into the broadcast player for registered fans', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { gcTime: 0 } } })}>
+        <MemoryRouter future={ROUTER_FUTURE}>
+          <LivePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('live-player').textContent).toContain('game:broadcast');
+      expect(screen.getByTestId('live-player').textContent).toContain('serverGranted:true');
+    });
+  });
+
+  it('keeps open broadcasts on the broadcast session route when a scorekeeper-created live score row exists', async () => {
+    publicHomeLiveGames = [{
+      id: '11111111-1111-4111-8111-111111111111',
+      league_id: 'sbbl',
+      home_team: { id: 'home-1', name: 'Home', league_id: 'sbbl' },
+      away_team: { id: 'away-1', name: 'Away', league_id: 'sbbl' },
+      status: 'live',
+      home_score: 12,
+      away_score: 10,
+      starts_at: '2026-05-10T20:00:00Z',
+    }];
+
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { gcTime: 0 } } })}>
+        <MemoryRouter future={ROUTER_FUTURE}>
+          <LivePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('live-player').textContent).toContain('game:broadcast');
+      expect(screen.getByTestId('live-player').textContent).toContain('serverGranted:true');
+    });
+  });
+
+  it('does not let viewer preflight block server-granted open broadcasts with live score rows', async () => {
+    viewerPreflightEnabled = true;
+    publicHomeLiveGames = [{
+      id: '11111111-1111-4111-8111-111111111111',
+      league_id: 'sbbl',
+      home_team: { id: 'home-1', name: 'Home', league_id: 'sbbl' },
+      away_team: { id: 'away-1', name: 'Away', league_id: 'sbbl' },
+      status: 'live',
+      starts_at: '2026-05-10T20:00:00Z',
+    }];
+
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { gcTime: 0 } } })}>
+        <MemoryRouter future={ROUTER_FUTURE}>
+          <LivePage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('viewer-preflight')).not.toBeInTheDocument();
+      expect(screen.getByTestId('live-player').textContent).toContain('game:broadcast');
+    });
+  });
+
+  it('keeps broadcast-oracle playback universal even when active_game_id is present', async () => {
+    activeBroadcastGameId = '22222222-2222-4222-8222-222222222222';
+
     render(
       <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { gcTime: 0 } } })}>
         <MemoryRouter future={ROUTER_FUTURE}>
