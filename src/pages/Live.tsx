@@ -936,17 +936,13 @@ const LivePage = () => {
     }
   }, [activeGameId, user?.id, session]);
 
+  const serverGrantedBroadcastAccess = Boolean(broadcast?.stream_url);
   const fallbackBroadcastGame = useMemo<Game | null>(() => {
-    // Camera-only live mode has no real game row; use "broadcast" alias routes.
-    // Activate when EITHER (a) the legacy local check grants privileged-role
-    // access, OR (b) get_active_broadcast() has populated stream_url — i.e.
-    // the server has already confirmed the viewer is permitted to watch
-    // (subscriber, code-redeemed, or registered user on an open broadcast).
-    // Without (b), a registered fan whose access was just granted via the
-    // server-side oracle would see "No Active Broadcast" because useLiveAccess
-    // returns 'paywall' for broadcasts with no active_game_id.
-    const serverGrantedAccess = (broadcast?.stream_url ?? null) !== null;
-    if (!(hasBroadcastFallbackAccess || serverGrantedAccess) || !isStreamLive || liveGame) return null;
+    // Universal live playback contract: when the broadcast oracle grants a
+    // stream URL, playback uses the game-agnostic broadcast session. Score rows
+    // and optional active_game_id are metadata only and must not re-route the
+    // viewer into stricter game-specific PPV/session paths.
+    if (!(hasBroadcastFallbackAccess || serverGrantedBroadcastAccess) || !isStreamLive) return null;
     return {
       id: 'broadcast',
       leagueId: 'sbbl',
@@ -960,8 +956,14 @@ const LivePage = () => {
       score: { home: 0, away: 0 },
       ppvPrice: 0,
     };
-  }, [hasBroadcastFallbackAccess, isStreamLive, liveGame, broadcast?.stream_url]);
-  const showPreflight = isViewerPreflightEnabled() && !!activeGameId && activeGameId !== 'broadcast' && !preflightReady;
+  }, [hasBroadcastFallbackAccess, isStreamLive, serverGrantedBroadcastAccess]);
+  const playerGame = useMemo<Game | null>(() => {
+    // Server-granted broadcast access is universal: always use /api/broadcast/*
+    // for playback and let liveGame continue to drive surrounding metadata.
+    if (serverGrantedBroadcastAccess && fallbackBroadcastGame) return fallbackBroadcastGame;
+    return liveGame ?? fallbackBroadcastGame;
+  }, [fallbackBroadcastGame, liveGame, serverGrantedBroadcastAccess]);
+  const showPreflight = isViewerPreflightEnabled() && !!activeGameId && activeGameId !== 'broadcast' && !serverGrantedBroadcastAccess && !preflightReady;
   const tokenEnabled = isFanTokenSystemEnabled();
   const biometricsEnabled = isBiometricOverlayEnabled();
   const micUpEnabled = isMicUpSeriesEnabled();
@@ -1387,7 +1389,7 @@ const LivePage = () => {
                     onSuccess={handleBroadcastRefetch}
                   />
                 )
-              ) : (liveGame || fallbackBroadcastGame) ? (
+              ) : playerGame ? (
                 <div
                   style={{
                     position: 'absolute',
@@ -1406,7 +1408,7 @@ const LivePage = () => {
                   {/* Twitch embed config source-of-truth includes parent: ['sbbl-hq.icu'] in LiveStreamPlayer. */}
                   <PlayerErrorBoundary key={streamNonce}>
                     <LiveStreamPlayer
-                      game={(liveGame ?? fallbackBroadcastGame)!}
+                      game={playerGame}
                       userId={user?.id ?? null}
                       roles={roles}
                       hasPremiumPlayerAccess={hasPremiumPlayerAccess}
