@@ -109,17 +109,35 @@ const OnboardingPage = () => {
         const supabase = getSupabaseClient();
         if (!supabase) throw new Error('Supabase client unavailable');
 
-        const { data, error: rpcError } = await supabase.rpc('complete_fan_onboarding', {
-          p_display_name:     form.displayName.trim(),
-          p_full_name:        form.fullName.trim() || null,
+        const payload = {
+          p_display_name: form.displayName.trim(),
+          p_full_name: form.fullName.trim() || null,
           p_preferred_league: form.preferredLeague || null,
-        });
+        };
 
-        if (rpcError) throw new Error(rpcError.message);
+        const { data, error: rpcError } = await supabase.rpc('complete_fan_onboarding', payload);
 
-        const result = data as { ok: boolean; error?: string } | null;
-        if (!result?.ok) {
-          throw new Error(result?.error ?? 'onboarding_failed');
+        if (rpcError) {
+          const rpcMessage = rpcError.message.toLowerCase();
+          // Fallback for environments where the RPC migration was not applied yet.
+          if (rpcMessage.includes('could not find the function') || rpcMessage.includes('schema cache')) {
+            const { error: profileError } = await supabase.from('profiles').upsert({
+              user_id: user.id,
+              display_name: payload.p_display_name,
+              full_name: payload.p_full_name,
+              preferred_league: payload.p_preferred_league,
+              primary_role_intent: 'fan',
+              onboarding_completed_at: new Date().toISOString(),
+            }, { onConflict: 'user_id' });
+            if (profileError) throw new Error(profileError.message);
+          } else {
+            throw new Error(rpcError.message);
+          }
+        } else {
+          const result = data as { ok: boolean; error?: string } | null;
+          if (!result?.ok) {
+            throw new Error(result?.error ?? 'onboarding_failed');
+          }
         }
 
         await refresh();
