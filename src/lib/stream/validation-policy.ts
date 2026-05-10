@@ -6,6 +6,19 @@ export const SIX_HOURS_MS = ENTITLEMENT_MS.VIEWING_SESSION_MAX;
 export const ENTITLEMENT_VALIDITY_MS = ENTITLEMENT_MS.ENTITLEMENT_VALIDITY;
 export const DEFAULT_PLAYBACK_ARTIFACT_TTL_MS = 10 * 60 * 1000;
 
+/** Minimum allowed artifact TTL (1 minute). Prevents zero/negative bypasses. */
+export const MIN_ARTIFACT_TTL_MS = 60 * 1000;
+/** Maximum allowed artifact TTL (30 minutes). Prevents unbounded token lifetime. */
+export const MAX_ARTIFACT_TTL_MS = 30 * 60 * 1000;
+
+/** Clamp TTL to safe bounds: [MIN_ARTIFACT_TTL_MS, MAX_ARTIFACT_TTL_MS]. */
+export function clampArtifactTtl(ttlMs: number): number {
+  if (!Number.isFinite(ttlMs) || ttlMs <= 0) return DEFAULT_PLAYBACK_ARTIFACT_TTL_MS;
+  if (ttlMs < MIN_ARTIFACT_TTL_MS) return MIN_ARTIFACT_TTL_MS;
+  if (ttlMs > MAX_ARTIFACT_TTL_MS) return MAX_ARTIFACT_TTL_MS;
+  return ttlMs;
+}
+
 export type SessionStatus = "active" | "resumable" | "expired" | "revoked" | "denied";
 
 export interface SessionFingerprint {
