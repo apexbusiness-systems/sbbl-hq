@@ -8,12 +8,24 @@ import type { HandlerCtx } from "../shared";
 import { json } from "../shared";
 
 export async function handlePublicConfig({ env }: HandlerCtx) {
+  // Capability flag: tells the UI whether Google OAuth is a working sign-in
+  // path. Defaults to false so the button cannot falsely advertise the
+  // provider when Google Cloud has the OAuth client in `org_internal` state.
+  // The operator opts in by setting GOOGLE_OAUTH_ENABLED ("true") in worker
+  // vars (see docs/ops/OAUTH_HOTFIX_RUNBOOK.md). The legacy alias
+  // FEATURE_GOOGLE_OAUTH is read for back-compat with older wrangler configs.
+  const googleEnabledRaw =
+    env.GOOGLE_OAUTH_ENABLED ?? env.FEATURE_GOOGLE_OAUTH ?? "false";
+  const googleOAuthEnabled =
+    String(googleEnabledRaw).trim().toLowerCase() === "true";
+
   return json({
     ok: true,
     appName: "SBBL HQ",
     defaultLeague: "SBBL",
     supabaseUrl: env.SUPABASE_URL ?? null,
     supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY ?? null,
+    googleOAuthEnabled,
   });
 }
 

@@ -777,7 +777,12 @@ const LivePage = () => {
     queryKey: ['get-active-broadcast', streamNonce],
     queryFn: async () => {
       const supabase = getSupabaseClient();
-      if (!supabase) return null;
+      if (!supabase) {
+        // No Supabase client — runtime config / public-config has not yet
+        // resolved. Surface as a misconfiguration so the misconfigured branch
+        // renders instead of "No Active Broadcast" (which would hide the bug).
+        throw new Error('supabase_client_unavailable');
+      }
       const { data, error } = await supabase.rpc('get_active_broadcast');
       if (error) throw new Error(error.message);
       return data as {
@@ -795,8 +800,17 @@ const LivePage = () => {
     enabled: !isSuperAdmin,
     staleTime: 15_000,
     refetchInterval: 15_000,
+    // Limit retries so a missing RPC / wrong project surfaces quickly as a
+    // misconfiguration banner instead of spinning silently on the skeleton.
+    retry: 1,
   });
   const broadcast = broadcastQuery.data ?? null;
+  // Distinct from "not live": the oracle itself failed (RPC missing, schema
+  // drift, wrong Supabase project, no client). Triggers the fail-closed
+  // misconfiguration render so live-service breakage is visible, not silent.
+  // Admins bypass the oracle (they read stream_admin_config directly) so this
+  // flag must be ignored when isSuperAdmin is true.
+  const broadcastOracleBroken = !isSuperAdmin && broadcastQuery.isError;
 
   const handleBroadcastRefetch = () => {
     setStreamNonce(n => n + 1);
@@ -1367,6 +1381,36 @@ const LivePage = () => {
                     onReady={() => setPreflightReady(true)}
                     onRetry={() => void preflightQuery.refetch()}
                   />
+                </div>
+              ) : broadcastOracleBroken && !serverGrantedBroadcastAccess ? (
+                // Live-service misconfiguration: the broadcast oracle (RPC,
+                // schema, or project binding) failed. Fail closed — render an
+                // explicit error state instead of silently falling through to
+                // "No Active Broadcast" (which would hide the outage). This
+                // branch is intentionally subordinate to serverGrantedAccess
+                // so the PR #500 contract still holds: when a stream_url has
+                // already been granted server-side, playback continues.
+                <div
+                  className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/85 px-6"
+                  data-testid="live-misconfigured"
+                  role="alert"
+                >
+                  <div className="w-14 h-14 rounded-full bg-red-900/40 border border-red-600/40 flex items-center justify-center mb-3">
+                    <Radio className="w-6 h-6 text-red-400" />
+                  </div>
+                  <p className="text-sm font-semibold text-white">Live service unavailable</p>
+                  <p className="text-xs text-white/60 mt-2 max-w-xs leading-relaxed">
+                    The broadcast service can't be reached right now. This usually
+                    means the server is being updated. No stream is being shown for
+                    safety — please refresh in a minute.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleBroadcastRefetch}
+                    className="mt-4 px-4 py-2 rounded-sm bg-white/10 border border-white/15 text-xs font-semibold text-white hover:bg-white/15"
+                  >
+                    Retry
+                  </button>
                 </div>
               ) : !isSuperAdmin && broadcast?.is_live && !broadcast?.stream_url ? (
                 // Broadcast is live but user is not permitted server-side.
