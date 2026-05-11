@@ -17,8 +17,19 @@
   //   STRIPE_WEBHOOK_SECRET       — Stripe webhook signing secret
   //   RESEND_API_KEY              — Resend email API key
   //   GROQ_API_KEY                — Groq Vision API key (enables POTG image parser)
-  //   OMNIHUB_SIGNING_SECRET      — OmniHub webhook HMAC signing secret (optional)
-  //   OMNIHUB_SYNC_URL            — OmniHub sync endpoint URL (optional)
+  //   OMNIHUB_SIGNING_SECRET      — HMAC secret used by /sync/drain to sign outbound
+  //                                 packets to OmniHub. Also serves as the fallback
+  //                                 verify key for /webhooks/omnihub if
+  //                                 OMNIHUB_VERIFY_KEY is unset.
+  //   OMNIHUB_SYNC_URL            — OmniHub sync endpoint URL
+  //                                 (e.g. https://hub.example/api/omnibridge/sync)
+  //   OMNIHUB_VERIFY_KEY          — HMAC secret used by /webhooks/omnihub to verify
+  //                                 inbound commands from the OmniHub control plane.
+  //                                 In production this SHOULD be a different key
+  //                                 from OMNIHUB_SIGNING_SECRET (separate keys for
+  //                                 inbound vs outbound), but the inbound handler
+  //                                 falls back to OMNIHUB_SIGNING_SECRET so a
+  //                                 single shared secret is supported in dev/staging.
   "assets": {
     "directory": "dist",
     "binding": "ASSETS",
