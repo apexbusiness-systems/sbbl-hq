@@ -2,7 +2,7 @@
 
 **Status**: MANDATORY — enforced by ESLint + vitest + CI.
 **Owner**: Data Pipeline (SBBL-HQ).
-**Last updated**: 2026-04-16.
+**Last updated**: 2026-05-11.
 
 ## TL;DR
 
@@ -80,6 +80,8 @@ is cached at the edge.
 | Home snapshot | `GET /api/public/home`         | `{ ok, teams, liveGames, … }`     | None                         | multiple tables              |
 | Teams         | `GET /api/teams`               | `{ ok, teams: TeamCard[] }`       | None                         | `teams` + `mvw_standings`    |
 | Products      | `GET /api/public/products`     | `{ ok, data: Product[] }`         | None                         | `store_products`             |
+| OmniBridge inbound | `POST /webhooks/omnihub`  | `{ ok, status, command_id }`      | HMAC-SHA256 (no mock)        | `api_idempotency_keys` + `log_admin_action` RPC |
+| OmniPort command   | `POST /api/omniport/command` | `{ ok, result }`               | Operator JWT only (no mock)  | Worker-only, no DB write     |
 
 † `/api/stats` is tier-aware: anonymous callers receive a limited stat line
 (pts/reb/ast only). Authenticated paid players/coaches/admins get the full
