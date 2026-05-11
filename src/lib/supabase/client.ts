@@ -13,7 +13,16 @@ let _reportedConfigMismatch = false;
 
 function buildClient(url: string, key: string): SupabaseClient {
   return createClient(url, key, {
-    auth: { persistSession: true, autoRefreshToken: true },
+    auth: {
+      persistSession: true,
+      autoRefreshToken: true,
+      // PKCE is the only flow that works safely in browser-based SPAs.
+      // detectSessionInUrl exchanges the ?code= param that Supabase writes
+      // on the OAuth callback redirect before any React component reads
+      // window.location — ensures SIGNED_IN fires reliably on /login return.
+      flowType: 'pkce',
+      detectSessionInUrl: true,
+    },
   });
 }
 
