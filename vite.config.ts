@@ -8,18 +8,19 @@ import { VitePWA } from "vite-plugin-pwa";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
 
-  // VITE_SUPABASE_URL and the publishable key are public credentials —
-  // the anon/publishable key is safe to embed in the client bundle (Supabase RLS
-  // protects data, not the key). They are already committed in wrangler.jsonc.
-  // Fallbacks here mean the build never fails on CI or a fresh clone just because
-  // .env is absent.
-  const supabaseUrl = env.VITE_SUPABASE_URL || 'https://ezanilxygnpucwkwpsoc.supabase.co';
+  // Supabase credentials are NEVER baked into the client bundle as fallbacks.
+  // Hardcoding a production URL/key here caused split-brain: the frontend would
+  // silently boot against committed prod credentials even when the runtime
+  // /api/public-config pointed at a different project (staging, preview, or a
+  // rotated key). The browser must rely on /api/public-config (served by the
+  // Cloudflare Worker from its bound env) as the source of truth and only
+  // fall back to build-time env when it is explicitly provided.
+  const supabaseUrl = env.VITE_SUPABASE_URL ?? '';
   const supabaseKey =
-    env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    env.VITE_SUPABASE_ANON_KEY ||
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo';
-    const turnstileSiteKey =
-    env.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAACz241-XHmFaqRrM';
+    env.VITE_SUPABASE_PUBLISHABLE_KEY ??
+    env.VITE_SUPABASE_ANON_KEY ??
+    '';
+  const turnstileSiteKey = env.VITE_TURNSTILE_SITE_KEY ?? '';
 
   // Sentry release: use git SHA injected by CI (VITE_APP_VERSION) or fall back
   // to a timestamp so every build produces a unique release string.

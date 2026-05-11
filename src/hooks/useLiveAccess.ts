@@ -9,7 +9,11 @@ export type AccessState =
   | 'unauthenticated'
   | 'free'
   | 'paid'
-  | 'paywall';
+  | 'paywall'
+  // Broadcast oracle failed (RPC missing, schema drift, wrong project, etc.).
+  // Distinct from "not live" — UI must fail closed and show a misconfiguration
+  // message rather than silently rendering an empty state.
+  | 'misconfigured';
 
 export interface LiveConfig {
   isLive: boolean;
@@ -38,7 +42,17 @@ export function useLiveAccess() {
       // Server-authoritative oracle: returns paywall flags and withholds stream_url unless permitted.
       // active_game_id is included in the response — no direct stream_admin_config read needed
       // (Rule 6.1: non-admin clients must not read stream_admin_config directly).
-      const { data: broadcast } = await supabase.rpc('get_active_broadcast');
+      const { data: broadcast, error: broadcastError } = await supabase.rpc('get_active_broadcast');
+
+      // Fail closed on oracle errors. The most common production cause is
+      // migration drift / wrong project / missing function — in any of those
+      // cases we MUST surface a misconfiguration state instead of silently
+      // pretending the broadcast is not live (which hides the outage).
+      if (broadcastError) {
+        if (!cancelled) setAccess('misconfigured');
+        return;
+      }
+
       const view = (broadcast as {
         is_live?: boolean | null;
         title?: string | null;
