@@ -5,6 +5,14 @@ import { ROUTER_FUTURE } from '@/test/utils/router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import LivePage from '@/pages/Live';
 
+/**
+ * BASELINE HOTFIX CONTRACT (live-event critical):
+ * When broadcast.stream_url exists (server-granted access), playback must stay
+ * on game:broadcast and bypass stricter game-specific/preflight routing.
+ *
+ * These tests are the canonical regression lock for this behavior.
+ */
+
 let publicHomeLiveGames: Array<Record<string, unknown>> = [];
 let activeBroadcastGameId: string | null = null;
 let viewerPreflightEnabled = false;
