@@ -1,9 +1,16 @@
-<!-- Version: v1.3.0 | Date: 2026-05-06 | Status: Current -->
+<!-- Version: v1.4.0 | Date: 2026-05-11 | Status: Current -->
 # SBBL Worker API Reference
 
-**Version:** v1.3.0
-**Previous:** v1.2.0 (2026-04-05)
-**Last Updated:** 2026-05-06
+**Version:** v1.4.0
+**Previous:** v1.3.0 (2026-05-06)
+**Last Updated:** 2026-05-11
+
+**Changelog (v1.3.0 → v1.4.0):**
+- Added **OmniBridge** section documenting `POST /webhooks/omnihub`
+  (`handleOmnihubWebhook`) and `POST /api/omniport/command`
+  (`handleOmniportCommand`) — new endpoints from PR #502.
+- Documented `OMNIHUB_VERIFY_KEY` fallback semantics and the 9-action
+  inbound allowlist.
 
 **Changelog (v1.2.0 → v1.3.0):**
 - Added **Broadcast** section documenting the `/api/broadcast/*` route
@@ -151,10 +158,166 @@ Authenticated fan endpoints (non-admin):
 
 ### Webhooks
 - `POST /webhooks/stripe` — Stripe webhook (HMAC-SHA256 verified).
+- `POST /webhooks/omnihub` — OmniHub inbound command receiver (HMAC-SHA256 verified). See OmniBridge section below.
 
 ### Sync
 - `POST /api/ingress` — OmniHub ingress.
-- `POST /sync/drain` — Sync drain.
+- `POST /sync/drain` — Outbound sync drain (`handleSyncDrain`). Sends `{ packet, signature }` envelope to `OMNIHUB_SYNC_URL` via `deliverSyncEnvelope()`.
+
+### OmniPort Diagnostic
+- `POST /api/omniport/command` — JWT-authenticated OmniHub operator diagnostic surface. See OmniBridge section below.
+
+---
+
+## OmniBridge Endpoints (PR #502 — v1.4.0)
+
+### `POST /webhooks/omnihub` — `handleOmnihubWebhook`
+
+Inbound command receiver from the APEX-OmniHub control plane. No Supabase JWT required — authentication is HMAC-based.
+
+#### Authentication
+
+HMAC-SHA256 via `OMNIHUB_VERIFY_KEY`. Falls back to `OMNIHUB_SIGNING_SECRET` in dev/staging when `OMNIHUB_VERIFY_KEY` is absent. Clock-skew window: ±300 seconds.
+
+#### Required Request Headers
+
+| Header | Description |
+|---|---|
+| `X-Omni-Source` | Must equal `"sbbl-hq"` (target source pin). Any other value → `400 target_mismatch`. |
+| `X-Omni-Signature` | `base64url(HMAC-SHA256(OMNIHUB_VERIFY_KEY, JSON.stringify(packet)))` |
+| `X-Omni-Packet-Id` | Unique packet ID used as the idempotency key. |
+| `X-Omni-Trace-Id` | Trace ID propagated in logs and audit records. |
+
+#### Request Body
+
+```json
+{
+  "packet": {
+    "action": "<action>",
+    "command_id": "<uuid>",
+    "payload": { ... },
+    "timestamp": "<ISO-8601>"
+  },
+  "signature": "<base64url-HMAC-SHA256>"
+}
+```
+
+`signature` = `base64url(HMAC-SHA256(secret, JSON.stringify(packet)))`
+
+#### 9-Action Allowlist
+
+Only the following actions are accepted. Any other value → `400 action_not_allowed`.
+
+| Action | Description |
+|---|---|
+| `disable_stream` | Disable a stream |
+| `enable_stream` | Enable a stream |
+| `revoke_access` | Revoke a user's access |
+| `grant_access` | Grant a user access |
+| `emergency_halt` | Emergency halt — kills all active sessions |
+| `broadcast_message` | Send a broadcast message |
+| `force_man_review` | Force a manual review queue item |
+| `hotfix_dispatch` | Trigger a hotfix dispatch |
+| `ping` | Liveness check — returns `{ ok: true }` |
+
+#### Validation Pipeline (in order)
+
+1. Header presence check — `400 missing_headers` if any required header is absent.
+2. `target_source` pin — `400 target_mismatch` if `X-Omni-Source !== "sbbl-hq"`.
+3. Clock-skew check — `400 clock_skew` if `|now - packet.timestamp| > 300s`.
+4. HMAC verify — `401 invalid_signature` if signature does not match.
+5. Risk-lane re-classification — `400 blocked_payload` if packet content matches BLOCKED patterns (`DROP TABLE`, `ALTER ROLE`, `DISABLE RLS`, `TRUNCATE`, `GRANT ALL PRIVILEGES`), even if signature is valid.
+6. Action allowlist — `400 action_not_allowed` if action is not in the 9-item list.
+7. Idempotency dedup — `200 already_processed` if `X-Omni-Packet-Id` is found in `api_idempotency_keys`.
+8. Action dispatch + audit via `log_admin_action` RPC.
+
+#### Responses
+
+| Status | Body | Meaning |
+|---|---|---|
+| `200` | `{ "ok": true, "result": { ... } }` | Command accepted and executed. |
+| `200` | `{ "ok": true, "status": "already_processed" }` | Duplicate packet — idempotency dedup triggered. |
+| `400` | `{ "ok": false, "error": "missing_headers" }` | One or more required headers absent. |
+| `400` | `{ "ok": false, "error": "target_mismatch" }` | `X-Omni-Source` is not `"sbbl-hq"`. |
+| `400` | `{ "ok": false, "error": "clock_skew" }` | Timestamp outside ±300-second window. |
+| `400` | `{ "ok": false, "error": "blocked_payload" }` | Payload matched BLOCKED risk-lane pattern. |
+| `400` | `{ "ok": false, "error": "action_not_allowed" }` | Action not in the 9-item allowlist. |
+| `401` | `{ "ok": false, "error": "invalid_signature" }` | HMAC verification failed. |
+
+---
+
+### `POST /api/omniport/command` — `handleOmniportCommand`
+
+JWT-authenticated diagnostic surface for OmniHub operator sessions.
+
+#### Authentication
+
+Standard Supabase JWT via `Authorization: Bearer <jwt>` (`requireAuth`). No HMAC.
+
+#### Request Body
+
+```json
+{
+  "command": "PING | ECHO | HEALTH_CHECK | TELEMETRY_SNAPSHOT",
+  "payload": { ... }
+}
+```
+
+#### Supported Commands
+
+| Command | Request Payload | Response |
+|---|---|---|
+| `PING` | (none required) | `{ "ok": true, "ts": "<ISO-8601>" }` |
+| `ECHO` | Any object | `{ "ok": true, "echo": <request payload> }` |
+| `HEALTH_CHECK` | (none required) | `{ "ok": true, "health": { "status": "ok", "worker": "sbbl-hq-worker", ... } }` |
+| `TELEMETRY_SNAPSHOT` | (none required) | `{ "ok": true, "telemetry": { ... recent QoE/telemetry metrics ... } }` |
+
+Any other command value → `400 unsupported_command`.
+
+#### Responses
+
+| Status | Body | Meaning |
+|---|---|---|
+| `200` | `{ "ok": true, ... }` | Command executed successfully. |
+| `400` | `{ "ok": false, "error": "unsupported_command" }` | Command not in supported set. |
+| `401` | `{ "ok": false, "error": "unauthorized" }` | JWT missing or invalid. |
+
+---
+
+### Outbound Sync — `POST /sync/drain` → `deliverSyncEnvelope()`
+
+`handleSyncDrain` accepts inbound sync events and forwards them to `OMNIHUB_SYNC_URL` via `deliverSyncEnvelope()`.
+
+#### Outbound Envelope Shape
+
+```json
+{
+  "packet": { ... },
+  "signature": "<base64url(HMAC-SHA256(OMNIHUB_SIGNING_SECRET, JSON.stringify(packet)))>"
+}
+```
+
+#### Outbound Headers
+
+| Header | Value |
+|---|---|
+| `X-Omni-Source` | `"sbbl-hq"` |
+| `X-Omni-Signature` | `base64url` HMAC-SHA256 of the serialized packet |
+| `X-Omni-Packet-Id` | `packet.id` |
+| `X-Omni-Trace-Id` | Trace ID for this delivery attempt |
+
+#### Retry Policy (`deliverSyncEnvelope`)
+
+| Attempt | Delay Before Attempt |
+|---|---|
+| 1 (initial) | — |
+| 2 | 250 ms |
+| 3 | 1 s |
+| 4 | 4 s |
+
+Per-attempt timeout: 5 seconds. 4xx responses are fast-fail (non-retryable). 5xx responses trigger retry up to the 4-attempt limit.
+
+---
 
 ## Error Model
 

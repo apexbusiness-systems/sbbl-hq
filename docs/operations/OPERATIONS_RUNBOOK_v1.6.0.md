@@ -1,11 +1,15 @@
-<!-- Version: v1.6.0 | Date: 2026-04-19 | Status: Current -->
+<!-- Version: v1.7.0 | Date: 2026-05-11 | Status: Current -->
 # SBBL HQ — Operations Runbook
 
-> Last updated: 2026-04-19
+> Last updated: 2026-05-11
 > Owner: APEX Business Systems Ltd
-> Previous version: v1.5.0 (2026-04-18)
+> Previous version: v1.6.0 (2026-04-19)
 
 ## Change log
+
+**v1.7.0 — 2026-05-11** — OmniBridge Operations. Added §OmniBridge Operations
+covering secret rotation, inbound traffic disable, outbound sync verification,
+idempotency key format, and emergency halt procedure for malicious commands.
 
 **v1.6.0 — 2026-04-19** — Universal Stream Player + WHIP browser ingest.
 Added MediaMTX `/whip/*` listener and the matching Caddy reverse proxy on
@@ -63,6 +67,7 @@ See `docs/features/STREAM_GATING_v1.7.0.md` for the full semantic model.
 7. [Deprecated Scripts — Removal Log](#deprecated-scripts--removal-log)
 8. [Emergency Procedures](#emergency-procedures)
 9. [Livestream Ops](#livestream-ops)
+10. [OmniBridge Operations](#omnibridge-operations)
 
 ---
 
@@ -79,8 +84,9 @@ All required secrets are listed in `wrangler.jsonc` under `[vars]` / `[[secrets]
 | `STRIPE_WEBHOOK_SECRET` | Stripe webhook HMAC secret |
 | `OPTIONAL_TURNSTILE_SECRET_KEY` | Cloudflare Turnstile server verification (optional — captcha skipped when absent) |
 | `SENTRY_DSN` | Sentry error tracking DSN (worker, set in wrangler.jsonc vars) |
-| `OMNIHUB_SIGNING_SECRET` | OmniHub sync packet signing secret |
-| `OMNIHUB_SYNC_URL` | OmniHub outbound sync endpoint |
+| `OMNIHUB_SIGNING_SECRET` | HMAC key used to sign outbound sync envelopes AND as fallback verify key in dev/staging |
+| `OMNIHUB_SYNC_URL` | OmniHub outbound sync endpoint (delivery target for `deliverSyncEnvelope`) |
+| `OMNIHUB_VERIFY_KEY` | HMAC key used to verify inbound OmniHub commands (production). Falls back to `OMNIHUB_SIGNING_SECRET` when absent. |
 | `GROQ_API_KEY` | Groq API key for POTG image parsing |
 
 Client-side env vars (Vite build-time, set as GitHub Actions secrets):
@@ -437,3 +443,209 @@ private network; use SSM Session Manager to hit it from an ops laptop.
 | 400 on POST | SDP parse error (usually codec mismatch) | Confirm browser supports H.264 + Opus; Safari on older iOS may not. |
 | `Stop Broadcast` doesn't release | Browser crashed before DELETE | MediaMTX GCs dead sessions on its idle timeout (default 30 s). |
 | Audio out of sync on captureStream() | Browser re-samples on tab throttling | Keep the `/live` tab active; consider using `Broadcast Camera` for production events. |
+
+---
+
+## OmniBridge Operations
+
+The OmniBridge is the bidirectional sync bridge between SBBL-HQ and APEX-OmniHub,
+introduced in PR #502. See `CLAUDE.md §8` and `docs/architecture/API_REFERENCE_v1.2.0.md`
+(OmniBridge section) for full technical specification.
+
+**Related secrets:** `OMNIHUB_SIGNING_SECRET`, `OMNIHUB_SYNC_URL`, `OMNIHUB_VERIFY_KEY`
+
+---
+
+### Rotating OMNIHUB_SIGNING_SECRET
+
+`OMNIHUB_SIGNING_SECRET` signs all outbound sync envelopes sent to OmniHub. Rotate it
+whenever a secret is suspected to be compromised or per your key-rotation schedule.
+
+```bash
+# 1. Generate a new secret (32-byte hex recommended)
+NEW_SECRET=$(openssl rand -hex 32)
+
+# 2. Coordinate with the OmniHub team — they must update their verify key
+#    BEFORE you rotate here, or outbound deliveries will start failing verification.
+
+# 3. Rotate the secret in Cloudflare Workers
+wrangler secret put OMNIHUB_SIGNING_SECRET --name sbbl-hq-worker
+# (paste the new secret when prompted)
+
+# 4. Verify the new secret is active
+wrangler secret list --name sbbl-hq-worker
+
+# 5. Confirm outbound deliveries are succeeding (see verification section below)
+```
+
+**Note:** In dev/staging where `OMNIHUB_VERIFY_KEY` is absent, `OMNIHUB_SIGNING_SECRET`
+also acts as the inbound verify key. Rotating it in dev/staging requires coordinating
+the update with any test OmniHub instance.
+
+---
+
+### Rotating OMNIHUB_VERIFY_KEY
+
+`OMNIHUB_VERIFY_KEY` verifies all inbound OmniHub commands on the
+`POST /webhooks/omnihub` endpoint. Only present in production.
+
+```bash
+# 1. Obtain the new verify key from the OmniHub team (they control this key).
+
+# 2. Stage the new key — do NOT remove the old key yet.
+wrangler secret put OMNIHUB_VERIFY_KEY --name sbbl-hq-worker
+# (paste the new key when prompted)
+
+# 3. Confirm with OmniHub that they have switched to signing with the new key.
+
+# 4. Monitor worker logs for any 401 invalid_signature responses on /webhooks/omnihub.
+#    If 401s appear, coordinate timing — the old and new key must not be active simultaneously.
+
+# 5. Once confirmed clean, the rotation is complete. The old key is no longer used.
+```
+
+---
+
+### Disabling Inbound OmniHub Traffic
+
+To block all inbound OmniHub commands (e.g., during an incident or while rotating keys):
+
+```bash
+# Remove OMNIHUB_VERIFY_KEY — all inbound commands will 401
+wrangler secret delete OMNIHUB_VERIFY_KEY --name sbbl-hq-worker
+
+# IMPORTANT: In dev/staging, this falls back to OMNIHUB_SIGNING_SECRET.
+# To fully disable inbound in dev/staging, also rotate OMNIHUB_SIGNING_SECRET
+# to a value unknown to OmniHub.
+```
+
+All `POST /webhooks/omnihub` requests will now return `401 invalid_signature` because
+the worker has no key to verify against (or an unknown key in dev/staging).
+
+To re-enable inbound traffic, restore `OMNIHUB_VERIFY_KEY`:
+
+```bash
+wrangler secret put OMNIHUB_VERIFY_KEY --name sbbl-hq-worker
+```
+
+---
+
+### Verifying Outbound Sync Drain is Working
+
+`deliverSyncEnvelope()` logs each attempt to the Cloudflare Worker log stream.
+
+```bash
+# Tail live worker logs (requires wrangler login)
+wrangler tail sbbl-hq-worker
+
+# Look for log lines like:
+#   [deliverSyncEnvelope] attempt 1 → 200 OK  (success)
+#   [deliverSyncEnvelope] attempt 1 → 500 retrying in 250ms  (retry triggered)
+#   [deliverSyncEnvelope] attempt 2 → 200 OK
+#   [deliverSyncEnvelope] 4xx fast-fail — not retrying  (target rejected)
+#   [deliverSyncEnvelope] all 4 attempts failed
+```
+
+**Retry budget:** 4 attempts total (initial + 3 retries at 250ms / 1s / 4s).
+**Per-attempt timeout:** 5 seconds.
+**4xx responses are fast-fail** — OmniHub is actively rejecting the envelope (bad
+signature, wrong source, etc.). Investigate the root cause; do not force-retry.
+
+If all 4 attempts fail on 5xx, the packet is lost for this delivery cycle.
+Consider implementing a dead-letter queue if this becomes a reliability concern.
+
+---
+
+### Idempotency Key Format
+
+Each inbound OmniHub command is deduplicated using the `X-Omni-Packet-Id` header value
+as the idempotency key, stored in the `api_idempotency_keys` table.
+
+**Key format:** `{command_id}` — the raw value of `X-Omni-Packet-Id` from the request header.
+
+**Dedup behavior:** If an identical `X-Omni-Packet-Id` is received again (replay),
+the handler returns `200 already_processed` immediately without re-executing the action.
+
+**Retention:** Keys are stored indefinitely (or per your DB retention policy). Do not
+truncate `api_idempotency_keys` without understanding the replay risk.
+
+To inspect recent OmniHub idempotency keys:
+
+```sql
+-- Supabase SQL editor or psql
+SELECT key, created_at
+FROM api_idempotency_keys
+WHERE key NOT LIKE 'stripe_%'   -- exclude Stripe keys
+ORDER BY created_at DESC
+LIMIT 50;
+```
+
+---
+
+### Emergency Halt — Malicious Inbound Command
+
+If a malicious or unauthorized command is received from OmniHub (or an attacker
+impersonating OmniHub):
+
+#### Immediate containment
+
+**Step 1 — Disable inbound OmniHub traffic immediately:**
+
+```bash
+wrangler secret delete OMNIHUB_VERIFY_KEY --name sbbl-hq-worker
+```
+
+This causes all subsequent `POST /webhooks/omnihub` requests to return `401` and
+prevents any further commands from executing.
+
+**Step 2 — Kill the emergency_halt action effects (if triggered):**
+
+If an `emergency_halt` command was successfully processed, it may have killed active
+stream sessions. Use the stream emergency procedures to restore service:
+
+```
+POST /ops/streams/status
+Authorization: Bearer <super_admin_token>
+Idempotency-Key: <uuid>
+
+{ "isLive": true }
+```
+
+**Step 3 — Audit the damage:**
+
+```sql
+-- Review recent admin actions logged via log_admin_action
+SELECT *
+FROM audit_logs
+WHERE action LIKE 'omnibridge_%'
+   OR source = 'omnihub'
+ORDER BY created_at DESC
+LIMIT 100;
+
+-- Review idempotency keys for all processed commands
+SELECT key, created_at
+FROM api_idempotency_keys
+WHERE key NOT LIKE 'stripe_%'
+ORDER BY created_at DESC
+LIMIT 100;
+```
+
+**Step 4 — Rotate all OmniHub secrets:**
+
+```bash
+wrangler secret put OMNIHUB_SIGNING_SECRET --name sbbl-hq-worker
+wrangler secret put OMNIHUB_VERIFY_KEY --name sbbl-hq-worker
+```
+
+Coordinate with the OmniHub team to provide them the new `OMNIHUB_SIGNING_SECRET`
+so their inbound verify can be updated.
+
+**Step 5 — Re-enable inbound traffic** only after the OmniHub team has confirmed
+the source of the malicious command has been identified and neutralized.
+
+#### Hard rules — never bypass during an incident
+
+- NEVER remove the idempotency check to "replay" a legitimate command faster.
+- NEVER accept a command with a bad signature, even if the OmniHub team requests it verbally.
+- NEVER add a new action to the allowlist during an incident — that decision requires repo owner approval.
+- NEVER skip the BLOCKED risk-lane check under any circumstance.

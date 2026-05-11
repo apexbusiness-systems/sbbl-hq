@@ -1,8 +1,48 @@
-<!-- Version: v1.4.0 | Date: 2026-04-29 | Status: Current -->
+<!-- Version: v1.5.0 | Date: 2026-05-11 | Status: Current -->
 # CHANGELOG
 
 All notable changes to SBBL HQ are documented in this file.
 Versioning follows [semantic versioning](https://semver.org) with UTC date stamps.
+
+---
+
+## [1.5.0] - 2026-05-11
+
+### Added — OmniBridge Integration (APEX-OmniHub bidirectional sync)
+
+- **`POST /webhooks/omnihub`** (`handleOmnihubWebhook`) — new inbound command
+  receiver from APEX-OmniHub control plane. Enforces:
+  - HMAC-SHA256 signature verification via `OMNIHUB_VERIFY_KEY` (falls back to
+    `OMNIHUB_SIGNING_SECRET` for shared-secret dev/staging).
+  - 9-action allowlist: `disable_stream`, `enable_stream`, `revoke_access`,
+    `grant_access`, `emergency_halt`, `broadcast_message`, `force_man_review`,
+    `hotfix_dispatch`, `ping`.
+  - `target_source === "sbbl-hq"` pin.
+  - Clock-skew check (±300 seconds).
+  - Idempotency dedup via `api_idempotency_keys` table.
+  - Risk-lane re-classification — BLOCKED payloads (DROP TABLE, ALTER ROLE,
+    DISABLE RLS, TRUNCATE, GRANT ALL PRIVILEGES) rejected regardless of signature.
+  - Full audit trail via `log_admin_action` RPC.
+
+- **`POST /api/omniport/command`** (`handleOmniportCommand`) — JWT-authenticated
+  diagnostic surface for OmniHub operator sessions. Supported commands:
+  `PING`, `ECHO`, `HEALTH_CHECK`, `TELEMETRY_SNAPSHOT`.
+
+- **`deliverSyncEnvelope()`** — hardened outbound telemetry delivery with 4-attempt
+  exponential backoff (0 / 250ms / 1s / 4s), 5-second per-attempt timeout, and
+  4xx fast-fail (non-retryable target rejection).
+
+### Changed
+- **`handleSyncDrain()`** — now sends canonical `{ packet, signature }` envelope
+  with required headers `X-Omni-Source`, `X-Omni-Signature`, `X-Omni-Packet-Id`,
+  `X-Omni-Trace-Id` (fixes silent 400 rejection on OmniHub side).
+- **`wrangler.jsonc`** — documented `OMNIHUB_VERIFY_KEY` with fallback semantics.
+
+### Tests
+- `src/worker/tests/omnihub-bridge.integration.test.ts` — 14 new integration tests
+  covering all new/changed surfaces (header presence, signature failure, target
+  mismatch, clock-skew, valid ping, BLOCKED payload, replay dedup, 401 unauth,
+  PING, unsupported command, HEALTH_CHECK, sync drain envelope, 5xx retry, 4xx fast-fail).
 
 ---
 
