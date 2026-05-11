@@ -289,13 +289,49 @@ test.describe('stream prelive validation', () => {
   });
 
   test('[evidence:paywall] unauthenticated viewer remains gated', async ({ page }) => {
-    // Mock public-config so the app boots without hitting the real Worker
+    // Mock public-config so the app boots without hitting the real Worker.
+    // Supplies test creds so the Supabase client can boot — vite.config.ts
+    // no longer ships hardcoded prod fallbacks, so the bundle relies on
+    // /api/public-config to provide creds the runtime client picks up.
     await page.route('**/api/public-config', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, appName: 'SBBL HQ', defaultLeague: 'SBBL' }),
+        body: JSON.stringify({
+          ok: true,
+          appName: 'SBBL HQ',
+          defaultLeague: 'SBBL',
+          supabaseUrl: 'https://ezanilxygnpucwkwpsoc.supabase.co',
+          supabasePublishableKey: 'playwright-publishable-key',
+          googleOAuthEnabled: false,
+        }),
       });
+    });
+
+    // Mock get_active_broadcast so the page doesn't depend on real DB state.
+    // Anon viewer + live broadcast + no stream_url → renders the anon paywall.
+    await page.route('**/rest/v1/**', async (route) => {
+      const url = route.request().url();
+      if (url.includes('/rpc/get_active_broadcast')) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            is_live: true,
+            stream_url: null,
+            title: 'Gate Test Broadcast',
+            active_game_id: null,
+            live_started_at: new Date().toISOString(),
+            requires_payment: false,
+            is_subscribed: false,
+            has_entitlement: false,
+            user_registered: false,
+          }),
+        });
+        return;
+      }
+      // Default: return an empty list/null so any other REST call is harmless.
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
     });
 
     // Provide a live game so Live.tsx renders LiveStreamPlayer (which contains the gate)
