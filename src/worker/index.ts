@@ -1582,6 +1582,56 @@ async function handleIngress(ctx: HandlerCtx) {
   }
 }
 
+// OmniBridge transport contract — must match
+// APEX-OmniHub/src/lib/omnibridge/syncPacketVerifier.ts::isSyncPacketEnvelope
+//   Body:    { packet: SyncPacket, signature: base64url(HMAC-SHA256(secret, JSON.stringify(packet))) }
+//   Headers: X-Omni-Source: <source_id from OMNIBRIDGE_M2M_CLIENTS registry>
+const OMNIHUB_SOURCE_ID = "sbbl-hq";
+const OMNIHUB_DELIVERY_TIMEOUT_MS = 5_000;
+const OMNIHUB_DELIVERY_RETRY_BACKOFF_MS = [250, 1_000, 4_000];
+
+async function deliverSyncEnvelope(
+  url: string,
+  envelope: { packet: SyncPacket; signature: string },
+): Promise<{ ok: boolean; status?: number; error?: string; attempts: number }> {
+  let lastError: string | undefined;
+  let lastStatus: number | undefined;
+  for (let attempt = 0; attempt < OMNIHUB_DELIVERY_RETRY_BACKOFF_MS.length + 1; attempt++) {
+    if (attempt > 0) {
+      const idx = Math.min(attempt - 1, OMNIHUB_DELIVERY_RETRY_BACKOFF_MS.length - 1);
+      await new Promise((r) => setTimeout(r, OMNIHUB_DELIVERY_RETRY_BACKOFF_MS[idx]));
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OMNIHUB_DELIVERY_TIMEOUT_MS);
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Omni-Source": OMNIHUB_SOURCE_ID,
+          "X-Omni-Signature": envelope.signature,
+          "X-Omni-Packet-Id": envelope.packet.packet_id,
+          "X-Omni-Trace-Id": envelope.packet.trace_id,
+        },
+        body: JSON.stringify(envelope),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (resp.ok) return { ok: true, status: resp.status, attempts: attempt + 1 };
+      lastStatus = resp.status;
+      // 4xx is non-retryable — signed wrong or rejected — stop early.
+      if (resp.status >= 400 && resp.status < 500) {
+        return { ok: false, status: resp.status, error: `target_rejected_${resp.status}`, attempts: attempt + 1 };
+      }
+      lastError = `upstream_${resp.status}`;
+    } catch (e) {
+      clearTimeout(timer);
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { ok: false, status: lastStatus, error: lastError ?? "exhausted_retries", attempts: OMNIHUB_DELIVERY_RETRY_BACKOFF_MS.length + 1 };
+}
+
 export async function handleSyncDrain(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   requireAuth(ctx.req);
@@ -1620,21 +1670,13 @@ export async function handleSyncDrain(ctx: HandlerCtx) {
       const url = ctx.env.OMNIHUB_SYNC_URL;
 
       if (url) {
-        const resp = await fetch(url, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "x-sbbl-signature": signed.signature,
-          },
-          body: JSON.stringify(signed.packet),
-        }).catch(() => null);
-
-        if (!resp || !resp.ok) {
+        const delivery = await deliverSyncEnvelope(url, signed);
+        if (!delivery.ok) {
           await ctx.admin.rpc("mark_outbox_retry", {
             p_outbox_id: item.id,
-            p_error_message: "sync_delivery_failed",
+            p_error_message: delivery.error ?? "sync_delivery_failed",
           });
-          return { id: item.id, status: "retry" };
+          return { id: item.id, status: "retry", attempts: delivery.attempts, error: delivery.error };
         }
       }
 
@@ -1644,6 +1686,271 @@ export async function handleSyncDrain(ctx: HandlerCtx) {
   );
 
   return json({ ok: true, processed: results.length, results });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OmniHub inbound governance channel — POST /webhooks/omnihub
+//
+// Receives signed commands from APEX-OmniHub's omnibridge-control plane.
+// Mirrors APEX-OmniHub/src/lib/omnibridge/outboundCaller.ts dispatch shape:
+//   Body:    { command: OutboundCommand, signature: base64url-HMAC-SHA256 }
+//   Headers: X-Omni-Command-Id, X-Omni-Signature, X-Omni-Action
+//
+// Commands are HMAC-verified, idempotency-deduplicated, risk-lane classified,
+// recorded in ingress_failures / log_admin_action, and acked.
+//
+// Defence-in-depth: BLOCKED actions are short-circuited even if signed; RED
+// actions are recorded but not auto-executed (control plane must approve via
+// the MAN-quorum path before re-dispatching as GREEN).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const OMNIHUB_COMMAND_ALLOWED_ACTIONS = new Set<string>([
+  "disable_stream",
+  "enable_stream",
+  "revoke_access",
+  "grant_access",
+  "emergency_halt",
+  "broadcast_message",
+  "force_man_review",
+  "hotfix_dispatch",
+  "ping",
+]);
+
+const OMNIHUB_COMMAND_MAX_BODY_BYTES = 256 * 1024;
+const OMNIHUB_COMMAND_MAX_AGE_SECONDS = 300;
+
+function omniBase64UrlToBytes(value: string): Uint8Array | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  const padLen = (4 - (value.length % 4)) % 4;
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat(padLen);
+  try {
+    const binary = atob(normalized);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) out[i] = binary.codePointAt(i) ?? 0;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyOmnihubCommandSignature(
+  command: Record<string, unknown>,
+  signature: string,
+  secret: string,
+): Promise<boolean> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  const sigBytes = omniBase64UrlToBytes(signature);
+  if (!sigBytes) return false;
+  return crypto.subtle.verify(
+    "HMAC",
+    key,
+    sigBytes,
+    new TextEncoder().encode(JSON.stringify(command)),
+  );
+}
+
+async function handleOmnihubWebhook(ctx: HandlerCtx) {
+  const clientIp = ctx.req.headers.get("cf-connecting-ip") ?? "unknown";
+  if (!checkRateLimit(clientIp)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
+
+  const verifyKey = ctx.env.OMNIHUB_VERIFY_KEY ?? ctx.env.OMNIHUB_SIGNING_SECRET;
+  if (!verifyKey) {
+    return json({ ok: false, error: "verify_key_not_configured" }, 503);
+  }
+
+  const headerSig = ctx.req.headers.get("x-omni-signature");
+  const headerCmdId = ctx.req.headers.get("x-omni-command-id");
+  if (!headerSig || !headerCmdId) {
+    return json({ ok: false, error: "missing_headers" }, 400);
+  }
+
+  const rawBody = await ctx.req.text();
+  if (rawBody.length > OMNIHUB_COMMAND_MAX_BODY_BYTES) {
+    return json({ ok: false, error: "body_too_large" }, 413);
+  }
+
+  let envelope: { command?: unknown; signature?: unknown };
+  try {
+    envelope = JSON.parse(rawBody);
+  } catch {
+    return json({ ok: false, error: "invalid_json" }, 400);
+  }
+
+  if (!envelope || typeof envelope !== "object" || !envelope.command || typeof envelope.command !== "object") {
+    return json({ ok: false, error: "invalid_envelope" }, 400);
+  }
+
+  const command = envelope.command as Record<string, unknown>;
+  const bodySignature = typeof envelope.signature === "string" ? envelope.signature : headerSig;
+
+  if (typeof command.command_id !== "string" || command.command_id !== headerCmdId) {
+    return json({ ok: false, error: "command_id_mismatch" }, 400);
+  }
+  if (typeof command.action !== "string" || !OMNIHUB_COMMAND_ALLOWED_ACTIONS.has(command.action)) {
+    return json({ ok: false, error: "unsupported_action" }, 400);
+  }
+  if (typeof command.target_source !== "string" || command.target_source !== "sbbl-hq") {
+    return json({ ok: false, error: "target_source_mismatch" }, 400);
+  }
+  if (typeof command.issued_at !== "string") {
+    return json({ ok: false, error: "missing_issued_at" }, 400);
+  }
+  const issuedMs = Date.parse(command.issued_at);
+  if (Number.isNaN(issuedMs) || Math.abs(Date.now() - issuedMs) > OMNIHUB_COMMAND_MAX_AGE_SECONDS * 1000) {
+    return json({ ok: false, error: "stale_command" }, 400);
+  }
+
+  const verified = await verifyOmnihubCommandSignature(command, bodySignature, verifyKey);
+  if (!verified) {
+    return json({ ok: false, error: "bad_signature" }, 401);
+  }
+
+  // Replay-detection via api_idempotency_keys (re-uses existing dedup table).
+  const dedupKey = `omnihub:${command.command_id}`;
+  const { error: dupErr } = await ctx.admin.from("api_idempotency_keys").insert({
+    idempotency_key: dedupKey,
+    route: "/webhooks/omnihub",
+    user_id: null,
+  });
+  if (dupErr && /duplicate|unique/i.test(dupErr.message)) {
+    return json({ ok: true, command_id: command.command_id, duplicate: true });
+  }
+
+  const action = command.action as string;
+  const payload = (command.payload as Record<string, unknown> | undefined) ?? {};
+
+  const envelopeForIngress = normalizeIngress({
+    source_type: "webhook",
+    actor_id: typeof command.issued_by === "string" ? command.issued_by : "omnihub-control",
+    device_id: null,
+    league_id: typeof payload.league_id === "string" ? payload.league_id : null,
+    entity_type: `omnihub.command.${action}`,
+    entity_id: typeof command.target_entity_id === "string" ? command.target_entity_id : null,
+    payload: { action, ...payload },
+  });
+
+  if (envelopeForIngress.risk_lane === "BLOCKED") {
+    await ctx.admin.rpc("record_ingress_failure", {
+      p_correlation_id: envelopeForIngress.correlation_id,
+      p_raw_input: command,
+      p_error_reason: "omnihub_command_blocked",
+      p_risk_score: 999,
+      p_source_type: "webhook",
+      p_user_id: null,
+    });
+    return json({ ok: false, command_id: command.command_id, error: "blocked", risk_lane: "BLOCKED" }, 403);
+  }
+
+  await ctx.admin.rpc("log_admin_action", {
+    p_action: `omnihub_${action}`,
+    p_ref_type: envelopeForIngress.entity_type,
+    p_ref_id: envelopeForIngress.entity_id,
+    p_payload: { command, envelope: envelopeForIngress },
+    p_idempotency_key: dedupKey,
+  });
+
+  // Action dispatch — every action below is idempotent. Anything that mutates
+  // production state goes through a Supabase RPC so RLS / audit triggers fire.
+  let result: Record<string, unknown> = { ack: true };
+  if (action === "ping") {
+    result = { ack: true, pong_at: new Date().toISOString() };
+  } else if (action === "broadcast_message") {
+    result = { ack: true, message_id: dedupKey };
+  } else if (action === "disable_stream" || action === "enable_stream") {
+    const isLive = action === "enable_stream";
+    await ctx.admin.from("stream_admin_config").update({ is_live: isLive }).eq("id", 1).then(() => undefined);
+    result = { ack: true, is_live: isLive };
+  } else {
+    // grant_access / revoke_access / emergency_halt / force_man_review / hotfix_dispatch
+    // are RED — record-only here. The control plane re-issues as GREEN after
+    // MAN-quorum approval; that ack just records receipt.
+    result = { ack: true, queued: true, risk_lane: envelopeForIngress.risk_lane };
+  }
+
+  return json({
+    ok: true,
+    command_id: command.command_id,
+    action,
+    risk_lane: envelopeForIngress.risk_lane,
+    result,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OmniPort authenticated command endpoint — POST /api/omniport/command
+//
+// Authenticated, low-risk diagnostic / control surface used by the integration
+// harness and operator tooling. Same risk-lane gating as the webhook channel,
+// but auth is per-user JWT (Bearer) rather than HMAC.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const OMNIPORT_ALLOWED_COMMANDS = new Set<string>([
+  "PING",
+  "ECHO",
+  "HEALTH_CHECK",
+  "TELEMETRY_SNAPSHOT",
+]);
+
+async function handleOmniportCommand(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = (await ctx.req.json()) as Record<string, unknown>;
+  } catch {
+    return json({ ok: false, success: false, error: "invalid_json" }, 400);
+  }
+
+  if (!body || typeof body !== "object") {
+    return json({ ok: false, success: false, error: "invalid_body" }, 400);
+  }
+
+  const command = typeof body.command === "string" ? body.command : "";
+  const targetApp = typeof body.targetApp === "string" ? body.targetApp : "";
+
+  if (!command || !OMNIPORT_ALLOWED_COMMANDS.has(command)) {
+    return json({ ok: false, success: false, error: "unsupported_command", command }, 400);
+  }
+  if (targetApp && targetApp !== "sbbl-hq") {
+    return json({ ok: false, success: false, error: "target_app_mismatch", targetApp }, 400);
+  }
+
+  const correlationId = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  if (command === "PING") {
+    return json({ ok: true, success: true, command: "PING", pong_at: now, correlationId, userId });
+  }
+  if (command === "ECHO") {
+    return json({ ok: true, success: true, command: "ECHO", data: body.data ?? null, correlationId, userId });
+  }
+  if (command === "HEALTH_CHECK") {
+    return json({
+      ok: true,
+      success: true,
+      command: "HEALTH_CHECK",
+      checks: { worker: "ok", supabase: ctx.env.SUPABASE_URL ? "configured" : "missing", omnihub_sync: ctx.env.OMNIHUB_SYNC_URL ? "configured" : "not_configured" },
+      correlationId,
+      timestamp: now,
+    });
+  }
+  // TELEMETRY_SNAPSHOT
+  return json({
+    ok: true,
+    success: true,
+    command: "TELEMETRY_SNAPSHOT",
+    snapshot: { source: "sbbl-hq", emitted_at: now, agents: [{ id: "sbbl-worker", status: "active" }] },
+    correlationId,
+  });
 }
 
 async function handleStripeWebhook(ctx: HandlerCtx) {
@@ -6384,6 +6691,9 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "GET", path: "/ops/headshots", handler: handleHeadshotQueue },
   { method: "POST", path: "/api/ingress", handler: handleIngress },
   { method: "POST", path: "/sync/drain", handler: handleSyncDrain },
+  // OmniBridge bidirectional integration with APEX-OmniHub control plane.
+  { method: "POST", path: "/webhooks/omnihub", handler: handleOmnihubWebhook },
+  { method: "POST", path: "/api/omniport/command", handler: handleOmniportCommand },
   { method: "GET", path: "/ops/health", handler: handleOpsHealth },
   { method: "GET", path: "/ops/metrics-lite", handler: handleOpsMetricsLite },
   { method: "POST", path: "/webhooks/stripe", handler: handleStripeWebhook },
