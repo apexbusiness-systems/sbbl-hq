@@ -1,8 +1,8 @@
-<!-- Version: v1.0.1 | Date: 2026-04-04 | Status: Current -->
+<!-- Version: v1.1.0 | Date: 2026-05-11 | Status: Current -->
 # Developer Onboarding Guide
 
-**Version:** v1.0.1  
-**Last Updated (UTC):** 2026-03-29
+**Version:** v1.1.0  
+**Last Updated (UTC):** 2026-05-11
 
 ## 1) Quick Start (15 minutes)
 
@@ -101,3 +101,58 @@ Go to: `Settings → Secrets and variables → Actions`
 ### D) Why `/api/public-config` does NOT return the anon key
 
 By design, the worker's `/api/public-config` endpoint only returns `appName` and `defaultLeague`. The Supabase client is initialized from the **build-time bundle**, not from a runtime API call. This is intentional and must not be changed.
+
+---
+
+## 7) OmniBridge Setup
+
+SBBL-HQ v1.5.0 merged the OmniBridge integration (PR #502), which adds two new worker endpoints and requires three additional Wrangler secrets before the integration will function.
+
+### Required Wrangler secrets
+
+These are **Worker-only** secrets (never in `.env` / browser bundle). Set them via `wrangler secret put` for production, and add them to `.dev.vars` for local development.
+
+| Secret | Description |
+|---|---|
+| `OMNIHUB_SIGNING_SECRET` | Outbound HMAC-SHA256 signing key — used to sign telemetry envelopes sent from SBBL-HQ to OmniHub (`/api/omnibridge/sync`). |
+| `OMNIHUB_SYNC_URL` | Full URL of the OmniHub sync endpoint that receives outbound telemetry from SBBL-HQ (e.g. `https://omnihub.example.com/api/omnibridge/sync`). |
+| `OMNIHUB_VERIFY_KEY` | Inbound HMAC-SHA256 verification key — used to authenticate signed commands arriving at `POST /webhooks/omnihub`. Must match the signing key configured on the OmniHub side. |
+
+> **Production recommendation:** Use separate key material for `OMNIHUB_VERIFY_KEY` (inbound) and `OMNIHUB_SIGNING_SECRET` (outbound). Sharing a single key couples the trust boundary between the two directions and complicates rotation.
+
+### Testing locally with the integration validator
+
+After populating `.dev.vars` with the three secrets above:
+
+1. Start the dev worker: `npm run dev`
+2. Run the integration validator: `npm run validate:omnibridge`
+3. The validator sends a signed test command to `POST /webhooks/omnihub` and verifies:
+   - HMAC signature accepted
+   - Idempotency key recorded in `api_idempotency_keys`
+   - Action dispatched and logged via `log_admin_action` RPC
+   - Replay of the same command_id is rejected (dedup check)
+
+If any check fails the validator exits non-zero with a descriptive error. Fix the secret values or local Supabase state before proceeding.
+
+### Hard rules from CLAUDE.md §8
+
+OmniBridge integration is governed by **CLAUDE.md §8** (OmniBridge hard rules). Before editing any OmniBridge handler, read that section in full. Key constraints:
+
+- All inbound commands **must** pass HMAC-SHA256 signature verification against `OMNIHUB_VERIFY_KEY` before any action is taken.
+- Commands classified as `BLOCKED` by the risk-lane classifier are **always rejected**, even if the HMAC is valid.
+- Only the 9 actions on the allowlist may be dispatched; any command with an action outside the list is rejected with `400`.
+- Clock-skew window is ±300 s — commands with a `timestamp` outside this window are rejected.
+- Every accepted command is logged via `log_admin_action` regardless of outcome.
+
+---
+
+## New Dev Checklist
+
+| Step | Done? |
+|---|---|
+| Clone repo and install dependencies (`npm install`) | ☐ |
+| Copy and populate `.env` and `.dev.vars` (see Section 6) | ☐ |
+| Run `npm run typecheck && npm run lint && npm run test && npm run build` — all green | ☐ |
+| OmniBridge secrets configured in `.dev.vars` (`OMNIHUB_SIGNING_SECRET`, `OMNIHUB_SYNC_URL`, `OMNIHUB_VERIFY_KEY`) | ☐ |
+| Run integration validator (`npm run validate:omnibridge`) — all checks pass | ☐ |
+| Read CLAUDE.md §8 (OmniBridge hard rules) | ☐ |

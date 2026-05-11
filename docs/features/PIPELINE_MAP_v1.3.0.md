@@ -1,4 +1,4 @@
-<!-- Version: v1.3.0 | Date: 2026-04-07 | Status: Current -->
+<!-- Version: v1.4.0 | Date: 2026-05-11 | Status: Current -->
 # SBBL HQ Pipeline Map (Internal)
 
 ## 1) Trust Boundary and Env Systems
@@ -68,6 +68,54 @@ Public render contract:
 - Landscape graphic target: `747x560` (`cover`)
 - Store media target: `800x800`
 - Render surface contract uses constrained card ratio (`3:4`) for stable fit in media grids.
+
+## 8) OmniBridge Layer
+
+Added in v1.5.0 (PR #502). Bidirectional sync channel between SBBL-HQ and APEX-OmniHub.
+
+### Inbound command path
+
+```
+OmniHub (external)
+  → POST /webhooks/omnihub   (handleOmnihubWebhook)
+      │
+      ├─ HMAC-SHA256 signature verify (OMNIHUB_VERIFY_KEY)
+      │   └─ invalid → 401
+      │
+      ├─ Clock-skew check (±300 s)
+      │   └─ outside window → 400
+      │
+      ├─ Risk-lane classify (content-level blast-radius guard)
+      │   └─ BLOCKED lane → 400 (even if HMAC valid)
+      │
+      ├─ Idempotency check (api_idempotency_keys on command_id)
+      │   └─ duplicate → 200 already_processed (no re-execution)
+      │
+      ├─ Action allowlist check (9 permitted actions)
+      │   └─ not on list → 400 action_not_allowed
+      │
+      ├─ Action dispatch (disable_stream | enable_stream | revoke_access |
+      │                   grant_access | emergency_halt | broadcast_message |
+      │                   force_man_review | hotfix_dispatch | ping)
+      │
+      └─ Audit log  →  log_admin_action RPC  →  audit_logs
+```
+
+### Outbound telemetry path
+
+```
+omnibridge_outbox (pending records)
+  → POST /sync/drain          (handleSyncDrain)
+      │
+      └─ deliverSyncEnvelope()
+            │
+            ├─ Build envelope: { packet: SyncPacket, signature: HMAC-SHA256(OMNIHUB_SIGNING_SECRET) }
+            ├─ Set headers: X-Omni-Source, X-Omni-Signature, X-Omni-Packet-Id, X-Omni-Trace-Id
+            ├─ Retry loop: 4 attempts, exponential backoff (250 ms → 1 s → 4 s)
+            │   └─ 4xx response → fast-fail (no retry on client rejection)
+            │
+            └─ OmniHub /api/omnibridge/sync  (OMNIHUB_SYNC_URL)
+```
 
 ## 7) Verification Artifacts
 - `src/test/endpoint-ingress-render-checklist.test.ts`

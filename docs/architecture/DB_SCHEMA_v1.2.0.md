@@ -1,8 +1,8 @@
-<!-- Version: v1.2.0 | Date: 2026-04-04 | Status: Current -->
+<!-- Version: v1.3.0 | Date: 2026-05-11 | Status: Current -->
 # DB Schema Summary
 
-**Version:** v1.2.0
-**Last Updated:** 2026-04-04
+**Version:** v1.3.0
+**Last Updated:** 2026-05-11
 
 The core schema is established in `supabase/migrations/202603270001_core_schema.sql` and extended by 28 subsequent migrations covering identity, league core, stats, streaming, commerce, media, ops, and governance domains.
 
@@ -80,7 +80,7 @@ The core schema is established in `supabase/migrations/202603270001_core_schema.
 | `coach_approval_requests` | Coach role approval workflow (20260404001000) |
 | `ingress_buffer` | Failed ingress quarantine with risk scoring |
 | `event_outbox` | Domain event outbox for async processing |
-| `api_idempotency_keys` | Worker request deduplication |
+| `api_idempotency_keys` | Worker request deduplication — also used by OmniBridge to prevent replay attacks: stores `command_id` (`X-Omni-Packet-Id`), `expires_at`, and `created_at` for each accepted inbound OmniHub command. Replayed packet IDs return `200 already_processed` without re-executing the action. |
 | `rls_audit` | **RLS auto-enforcement audit log** — records every table that has RLS auto-enabled by the DDL event trigger. Admin-read-only. (20260404200000) |
 
 ### Broadcast & Engagement (20260417100000)
@@ -97,6 +97,10 @@ The core schema is established in `supabase/migrations/202603270001_core_schema.
 | `watch_party_members` | UNIQUE `(watch_party_id, user_id)`. |
 | `ai_weekly_digest` | Cached narrative recap. UNIQUE `(league_id, week_start)` upserted by worker. |
 | `obs_commands` | FIFO queue consumed by on-site `obs-agent`. Status: `pending\|acked\|failed`. |
+
+### OmniBridge audit trail
+
+The `log_admin_action` RPC is called for **every** inbound OmniHub command accepted by `POST /webhooks/omnihub`, regardless of whether the resulting action succeeded or was a no-op. This ensures a complete, tamper-evident audit trail in `audit_logs` for all external command traffic. The audit record includes the `command_id`, action name, risk lane, and `X-Omni-Trace-Id`.
 
 ## Performance Indexes (10K+ Concurrent Users)
 
