@@ -99,7 +99,6 @@ describe('Login — Google OAuth capability flag', () => {
   it('preserves the org_internal error message in the URL search params', async () => {
     runtimeConfigValue = { googleOAuthEnabled: true };
 
-    // Simulate Supabase bouncing us back with an org_internal error.
     window.history.pushState(
       {},
       'login',
@@ -116,7 +115,72 @@ describe('Login — Google OAuth capability flag', () => {
       expect(screen.getByText(/this OAuth app is set to Internal-only/i)).toBeInTheDocument();
     });
 
-    // Cleanup
+    window.history.pushState({}, 'login', '/login');
+  });
+
+  it('shows a provider-disabled message when Supabase returns provider_disabled', async () => {
+    runtimeConfigValue = { googleOAuthEnabled: true };
+
+    window.history.pushState(
+      {},
+      'login',
+      '/login?error=provider_disabled&error_description=provider+is+not+enabled',
+    );
+
+    render(
+      <BrowserRouter>
+        <LoginPage />
+      </BrowserRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/not yet enabled on this platform/i)).toBeInTheDocument();
+    });
+
+    window.history.pushState({}, 'login', '/login');
+  });
+
+  it('shows a callback URL mismatch message on redirect_uri_mismatch', async () => {
+    runtimeConfigValue = { googleOAuthEnabled: true };
+
+    window.history.pushState(
+      {},
+      'login',
+      '/login?error=redirect_uri_mismatch&error_description=redirect+uri+mismatch',
+    );
+
+    render(
+      <BrowserRouter>
+        <LoginPage />
+      </BrowserRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/callback URL mismatch/i)).toBeInTheDocument();
+    });
+
+    window.history.pushState({}, 'login', '/login');
+  });
+
+  it('shows a cancelled message on access_denied', async () => {
+    runtimeConfigValue = { googleOAuthEnabled: true };
+
+    window.history.pushState(
+      {},
+      'login',
+      '/login?error=access_denied&error_description=user+denied+access',
+    );
+
+    render(
+      <BrowserRouter>
+        <LoginPage />
+      </BrowserRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/was cancelled/i)).toBeInTheDocument();
+    });
+
     window.history.pushState({}, 'login', '/login');
   });
 });

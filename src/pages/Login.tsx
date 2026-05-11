@@ -63,6 +63,18 @@ const LoginPage = () => {
       setError('Google sign-in is blocked: this OAuth app is set to Internal-only in Google Cloud. Switch OAuth consent to External and add your Google account as a test user, or publish the app.');
       return;
     }
+    if (normalizedDetails.includes('provider_disabled') || normalizedDetails.includes('provider is not enabled')) {
+      setError('Google sign-in is not yet enabled on this platform. Please use email and password sign-in.');
+      return;
+    }
+    if (normalizedDetails.includes('redirect_uri_mismatch') || normalizedDetails.includes('redirect_to_not_allowed')) {
+      setError('Google sign-in configuration error: callback URL mismatch. Please contact support.');
+      return;
+    }
+    if (normalizedDetails.includes('access_denied')) {
+      setError('Google sign-in was cancelled. Please try again or use email sign-in.');
+      return;
+    }
 
     setError('Google sign-in was denied by the provider. Please try again or use email sign-in.');
   }, [location.search]);
