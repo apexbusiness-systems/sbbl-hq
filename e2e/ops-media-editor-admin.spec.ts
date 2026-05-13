@@ -218,13 +218,11 @@ test.describe('ops media editor admin', () => {
     const panel = page.locator('[role="tabpanel"]').filter({ hasText: 'Media Library' });
     await expect(panel).toBeVisible();
 
-    // Filter bar holds the status/surface selects. The status select has the
-    // sentinel option "All statuses" — we match on it to disambiguate.
+    // Filter bar holds the status/surface filter buttons. We click the chip
+    // buttons instead of using selects (the new MediaFilterBar uses visual chips).
     const filterBar = panel.locator('div.flex.flex-wrap.gap-4.items-end');
-    const statusSelect = filterBar.locator('select').filter({ hasText: 'All statuses' });
-    const surfaceSelect = filterBar.locator('select').filter({ hasText: 'All surfaces' });
-    await expect(statusSelect).toBeVisible();
-    await expect(surfaceSelect).toBeVisible();
+    const statusAllButton = filterBar.getByRole('button', { name: 'All' }).first();
+    await expect(statusAllButton).toBeVisible();
 
     // Initial load: all three rows render — POTG, Event, Store.
     // Row selectors key off the stable `id: <uuid>` text node so they keep
@@ -245,7 +243,9 @@ test.describe('ops media editor admin', () => {
     await expect(eventRow.getByText('draft', { exact: true })).toBeVisible();
 
     // ── Filter by status=draft — a new list fetch fires with ?status=draft
-    await statusSelect.selectOption('draft');
+    // Click the "Draft" chip button in the filter bar
+    const draftButton = filterBar.getByRole('button', { name: 'Draft' });
+    await draftButton.click();
     await expect(panel.getByText(/1 rows/)).toBeVisible();
     await expect(potgRow).toHaveCount(0);
     await expect(storeRow).toHaveCount(0);
@@ -254,20 +254,28 @@ test.describe('ops media editor admin', () => {
     expect(listCaptures.some((c) => c.query.includes('status=draft'))).toBeTruthy();
 
     // Reset filter back to "all" so we can edit the POTG row.
-    await statusSelect.selectOption('all');
+    // Click the "All" button to clear the status filter
+    const allStatusButton = filterBar.getByRole('button', { name: 'All' }).first();
+    await allStatusButton.click();
     await expect(panel.getByText(/3 rows/)).toBeVisible();
 
     // ── Edit flow: rename POTG + force status back to draft ─────────────
     await potgRow.getByRole('button', { name: 'Edit' }).click();
-    const titleInput = potgRow.locator('input[placeholder="Publication title"]');
+
+    // The EditMetadataModal should appear with title input and status dropdown
+    const modal = page.locator('[role="dialog"]');
+    await expect(modal).toBeVisible();
+
+    const titleInput = modal.locator('input[placeholder="Publication title"]');
     await expect(titleInput).toBeVisible();
     await titleInput.fill('Michael Ramos POTG (Updated)');
 
-    // Use the row-scoped select to move status → draft. (The only <select>
-    // inside the edit UI of this row is the status dropdown.)
-    await potgRow.locator('select').selectOption('draft');
+    // Change the status to draft using the status select in the modal
+    const statusSelect = modal.locator('select');
+    await statusSelect.selectOption('draft');
 
-    await potgRow.getByRole('button', { name: 'Save' }).click();
+    // Click the Save Changes button in the modal
+    await modal.getByRole('button', { name: 'Save Changes' }).click();
 
     // Wait for PATCH to land + optimistic refetch to repaint the row.
     await expect(potgRow.getByText('draft', { exact: true })).toBeVisible();
