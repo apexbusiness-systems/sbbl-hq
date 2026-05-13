@@ -437,6 +437,162 @@ If a regression test fails on your branch, **read the failing assertion**.
 Each one maps to a real production incident from v1.3.x. Disabling the
 test is never the right answer.
 
+## §8 OmniBridge — APEX-OmniHub Integration (DO NOT DRIFT)
+
+This section documents the bidirectional sync bridge between SBBL-HQ and
+APEX-OmniHub, merged in PR #502. All rules below are permanent. Agents
+MUST read this section before touching any code in or adjacent to
+`handleOmnihubWebhook`, `handleOmniportCommand`, `deliverSyncEnvelope`,
+or `handleSyncDrain`.
+
+### 8.1 — New endpoints (PR #502)
+
+#### `POST /webhooks/omnihub` — `handleOmnihubWebhook`
+
+Inbound command receiver from the APEX-OmniHub control plane.
+
+**Authentication:** HMAC-SHA256 via `OMNIHUB_VERIFY_KEY` (falls back to
+`OMNIHUB_SIGNING_SECRET` in dev/staging when `OMNIHUB_VERIFY_KEY` is
+absent). Clock-skew window: ±300 seconds.
+
+**Envelope shape:**
+
+```ts
+{
+  packet: SyncPacket,
+  signature: base64url(HMAC-SHA256(secret, JSON.stringify(packet)))
+}
+```
+
+Required inbound headers:
+- `X-Omni-Source` — must equal `"sbbl-hq"` (`target_source` pin)
+- `X-Omni-Signature` — base64url HMAC-SHA256 of the serialized packet
+- `X-Omni-Packet-Id` — used as the idempotency key stored in `api_idempotency_keys`
+- `X-Omni-Trace-Id` — propagated in logs and audit records
+
+**9-action allowlist** (HARD RULE — no additions without repo owner approval):
+
+```
+disable_stream
+enable_stream
+revoke_access
+grant_access
+emergency_halt
+broadcast_message
+force_man_review
+hotfix_dispatch
+ping
+```
+
+Any action not on this list is rejected with `400 action_not_allowed`.
+
+**Risk-lane re-classification:** Payloads whose content matches
+BLOCKED-lane patterns (e.g., `DROP TABLE`, `ALTER ROLE`, `DISABLE RLS`,
+`TRUNCATE`, `GRANT ALL PRIVILEGES`) are rejected even if the HMAC
+signature is valid. This check runs BEFORE any action dispatch.
+
+**Idempotency:** The `X-Omni-Packet-Id` value is stored in
+`api_idempotency_keys` on first processing. Replayed packet IDs return
+`200 already_processed` without re-executing the action.
+
+**Audit:** Every accepted command is written via `log_admin_action` RPC.
+
+#### `POST /api/omniport/command` — `handleOmniportCommand`
+
+JWT-authenticated diagnostic surface for OmniHub operator sessions.
+
+**Authentication:** Standard Supabase JWT (`requireAuth`). No HMAC.
+
+**Supported commands:**
+
+| Command | Description |
+|---|---|
+| `PING` | Liveness check — returns `{ ok: true, ts: <ISO timestamp> }` |
+| `ECHO` | Returns the request payload verbatim |
+| `HEALTH_CHECK` | Returns worker health snapshot |
+| `TELEMETRY_SNAPSHOT` | Returns recent QoE/telemetry metrics |
+
+Any other command returns `400 unsupported_command`.
+
+### 8.2 — Outbound sync: `handleSyncDrain` + `deliverSyncEnvelope`
+
+`handleSyncDrain` (`POST /sync/drain`) sends a canonical envelope to
+`OMNIHUB_SYNC_URL`:
+
+```ts
+// Envelope shape
+{ packet: SyncPacket, signature: base64url(HMAC-SHA256(OMNIHUB_SIGNING_SECRET, JSON.stringify(packet))) }
+
+// Required outbound headers
+X-Omni-Source:     "sbbl-hq"
+X-Omni-Signature:  <base64url HMAC>
+X-Omni-Packet-Id:  <packet.id>
+X-Omni-Trace-Id:   <trace id>
+```
+
+`deliverSyncEnvelope()` implements a 4-attempt exponential-backoff
+delivery loop:
+
+| Attempt | Delay before retry |
+|---|---|
+| 1 (initial) | — |
+| 2 | 250 ms |
+| 3 | 1 s |
+| 4 | 4 s |
+
+Per-attempt timeout: 5 seconds. 4xx responses are treated as fast-fail
+(non-retryable target rejection — do not retry on client errors).
+
+### 8.3 — Required Cloudflare Worker secrets
+
+| Secret | Purpose |
+|---|---|
+| `OMNIHUB_SIGNING_SECRET` | HMAC key used to sign outbound sync envelopes (required) |
+| `OMNIHUB_SYNC_URL` | OmniHub endpoint to deliver outbound packets (required) |
+| `OMNIHUB_VERIFY_KEY` | HMAC key used to verify inbound OmniHub commands (production) |
+
+**Fallback rule:** When `OMNIHUB_VERIFY_KEY` is absent (dev/staging),
+the worker falls back to `OMNIHUB_SIGNING_SECRET` as the verification
+key. This allows a shared-secret dev/staging setup without requiring a
+separate key pair.
+
+### 8.4 — HARD RULES (enforce in every review)
+
+- **NEVER** bypass the 9-action allowlist. If a new action is needed,
+  add it explicitly to the allowlist with repo owner approval.
+- **NEVER** skip the idempotency check. Every inbound OmniHub command
+  must be checked against `api_idempotency_keys` before execution.
+- **NEVER** skip the HMAC verify step. A missing or invalid
+  `X-Omni-Signature` must always result in a `401` rejection, regardless
+  of the command.
+- **NEVER** process a BLOCKED-lane payload even if the signature is
+  valid. Risk-lane rejection happens before action dispatch.
+- **NEVER** remove or weaken the `target_source === "sbbl-hq"` pin.
+
+### 8.5 — Integration tests
+
+`src/worker/tests/omnihub-bridge.integration.test.ts` — 14 tests
+covering all new/changed surfaces:
+
+- Header presence validation
+- Signature failure rejection
+- Target mismatch (`target_source` pin)
+- Clock-skew rejection (>300 s)
+- Valid `ping` dispatch
+- BLOCKED payload rejection
+- Replay dedup (idempotency)
+- 401 unauthenticated
+- PING command
+- Unsupported command
+- HEALTH_CHECK
+- Sync drain envelope shape
+- 5xx retry (backoff triggered)
+- 4xx fast-fail (no retry)
+
+All 14 tests must pass before merging any change to OmniBridge surfaces.
+
+---
+
 ### 7. Broadcast Stream Independence — HARD FREEZE, DO NOT TOUCH
 
 **This is a hard owner rule. The broadcast stream is a standalone media
@@ -592,3 +748,7 @@ CI runs all of these. Do not merge red.
   + vitest guardrails (this guide). See
   [`docs/protocols/no-mock-in-production.md`](docs/protocols/no-mock-in-production.md)
   for details.
+
+---
+
+Last verified: 2026-05-11

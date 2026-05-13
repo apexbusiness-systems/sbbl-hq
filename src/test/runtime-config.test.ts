@@ -41,6 +41,65 @@ describe('runtime-config', () => {
     expect(config.supabaseUrl).toBe('https://test.supabase.co');
     expect(config.appName).toBe('TEST APP');
   });
+
+  it('defaults googleOAuthEnabled to false when the worker does not send the flag', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        supabaseUrl: 'https://test.supabase.co',
+        supabasePublishableKey: 'test-key-123',
+      }),
+    }));
+    const { getRuntimeConfig } = await import('@/lib/runtime-config');
+    const config = await getRuntimeConfig();
+    expect(config.googleOAuthEnabled).toBe(false);
+  });
+
+  it('respects googleOAuthEnabled=true from the worker', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        supabaseUrl: 'https://test.supabase.co',
+        supabasePublishableKey: 'test-key-123',
+        googleOAuthEnabled: true,
+      }),
+    }));
+    const { getRuntimeConfig } = await import('@/lib/runtime-config');
+    const config = await getRuntimeConfig();
+    expect(config.googleOAuthEnabled).toBe(true);
+  });
+
+  it('coerces non-boolean googleOAuthEnabled to false (fails closed)', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({
+        ok: true,
+        supabaseUrl: 'https://test.supabase.co',
+        supabasePublishableKey: 'test-key-123',
+        // Worker MUST send a boolean; if it accidentally sends a string, we
+        // must NOT treat it as enabled.
+        googleOAuthEnabled: 'true' as unknown as boolean,
+      }),
+    }));
+    const { getRuntimeConfig } = await import('@/lib/runtime-config');
+    const config = await getRuntimeConfig();
+    expect(config.googleOAuthEnabled).toBe(false);
+  });
+
+  it('does not silently boot a Supabase client from committed prod fallback creds', async () => {
+    // When env is empty AND the public-config fetch fails, the config must
+    // resolve to nulls — never to baked-in production fallbacks.
+    vi.stubEnv('VITE_SUPABASE_URL', '');
+    vi.stubEnv('VITE_SUPABASE_PUBLISHABLE_KEY', '');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', '');
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    const { getRuntimeConfig } = await import('@/lib/runtime-config');
+    const config = await getRuntimeConfig();
+    expect(config.supabaseUrl).toBeNull();
+    expect(config.supabasePublishableKey).toBeNull();
+  });
 });
 
 describe('runtime-config → Supabase client init (login chain)', () => {

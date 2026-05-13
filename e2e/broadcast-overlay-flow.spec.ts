@@ -64,6 +64,24 @@ const OVERLAY_PAYLOAD = {
 };
 
 async function stubBroadcastApis(page: import('@playwright/test').Page) {
+  // Mock /api/public-config so the bundle boots with a working Supabase client.
+  // vite.config.ts no longer ships hardcoded prod fallbacks, so the chromeless
+  // overlay shell still mounts AuthProvider and would otherwise see configAvailable=false.
+  await page.route('**/api/public-config', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        appName: 'SBBL HQ',
+        defaultLeague: 'SBBL',
+        supabaseUrl: 'https://ezanilxygnpucwkwpsoc.supabase.co',
+        supabasePublishableKey: 'playwright-publishable-key',
+        googleOAuthEnabled: false,
+      }),
+    }),
+  );
+
   await page.route('**/api/public/overlay/**', (route) =>
     route.fulfill({
       status: 200,

@@ -8,12 +8,24 @@ import type { HandlerCtx } from "../shared";
 import { json } from "../shared";
 
 export async function handlePublicConfig({ env }: HandlerCtx) {
+  // Capability flag: tells the UI whether Google OAuth is a working sign-in
+  // path. Defaults to false so the button cannot falsely advertise the
+  // provider when Google Cloud has the OAuth client in `org_internal` state.
+  // The operator opts in by setting GOOGLE_OAUTH_ENABLED ("true") in worker
+  // vars (see docs/ops/OAUTH_HOTFIX_RUNBOOK.md). The legacy alias
+  // FEATURE_GOOGLE_OAUTH is read for back-compat with older wrangler configs.
+  const googleEnabledRaw =
+    env.GOOGLE_OAUTH_ENABLED ?? env.FEATURE_GOOGLE_OAUTH ?? "false";
+  const googleOAuthEnabled =
+    String(googleEnabledRaw).trim().toLowerCase() === "true";
+
   return json({
     ok: true,
     appName: "SBBL HQ",
     defaultLeague: "SBBL",
     supabaseUrl: env.SUPABASE_URL ?? null,
     supabasePublishableKey: env.SUPABASE_PUBLISHABLE_KEY ?? null,
+    googleOAuthEnabled,
   });
 }
 
@@ -152,11 +164,12 @@ export async function handlePublicHome({ req, admin }: HandlerCtx) {
     .slice(0, 5)
     .map(enrichGame);
 
-  const activeSeason = (seasonsRes.data ?? []).find(
-    (s: Record<string, unknown>) => {
-      const sLeagues = s.leagues as { code?: string } | null;
-      return (sLeagues?.code ?? "").toUpperCase() === leagueCode;
-    },
+  // FAST PATH: If we resolved activeLeagueId, match by ID directly (O(1) comparison vs string allocations)
+  const activeSeason = (seasonsRes.data ?? []).find((s: Record<string, unknown>) =>
+    activeLeagueId
+      ? s.league_id === activeLeagueId
+      : ((s.leagues as { code?: string } | null)?.code ?? "").toUpperCase() ===
+        leagueCode,
   ) as { id: string; name: string; status: string } | undefined;
 
   return new Response(

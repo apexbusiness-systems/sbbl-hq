@@ -1,8 +1,8 @@
-<!-- Version: v1.0.0 | Date: 2026-04-16 | Status: Current -->
+<!-- Version: v1.1.0 | Date: 2026-05-11 | Status: Current -->
 # SBBL HQ — Complete Codebase Map
 
-**Version:** v1.0.0
-**Last Updated:** 2026-04-16
+**Version:** v1.1.0
+**Last Updated:** 2026-05-11
 **Owner:** APEX Business Systems Ltd. — Engineering Lead
 
 ## Overview
@@ -243,7 +243,24 @@ POST	/ops/potg/parse	AI POTG image parsing (Groq Vision)
 POST	/ops/potg/submit	Submit POTG
 POST	/ops/scores/*	Score management
 POST	/ops/coach/:id/resolve	Approve/reject coach requests
-POST	/webhooks/stripe	Stripe webhook handler
+POST	/webhooks/stripe	Stripe webhook handler (HMAC-SHA256 verified)
+POST	/webhooks/omnihub	`handleOmnihubWebhook` — OmniHub inbound command receiver (HMAC-SHA256 verified; 9-action allowlist; idempotency; risk-lane reclassification; audit)
+POST	/api/omniport/command	`handleOmniportCommand` — JWT-authenticated OmniHub operator diagnostic (PING, ECHO, HEALTH_CHECK, TELEMETRY_SNAPSHOT)
+POST	/sync/drain	`handleSyncDrain` — outbound sync drain; sends `{ packet, signature }` envelope via `deliverSyncEnvelope()` with X-Omni-* headers
+
+### OmniBridge Code Surfaces (PR #502 — added 2026-05-11)
+
+| Function | File | Description |
+|---|---|---|
+| `handleOmnihubWebhook` | `src/worker/index.ts` | `POST /webhooks/omnihub` — HMAC-verified inbound OmniHub command receiver. Enforces: clock-skew check (±300s), `target_source === "sbbl-hq"` pin, risk-lane reclassification (BLOCKED payloads rejected even if signed), 9-action allowlist, idempotency dedup via `api_idempotency_keys`, full audit via `log_admin_action` RPC. |
+| `handleOmniportCommand` | `src/worker/index.ts` | `POST /api/omniport/command` — JWT-authenticated diagnostic surface for OmniHub operator sessions. Commands: `PING`, `ECHO`, `HEALTH_CHECK`, `TELEMETRY_SNAPSHOT`. Any other command → `400 unsupported_command`. |
+| `handleSyncDrain` (modified) | `src/worker/index.ts` | `POST /sync/drain` — now sends canonical `{ packet, signature }` envelope with required headers `X-Omni-Source`, `X-Omni-Signature`, `X-Omni-Packet-Id`, `X-Omni-Trace-Id`. Fixes silent 400 rejection on OmniHub side. |
+| `deliverSyncEnvelope` | `src/worker/index.ts` | Hardened outbound delivery with 4-attempt exponential backoff (0 / 250ms / 1s / 4s delays), 5-second per-attempt timeout, and 4xx fast-fail (non-retryable target rejection). |
+
+**Integration tests:** `src/worker/tests/omnihub-bridge.integration.test.ts` — 14 tests covering all new/changed surfaces.
+
+**Required Cloudflare secrets:** `OMNIHUB_SIGNING_SECRET` (sign outbound), `OMNIHUB_SYNC_URL` (delivery target), `OMNIHUB_VERIFY_KEY` (verify inbound; falls back to `OMNIHUB_SIGNING_SECRET` in dev/staging).
+
 Security Model
 JWT Verification: Supabase JWKS-based verification via jose library
 Role Hierarchy: fan(1) → player(2) → coach/team_manager/media_operator/store_operator(3) → league_admin(4) → super_admin(5)
