@@ -223,6 +223,9 @@ test.describe('ops media editor admin', () => {
     const filterBar = panel.locator('div.border.border-border.rounded-sm.p-4.bg-secondary\\/20');
     await expect(filterBar).toBeVisible();
 
+    // Wait for data to load by checking the publication counter
+    await expect(panel.getByText(/3 publications/)).toBeVisible();
+
     // Initial load: all three rows render — POTG, Event, Store.
     // Row selectors key off the stable `id: <uuid>` text node so they keep
     // matching even after the edit UI replaces the title <p> with an <input>.
@@ -233,9 +236,6 @@ test.describe('ops media editor admin', () => {
     await expect(potgRow).toBeVisible();
     await expect(eventRow).toBeVisible();
     await expect(storeRow).toBeVisible();
-
-    // Row counter reflects unfiltered list size.
-    await expect(panel.getByText(/3 publications/)).toBeVisible();
 
     // Draft badge is visible on the event row (proves we're showing
     // non-published rows that /media intentionally hides).
