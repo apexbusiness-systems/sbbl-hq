@@ -235,7 +235,7 @@ test.describe('ops media editor admin', () => {
     await expect(storeRow).toBeVisible();
 
     // Row counter reflects unfiltered list size.
-    await expect(panel.getByText(/3 rows/)).toBeVisible();
+    await expect(panel.getByText(/3 publications/)).toBeVisible();
 
     // Draft badge is visible on the event row (proves we're showing
     // non-published rows that /media intentionally hides).
@@ -246,7 +246,7 @@ test.describe('ops media editor admin', () => {
     const statusSection = filterBar.locator('div.space-y-2').first();
     const draftButton = statusSection.getByRole('button', { name: 'Draft' });
     await draftButton.click();
-    await expect(panel.getByText(/1 rows/)).toBeVisible();
+    await expect(panel.getByText(/1 publications/)).toBeVisible();
     await expect(potgRow).toHaveCount(0);
     await expect(storeRow).toHaveCount(0);
     await expect(eventRow).toBeVisible();
