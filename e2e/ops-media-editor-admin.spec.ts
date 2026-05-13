@@ -271,8 +271,8 @@ test.describe('ops media editor admin', () => {
     await expect(titleInput).toBeVisible();
     await titleInput.fill('Michael Ramos POTG (Updated)');
 
-    // Change the status to draft using the status select in the modal
-    const statusSelect = modal.locator('select');
+    // Change the status to draft using the first select in the modal (status dropdown)
+    const statusSelect = modal.locator('select').first();
     await statusSelect.selectOption('draft');
 
     // Click the Save Changes button in the modal
