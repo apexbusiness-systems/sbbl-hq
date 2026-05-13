@@ -227,10 +227,14 @@ test.describe('ops media editor admin', () => {
     await expect(panel.getByText(/3 publications/)).toBeVisible();
 
     // Initial load: all three rows render — POTG, Event, Store.
-    // Find media cards by their title text (more stable than CSS class selectors).
-    const potgRow = panel.locator('div').filter({ hasText: 'Michael Ramos POTG' });
-    const eventRow = panel.locator('div').filter({ hasText: 'Friday Night Run Flyer' });
-    const storeRow = panel.locator('div').filter({ hasText: 'Hype Shirt Promo' });
+    // Find media cards by their title h3 element and use locator chaining.
+    // Each h3 with a title is inside exactly one media card container.
+    const getCardByTitle = (title: string) =>
+      panel.locator('h3').filter({ hasText: title }).locator('xpath=ancestor::div[@class and contains(@class, "border")]').first();
+
+    const potgRow = getCardByTitle('Michael Ramos POTG');
+    const eventRow = getCardByTitle('Friday Night Run Flyer');
+    const storeRow = getCardByTitle('Hype Shirt Promo');
     await expect(potgRow).toBeVisible();
     await expect(eventRow).toBeVisible();
     await expect(storeRow).toBeVisible();
