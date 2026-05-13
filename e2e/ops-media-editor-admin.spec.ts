@@ -244,9 +244,8 @@ test.describe('ops media editor admin', () => {
     await expect(eventRow.getByText('draft', { exact: true })).toBeVisible();
 
     // ── Filter by status=draft — a new list fetch fires with ?status=draft
-    // Find the Status filter section and click the "Draft" button
-    const statusSection = filterBar.locator('div.space-y-2').first();
-    const draftButton = statusSection.getByRole('button', { name: 'Draft' });
+    // Find and click the "Draft" filter button in the filter bar
+    const draftButton = filterBar.locator('button').filter({ hasText: 'Draft' });
     await draftButton.click();
     await expect(panel.getByText(/1 publications/)).toBeVisible();
     await expect(potgRow).toHaveCount(0);
@@ -256,10 +255,10 @@ test.describe('ops media editor admin', () => {
     expect(listCaptures.some((c) => c.query.includes('status=draft'))).toBeTruthy();
 
     // Reset filter back to "all" so we can edit the POTG row.
-    // Click the "All" button in the status section to clear the filter
-    const allStatusButton = statusSection.getByRole('button', { name: 'All' });
+    // Click the first "All" button (status filter)
+    const allStatusButton = filterBar.locator('button').filter({ hasText: 'All' }).first();
     await allStatusButton.click();
-    await expect(panel.getByText(/3 rows/)).toBeVisible();
+    await expect(panel.getByText(/3 publications/)).toBeVisible();
 
     // ── Edit flow: rename POTG + force status back to draft ─────────────
     await potgRow.getByRole('button', { name: 'Edit' }).click();
