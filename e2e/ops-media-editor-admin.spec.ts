@@ -292,11 +292,13 @@ test.describe('ops media editor admin', () => {
     expect(patchCaptures[0].idempotency).toBeTruthy();
 
     // ── Archive flow: store row → DELETE + status flips to archived ─────
-    page.once('dialog', (dialog) => {
-      expect(dialog.message()).toContain('Hype Shirt Promo');
-      void dialog.accept();
-    });
+    // Click Archive button to open the ArchiveModal
     await storeRow.getByRole('button', { name: 'Archive' }).click();
+
+    // Confirm in the archive modal
+    const archiveModal = page.locator('[role="dialog"]').filter({ hasText: 'Archive Media' });
+    await expect(archiveModal).toBeVisible();
+    await archiveModal.getByRole('button', { name: 'Archive' }).click();
 
     await expect(storeRow.getByText('archived', { exact: true })).toBeVisible();
 
@@ -307,11 +309,14 @@ test.describe('ops media editor admin', () => {
     // Once archived, the Archive button must disable (operator can't double-archive).
     await expect(storeRow.getByRole('button', { name: 'Archive' })).toBeDisabled();
 
-    // ── Dismissing the confirm dialog must NOT fire a DELETE ───────────
-    page.once('dialog', (dialog) => {
-      void dialog.dismiss();
-    });
+    // ── Dismissing the archive modal must NOT fire a DELETE ───────────
     await eventRow.getByRole('button', { name: 'Archive' }).click();
+
+    // Cancel in the archive modal
+    const archiveModal2 = page.locator('[role="dialog"]').filter({ hasText: 'Archive Media' });
+    await expect(archiveModal2).toBeVisible();
+    await archiveModal2.getByRole('button', { name: 'Keep' }).click();
+
     expect(deleteCaptures).toHaveLength(1); // still just the one from earlier
   });
 });
