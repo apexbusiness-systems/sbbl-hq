@@ -227,12 +227,11 @@ test.describe('ops media editor admin', () => {
     await expect(panel.getByText(/3 publications/)).toBeVisible();
 
     // Initial load: all three rows render — POTG, Event, Store.
-    // Row selectors key off the stable `id: <uuid>` text node so they keep
-    // matching even after the edit UI replaces the title <p> with an <input>.
+    // Row selectors key off the first 8 chars of the ID (component displays pub.id.slice(0, 8)).
     const rowBase = panel.locator('div.border.border-border.rounded-sm.bg-card');
-    const potgRow = rowBase.filter({ hasText: 'pub-potg-001' });
-    const eventRow = rowBase.filter({ hasText: 'pub-event-001' });
-    const storeRow = rowBase.filter({ hasText: 'pub-store-001' });
+    const potgRow = rowBase.filter({ hasText: 'pub-potg' });
+    const eventRow = rowBase.filter({ hasText: 'pub-even' });
+    const storeRow = rowBase.filter({ hasText: 'pub-sto' });
     await expect(potgRow).toBeVisible();
     await expect(eventRow).toBeVisible();
     await expect(storeRow).toBeVisible();
