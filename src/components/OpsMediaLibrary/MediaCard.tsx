@@ -1,5 +1,6 @@
 import { Image as ImageIcon, ChevronUp, ChevronDown, Edit2, Trash2, Eye } from 'lucide-react';
 import type { OpsMediaPublication } from '@/lib/api/ops';
+import type { LeagueId } from '@/types';
 import { getLeagueConfig } from '@/lib/leagues';
 
 export type MediaCardProps = {
@@ -29,7 +30,7 @@ export function MediaCard({
   isLoading,
   editsDisabled,
 }: MediaCardProps) {
-  const leagueConfig = pub.leagueId ? getLeagueConfig(pub.leagueId as any) : null;
+  const leagueConfig = pub.leagueId ? getLeagueConfig(pub.leagueId as LeagueId) : null;
 
   const statusColor = {
     published: 'bg-success/15 text-success',

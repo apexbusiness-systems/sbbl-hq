@@ -1,6 +1,7 @@
 import { X, Image as ImageIcon } from 'lucide-react';
 import { getLeagueConfig } from '@/lib/leagues';
 import type { OpsMediaPublication } from '@/lib/api/ops';
+import type { LeagueId } from '@/types';
 
 export type PreviewModalProps = {
   publication: OpsMediaPublication | null;
@@ -12,7 +13,7 @@ export function PreviewModal({ publication, isOpen, onClose }: PreviewModalProps
   if (!isOpen || !publication) return null;
 
   const leagueConfig = publication.leagueId
-    ? getLeagueConfig(publication.leagueId as any)
+    ? getLeagueConfig(publication.leagueId as LeagueId)
     : null;
 
   return (

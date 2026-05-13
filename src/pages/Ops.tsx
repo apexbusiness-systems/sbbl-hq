@@ -458,143 +458,6 @@ const OpsPage = () => {
     },
   });
 
-  // ── Media Library queries/mutations ────────────────────────────────────
-  const mediaListQuery = useQuery({
-    queryKey: ['ops-media-list', mediaStatusFilter, mediaSurfaceFilter, mediaLeagueFilter],
-    queryFn: () => fetchOpsMediaList({
-      status: mediaStatusFilter,
-      surface: mediaSurfaceFilter === 'all' ? undefined : mediaSurfaceFilter,
-      leagueId: mediaLeagueFilter === 'all' ? undefined : mediaLeagueFilter,
-    }),
-    enabled: canRunOps && activeTab === 'media',
-    retry: shouldRetryOpsQuery,
-    staleTime: 15_000,
-  });
-
-  const mediaPublications = useMemo<OpsMediaPublication[]>(
-    () => mediaListQuery.data?.data ?? [],
-    [mediaListQuery.data?.data],
-  );
-
-  useEffect(() => {
-    setMediaOrderIds(mediaPublications.map((pub) => pub.id));
-  }, [mediaPublications]);
-
-  const orderedMediaPublications = useMemo<OpsMediaPublication[]>(() => {
-    if (mediaOrderIds.length === 0) return mediaPublications;
-    const byId = new Map(mediaPublications.map((pub) => [pub.id, pub]));
-    const ordered: OpsMediaPublication[] = [];
-    mediaOrderIds.forEach((id) => {
-      const row = byId.get(id);
-      if (row) ordered.push(row);
-      byId.delete(id);
-    });
-    return [...ordered, ...byId.values()];
-  }, [mediaOrderIds, mediaPublications]);
-
-  const hasPendingMediaOrderChanges = useMemo(() => {
-    if (mediaOrderIds.length !== mediaPublications.length) return false;
-    return mediaOrderIds.some((id, index) => id !== mediaPublications[index]?.id);
-  }, [mediaOrderIds, mediaPublications]);
-
-  const mediaPatchMutation = useMutation({
-    mutationFn: async ({ id, payload }: { id: string; payload: Parameters<typeof patchOpsMediaPublication>[1] }) => {
-      ensureOpsAccess();
-      return patchOpsMediaPublication(id, payload);
-    },
-    onSuccess: async (_data, variables) => {
-      setMediaEditingId((current) => (current === variables.id ? null : current));
-      setMediaEdits((prev) => {
-        if (!(variables.id in prev)) return prev;
-        const next = { ...prev };
-        delete next[variables.id];
-        return next;
-      });
-      await queryClient.invalidateQueries({ queryKey: ['ops-media-list'] });
-      await queryClient.invalidateQueries({ queryKey: ['public-media'] });
-      await queryClient.invalidateQueries({ queryKey: ['public-media-posters'] });
-    },
-  });
-
-  const mediaDeleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      ensureOpsAccess();
-      return deleteOpsMediaPublication(id);
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['ops-media-list'] });
-      await queryClient.invalidateQueries({ queryKey: ['public-media'] });
-      await queryClient.invalidateQueries({ queryKey: ['public-media-posters'] });
-    },
-  });
-
-  const mediaOrderMutation = useMutation({
-    mutationFn: async (items: Array<{ id: string; sortOrder: number }>) => {
-      ensureOpsAccess();
-      return updateOpsMediaPublicationOrder(items);
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['ops-media-list'] });
-      await queryClient.invalidateQueries({ queryKey: ['public-media'] });
-      await queryClient.invalidateQueries({ queryKey: ['public-media-posters'] });
-    },
-  });
-
-  const beginMediaEdit = (pub: OpsMediaPublication) => {
-    setMediaEditingId(pub.id);
-    setMediaEdits((prev) => ({
-      ...prev,
-      [pub.id]: {
-        title: pub.title,
-        status: (pub.status as MediaPublicationStatus) ?? 'draft',
-        leagueId: pub.leagueId ?? '',
-      },
-    }));
-  };
-
-  const cancelMediaEdit = (id: string) => {
-    setMediaEditingId((current) => (current === id ? null : current));
-    setMediaEdits((prev) => {
-      if (!(id in prev)) return prev;
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-  };
-
-  const saveMediaEdit = (pub: OpsMediaPublication) => {
-    const draft = mediaEdits[pub.id];
-    if (!draft) return;
-    const payload: Parameters<typeof patchOpsMediaPublication>[1] = {};
-    if (draft.title.trim() && draft.title.trim() !== pub.title) payload.title = draft.title.trim();
-    if (draft.status !== pub.status) payload.status = draft.status;
-    if ((draft.leagueId || null) !== (pub.leagueId ?? null)) {
-      payload.leagueId = draft.leagueId ? draft.leagueId : null;
-    }
-    if (Object.keys(payload).length === 0) {
-      cancelMediaEdit(pub.id);
-      return;
-    }
-    mediaPatchMutation.mutate({ id: pub.id, payload });
-  };
-
-  const moveMediaRow = (id: string, direction: 'up' | 'down') => {
-    setMediaOrderIds((prev) => {
-      const index = prev.indexOf(id);
-      if (index < 0) return prev;
-      const nextIndex = direction === 'up' ? index - 1 : index + 1;
-      if (nextIndex < 0 || nextIndex >= prev.length) return prev;
-      const next = [...prev];
-      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-      return next;
-    });
-  };
-
-  const saveMediaOrder = () => {
-    if (!hasPendingMediaOrderChanges) return;
-    mediaOrderMutation.mutate(mediaOrderIds.map((id, index) => ({ id, sortOrder: index })));
-  };
-
 
   const handleEventImageUpload = async (file: File) => {
     ensureOpsAccess();
@@ -681,10 +544,6 @@ const OpsPage = () => {
         potgMutation.error,
         storeMutation.error,
         eventMediaMutation.error,
-        mediaListQuery.error,
-        mediaPatchMutation.error,
-        mediaDeleteMutation.error,
-        mediaOrderMutation.error,
       ].some((error) => isOpsAuthError(error)),
     [
       bootstrapQuery.error,
@@ -692,10 +551,6 @@ const OpsPage = () => {
       potgMutation.error,
       storeMutation.error,
       eventMediaMutation.error,
-      mediaListQuery.error,
-      mediaPatchMutation.error,
-      mediaDeleteMutation.error,
-      mediaOrderMutation.error,
     ],
   );
 
