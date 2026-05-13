@@ -227,11 +227,10 @@ test.describe('ops media editor admin', () => {
     await expect(panel.getByText(/3 publications/)).toBeVisible();
 
     // Initial load: all three rows render — POTG, Event, Store.
-    // Row selectors key off the first 8 chars of the ID (component displays pub.id.slice(0, 8)).
-    const rowBase = panel.locator('div.border.border-border.rounded-sm.bg-card');
-    const potgRow = rowBase.filter({ hasText: 'pub-potg' });
-    const eventRow = rowBase.filter({ hasText: 'pub-even' });
-    const storeRow = rowBase.filter({ hasText: 'pub-sto' });
+    // Find media cards by their title text (more stable than CSS class selectors).
+    const potgRow = panel.locator('div').filter({ hasText: 'Michael Ramos POTG' });
+    const eventRow = panel.locator('div').filter({ hasText: 'Friday Night Run Flyer' });
+    const storeRow = panel.locator('div').filter({ hasText: 'Hype Shirt Promo' });
     await expect(potgRow).toBeVisible();
     await expect(eventRow).toBeVisible();
     await expect(storeRow).toBeVisible();
