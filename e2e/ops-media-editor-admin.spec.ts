@@ -220,9 +220,8 @@ test.describe('ops media editor admin', () => {
 
     // Filter bar holds the status/surface filter buttons. We click the chip
     // buttons instead of using selects (the new MediaFilterBar uses visual chips).
-    const filterBar = panel.locator('div.flex.flex-wrap.gap-4.items-end');
-    const statusAllButton = filterBar.getByRole('button', { name: 'All' }).first();
-    await expect(statusAllButton).toBeVisible();
+    const filterBar = panel.locator('div.border.border-border.rounded-sm.p-4.bg-secondary\\/20');
+    await expect(filterBar).toBeVisible();
 
     // Initial load: all three rows render — POTG, Event, Store.
     // Row selectors key off the stable `id: <uuid>` text node so they keep
@@ -243,8 +242,9 @@ test.describe('ops media editor admin', () => {
     await expect(eventRow.getByText('draft', { exact: true })).toBeVisible();
 
     // ── Filter by status=draft — a new list fetch fires with ?status=draft
-    // Click the "Draft" chip button in the filter bar
-    const draftButton = filterBar.getByRole('button', { name: 'Draft' });
+    // Find the Status filter section and click the "Draft" button
+    const statusSection = filterBar.locator('div.space-y-2').first();
+    const draftButton = statusSection.getByRole('button', { name: 'Draft' });
     await draftButton.click();
     await expect(panel.getByText(/1 rows/)).toBeVisible();
     await expect(potgRow).toHaveCount(0);
@@ -254,8 +254,8 @@ test.describe('ops media editor admin', () => {
     expect(listCaptures.some((c) => c.query.includes('status=draft'))).toBeTruthy();
 
     // Reset filter back to "all" so we can edit the POTG row.
-    // Click the "All" button to clear the status filter
-    const allStatusButton = filterBar.getByRole('button', { name: 'All' }).first();
+    // Click the "All" button in the status section to clear the filter
+    const allStatusButton = statusSection.getByRole('button', { name: 'All' });
     await allStatusButton.click();
     await expect(panel.getByText(/3 rows/)).toBeVisible();
 
