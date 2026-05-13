@@ -39,7 +39,7 @@ export function EditMetadataModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-card border border-border rounded-sm max-w-md w-full p-6 space-y-4">
+      <div className="bg-card border border-border rounded-sm max-w-md w-full p-6 space-y-4" role="dialog" aria-label="Edit Metadata">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold text-base">Edit Metadata</h2>
           <button

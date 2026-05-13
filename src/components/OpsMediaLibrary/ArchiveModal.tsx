@@ -20,7 +20,7 @@ export function ArchiveModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-card border border-border rounded-sm max-w-sm w-full p-6 space-y-4">
+      <div className="bg-card border border-border rounded-sm max-w-sm w-full p-6 space-y-4" role="dialog" aria-label="Archive Media">
         <div className="flex items-start gap-3">
           <AlertCircle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
           <div className="flex-1 min-w-0">
