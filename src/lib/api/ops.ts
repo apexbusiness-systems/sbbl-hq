@@ -108,6 +108,15 @@ export type OpsMediaPublication = {
   type: string;
   thumbnail: string;
   createdAt: string | null;
+  /** ISO timestamp when pinned, null = not pinned */
+  pinnedAt: string | null;
+  /** Parser flagged this publication for manual review */
+  needsReview: boolean;
+  /** Parser confidence score 0-1, null if not parsed */
+  confidence: number | null;
+  /** Fields the parser was uncertain about */
+  uncertainFields: string[] | null;
+  updatedAt: string | null;
 };
 
 export type OpsMediaListFilters = {
@@ -115,6 +124,12 @@ export type OpsMediaListFilters = {
   surface?: string | 'all';
   leagueId?: string;
   limit?: number;
+  /** Server-side search: ILIKE on title + subtitle */
+  q?: string;
+  /** Filter by pinned status: true = pinned only, false/undefined = all */
+  pinned?: boolean;
+  /** Sort order: 'newest' (default) or 'sort_order' */
+  orderBy?: 'newest' | 'sort_order';
 };
 
 export async function fetchOpsMediaList(filters: OpsMediaListFilters = {}) {
@@ -123,6 +138,9 @@ export async function fetchOpsMediaList(filters: OpsMediaListFilters = {}) {
   if (filters.surface && filters.surface !== 'all') params.set('surface', filters.surface);
   if (filters.leagueId) params.set('leagueId', filters.leagueId);
   if (filters.limit) params.set('limit', String(filters.limit));
+  if (filters.q) params.set('q', filters.q);
+  if (filters.pinned !== undefined) params.set('pinned', String(filters.pinned));
+  if (filters.orderBy) params.set('orderBy', filters.orderBy);
   const qs = params.toString();
   const suffix = qs.length > 0 ? `?${qs}` : '';
   return apiFetch<{ ok: boolean; data: OpsMediaPublication[] }>(`/ops/list/media${suffix}`);
@@ -136,6 +154,8 @@ export async function patchOpsMediaPublication(
     status?: MediaPublicationStatus;
     leagueId?: string | null;
     sortAt?: string;
+    /** null to unpin, ISO timestamp to pin */
+    pinnedAt?: string | null;
   },
 ) {
   return apiFetch<{ ok: boolean; data: Record<string, unknown> }>(
@@ -163,6 +183,89 @@ export async function updateOpsMediaPublicationOrder(items: Array<{ id: string; 
     method: 'POST',
     headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-media-order-save') },
     body: JSON.stringify({ items }),
+  });
+}
+
+// ── Media Intelligence Overhaul — new API wrappers ────────────────────────
+
+/** Restore an archived publication back to draft. Idempotent for non-archived. */
+export async function restoreMediaPublication(id: string) {
+  return apiFetch<{ ok: boolean; data: Record<string, unknown> }>(
+    `/ops/media/publications/${id}/restore`,
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-media-restore-${id}`) },
+      body: JSON.stringify({}),
+    },
+  );
+}
+
+export type StaleCleanupPreviewResponse = {
+  ok: boolean;
+  totalAffected: number;
+  publications: Array<OpsMediaPublication & { daysSincePublish: number }>;
+  excludedPinned: number;
+  excludedRecentlyEdited: number;
+};
+
+/** Preview which publications would be affected by stale cleanup. */
+export async function previewStaleCleanup(params?: { olderThanDays?: number }) {
+  return apiFetch<StaleCleanupPreviewResponse>(
+    '/ops/media/stale-cleanup-preview',
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-stale-preview') },
+      body: JSON.stringify(params ?? {}),
+    },
+  );
+}
+
+export type StaleCleanupExecuteResponse = {
+  ok: boolean;
+  archived: number;
+  ids: string[];
+};
+
+/** Execute stale cleanup — archives all matching publications. Re-validates server-side. */
+export async function executeStaleCleanup(params?: { olderThanDays?: number }) {
+  return apiFetch<StaleCleanupExecuteResponse>(
+    '/ops/media/stale-cleanup-execute',
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-stale-execute') },
+      body: JSON.stringify(params ?? {}),
+    },
+  );
+}
+
+export type BulkArchiveResponse = {
+  ok: boolean;
+  archived: number;
+  ids: string[];
+};
+
+export type BulkArchiveErrorResponse = {
+  ok: false;
+  error: string;
+  invalidIds?: string[];
+};
+
+/** Bulk archive multiple publications atomically via Postgres RPC. */
+export async function bulkArchiveMedia(ids: string[]) {
+  return apiFetch<BulkArchiveResponse>(
+    '/ops/media/bulk-archive',
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-media-bulk-archive') },
+      body: JSON.stringify({ ids }),
+    },
+  );
+}
+
+/** Toggle pin on a publication. null = unpin, ISO timestamp = pin. */
+export async function toggleMediaPin(id: string, pinned: boolean) {
+  return patchOpsMediaPublication(id, {
+    pinnedAt: pinned ? new Date().toISOString() : null,
   });
 }
 

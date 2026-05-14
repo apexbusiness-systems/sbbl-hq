@@ -1,8 +1,8 @@
-<!-- Version: v1.2.0 | Date: 2026-04-04 | Status: Current -->
+<!-- Version: v1.3.0 | Date: 2026-05-13 | Status: Current -->
 # DB Schema Summary
 
-**Version:** v1.2.0
-**Last Updated:** 2026-04-04
+**Version:** v1.3.0
+**Last Updated:** 2026-05-13
 
 The core schema is established in `supabase/migrations/202603270001_core_schema.sql` and extended by 28 subsequent migrations covering identity, league core, stats, streaming, commerce, media, ops, and governance domains.
 
@@ -71,6 +71,38 @@ The core schema is established in `supabase/migrations/202603270001_core_schema.
 | `reward_credits` | Promotional/reward credit system |
 | `stripe_events` | **Stripe webhook idempotency log** — UNIQUE on `stripe_event_id` (TEXT). Tracks processing status: `processed`, `duplicate`, `failed`, `skipped`. (20260404240000) |
 
+### Media
+
+| Table | Purpose |
+|---|---|
+| `media_assets` | Raw media asset storage (images, videos, articles) |
+| `media_publications` | Published media with surface targeting, scheduling, and parser intelligence flags (see full column definition below) |
+
+#### `media_publications` — Full Column Reference
+
+| Column | Type | Constraints | Description |
+| --- | --- | --- | --- |
+| `id` | `uuid` | `PRIMARY KEY DEFAULT gen_random_uuid()` | Unique publication identifier |
+| `media_asset_id` | `uuid` | `NOT NULL REFERENCES media_assets(id) ON DELETE CASCADE` | Linked media asset; UNIQUE with `surface` |
+| `surface` | `text` | `NOT NULL CHECK (surface IN ('media_feed','store','potg','event','score','feature'))` | Target display surface; UNIQUE with `media_asset_id` |
+| `league_id` | `uuid` | `NULL REFERENCES leagues(id)` | Optional league scope |
+| `title` | `text` | `NOT NULL` | Publication title |
+| `subtitle` | `text` | `NULL` | Optional subtitle |
+| `status` | `text` | `NOT NULL CHECK (status IN ('draft','scheduled','published','archived'))` | Publication lifecycle status |
+| `published_at` | `timestamptz` | `NULL` | When the publication went live |
+| `scheduled_at` | `timestamptz` | `NULL` | Scheduled publish time |
+| `sort_at` | `timestamptz` | `NOT NULL DEFAULT now()` | Sort ordering timestamp |
+| `render_payload` | `jsonb` | `NOT NULL DEFAULT '{}'::jsonb` | Rendering configuration payload |
+| `pinned_at` | `timestamptz` | `DEFAULT NULL` | When pinned; non-NULL = pinned, NULL = not pinned |
+| `needs_review` | `boolean` | `DEFAULT FALSE` | Parser flagged for manual review (NOT a status value) |
+| `parser_confidence` | `real` | `DEFAULT NULL` | Parser confidence score 0–1; NULL if not parsed |
+| `parser_uncertain_fields` | `text[]` | `DEFAULT NULL` | Array of field names the parser was uncertain about |
+| `updated_at` | `timestamptz` | `DEFAULT now()` | Last modification timestamp (maintained by `touch_updated_at` trigger) |
+
+**RLS policies:**
+- `super_admin_full_access` — full CRUD for `super_admin` role
+- `public_read_published` — public SELECT where `status = 'published'`
+
 ### Ops & Governance
 
 | Table | Purpose |
@@ -111,6 +143,13 @@ Migration `20260404100000_performance_indexes_10k_concurrent.sql` adds 30+ index
 - **Keyset pagination:** `games(created_at DESC)`, `games(status, created_at DESC)`, `import_jobs(created_at DESC)`
 - **Event outbox:** `event_outbox(status, created_at) WHERE status='pending'`
 - **Idempotency:** `api_idempotency_keys(idempotency_key, created_at)`
+- **Media (v1.3.0):** `idx_media_publications_pinned` on `(pinned_at) WHERE pinned_at IS NOT NULL` (partial — pinned items only), `idx_media_publications_stale_cleanup` on `(status, published_at, pinned_at, updated_at) WHERE status = 'published'` (composite partial — stale cleanup scan), `idx_media_publications_title_lower` on `(lower(title))` (expression index — prefix search)
+
+## RPC Functions (v1.3.0)
+
+| Function | Signature | Purpose |
+| --- | --- | --- |
+| `bulk_archive_media_publications` | `(p_ids uuid[]) → void` | Validates all IDs exist in `media_publications` and none are pinned (`pinned_at IS NULL`). Atomically sets `status = 'archived'` on all validated rows. Raises exception `invalid_ids` with the set of missing IDs if any are not found. Raises exception `pinned_ids` with the set of pinned IDs if any have `pinned_at IS NOT NULL`. Both validations run before any mutation. (v1.3.0) |
 
 ## RLS Helper Functions (20260404210000)
 

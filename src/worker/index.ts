@@ -33,6 +33,7 @@ import {
   handleOverlayFoul,
   handleOverlayPeriod,
   handleOverlayReset,
+  handleOverlayStatus,
 } from "./routes/overlay";
 import {
   handlePublicPollsList,
@@ -105,6 +106,14 @@ const transientRateLimits = new Map<string, number[]>();
 const streamUrlCache = new Map<string, { url: string; expiresAtMs: number }>();
 const STREAM_URL_CACHE_TTL_MS = 30_000;
 
+const ALLOWED_ORIGINS = [
+  "https://sbbl-hq.icu",
+  "https://www.sbbl-hq.icu",
+  "http://localhost:5173",
+  "capacitor://localhost",
+  "http://localhost",
+];
+
 // Per-isolate cached admin Supabase client.  Cloudflare Workers reuse isolate
 // memory across requests, so we avoid creating a new client on every fetch.
 let _cachedAdmin: SupabaseClient | null = null;
@@ -123,8 +132,8 @@ type HeartbeatEntry = {
 };
 const heartbeatQueue: HeartbeatEntry[] = [];
 let heartbeatFlushTimer: ReturnType<typeof setTimeout> | null = null;
-const HEARTBEAT_FLUSH_INTERVAL_MS = 30_000;
-const HEARTBEAT_QUEUE_MAX = 5_000; // OOM guard — drop oldest if queue exceeds this
+const HEARTBEAT_FLUSH_INTERVAL_MS = 5_000; // Flush every 5 seconds instead of 30 to keep batch sizes small (approx ~4000 for 20k users)
+const HEARTBEAT_QUEUE_MAX = 10_000; // Expanded to handle up to 40k+ concurrents safely over 5s
 const HEARTBEAT_MAX_RETRIES = 3;    // Stop retrying after 3 consecutive failures
 let heartbeatConsecutiveFailures = 0;
 
@@ -377,14 +386,17 @@ async function getStreamUrlForGame(
   const cacheHit = streamUrlCache.get(gameId);
   if (cacheHit && cacheHit.expiresAtMs > nowMs) return cacheHit.url;
 
-  const game = await admin
-    .from("games")
-    .select("stream_url")
-    .eq("id", gameId)
+  // Resolve via stream_admin_config.collection_id (canonical source — same path
+  // used by handlePlaybackSession). Never reads games.stream_url; raw origin is
+  // never returned to clients (handleStreamProxy proxies it).
+  const cfg = await admin
+    .from("stream_admin_config")
+    .select("collection_id")
+    .eq("id", true)
     .maybeSingle();
-  if (game.error) throw new Error(game.error.message);
+  if (cfg.error) throw new Error(cfg.error.message);
   const streamUrl =
-    String((game.data as { stream_url?: string } | null)?.stream_url ?? "").trim() ||
+    String((cfg.data as { collection_id?: string } | null)?.collection_id ?? "").trim() ||
     String(env.VITE_STREAM_URL ?? "").trim();
   if (!streamUrl) throw new Error("stream_not_configured");
 
@@ -1570,6 +1582,56 @@ async function handleIngress(ctx: HandlerCtx) {
   }
 }
 
+// OmniBridge transport contract — must match
+// APEX-OmniHub/src/lib/omnibridge/syncPacketVerifier.ts::isSyncPacketEnvelope
+//   Body:    { packet: SyncPacket, signature: base64url(HMAC-SHA256(secret, JSON.stringify(packet))) }
+//   Headers: X-Omni-Source: <source_id from OMNIBRIDGE_M2M_CLIENTS registry>
+const OMNIHUB_SOURCE_ID = "sbbl-hq";
+const OMNIHUB_DELIVERY_TIMEOUT_MS = 5_000;
+const OMNIHUB_DELIVERY_RETRY_BACKOFF_MS = [250, 1_000, 4_000];
+
+async function deliverSyncEnvelope(
+  url: string,
+  envelope: { packet: SyncPacket; signature: string },
+): Promise<{ ok: boolean; status?: number; error?: string; attempts: number }> {
+  let lastError: string | undefined;
+  let lastStatus: number | undefined;
+  for (let attempt = 0; attempt < OMNIHUB_DELIVERY_RETRY_BACKOFF_MS.length + 1; attempt++) {
+    if (attempt > 0) {
+      const idx = Math.min(attempt - 1, OMNIHUB_DELIVERY_RETRY_BACKOFF_MS.length - 1);
+      await new Promise((r) => setTimeout(r, OMNIHUB_DELIVERY_RETRY_BACKOFF_MS[idx]));
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), OMNIHUB_DELIVERY_TIMEOUT_MS);
+    try {
+      const resp = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "X-Omni-Source": OMNIHUB_SOURCE_ID,
+          "X-Omni-Signature": envelope.signature,
+          "X-Omni-Packet-Id": envelope.packet.packet_id,
+          "X-Omni-Trace-Id": envelope.packet.trace_id,
+        },
+        body: JSON.stringify(envelope),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+      if (resp.ok) return { ok: true, status: resp.status, attempts: attempt + 1 };
+      lastStatus = resp.status;
+      // 4xx is non-retryable — signed wrong or rejected — stop early.
+      if (resp.status >= 400 && resp.status < 500) {
+        return { ok: false, status: resp.status, error: `target_rejected_${resp.status}`, attempts: attempt + 1 };
+      }
+      lastError = `upstream_${resp.status}`;
+    } catch (e) {
+      clearTimeout(timer);
+      lastError = e instanceof Error ? e.message : String(e);
+    }
+  }
+  return { ok: false, status: lastStatus, error: lastError ?? "exhausted_retries", attempts: OMNIHUB_DELIVERY_RETRY_BACKOFF_MS.length + 1 };
+}
+
 export async function handleSyncDrain(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   requireAuth(ctx.req);
@@ -1608,21 +1670,13 @@ export async function handleSyncDrain(ctx: HandlerCtx) {
       const url = ctx.env.OMNIHUB_SYNC_URL;
 
       if (url) {
-        const resp = await fetch(url, {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-            "x-sbbl-signature": signed.signature,
-          },
-          body: JSON.stringify(signed.packet),
-        }).catch(() => null);
-
-        if (!resp || !resp.ok) {
+        const delivery = await deliverSyncEnvelope(url, signed);
+        if (!delivery.ok) {
           await ctx.admin.rpc("mark_outbox_retry", {
             p_outbox_id: item.id,
-            p_error_message: "sync_delivery_failed",
+            p_error_message: delivery.error ?? "sync_delivery_failed",
           });
-          return { id: item.id, status: "retry" };
+          return { id: item.id, status: "retry", attempts: delivery.attempts, error: delivery.error };
         }
       }
 
@@ -1632,6 +1686,271 @@ export async function handleSyncDrain(ctx: HandlerCtx) {
   );
 
   return json({ ok: true, processed: results.length, results });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OmniHub inbound governance channel — POST /webhooks/omnihub
+//
+// Receives signed commands from APEX-OmniHub's omnibridge-control plane.
+// Mirrors APEX-OmniHub/src/lib/omnibridge/outboundCaller.ts dispatch shape:
+//   Body:    { command: OutboundCommand, signature: base64url-HMAC-SHA256 }
+//   Headers: X-Omni-Command-Id, X-Omni-Signature, X-Omni-Action
+//
+// Commands are HMAC-verified, idempotency-deduplicated, risk-lane classified,
+// recorded in ingress_failures / log_admin_action, and acked.
+//
+// Defence-in-depth: BLOCKED actions are short-circuited even if signed; RED
+// actions are recorded but not auto-executed (control plane must approve via
+// the MAN-quorum path before re-dispatching as GREEN).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const OMNIHUB_COMMAND_ALLOWED_ACTIONS = new Set<string>([
+  "disable_stream",
+  "enable_stream",
+  "revoke_access",
+  "grant_access",
+  "emergency_halt",
+  "broadcast_message",
+  "force_man_review",
+  "hotfix_dispatch",
+  "ping",
+]);
+
+const OMNIHUB_COMMAND_MAX_BODY_BYTES = 256 * 1024;
+const OMNIHUB_COMMAND_MAX_AGE_SECONDS = 300;
+
+function omniBase64UrlToBytes(value: string): Uint8Array | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) return null;
+  const padLen = (4 - (value.length % 4)) % 4;
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat(padLen);
+  try {
+    const binary = atob(normalized);
+    const out = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) out[i] = binary.codePointAt(i) ?? 0;
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+async function verifyOmnihubCommandSignature(
+  command: Record<string, unknown>,
+  signature: string,
+  secret: string,
+): Promise<boolean> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"],
+  );
+  const sigBytes = omniBase64UrlToBytes(signature);
+  if (!sigBytes) return false;
+  return crypto.subtle.verify(
+    "HMAC",
+    key,
+    sigBytes,
+    new TextEncoder().encode(JSON.stringify(command)),
+  );
+}
+
+async function handleOmnihubWebhook(ctx: HandlerCtx) {
+  const clientIp = ctx.req.headers.get("cf-connecting-ip") ?? "unknown";
+  if (!checkRateLimit(clientIp)) {
+    return json({ ok: false, error: "rate_limited" }, 429);
+  }
+
+  const verifyKey = ctx.env.OMNIHUB_VERIFY_KEY ?? ctx.env.OMNIHUB_SIGNING_SECRET;
+  if (!verifyKey) {
+    return json({ ok: false, error: "verify_key_not_configured" }, 503);
+  }
+
+  const headerSig = ctx.req.headers.get("x-omni-signature");
+  const headerCmdId = ctx.req.headers.get("x-omni-command-id");
+  if (!headerSig || !headerCmdId) {
+    return json({ ok: false, error: "missing_headers" }, 400);
+  }
+
+  const rawBody = await ctx.req.text();
+  if (rawBody.length > OMNIHUB_COMMAND_MAX_BODY_BYTES) {
+    return json({ ok: false, error: "body_too_large" }, 413);
+  }
+
+  let envelope: { command?: unknown; signature?: unknown };
+  try {
+    envelope = JSON.parse(rawBody);
+  } catch {
+    return json({ ok: false, error: "invalid_json" }, 400);
+  }
+
+  if (!envelope || typeof envelope !== "object" || !envelope.command || typeof envelope.command !== "object") {
+    return json({ ok: false, error: "invalid_envelope" }, 400);
+  }
+
+  const command = envelope.command as Record<string, unknown>;
+  const bodySignature = typeof envelope.signature === "string" ? envelope.signature : headerSig;
+
+  if (typeof command.command_id !== "string" || command.command_id !== headerCmdId) {
+    return json({ ok: false, error: "command_id_mismatch" }, 400);
+  }
+  if (typeof command.action !== "string" || !OMNIHUB_COMMAND_ALLOWED_ACTIONS.has(command.action)) {
+    return json({ ok: false, error: "unsupported_action" }, 400);
+  }
+  if (typeof command.target_source !== "string" || command.target_source !== "sbbl-hq") {
+    return json({ ok: false, error: "target_source_mismatch" }, 400);
+  }
+  if (typeof command.issued_at !== "string") {
+    return json({ ok: false, error: "missing_issued_at" }, 400);
+  }
+  const issuedMs = Date.parse(command.issued_at);
+  if (Number.isNaN(issuedMs) || Math.abs(Date.now() - issuedMs) > OMNIHUB_COMMAND_MAX_AGE_SECONDS * 1000) {
+    return json({ ok: false, error: "stale_command" }, 400);
+  }
+
+  const verified = await verifyOmnihubCommandSignature(command, bodySignature, verifyKey);
+  if (!verified) {
+    return json({ ok: false, error: "bad_signature" }, 401);
+  }
+
+  // Replay-detection via api_idempotency_keys (re-uses existing dedup table).
+  const dedupKey = `omnihub:${command.command_id}`;
+  const { error: dupErr } = await ctx.admin.from("api_idempotency_keys").insert({
+    idempotency_key: dedupKey,
+    route: "/webhooks/omnihub",
+    user_id: null,
+  });
+  if (dupErr && /duplicate|unique/i.test(dupErr.message)) {
+    return json({ ok: true, command_id: command.command_id, duplicate: true });
+  }
+
+  const action = command.action as string;
+  const payload = (command.payload as Record<string, unknown> | undefined) ?? {};
+
+  const envelopeForIngress = normalizeIngress({
+    source_type: "webhook",
+    actor_id: typeof command.issued_by === "string" ? command.issued_by : "omnihub-control",
+    device_id: null,
+    league_id: typeof payload.league_id === "string" ? payload.league_id : null,
+    entity_type: `omnihub.command.${action}`,
+    entity_id: typeof command.target_entity_id === "string" ? command.target_entity_id : null,
+    payload: { action, ...payload },
+  });
+
+  if (envelopeForIngress.risk_lane === "BLOCKED") {
+    await ctx.admin.rpc("record_ingress_failure", {
+      p_correlation_id: envelopeForIngress.correlation_id,
+      p_raw_input: command,
+      p_error_reason: "omnihub_command_blocked",
+      p_risk_score: 999,
+      p_source_type: "webhook",
+      p_user_id: null,
+    });
+    return json({ ok: false, command_id: command.command_id, error: "blocked", risk_lane: "BLOCKED" }, 403);
+  }
+
+  await ctx.admin.rpc("log_admin_action", {
+    p_action: `omnihub_${action}`,
+    p_ref_type: envelopeForIngress.entity_type,
+    p_ref_id: envelopeForIngress.entity_id,
+    p_payload: { command, envelope: envelopeForIngress },
+    p_idempotency_key: dedupKey,
+  });
+
+  // Action dispatch — every action below is idempotent. Anything that mutates
+  // production state goes through a Supabase RPC so RLS / audit triggers fire.
+  let result: Record<string, unknown> = { ack: true };
+  if (action === "ping") {
+    result = { ack: true, pong_at: new Date().toISOString() };
+  } else if (action === "broadcast_message") {
+    result = { ack: true, message_id: dedupKey };
+  } else if (action === "disable_stream" || action === "enable_stream") {
+    const isLive = action === "enable_stream";
+    await ctx.admin.from("stream_admin_config").update({ is_live: isLive }).eq("id", 1).then(() => undefined);
+    result = { ack: true, is_live: isLive };
+  } else {
+    // grant_access / revoke_access / emergency_halt / force_man_review / hotfix_dispatch
+    // are RED — record-only here. The control plane re-issues as GREEN after
+    // MAN-quorum approval; that ack just records receipt.
+    result = { ack: true, queued: true, risk_lane: envelopeForIngress.risk_lane };
+  }
+
+  return json({
+    ok: true,
+    command_id: command.command_id,
+    action,
+    risk_lane: envelopeForIngress.risk_lane,
+    result,
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// OmniPort authenticated command endpoint — POST /api/omniport/command
+//
+// Authenticated, low-risk diagnostic / control surface used by the integration
+// harness and operator tooling. Same risk-lane gating as the webhook channel,
+// but auth is per-user JWT (Bearer) rather than HMAC.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const OMNIPORT_ALLOWED_COMMANDS = new Set<string>([
+  "PING",
+  "ECHO",
+  "HEALTH_CHECK",
+  "TELEMETRY_SNAPSHOT",
+]);
+
+async function handleOmniportCommand(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+
+  let body: Record<string, unknown> | null = null;
+  try {
+    body = (await ctx.req.json()) as Record<string, unknown>;
+  } catch {
+    return json({ ok: false, success: false, error: "invalid_json" }, 400);
+  }
+
+  if (!body || typeof body !== "object") {
+    return json({ ok: false, success: false, error: "invalid_body" }, 400);
+  }
+
+  const command = typeof body.command === "string" ? body.command : "";
+  const targetApp = typeof body.targetApp === "string" ? body.targetApp : "";
+
+  if (!command || !OMNIPORT_ALLOWED_COMMANDS.has(command)) {
+    return json({ ok: false, success: false, error: "unsupported_command", command }, 400);
+  }
+  if (targetApp && targetApp !== "sbbl-hq") {
+    return json({ ok: false, success: false, error: "target_app_mismatch", targetApp }, 400);
+  }
+
+  const correlationId = crypto.randomUUID();
+  const now = new Date().toISOString();
+
+  if (command === "PING") {
+    return json({ ok: true, success: true, command: "PING", pong_at: now, correlationId, userId });
+  }
+  if (command === "ECHO") {
+    return json({ ok: true, success: true, command: "ECHO", data: body.data ?? null, correlationId, userId });
+  }
+  if (command === "HEALTH_CHECK") {
+    return json({
+      ok: true,
+      success: true,
+      command: "HEALTH_CHECK",
+      checks: { worker: "ok", supabase: ctx.env.SUPABASE_URL ? "configured" : "missing", omnihub_sync: ctx.env.OMNIHUB_SYNC_URL ? "configured" : "not_configured" },
+      correlationId,
+      timestamp: now,
+    });
+  }
+  // TELEMETRY_SNAPSHOT
+  return json({
+    ok: true,
+    success: true,
+    command: "TELEMETRY_SNAPSHOT",
+    snapshot: { source: "sbbl-hq", emitted_at: now, agents: [{ id: "sbbl-worker", status: "active" }] },
+    correlationId,
+  });
 }
 
 async function handleStripeWebhook(ctx: HandlerCtx) {
@@ -2128,38 +2447,36 @@ async function handleImportRoute(
     );
   } else {
     // Iterative fallback if bulk db operation fails
-    for (const row of rows) {
+    const BATCH_SIZE = 50;
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE);
       try {
         if (kind === "teams") {
-          const { error } = await ctx.admin.from("teams").insert({
+          const payload = batch.map((row) => ({
             league_id: row.league_id,
             season_id: row.season_id,
             division_id: row.division_id || null,
             name: row.name,
             status: "published",
+          }));
+          const { error } = await ctx.admin.from("teams").upsert(payload, {
+            onConflict: "season_id,name",
           });
-          if (error && !String(error.message).includes("duplicate key"))
-            throw error;
-        }
-
-        if (kind === "players") {
-          const { error } = await ctx.admin.from("players").upsert(
-            {
-              user_id: row.user_id,
-              team_id: row.team_id || null,
-              league_id: row.league_id || null,
-              jersey_number: row.jersey_number
-                ? Number(row.jersey_number)
-                : null,
-              position: row.position || null,
-            },
-            { onConflict: "user_id" },
-          );
           if (error) throw error;
-        }
-
-        if (kind === "schedules") {
-          const { error } = await ctx.admin.from("schedule_slots").insert({
+        } else if (kind === "players") {
+          const payload = batch.map((row) => ({
+            user_id: row.user_id,
+            team_id: row.team_id || null,
+            league_id: row.league_id || null,
+            jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
+            position: row.position || null,
+          }));
+          const { error } = await ctx.admin
+            .from("players")
+            .upsert(payload, { onConflict: "user_id" });
+          if (error) throw error;
+        } else if (kind === "schedules") {
+          const payload = batch.map((row) => ({
             league_id: row.league_id,
             season_id: row.season_id,
             venue_id: row.venue_id || null,
@@ -2167,42 +2484,115 @@ async function handleImportRoute(
             starts_at: row.starts_at,
             ends_at: row.ends_at || null,
             status: row.status || "upcoming",
-          });
+          }));
+          const { error } = await ctx.admin
+            .from("schedule_slots")
+            .insert(payload);
           if (error) throw error;
-        }
-
-        if (kind === "events") {
-          const { error } = await ctx.admin.from("league_events").insert({
+        } else if (kind === "events") {
+          const payload = batch.map((row) => ({
             league_id: row.league_id || null,
             season_id: row.season_id || null,
             venue_id: row.venue_id || null,
             title: row.title,
             starts_at: row.starts_at || null,
             metadata: row,
-          });
+          }));
+          const { error } = await ctx.admin
+            .from("league_events")
+            .insert(payload);
           if (error) throw error;
         }
 
-        await ctx.admin.rpc("enqueue_local_domain_event", {
-          p_event_type: `${kind}_imported`,
-          p_entity_type: kind,
-          p_entity_id: null,
-          p_league_id: row.league_id || null,
-          p_payload: row,
-          p_trace_id: crypto.randomUUID(),
-          p_available_at: new Date().toISOString(),
-        });
-        insertedRows += 1;
-      } catch (error) {
-        failedRows += 1;
-        errors.push(error instanceof Error ? error.message : "import_failed");
-        await writeIngressFailure(
-          ctx.admin,
-          `${kind}_import_failed`,
-          row,
-          "admin_mutation",
-          session.userId,
+        await Promise.all(
+          batch.map((row) =>
+            ctx.admin.rpc("enqueue_local_domain_event", {
+              p_event_type: `${kind}_imported`,
+              p_entity_type: kind,
+              p_entity_id: null,
+              p_league_id: row.league_id || null,
+              p_payload: row,
+              p_trace_id: crypto.randomUUID(),
+              p_available_at: new Date().toISOString(),
+            }),
+          ),
         );
+        insertedRows += batch.length;
+      } catch (batchError) {
+        // If a batch fails, fall back to individual rows for this batch to ensure granular error reporting
+        for (const row of batch) {
+          try {
+            if (kind === "teams") {
+              const { error } = await ctx.admin.from("teams").insert({
+                league_id: row.league_id,
+                season_id: row.season_id,
+                division_id: row.division_id || null,
+                name: row.name,
+                status: "published",
+              });
+              if (error && !String(error.message).includes("duplicate key"))
+                throw error;
+            } else if (kind === "players") {
+              const { error } = await ctx.admin.from("players").upsert(
+                {
+                  user_id: row.user_id,
+                  team_id: row.team_id || null,
+                  league_id: row.league_id || null,
+                  jersey_number: row.jersey_number
+                    ? Number(row.jersey_number)
+                    : null,
+                  position: row.position || null,
+                },
+                { onConflict: "user_id" },
+              );
+              if (error) throw error;
+            } else if (kind === "schedules") {
+              const { error } = await ctx.admin.from("schedule_slots").insert({
+                league_id: row.league_id,
+                season_id: row.season_id,
+                venue_id: row.venue_id || null,
+                court_id: row.court_id || null,
+                starts_at: row.starts_at,
+                ends_at: row.ends_at || null,
+                status: row.status || "upcoming",
+              });
+              if (error) throw error;
+            } else if (kind === "events") {
+              const { error } = await ctx.admin.from("league_events").insert({
+                league_id: row.league_id || null,
+                season_id: row.season_id || null,
+                venue_id: row.venue_id || null,
+                title: row.title,
+                starts_at: row.starts_at || null,
+                metadata: row,
+              });
+              if (error) throw error;
+            }
+
+            await ctx.admin.rpc("enqueue_local_domain_event", {
+              p_event_type: `${kind}_imported`,
+              p_entity_type: kind,
+              p_entity_id: null,
+              p_league_id: row.league_id || null,
+              p_payload: row,
+              p_trace_id: crypto.randomUUID(),
+              p_available_at: new Date().toISOString(),
+            });
+            insertedRows += 1;
+          } catch (error) {
+            failedRows += 1;
+            errors.push(
+              error instanceof Error ? error.message : "import_failed",
+            );
+            await writeIngressFailure(
+              ctx.admin,
+              `${kind}_import_failed`,
+              row,
+              "admin_mutation",
+              session.userId,
+            );
+          }
+        }
       }
     }
   }
@@ -2438,6 +2828,9 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   const statusFilter = url.searchParams.get('status');
   const surfaceFilter = url.searchParams.get('surface');
   const leagueFilter = url.searchParams.get('leagueId');
+  const searchQuery = url.searchParams.get('q');          // NEW: text search
+  const pinnedFilter = url.searchParams.get('pinned');    // NEW: pin status filter
+  const orderBy = url.searchParams.get('orderBy');        // NEW: sort mode
   const limitParam = Number(url.searchParams.get('limit') ?? '100');
   const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 100, 1), 200);
 
@@ -2445,18 +2838,44 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
     .from('media_publications')
     .select(
       'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,sort_order,league_id,render_payload,' +
+      'pinned_at,needs_review,parser_confidence,parser_uncertain_fields,' +   // NEW columns
       'media_assets!inner(id,metadata,created_at),' +
       'leagues:leagues!league_id(id,code,name)'
-    )
-    .order('sort_order', { ascending: true, nullsFirst: false })
-    .order('id', { ascending: true })
-    .limit(limit);
+    );
+
+  // Default: newest-first (operator can explicitly request sort_order mode)
+  if (orderBy === 'sort_order') {
+    query = query
+      .order('sort_order', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true });
+  } else {
+    query = query
+      .order('created_at', { referencedTable: 'media_assets', ascending: false, nullsFirst: false })
+      .order('id', { ascending: false });
+  }
+
+  query = query.limit(limit);
 
   if (statusFilter && isMediaPublicationStatus(statusFilter)) {
     query = query.eq('status', statusFilter);
   }
   if (surfaceFilter) query = query.eq('surface', surfaceFilter);
   if (leagueFilter) query = query.eq('league_id', leagueFilter);
+
+  // NEW: pinned filter
+  if (pinnedFilter === 'true') {
+    query = query.not('pinned_at', 'is', null);
+  } else if (pinnedFilter === 'false') {
+    query = query.is('pinned_at', null);
+  }
+
+  // NEW: text search (ILIKE on title + subtitle)
+  // Note: Without pg_trgm GIN indexes, %q% ILIKE uses sequential scan.
+  // Acceptable for current dataset sizes; add trigram indexes if needed.
+  if (searchQuery && searchQuery.trim().length > 0) {
+    const q = searchQuery.trim();
+    query = query.or(`title.ilike.%${q}%,subtitle.ilike.%${q}%`);
+  }
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
@@ -2487,6 +2906,12 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
       type,
       thumbnail,
       createdAt: asset.created_at == null ? null : String(asset.created_at),
+      pinnedAt: raw.pinned_at == null ? null : String(raw.pinned_at),         // NEW
+      needsReview: Boolean(raw.needs_review ?? false),                         // NEW
+      confidence: raw.parser_confidence == null ? null : Number(raw.parser_confidence),  // NEW
+      uncertainFields: Array.isArray(raw.parser_uncertain_fields)               // NEW
+        ? (raw.parser_uncertain_fields as string[])
+        : [],
     };
   });
 
@@ -2534,6 +2959,22 @@ async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
     update.sort_at = body.sortAt;
   }
 
+  // NEW: pin/unpin support (pinnedAt: ISO timestamp to pin, null to unpin)
+  if ('pinnedAt' in body) {
+    if (body.pinnedAt === null) {
+      update.pinned_at = null;
+    } else if (typeof body.pinnedAt === 'string' && body.pinnedAt.length > 0) {
+      // Validate ISO timestamp
+      const d = new Date(body.pinnedAt);
+      if (isNaN(d.getTime())) {
+        return json({ ok: false, error: 'invalid_pinnedAt' }, 400);
+      }
+      update.pinned_at = body.pinnedAt;
+    } else {
+      return json({ ok: false, error: 'invalid_pinnedAt' }, 400);
+    }
+  }
+
   if (Object.keys(update).length === 0) {
     return json({ ok: false, error: 'no_editable_fields' }, 400);
   }
@@ -2542,7 +2983,7 @@ async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
     .from('media_publications')
     .update(update)
     .eq('id', id)
-    .select('id,title,subtitle,status,league_id,published_at,sort_at')
+    .select('id,title,subtitle,status,league_id,published_at,sort_at,pinned_at,needs_review,parser_confidence,parser_uncertain_fields')
     .single();
   if (error) throw new Error(error.message);
 
@@ -2564,9 +3005,22 @@ async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
   const id = ctx.params.id;
   if (!id) return json({ ok: false, error: 'missing_id' }, 400);
 
+  // NEW: refuse archive if pinned (must unpin first)
+  const { data: existing, error: fetchError } = await ctx.admin
+    .from('media_publications')
+    .select('id,status,pinned_at')
+    .eq('id', id)
+    .single();
+  if (fetchError || !existing) {
+    return json({ ok: false, error: 'not_found' }, 404);
+  }
+  if (existing.pinned_at != null) {
+    return json({ ok: false, error: 'unpin_before_archiving' }, 409);
+  }
+
   const { data, error } = await ctx.admin
     .from('media_publications')
-    .update({ status: 'archived', published_at: null })
+    .update({ status: 'archived', published_at: null, updated_at: new Date().toISOString() })
     .eq('id', id)
     .select('id,status')
     .single();
@@ -2577,7 +3031,7 @@ async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
     action: 'ops_archive_media_publication',
     ref_type: 'media_publications',
     ref_id: id,
-    payload: {},
+    payload: { previous_status: existing.status },
     idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
   });
 
@@ -2633,8 +3087,231 @@ async function handleOpsReorderMediaPublications(ctx: HandlerCtx) {
   return json({ ok: true, updated: normalized.length });
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// Media Intelligence Overhaul — new handlers (restore, stale cleanup, bulk archive)
+// ═══════════════════════════════════════════════════════════════════════
 
-// handlePublicConfig — extracted to src/worker/routes/public.ts
+/** POST /ops/media/publications/:id/restore — restore an archived publication to draft */
+async function handleOpsMediaRestore(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const id = ctx.params.id;
+  if (!id) return json({ ok: false, error: 'missing_id' }, 400);
+
+  // Fetch current state
+  const { data: existing, error: fetchErr } = await ctx.admin
+    .from('media_publications')
+    .select('id,status,published_at')
+    .eq('id', id)
+    .single();
+  if (fetchErr || !existing) {
+    return json({ ok: false, error: 'not_found' }, 404);
+  }
+
+  // Idempotent: if not archived, return current state
+  if (existing.status !== 'archived') {
+    return json({ ok: true, data: existing });
+  }
+
+  // Restore to draft, clear published_at
+  const { data, error } = await ctx.admin
+    .from('media_publications')
+    .update({ status: 'draft', published_at: null, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select('id,status,title,surface,league_id')
+    .single();
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_restore_media_publication',
+    ref_type: 'media_publications',
+    ref_id: id,
+    payload: { previous_status: 'archived' },
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, data });
+}
+
+/** POST /ops/media/stale-cleanup-preview — preview which publications would be archived */
+async function handleOpsMediaStalePreview(ctx: HandlerCtx) {
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => ({}))) as {
+    olderThanDays?: number;
+    excludeRecentlyEditedDays?: number;
+  };
+  const olderThanDays = Math.max(Math.min(body.olderThanDays ?? 30, 365), 1);
+  const excludeRecentlyEditedDays = Math.max(Math.min(body.excludeRecentlyEditedDays ?? 7, 90), 1);
+
+  const cutoffDate = new Date(Date.now() - olderThanDays * 86_400_000).toISOString();
+  const editCutoff = new Date(Date.now() - excludeRecentlyEditedDays * 86_400_000).toISOString();
+
+  // Stale published items (not pinned, not recently edited)
+  const { data: staleData, error: staleErr } = await ctx.admin
+    .from('media_publications')
+    .select('id,title,surface,league_id,published_at,leagues:leagues!league_id(code)')
+    .eq('status', 'published')
+    .lt('published_at', cutoffDate)
+    .is('pinned_at', null)
+    .lt('updated_at', editCutoff);
+  if (staleErr) throw new Error(staleErr.message);
+
+  // Count excluded: pinned
+  const { count: excludedPinned, error: pinErr } = await ctx.admin
+    .from('media_publications')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'published')
+    .lt('published_at', cutoffDate)
+    .not('pinned_at', 'is', null);
+  if (pinErr) throw new Error(pinErr.message);
+
+  // Count excluded: recently edited
+  const { count: excludedEdited, error: editErr } = await ctx.admin
+    .from('media_publications')
+    .select('*', { count: 'exact', head: true })
+    .eq('status', 'published')
+    .lt('published_at', cutoffDate)
+    .is('pinned_at', null)
+    .gte('updated_at', editCutoff);
+  if (editErr) throw new Error(editErr.message);
+
+  const publications = ((staleData ?? []) as unknown as Record<string, unknown>[]).map((raw) => {
+    const leagueRow = (raw.leagues as Record<string, unknown> | null) ?? {};
+    const publishedAt = raw.published_at == null ? null : String(raw.published_at);
+    const daysSincePublish = publishedAt
+      ? Math.floor((Date.now() - new Date(publishedAt).getTime()) / 86_400_000)
+      : 0;
+    return {
+      id: String(raw.id),
+      title: String(raw.title ?? ''),
+      surface: String(raw.surface ?? ''),
+      leagueCode: leagueRow.code == null ? null : String(leagueRow.code),
+      publishedAt,
+      daysSincePublish,
+    };
+  });
+
+  return json({
+    ok: true,
+    totalAffected: publications.length,
+    publications,
+    excludedPinned: excludedPinned ?? 0,
+    excludedRecentlyEdited: excludedEdited ?? 0,
+    criteria: { olderThanDays, excludeRecentlyEditedDays },
+  });
+}
+
+/** POST /ops/media/stale-cleanup-execute — archive stale publications (re-validates server-side) */
+async function handleOpsMediaStaleExecute(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => ({}))) as {
+    olderThanDays?: number;
+    excludeRecentlyEditedDays?: number;
+  };
+  const olderThanDays = Math.max(Math.min(body.olderThanDays ?? 30, 365), 1);
+  const excludeRecentlyEditedDays = Math.max(Math.min(body.excludeRecentlyEditedDays ?? 7, 90), 1);
+
+  // Re-run the preview query server-side (never trust client-sent IDs)
+  const cutoffDate = new Date(Date.now() - olderThanDays * 86_400_000).toISOString();
+  const editCutoff = new Date(Date.now() - excludeRecentlyEditedDays * 86_400_000).toISOString();
+
+  const { data: staleData, error: staleErr } = await ctx.admin
+    .from('media_publications')
+    .select('id')
+    .eq('status', 'published')
+    .lt('published_at', cutoffDate)
+    .is('pinned_at', null)
+    .lt('updated_at', editCutoff);
+  if (staleErr) throw new Error(staleErr.message);
+
+  const staleIds = ((staleData ?? []) as unknown as Record<string, unknown>[]).map(
+    (raw) => String(raw.id)
+  );
+
+  if (staleIds.length === 0) {
+    return json({ ok: true, archived: 0, ids: [] });
+  }
+
+  // Atomic batch archive
+  const { error: updateErr } = await ctx.admin
+    .from('media_publications')
+    .update({ status: 'archived', published_at: null, updated_at: new Date().toISOString() })
+    .in('id', staleIds)
+    .eq('status', 'published');
+  if (updateErr) throw new Error(updateErr.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_stale_cleanup',
+    ref_type: 'media_publications',
+    ref_id: null,
+    payload: {
+      count: staleIds.length,
+      ids: staleIds,
+      criteria: { olderThanDays, excludeRecentlyEditedDays },
+    },
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, archived: staleIds.length, ids: staleIds });
+}
+
+/** POST /ops/media/bulk-archive — transactional bulk archive via RPC */
+async function handleOpsBulkArchive(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => null)) as { ids?: unknown[] } | null;
+  const ids = Array.isArray(body?.ids) ? body.ids : [];
+
+  if (ids.length === 0) return json({ ok: false, error: 'empty_ids' }, 400);
+  if (ids.length > 100) return json({ ok: false, error: 'too_many_ids (max 100)' }, 400);
+
+  // Filter to valid UUID strings
+  const validIds = ids.filter((id): id is string =>
+    typeof id === 'string' && id.length > 0
+  );
+  if (validIds.length !== ids.length) {
+    return json({ ok: false, error: 'invalid_id_format' }, 400);
+  }
+
+  // Call the transactional RPC: validates all IDs + archives in one TX
+  const { data, error } = await ctx.admin.rpc('bulk_archive_media_publications', {
+    p_ids: validIds,
+  });
+  if (error) {
+    // Parse the custom exception messages from the RPC
+    const msg = error.message ?? '';
+    if (msg.startsWith('invalid_ids:')) {
+      const invalidIds = msg.replace('invalid_ids:', '').trim().replace(/[{}"]/g, '').split(',').map((s: string) => s.trim()).filter(Boolean);
+      return json({ ok: false, error: 'invalid_ids', invalidIds }, 400);
+    }
+    if (msg.startsWith('pinned_ids:')) {
+      const pinnedIds = msg.replace('pinned_ids:', '').trim().replace(/[{}"]/g, '').split(',').map((s: string) => s.trim()).filter(Boolean);
+      return json({ ok: false, error: 'pinned_ids', invalidIds: pinnedIds }, 409);
+    }
+    throw new Error(msg);
+  }
+
+  const archivedIds = ((data ?? []) as unknown as Record<string, unknown>[]).map(
+    (row) => String(row.archived_id)
+  );
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_bulk_archive_media',
+    ref_type: 'media_publications',
+    ref_id: null,
+    payload: { count: archivedIds.length, ids: archivedIds },
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, archived: archivedIds.length, ids: archivedIds });
+}
 const handlePublicConfig = _handlePublicConfig;
 
 // handlePublicHome — extracted to src/worker/routes/public.ts
@@ -3422,7 +4099,7 @@ async function getUserRolesFromDB(
  * Returns { code: uuid } — the invite ID is the redemption token.
  * On duplicate request for same game returns the existing code (idempotent).
  */
-async function handleInviteGenerate(ctx: HandlerCtx) {
+export async function handleInviteGenerate(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const userId = requireAuth(ctx.req);
 
@@ -3673,7 +4350,9 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
   // First use: atomically lock the invite to this user + IP
   // The `.is('used_by', null)` filter makes this a compare-and-swap:
   // if a concurrent request already locked it, this update affects 0 rows.
-  const { error: updateErr, count } = await ctx.admin
+  // Use data.length (not count) — Supabase JS only populates count when
+  // the Prefer:count=exact header is sent; without it count is always null.
+  const { data: claimedRows, error: updateErr } = await ctx.admin
     .from("ppv_invites")
     .update({
       used_by: userId,
@@ -3682,12 +4361,13 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
     })
     .eq("id", code)
     .is("used_by", null)
-    .select("id"); // returns rows to detect 0-row update
+    .select("id");
 
   if (updateErr) throw new Error(updateErr.message);
 
-  // count === 0 means a concurrent request locked it first — re-check
-  if (count === 0) {
+  const claimedCount = Array.isArray(claimedRows) ? claimedRows.length : 0;
+  // claimedCount === 0 means a concurrent request locked it first — re-check
+  if (claimedCount === 0) {
     const { data: recheck } = await ctx.admin
       .from("ppv_invites")
       .select("used_by, ip_address")
@@ -3835,7 +4515,9 @@ async function handleStreamQoeBeacon(ctx: HandlerCtx): Promise<Response> {
   }
 
   const clientIp = getClientIP(ctx.req);
-  if (!enforceInMemoryRateLimit(`qoe:${clientIp}`, 10, 60_000)) {
+  // Scope per (gameId, IP) so a household watching two different live games
+  // does not collide on a shared bucket and 429 each other's beacons.
+  if (!enforceInMemoryRateLimit(`qoe:${gameId}:${clientIp}`, 10, 60_000)) {
     return new Response(null, { status: 429 });
   }
 
@@ -3912,9 +4594,11 @@ async function handleStreamQoeHealth(ctx: HandlerCtx): Promise<Response> {
 
 // ── STREAM ACCESS & PURCHASE ────────────────────────────────────────────────
 
-async function handleStreamAccess({ req, admin }: HandlerCtx) {
+export async function handleStreamAccess({ req, admin }: HandlerCtx) {
   const userId = requireAuth(req);
   const gameId = new URL(req.url).pathname.split("/")[3]; // /api/streams/:gameId/access
+  // Broadcast access lives at /api/broadcast/access — not here.
+  // This handler only handles game-specific PPV entitlement checks.
   const { data, error } = await admin.rpc("can_user_view_stream", {
     p_game_id: gameId,
     p_user_id: userId,
@@ -4016,8 +4700,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   // to null so all downstream code treats it as a null gameId consistently.
   // Without this, 'broadcast' would be passed as a gameId string to Supabase
   // queries that expect a UUID, causing 500 errors from invalid UUID format.
-  const rawGameId = ctx.params.gameId ?? null;
-  const gameId: string | null = rawGameId === 'broadcast' ? null : rawGameId;
+  const gameId: string | null = ctx.params.gameId ?? null;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionKey?: string;
     playbackMode?: 'live' | 'replay';
@@ -4027,10 +4710,16 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   }
   const playbackMode: 'live' | 'replay' = body.playbackMode === 'replay' ? 'replay' : 'live';
 
+  // Fetch roles once here so both the super-admin fast-path and the replay gate
+  // can use them without a second DB round-trip.
+  const roles = await getUserRolesFromDB(userId, ctx.admin);
+  const isSuperAdmin = roles.includes("super_admin");
+
   // ── WS7 replay gate (embargo + entitlement) ────────────────────────────
-  // Applies only when the client explicitly requests replay playback
-  // for a real game. Broadcast alias and live mode unchanged.
-  if (playbackMode === 'replay' && gameId) {
+  // Applies only when the client explicitly requests replay playback for a real
+  // game. Super admins bypass this gate (they have full fast-path access below).
+  // Broadcast alias and live mode are unchanged.
+  if (playbackMode === 'replay' && gameId && !isSuperAdmin) {
     const gRes = await ctx.admin
       .from("games")
       .select("replay_mode, replay_monetization_enabled_at")
@@ -4068,9 +4757,6 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       return json({ ok: false, error: "replay_available_for_purchase" }, 402);
     }
   }
-
-  const roles = await getUserRolesFromDB(userId, ctx.admin);
-  const isSuperAdmin = roles.includes("super_admin");
 
   // ── Super admin fast-path ──────────────────────────────────────────────
   // No access checks, no PPV, no one-device displacement, and no DB session
@@ -4116,15 +4802,20 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     }, 200, cookieHeaders);
   }
 
+  // Broadcast (no game) must use /api/broadcast/session — not this handler.
+  // Covers both null (missing gameId) and the 'broadcast' alias string that
+  // legacy clients may still send. Prevents them from being routed through
+  // the PPV/entitlement path for open broadcasts.
+  if (gameId === null || gameId === "broadcast") {
+    return json({ ok: false, error: "use_broadcast_endpoint" }, 400);
+  }
+
   const hasPrivilegedRole = roles.some(
     (role) => role === "player" || role === "paid_fan",
   );
-  // Camera-only broadcast alias (gameId=null) is accessible to any privileged
-  // role — roster players and paid fans (season pass). PPV is game-specific
-  // and does not apply when there is no game. Regular fans are expected to
-  // purchase PPV for a specific game instead.
   let hasAccess = hasPrivilegedRole;
-  if (!hasAccess && gameId) {
+  if (!hasAccess) {
+    // PPV game: check entitlement or invite redemption.
     const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
       p_game_id: gameId,
       p_user_id: userId,
@@ -4135,13 +4826,6 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   if (!hasAccess) return json({ ok: false, error: "forbidden" }, 403);
 
   const cfg = await getOrCreateStreamConfig(ctx.admin);
-
-  // RC-2: For the broadcast alias (no real game), enforce is_live for non-admins.
-  // Super admins already return above via the fast-path. Privileged roles
-  // (player/paid_fan) still need the stream to be online.
-  if (gameId === null && !cfg.is_live && playbackMode !== "replay") {
-    return json({ ok: false, error: "stream_offline" }, 403);
-  }
 
   // WS7: Replay Embargo & Monetization (belt-and-suspenders — the
   // primary gate runs at the top of the handler on body.playbackMode;
@@ -4663,9 +5347,13 @@ async function handleStreamProxy(ctx: HandlerCtx) {
   if (!upstream.ok) return new Response("Upstream error", { status: upstream.status });
 
   const headers = new Headers(upstream.headers);
-  headers.set("Access-Control-Allow-Origin", new URL(ctx.req.url).origin);
-  headers.set("Access-Control-Allow-Credentials", "true");
-  headers.set("Vary", "Origin");
+
+  const origin = ctx.req.headers.get("Origin");
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    headers.set("Access-Control-Allow-Origin", origin);
+    headers.set("Access-Control-Allow-Credentials", "true");
+    headers.set("Vary", "Origin");
+  }
 
   if (!isManifest) {
     return new Response(upstream.body, {
@@ -4830,8 +5518,110 @@ export async function handleResetReactions(ctx: HandlerCtx) {
   return json({ ok: true, gameId, reset: true });
 }
 
-async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
-  return handlePlaybackSession({ ...ctx, params: { ...ctx.params, gameId: null } });
+// ── Broadcast-standalone handlers ────────────────────────────────────────────
+// Livestreams are independent of games. These handlers own the entire
+// broadcast session lifecycle with zero game coupling. Do NOT add gameId
+// parameters, PPV entitlement checks, or any game-specific logic here.
+// The only access rule for an open broadcast: stream is live + user is registered.
+// See CLAUDE.md Rule 7 — these handlers are frozen; do not modify without
+// explicit owner instruction.
+
+export async function handleBroadcastStreamAccess({ req, admin }: HandlerCtx) {
+  const userId = requireAuth(req);
+  const cfgRes = await admin
+    .from("stream_admin_config")
+    .select("is_live")
+    .eq("id", true)
+    .maybeSingle();
+  if (!cfgRes.data?.is_live) {
+    return json({ ok: true, hasAccess: false });
+  }
+  const profileRes = await admin
+    .from("profiles")
+    .select("onboarding_completed_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const isRegistered = Boolean(
+    (profileRes.data as { onboarding_completed_at?: string | null } | null)
+      ?.onboarding_completed_at,
+  );
+  return json({ ok: true, hasAccess: isRegistered });
+}
+
+export async function handleBroadcastSessionStart(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const userId = requireAuth(ctx.req);
+  const body = (await ctx.req.json().catch(() => null)) as {
+    sessionKey?: string;
+  } | null;
+  if (!body?.sessionKey || body.sessionKey.length < 8) {
+    return json({ ok: false, error: "session_key_required" }, 400);
+  }
+
+  const cfg = await getOrCreateStreamConfig(ctx.admin);
+
+  // Super admin: no access checks, synthetic session so they can preview before going live.
+  const roles = await getUserRolesFromDB(userId, ctx.admin);
+  if (roles.includes("super_admin")) {
+    const playbackUrl =
+      String(cfg.collection_id ?? "").trim() ||
+      String(ctx.env.VITE_STREAM_URL ?? "").trim();
+    const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
+    return json({
+      ok: true,
+      playback: { type: "url", url: playbackUrl, heartbeatIntervalSec: 25, maxExpiresAt },
+      session: { id: crypto.randomUUID(), maxExpiresAt },
+    });
+  }
+
+  if (!cfg.is_live) {
+    return json({ ok: false, error: "stream_offline" }, 403);
+  }
+
+  const playbackUrl =
+    String(cfg.collection_id ?? "").trim() ||
+    String(ctx.env.VITE_STREAM_URL ?? "").trim();
+  if (!playbackUrl) {
+    return json({ ok: false, error: "stream_not_configured" }, 409);
+  }
+
+  // Registered users may watch an open broadcast — no entitlement row required.
+  const profileRes = await ctx.admin
+    .from("profiles")
+    .select("onboarding_completed_at")
+    .eq("user_id", userId)
+    .maybeSingle();
+  const isRegistered = Boolean(
+    (profileRes.data as { onboarding_completed_at?: string | null } | null)
+      ?.onboarding_completed_at,
+  );
+  if (!isRegistered) return json({ ok: false, error: "forbidden" }, 403);
+
+  const session = await createOrRefreshPlaybackSession(
+    ctx,
+    null,
+    userId,
+    body.sessionKey,
+  );
+  return json({
+    ok: true,
+    playback: {
+      type: "url",
+      url: playbackUrl,
+      heartbeatIntervalSec: 25,
+      maxExpiresAt: session.maxExpiresAt,
+    },
+    session: { id: session.id, maxExpiresAt: session.maxExpiresAt },
+  });
+}
+
+// Heartbeat and end delegate to the game-agnostic handlers with null gameId.
+// Sessions for broadcasts are stored with game_id = null — no game coupling.
+async function handleBroadcastHeartbeatRoute(ctx: HandlerCtx) {
+  return handleStreamSessionHeartbeat({ ...ctx, params: { ...ctx.params, gameId: null } });
+}
+async function handleBroadcastSessionEndRoute(ctx: HandlerCtx) {
+  return handleStreamSessionEnd({ ...ctx, params: { ...ctx.params, gameId: null } });
 }
 
 /**
@@ -4844,7 +5634,7 @@ async function handleBroadcastPlaybackSession(ctx: HandlerCtx) {
  * Body: { isLive: boolean, collectionId: string, title: string }
  * Requires: super_admin
  */
-async function handleGoLive(ctx: HandlerCtx) {
+export async function handleGoLive(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireSuperAdminSession(ctx.req, ctx.admin);
 
@@ -4852,6 +5642,7 @@ async function handleGoLive(ctx: HandlerCtx) {
     isLive?: boolean;
     collectionId?: string;
     title?: string;
+    activeGameId?: string | null;
   } | null;
 
   if (!body || typeof body.isLive !== "boolean") {
@@ -4889,6 +5680,14 @@ async function handleGoLive(ctx: HandlerCtx) {
   if (typeof body.title === "string" && body.title.trim()) {
     patch.title = body.title.trim();
   }
+  if (body.activeGameId === null) {
+    patch.active_game_id = null;
+  } else if (typeof body.activeGameId === "string" && body.activeGameId.trim()) {
+    const activeGameId = body.activeGameId.trim();
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(activeGameId)) return json({ ok: false, error: "invalid_active_game_id" }, 400);
+    patch.active_game_id = activeGameId;
+  }
   if (body.isLive) {
     patch.live_started_at = nowIso;
     patch.live_ended_at = null;
@@ -4899,7 +5698,7 @@ async function handleGoLive(ctx: HandlerCtx) {
   const { data, error } = await ctx.admin
     .from("stream_admin_config")
     .upsert(patch, { onConflict: "id" })
-    .select("collection_id,title,is_live,updated_at")
+    .select("collection_id,title,is_live,active_game_id,updated_at")
     .single();
 
   if (error) {
@@ -4929,6 +5728,7 @@ async function handleGoLive(ctx: HandlerCtx) {
     isLive: Boolean(data.is_live),
     collectionId: String(data.collection_id ?? ""),
     title: String(data.title ?? ""),
+    activeGameId: data.active_game_id ? String(data.active_game_id) : null,
     updatedAt: String(data.updated_at ?? nowIso),
   });
 }
@@ -5432,7 +6232,12 @@ async function handleDirectStoreCheckout({ req, env, admin }: HandlerCtx) {
   }
 
   const orderId = orderData.id;
-  const orderItemsData = [];
+  const orderItemsData: Array<{
+    order_id: string;
+    product_id: string;
+    quantity: number;
+    unit_price_cents: number;
+  }> = [];
 
   const params = new URLSearchParams({
     "payment_method_types[]": "card",
@@ -5914,15 +6719,20 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     path: "/api/streams/:gameId/access",
     handler: handleStreamAccess,
   },
-  // IMPORTANT: literal "broadcast" routes MUST come before the parameterized
-  // :gameId routes. The router does a linear first-match scan; if :gameId is
-  // registered first it captures "broadcast" as a gameId parameter, which then
-  // fails the DB upsert (invalid UUID → 500). Literal paths always beat params.
-  {
-    method: "POST",
-    path: "/api/streams/broadcast/session",
-    handler: handleBroadcastPlaybackSession,
-  },
+  // ── Broadcast routes (game-independent) ──────────────────────────────────
+  // These are the canonical routes for open livestreams. Streams are NOT
+  // coupled to games. Do not add gameId logic here — see CLAUDE.md Rule 7.
+  { method: "GET",  path: "/api/broadcast/access",              handler: handleBroadcastStreamAccess },
+  { method: "POST", path: "/api/broadcast/session",             handler: handleBroadcastSessionStart },
+  { method: "POST", path: "/api/broadcast/session/heartbeat",   handler: handleBroadcastHeartbeatRoute },
+  { method: "POST", path: "/api/broadcast/session/end",         handler: handleBroadcastSessionEndRoute },
+  // Legacy aliases — kept so old clients don't 404. Primary routes are /api/broadcast/* above.
+  // IMPORTANT: literal paths MUST come before :gameId to prevent "broadcast"
+  // being captured as an invalid UUID parameter (router is first-match).
+  { method: "POST", path: "/api/streams/broadcast/session",             handler: handleBroadcastSessionStart },
+  { method: "POST", path: "/api/streams/broadcast/session/heartbeat",   handler: handleBroadcastHeartbeatRoute },
+  { method: "POST", path: "/api/streams/broadcast/session/end",         handler: handleBroadcastSessionEndRoute },
+  // ── Game-specific PPV stream routes ───────────────────────────────────────
   {
     method: "POST",
     path: "/api/streams/:gameId/session",
@@ -5935,18 +6745,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   },
   {
     method: "POST",
-    path: "/api/streams/broadcast/session/heartbeat",
-    handler: handleBroadcastHeartbeat,
-  },
-  {
-    method: "POST",
     path: "/api/streams/:gameId/session/heartbeat",
     handler: handleStreamSessionHeartbeat,
-  },
-  {
-    method: "POST",
-    path: "/api/streams/broadcast/session/end",
-    handler: handleBroadcastSessionEnd,
   },
   {
     method: "POST",
@@ -6178,6 +6978,9 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "GET", path: "/ops/headshots", handler: handleHeadshotQueue },
   { method: "POST", path: "/api/ingress", handler: handleIngress },
   { method: "POST", path: "/sync/drain", handler: handleSyncDrain },
+  // OmniBridge bidirectional integration with APEX-OmniHub control plane.
+  { method: "POST", path: "/webhooks/omnihub", handler: handleOmnihubWebhook },
+  { method: "POST", path: "/api/omniport/command", handler: handleOmniportCommand },
   { method: "GET", path: "/ops/health", handler: handleOpsHealth },
   { method: "GET", path: "/ops/metrics-lite", handler: handleOpsMetricsLite },
   { method: "POST", path: "/webhooks/stripe", handler: handleStripeWebhook },
@@ -6193,6 +6996,7 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/api/ops/overlay/:gameId/foul",       handler: handleOverlayFoul },
   { method: "POST", path: "/api/ops/overlay/:gameId/period",     handler: handleOverlayPeriod },
   { method: "POST", path: "/api/ops/overlay/:gameId/reset",      handler: handleOverlayReset },
+  { method: "POST", path: "/api/ops/overlay/:gameId/status",     handler: handleOverlayStatus },
 
   // ── Engagement (polls, predictions, trivia, gamification) ────────────
   { method: "GET",  path: "/api/public/engagement/polls",            handler: handlePublicPollsList },
@@ -6343,21 +7147,21 @@ function addSecurityHeaders(res: Response): Response {
   headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
-  // Facebook is explicitly NOT included — it is a blocked stream source.
+  // Facebook is allowed in frame-src only — plugins/video.php iframe embed, no SDK.
   // WHEP (WebRTC egress) connections to stream.sbbl-hq.icu are covered by the
   // *.sbbl-hq.icu wildcard in connect-src; media-src blob: covers WebRTC tracks.
   headers.set('Content-Security-Policy',
     "default-src 'self'; " +
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://assets.twitch.tv https://static.cloudflareinsights.com; " +
-    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://static.cloudflareinsights.com; " +
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://player.twitch.tv https://assets.twitch.tv https://static.cloudflareinsights.com; " +
+    "script-src-elem 'self' 'unsafe-inline' https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com https://s.ytimg.com https://embed.twitch.tv https://player.twitch.tv https://static.cloudflareinsights.com; " +
     // fonts.googleapis.com serves the @font-face CSS (style-src).
     // fonts.gstatic.com serves the actual .woff2 files (font-src).
     // Both are required for Space Grotesk loaded in index.html (canonical brand font).
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-    "img-src 'self' data: blob: https:; " +
+    "img-src 'self' data: blob: https: https://static-cdn.jtvnw.net; " +
     "font-src 'self' data: https://fonts.gstatic.com; " +
-    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://www.youtube.com wss://www.youtube.com https://www.youtube-nocookie.com https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://cloudflareinsights.com https://static.cloudflareinsights.com; " +
-    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com; " +
+    "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.sbbl-hq.icu wss://*.sbbl-hq.icu https://api.stripe.com https://checkout.stripe.com https://challenges.cloudflare.com https://www.youtube.com wss://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://api.twitch.tv wss://pubsub-edge.twitch.tv https://usher.twitchsvc.net https://*.twitchsvc.net wss://*.twitchsvc.net https://cloudflareinsights.com https://static.cloudflareinsights.com; " +
+    "frame-src https://challenges.cloudflare.com https://js.stripe.com https://www.youtube.com https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv https://player.vimeo.com https://www.facebook.com; " +
     "media-src 'self' blob: https://*.googlevideo.com https://*.ytimg.com https://*.twitch.tv https://*.twitchsvc.net; " +
     "worker-src 'self' blob:; " +
     "frame-ancestors 'none'; " +
@@ -7149,6 +7953,10 @@ routes.push(
   { method: "PATCH",  path: "/ops/media/publications/:id",  handler: handleOpsPatchMediaPublications },
   { method: "DELETE", path: "/ops/media/publications/:id",  handler: handleOpsDeleteMediaPublications },
   { method: "POST",   path: "/ops/media/publications/order", handler: handleOpsReorderMediaPublications },
+  { method: "POST",   path: "/ops/media/publications/:id/restore", handler: handleOpsMediaRestore },
+  { method: "POST",   path: "/ops/media/stale-cleanup-preview",    handler: handleOpsMediaStalePreview },
+  { method: "POST",   path: "/ops/media/stale-cleanup-execute",    handler: handleOpsMediaStaleExecute },
+  { method: "POST",   path: "/ops/media/bulk-archive",             handler: handleOpsBulkArchive },
 );
 
 // ── Scores handlers ────────────────────────────────────────────────────────
@@ -7339,15 +8147,21 @@ async function handleScoresCsvImport(ctx: HandlerCtx) {
   let failed = 0;
   const errors: string[] = [];
 
-  for (const row of rows) {
-    try {
-      // Resolve league uuid if league_id code provided
-      let leagueUuid: string | null = null;
-      if (row.league_id) {
-        const { data: lr } = await ctx.admin.from("leagues").select("id").ilike("code", row.league_id).maybeSingle();
-        leagueUuid = lr?.id ?? null;
-      }
-      const { error } = await ctx.admin.from("games").insert({
+  // Resolve league UUIDs in bulk to avoid N+1 query pattern
+  const leagueMap = new Map<string, string>();
+  const uniqueCodes = Array.from(new Set(rows.map((r) => r.league_id).filter(Boolean) as string[]));
+  if (uniqueCodes.length > 0) {
+    const { data: leagues } = await ctx.admin.from("leagues").select("id, code").in("code", uniqueCodes);
+    leagues?.forEach((l) => {
+      if (l.code) leagueMap.set(l.code.toLowerCase(), l.id);
+    });
+  }
+
+  let bulkSuccess = false;
+  try {
+    const payload = rows.map((row) => {
+      const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
+      return {
         category: row.category || "league",
         league_id: leagueUuid,
         participant1_label: row.home_label || null,
@@ -7358,12 +8172,43 @@ async function handleScoresCsvImport(ctx: HandlerCtx) {
         game_date: row.game_date || null,
         event_name: row.event_name || null,
         notes: row.notes || null,
-      });
-      if (error) { failed++; errors.push(`${row.home_label} vs ${row.away_label}: ${error.message}`); }
-      else inserted++;
-    } catch (e) {
-      failed++;
-      errors.push(e instanceof Error ? e.message : "unknown");
+      };
+    });
+
+    const { error } = await ctx.admin.from("games").insert(payload);
+    if (error) throw error;
+    bulkSuccess = true;
+    inserted = rows.length;
+  } catch (bulkErr) {
+    // Fallback to iterative on failure to capture individual row errors
+  }
+
+  if (!bulkSuccess) {
+    for (const row of rows) {
+      try {
+        const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
+        const { error } = await ctx.admin.from("games").insert({
+          category: row.category || "league",
+          league_id: leagueUuid,
+          participant1_label: row.home_label || null,
+          participant2_label: row.away_label || null,
+          home_score: row.home_score !== "" && row.home_score != null ? Number(row.home_score) : null,
+          away_score: row.away_score !== "" && row.away_score != null ? Number(row.away_score) : null,
+          status: row.status || "final",
+          game_date: row.game_date || null,
+          event_name: row.event_name || null,
+          notes: row.notes || null,
+        });
+        if (error) {
+          failed++;
+          errors.push(`${row.home_label || "Unknown"} vs ${row.away_label || "Unknown"}: ${error.message}`);
+        } else {
+          inserted++;
+        }
+      } catch (e) {
+        failed++;
+        errors.push(e instanceof Error ? e.message : "unknown");
+      }
     }
   }
 

@@ -2,7 +2,7 @@
 
 **Status**: MANDATORY — enforced by ESLint + vitest + CI.
 **Owner**: Data Pipeline (SBBL-HQ).
-**Last updated**: 2026-04-16.
+**Last updated**: 2026-05-13.
 
 ## TL;DR
 
@@ -80,6 +80,12 @@ is cached at the edge.
 | Home snapshot | `GET /api/public/home`         | `{ ok, teams, liveGames, … }`     | None                         | multiple tables              |
 | Teams         | `GET /api/teams`               | `{ ok, teams: TeamCard[] }`       | None                         | `teams` + `mvw_standings`    |
 | Products      | `GET /api/public/products`     | `{ ok, data: Product[] }`         | None                         | `store_products`             |
+| Media Library | `GET /api/ops/list/media` | `{ ok, data: OpsMediaPublication[] }` | Super-admin required | `media_publications` + joins |
+| Media Search  | `GET /api/ops/list/media?q=...` | `{ ok, data: OpsMediaPublication[] }` | Super-admin required | `media_publications` ILIKE |
+| Bulk Archive  | `POST /api/ops/media/bulk-archive` | `{ ok, archived, ids }` | Super-admin required | `bulk_archive_media_publications()` RPC |
+| Restore Media | `POST /api/ops/media/publications/:id/restore` | `{ ok, data }` | Super-admin required | `media_publications` UPDATE |
+| Stale Preview | `POST /api/ops/media/stale-cleanup-preview` | `{ ok, totalAffected, ... }` | Super-admin required | `media_publications` SELECT |
+| Stale Execute | `POST /api/ops/media/stale-cleanup-execute` | `{ ok, archived, ids }` | Super-admin required | `media_publications` UPDATE |
 
 † `/api/stats` is tier-aware: anonymous callers receive a limited stat line
 (pts/reb/ast only). Authenticated paid players/coaches/admins get the full

@@ -1,5 +1,14 @@
 # Claude / Agent Operating Guide — SBBL-HQ
 
+**Version:** 2.0.0  
+**Last Updated:** 2026-05-13  
+**Verified Against:** Full repo audit — `package.json v1.3.0`, `ci.yml`, `deploy.yml`, `wrangler.jsonc`, `src/worker/bindings.d.ts`  
+
+> **Extended documentation:** See [`docs/MASTER_INDEX.md`](docs/MASTER_INDEX.md) for the complete doc hub, runbooks, and onboarding guides.  
+> **Full onboarding:** See [`docs/onboarding/AGENT_ONBOARDING.md`](docs/onboarding/AGENT_ONBOARDING.md).
+
+
+
 Welcome. This document is the **single source of truth** for agents
 working in this repo. Read it in full before your first edit.
 
@@ -110,6 +119,14 @@ This rule is enforced by:
 - **Vitest stage tests** (`src/test/stream-independence-stage*.test.ts`).
 - **Sentry alert** on `stream.access.v2` error rate > 0.1%.
 
+### 5. Media Publications — Pin Before Archive, Two-Phase Cleanup
+
+Pinned media CANNOT be archived (worker returns 409). Unpin before archiving.
+Stale cleanup is two-phase: preview → confirm (type "ARCHIVE") → execute.
+The execute phase re-validates server-side (never trusts client-sent IDs).
+Bulk archive uses `bulk_archive_media_publications()` RPC for true transactional atomicity.
+Default media ordering is newest-first (`created_at DESC`), not `sort_order ASC`.
+
 ## Architecture at a glance
 
 ```
@@ -128,6 +145,8 @@ Supabase
   ├── tables                    ← players, teams, games, leagues, seasons,
   │                               player_game_stats, store_products,
   │                               media_publications, …
+  │    └─ media_publications: pinned_at, needs_review, parser_confidence,
+  │       parser_uncertain_fields columns; bulk_archive_media_publications() RPC
   ├── RPCs                      ← get_stats_dashboard, get_leaderboards,
   │                               mark_order_paid, finalize_game_stats, …
   └── migrations                ← supabase/migrations/*.sql (date-prefixed)
@@ -139,6 +158,25 @@ Data flow for any page:
 2. Worker handler runs Supabase query (service role — RLS-free).
 3. Handler returns `{ ok, data }` with edge cache headers.
 4. Page renders the array. Empty = visible empty state.
+
+## Skills & Commands
+
+This project includes 7 APEX skills and 1 project context profile in
+`.claude/skills/`. Each skill has YAML frontmatter with `name`,
+`description`, and `triggers` for auto-discovery. See
+[`.claude/README.md`](.claude/README.md) for the full skill map.
+
+**Available slash commands:**
+- `/project:apex-power` — Activate APEX-POWER-20X execution protocol
+- `/project:debug` — Activate 8-phase debug protocol
+- `/project:qa-gate` — Run zero-trust QA verification matrix
+
+**Skill hierarchy:**
+```
+apex-power (meta-skill) → omnidev-v2 | apex-master-debug | apex-frontend
+                        → apex-omnitest | apex-memory | apex-qa
+sbbl-agent (project context) → domain awareness for all skills
+```
 
 ## Common tasks
 
@@ -182,3 +220,10 @@ CI runs all of these. Do not merge red.
   + vitest guardrails (this guide). See
   [`docs/protocols/no-mock-in-production.md`](docs/protocols/no-mock-in-production.md)
   for details.
+
+- **2026-05-13** — Media Intelligence Overhaul. Added `pinned_at`,
+  `needs_review`, `parser_confidence`, `parser_uncertain_fields` columns
+  to `media_publications`; `bulk_archive_media_publications()` RPC for
+  transactional bulk archive; pin-before-archive guard (409 on pinned);
+  two-phase stale cleanup (preview → confirm → execute with server-side
+  re-validation); default ordering changed to newest-first (`created_at DESC`).
