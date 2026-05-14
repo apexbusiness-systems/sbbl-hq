@@ -317,7 +317,7 @@ ppv_invites	PPV invite codes (1 per paid fan per game)
 comp_codes	Super-admin complimentary access codes
 Content
 Table	Purpose
-media_publications	POTG cards, posters, highlights (with sort_order)
+media_publications	POTG cards, posters, highlights. Columns: `sort_order`, `pinned_at` (non-null = pinned; excluded from stale cleanup), `needs_review` (parser flagged low-confidence), `parser_confidence` (0.0–1.0 AI score). Migration: `20260514000100`.
 ingest_submissions	Content ingest pipeline
 publish_jobs	Multi-destination publishing queue
 review_queue	Admin review items

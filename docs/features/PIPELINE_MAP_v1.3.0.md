@@ -1,4 +1,4 @@
-<!-- Version: v1.4.0 | Date: 2026-05-11 | Status: Current -->
+<!-- Version: v1.5.0 | Date: 2026-05-14 | Status: Current -->
 # SBBL HQ Pipeline Map (Internal)
 
 ## 1) Trust Boundary and Env Systems
@@ -68,6 +68,49 @@ Public render contract:
 - Landscape graphic target: `747x560` (`cover`)
 - Store media target: `800x800`
 - Render surface contract uses constrained card ratio (`3:4`) for stable fit in media grids.
+
+## 7) Media Command Center (v1.5.0)
+
+Super-admin-only endpoints for managing the media library. All mutations are audit-logged, idempotent, and rollback-safe.
+
+### New endpoints (migration `20260514000100`)
+
+| Endpoint | Description |
+|---|---|
+| `GET /ops/list/media` | List publications. Supports `needsReview=true`, `search=<term>`, `sortBy=newest\|oldest\|sort_order`. Returns `pinnedAt`, `needsReview`, `parserConfidence`. |
+| `POST /ops/media/publications/:id/pin` | Pin (`{ pin: true }`) or unpin (`{ pin: false }`). Pinned items: excluded from stale cleanup, blocked from archive. |
+| `POST /ops/media/publications/:id/restore` | Restore archived → draft. |
+| `POST /ops/media/bulk-archive` | All-or-nothing bulk archive. 1–100 IDs. Rejects pinned items before mutating. |
+| `GET /ops/media/stale` | Preview stale items (default: >30 days, not pinned, not recently edited). |
+| `POST /ops/media/stale/archive` | Archive confirmed stale IDs. Server re-validates; skips pinned. |
+
+### Schema additions (`media_publications`)
+
+| Column | Type | Description |
+|---|---|---|
+| `pinned_at` | `TIMESTAMPTZ NULL` | Non-null = pinned. Pinned items are protected from stale cleanup and archive. |
+| `needs_review` | `BOOLEAN DEFAULT FALSE` | Parser flagged as low-confidence; requires operator sign-off. |
+| `parser_confidence` | `NUMERIC(5,4) NULL` | 0.0–1.0 AI parser confidence score. NULL if not AI-parsed. |
+
+### UI components (`src/components/OpsMediaLibrary/`)
+
+| Component | Purpose |
+|---|---|
+| `MediaCard` | Card with pin badge, needs-review badge, confidence badge, bulk-select checkbox, restore button. Min 44×44px touch targets. |
+| `MediaFilterBar` | Search input, sort select (newest/oldest/sort_order), needs_review status filter. |
+| `BulkSelectBar` | Sticky bulk selection toolbar (count, select-all, archive N, clear). |
+| `RestoreModal` | Confirm restore-from-archive sheet. |
+| `StaleCleanupModal` | Two-phase stale cleanup: preview (selectable thumbnails) → confirm → archive. |
+
+### Invariants (enforced)
+- **Archive is blocked if item is pinned.** Unpin first.
+- **Bulk archive is all-or-nothing.** If any ID is pinned or missing, nothing is archived.
+- **Stale cleanup never auto-deletes.** It archives only, and only after operator confirmation.
+- **Stale cleanup excludes pinned items and items updated in the last 7 days** — server re-validates at execution time.
+- **`needs_review = true` creates a triage state.** Parser low-confidence items must be reviewed before publish.
+- **Operator-selected league/category overrides parser guesses** — the UI sends explicit fields that the worker trusts over inferred metadata.
+
+---
 
 ## 8) OmniBridge Layer
 

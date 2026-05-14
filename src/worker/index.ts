@@ -2828,30 +2828,47 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   const statusFilter = url.searchParams.get('status');
   const surfaceFilter = url.searchParams.get('surface');
   const leagueFilter = url.searchParams.get('leagueId');
-  const limitParam = Number(url.searchParams.get('limit') ?? '100');
-  const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 100, 1), 200);
+  const needsReviewFilter = url.searchParams.get('needsReview') === 'true';
+  const searchFilter = url.searchParams.get('search')?.trim() ?? '';
+  const sortBy = url.searchParams.get('sortBy') ?? 'newest';
+  const limitParam = Number(url.searchParams.get('limit') ?? '200');
+  const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 200, 1), 500);
 
   let query = admin
     .from('media_publications')
     .select(
-      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,sort_order,league_id,render_payload,' +
+      'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,sort_order,' +
+      'league_id,render_payload,pinned_at,needs_review,parser_confidence,' +
       'media_assets!inner(id,metadata,created_at),' +
       'leagues:leagues!league_id(id,code,name)'
     )
-    .order('sort_order', { ascending: true, nullsFirst: false })
-    .order('id', { ascending: true })
     .limit(limit);
+
+  // Apply sort order
+  if (sortBy === 'sort_order') {
+    query = query
+      .order('sort_order', { ascending: true, nullsFirst: false })
+      .order('id', { ascending: true });
+  } else if (sortBy === 'oldest') {
+    query = query
+      .order('created_at', { referencedTable: 'media_assets', ascending: true });
+  } else {
+    // Default: newest first
+    query = query
+      .order('created_at', { referencedTable: 'media_assets', ascending: false });
+  }
 
   if (statusFilter && isMediaPublicationStatus(statusFilter)) {
     query = query.eq('status', statusFilter);
   }
   if (surfaceFilter) query = query.eq('surface', surfaceFilter);
   if (leagueFilter) query = query.eq('league_id', leagueFilter);
+  if (needsReviewFilter) query = query.eq('needs_review', true);
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((raw) => {
+  let rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((raw) => {
     const asset = (raw.media_assets as Record<string, unknown> | null) ?? {};
     const assetMeta = (asset.metadata as Record<string, unknown> | null) ?? {};
     const payload = (raw.render_payload as Record<string, unknown> | null) ?? {};
@@ -2877,8 +2894,17 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
       type,
       thumbnail,
       createdAt: asset.created_at == null ? null : String(asset.created_at),
+      pinnedAt: raw.pinned_at == null ? null : String(raw.pinned_at),
+      needsReview: raw.needs_review === true,
+      parserConfidence: raw.parser_confidence == null ? null : Number(raw.parser_confidence),
     };
   });
+
+  // Client-side search filter (title contains search term, case-insensitive)
+  if (searchFilter.length > 0) {
+    const term = searchFilter.toLowerCase();
+    rows = rows.filter((r) => r.title.toLowerCase().includes(term));
+  }
 
   return json({ ok: true, data: rows });
 }
@@ -3021,6 +3047,218 @@ async function handleOpsReorderMediaPublications(ctx: HandlerCtx) {
   });
 
   return json({ ok: true, updated: normalized.length });
+}
+
+// ── POST /ops/media/bulk-archive ──────────────────────────────────────────
+// All-or-nothing bulk archive. Rejects pinned items and already-archived items.
+// Accepts 1–100 IDs. Validates all before mutating any.
+async function handleOpsBulkArchiveMedia(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const body = (await ctx.req.json().catch(() => null)) as { ids?: unknown } | null;
+  const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]) : [];
+  if (ids.length === 0) return json({ ok: false, error: 'empty_ids' }, 400);
+  if (ids.length > 100) return json({ ok: false, error: 'too_many_ids (max 100)' }, 400);
+  if (!ids.every((id) => typeof id === 'string' && id.length > 0)) {
+    return json({ ok: false, error: 'invalid_ids' }, 400);
+  }
+  const validIds = ids as string[];
+  const uniqueIds = [...new Set(validIds)];
+
+  // Validate: fetch all rows, check pinned/archived state before touching anything
+  const { data: rows, error: fetchErr } = await ctx.admin
+    .from('media_publications')
+    .select('id,status,pinned_at')
+    .in('id', uniqueIds);
+  if (fetchErr) throw new Error(fetchErr.message);
+
+  const found = new Map((rows ?? []).map((r) => [String(r.id), r]));
+  const missing = uniqueIds.filter((id) => !found.has(id));
+  if (missing.length > 0) {
+    return json({ ok: false, error: 'invalid_ids', invalidIds: missing }, 400);
+  }
+  const pinned = uniqueIds.filter((id) => found.get(id)?.pinned_at != null);
+  if (pinned.length > 0) {
+    return json({ ok: false, error: 'pinned_items_cannot_be_archived', invalidIds: pinned }, 400);
+  }
+
+  const { error: updateErr } = await ctx.admin
+    .from('media_publications')
+    .update({ status: 'archived', published_at: null })
+    .in('id', uniqueIds)
+    .neq('status', 'archived');
+  if (updateErr) throw new Error(updateErr.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_bulk_archive_media',
+    ref_type: 'media_publications',
+    ref_id: null,
+    payload: { count: uniqueIds.length, ids: uniqueIds },
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, archived: uniqueIds.length, ids: uniqueIds });
+}
+
+// ── POST /ops/media/publications/:id/pin ─────────────────────────────────
+// Toggle pin state. Body: { pin: boolean }. Pinned items cannot be archived.
+async function handleOpsPinMediaPublication(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const id = ctx.params.id;
+  if (!id) return json({ ok: false, error: 'missing_id' }, 400);
+
+  const body = (await ctx.req.json().catch(() => null)) as { pin?: unknown } | null;
+  if (body == null || typeof body.pin !== 'boolean') {
+    return json({ ok: false, error: 'body must be { pin: boolean }' }, 400);
+  }
+
+  const pinnedAt = body.pin ? new Date().toISOString() : null;
+  const { data, error } = await ctx.admin
+    .from('media_publications')
+    .update({ pinned_at: pinnedAt })
+    .eq('id', id)
+    .select('id,pinned_at')
+    .single();
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: body.pin ? 'ops_pin_media_publication' : 'ops_unpin_media_publication',
+    ref_type: 'media_publications',
+    ref_id: id,
+    payload: { pin: body.pin },
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, data });
+}
+
+// ── POST /ops/media/publications/:id/restore ──────────────────────────────
+// Restore an archived publication back to draft status.
+async function handleOpsRestoreMediaPublication(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const id = ctx.params.id;
+  if (!id) return json({ ok: false, error: 'missing_id' }, 400);
+
+  const { data: existing, error: fetchErr } = await ctx.admin
+    .from('media_publications')
+    .select('id,status')
+    .eq('id', id)
+    .single();
+  if (fetchErr) throw new Error(fetchErr.message);
+  if (existing?.status !== 'archived') {
+    return json({ ok: false, error: 'only_archived_items_can_be_restored' }, 400);
+  }
+
+  const { data, error } = await ctx.admin
+    .from('media_publications')
+    .update({ status: 'draft', published_at: null })
+    .eq('id', id)
+    .select('id,status')
+    .single();
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_restore_media_publication',
+    ref_type: 'media_publications',
+    ref_id: id,
+    payload: {},
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, data });
+}
+
+// ── GET /ops/media/stale ──────────────────────────────────────────────────
+// List stale unpinned media (older than threshold days, not recently edited).
+// Returns IDs + metadata for preview before archival.
+async function handleOpsListStaleMedia({ req, admin }: HandlerCtx) {
+  await requireSuperAdminSession(req, admin);
+  const url = new URL(req.url);
+  const daysParam = Number(url.searchParams.get('days') ?? '30');
+  const days = Number.isFinite(daysParam) && daysParam > 0 ? Math.min(daysParam, 365) : 30;
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const { data, error } = await admin
+    .from('media_publications')
+    .select(
+      'id,title,surface,status,pinned_at,needs_review,render_payload,' +
+      'media_assets!inner(id,metadata,created_at,updated_at)'
+    )
+    .neq('status', 'archived')
+    .is('pinned_at', null)
+    .eq('needs_review', false)
+    .lt('created_at', cutoff);
+  if (error) throw new Error(error.message);
+
+  const rows = ((data ?? []) as unknown as Record<string, unknown>[])
+    .filter((raw) => {
+      const asset = (raw.media_assets as Record<string, unknown> | null) ?? {};
+      const updatedAt = asset.updated_at ? String(asset.updated_at) : null;
+      // Exclude items updated within the last 7 days (recently edited)
+      if (updatedAt && new Date(updatedAt) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)) {
+        return false;
+      }
+      return true;
+    })
+    .map((raw) => {
+      const asset = (raw.media_assets as Record<string, unknown> | null) ?? {};
+      const assetMeta = (asset.metadata as Record<string, unknown> | null) ?? {};
+      const payload = (raw.render_payload as Record<string, unknown> | null) ?? {};
+      const thumbnail = String(
+        payload.thumbnail ?? payload.image_url ?? assetMeta.thumbnail ?? assetMeta.image_url ?? ''
+      );
+      return {
+        id: String(raw.id),
+        title: String(raw.title ?? ''),
+        surface: String(raw.surface ?? ''),
+        status: String(raw.status ?? ''),
+        thumbnail,
+        createdAt: asset.created_at == null ? null : String(asset.created_at),
+      };
+    });
+
+  return json({ ok: true, data: rows, days });
+}
+
+// ── POST /ops/media/stale/archive ─────────────────────────────────────────
+// Archive a confirmed set of stale media IDs. Server re-validates before executing.
+// Pinned items in the list are silently skipped (not rejected) to be safe.
+async function handleOpsArchiveStaleMedia(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const body = (await ctx.req.json().catch(() => null)) as { ids?: unknown } | null;
+  const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]) : [];
+  if (ids.length === 0) return json({ ok: false, error: 'empty_ids' }, 400);
+  if (ids.length > 200) return json({ ok: false, error: 'too_many_ids (max 200)' }, 400);
+  if (!ids.every((id) => typeof id === 'string' && id.length > 0)) {
+    return json({ ok: false, error: 'invalid_ids' }, 400);
+  }
+  const validIds = [...new Set(ids as string[])];
+
+  // Re-validate: skip pinned items; archive the rest
+  const { error } = await ctx.admin
+    .from('media_publications')
+    .update({ status: 'archived', published_at: null })
+    .in('id', validIds)
+    .is('pinned_at', null)
+    .neq('status', 'archived');
+  if (error) throw new Error(error.message);
+
+  await ctx.admin.from('audit_logs').insert({
+    actor_id: userId,
+    action: 'ops_archive_stale_media',
+    ref_type: 'media_publications',
+    ref_id: null,
+    payload: { count: validIds.length, ids: validIds },
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, archived: validIds.length });
 }
 
 
@@ -7662,10 +7900,15 @@ routes.push(
   { method: "GET",    path: "/ops/list/players",   handler: handleOpsListPlayers },
   { method: "GET",    path: "/ops/list/products",  handler: handleOpsListProducts },
   { method: "GET",    path: "/ops/list/events",    handler: handleOpsListEvents },
-  { method: "GET",    path: "/ops/list/media",              handler: handleOpsListMediaPublications },
-  { method: "PATCH",  path: "/ops/media/publications/:id",  handler: handleOpsPatchMediaPublications },
-  { method: "DELETE", path: "/ops/media/publications/:id",  handler: handleOpsDeleteMediaPublications },
-  { method: "POST",   path: "/ops/media/publications/order", handler: handleOpsReorderMediaPublications },
+  { method: "GET",    path: "/ops/list/media",                        handler: handleOpsListMediaPublications },
+  { method: "PATCH",  path: "/ops/media/publications/:id",            handler: handleOpsPatchMediaPublications },
+  { method: "DELETE", path: "/ops/media/publications/:id",            handler: handleOpsDeleteMediaPublications },
+  { method: "POST",   path: "/ops/media/publications/order",          handler: handleOpsReorderMediaPublications },
+  { method: "POST",   path: "/ops/media/bulk-archive",                handler: handleOpsBulkArchiveMedia },
+  { method: "POST",   path: "/ops/media/publications/:id/pin",        handler: handleOpsPinMediaPublication },
+  { method: "POST",   path: "/ops/media/publications/:id/restore",    handler: handleOpsRestoreMediaPublication },
+  { method: "GET",    path: "/ops/media/stale",                       handler: handleOpsListStaleMedia },
+  { method: "POST",   path: "/ops/media/stale/archive",               handler: handleOpsArchiveStaleMedia },
 );
 
 // ── Scores handlers ────────────────────────────────────────────────────────

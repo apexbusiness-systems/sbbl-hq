@@ -1,9 +1,19 @@
-<!-- Version: v1.4.0 | Date: 2026-05-11 | Status: Current -->
+<!-- Version: v1.5.0 | Date: 2026-05-14 | Status: Current -->
 # SBBL Worker API Reference
 
-**Version:** v1.4.0
-**Previous:** v1.3.0 (2026-05-06)
-**Last Updated:** 2026-05-11
+**Version:** v1.5.0
+**Previous:** v1.4.0 (2026-05-11)
+**Last Updated:** 2026-05-14
+
+**Changelog (v1.4.0 → v1.5.0):**
+- Added **Media Command Center** endpoints (super_admin only):
+  - `GET /ops/list/media` — now returns `pinnedAt`, `needsReview`, `parserConfidence`; supports `needsReview`, `search`, `sortBy` query params.
+  - `POST /ops/media/bulk-archive` — all-or-nothing bulk archive (1–100 IDs); rejects pinned items.
+  - `POST /ops/media/publications/:id/pin` — toggle pin (`{ pin: boolean }`); pinned items are excluded from stale cleanup and cannot be archived until unpinned.
+  - `POST /ops/media/publications/:id/restore` — restore archived → draft.
+  - `GET /ops/media/stale` — list stale unpinned items older than `?days=` (default 30); excludes pinned and recently-edited.
+  - `POST /ops/media/stale/archive` — archive confirmed stale IDs; server re-validates and skips pinned items.
+- `media_publications` schema extended with `pinned_at TIMESTAMPTZ NULL`, `needs_review BOOLEAN DEFAULT FALSE`, `parser_confidence NUMERIC(5,4) NULL` (migration `20260514000100`).
 
 **Changelog (v1.3.0 → v1.4.0):**
 - Added **OmniBridge** section documenting `POST /webhooks/omnihub`
@@ -141,6 +151,17 @@ Require `league_admin`, `super_admin`, or `team_manager` role.
 - `POST /ops/store/media` — Upload store media.
 - `POST /ops/potg/parse` — Parse POTG image with AI.
 - `POST /ops/potg/submit` — Submit POTG record.
+
+#### Media Library (super_admin only)
+- `GET /ops/list/media` — List media publications. Query params: `status`, `surface`, `leagueId`, `needsReview=true`, `search=<term>`, `sortBy=newest|oldest|sort_order`, `limit`. Response includes `pinnedAt`, `needsReview`, `parserConfidence` fields.
+- `PATCH /ops/media/publications/:id` — Edit metadata (title, status, leagueId, sortAt). Audit-logged.
+- `DELETE /ops/media/publications/:id` — Archive (sets `status='archived'`). Cannot archive pinned items — unpin first. Audit-logged.
+- `POST /ops/media/publications/order` — Persist manual drag-reorder (`{ items: [{ id, sortOrder }] }`). Audit-logged.
+- `POST /ops/media/publications/:id/pin` — Toggle pin. Body: `{ pin: boolean }`. Pinned items are excluded from stale cleanup and cannot be archived until unpinned. Audit-logged.
+- `POST /ops/media/publications/:id/restore` — Restore archived → draft. Rejects non-archived items. Audit-logged.
+- `POST /ops/media/bulk-archive` — All-or-nothing bulk archive. Body: `{ ids: string[] }` (1–100). Validates all IDs exist and are not pinned before mutating any. Returns `{ ok, archived, ids }`. Audit-logged.
+- `GET /ops/media/stale` — List stale unpinned media. Query param: `?days=30` (default, max 365). Excludes pinned items and items updated in the last 7 days.
+- `POST /ops/media/stale/archive` — Archive confirmed stale IDs. Body: `{ ids: string[] }`. Server re-validates before executing; silently skips pinned items. Audit-logged.
 - `POST /api/coach/request` — Coach approval request.
 - `GET /ops/coach/requests` — List coach requests.
 - `POST /ops/coach/:id/resolve` — Resolve coach request.

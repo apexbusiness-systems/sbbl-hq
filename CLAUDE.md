@@ -749,6 +749,52 @@ CI runs all of these. Do not merge red.
   [`docs/protocols/no-mock-in-production.md`](docs/protocols/no-mock-in-production.md)
   for details.
 
+### 9. Media Command Center — Touch-First UX (v1.5.0)
+
+The Ops Console Media Library tab was overhauled into a full touch-first media command center (super_admin only). Key invariants:
+
+#### 9.1 — Pinned items are protected
+
+`media_publications.pinned_at` (non-null = pinned). Pinned items:
+- Cannot be archived via single-item or bulk-archive until unpinned.
+- Are excluded from stale cleanup (both preview and execution).
+- Show a "Pinned" badge and pin/unpin button in the UI.
+
+#### 9.2 — Bulk archive is all-or-nothing
+
+`POST /ops/media/bulk-archive` accepts 1–100 IDs. It validates that all IDs exist and none are pinned **before mutating any**. If any validation fails, nothing is archived. The error response includes `invalidIds`.
+
+#### 9.3 — Stale cleanup is two-phase
+
+`GET /ops/media/stale` returns a preview (thumbnail + metadata) of items older than `?days` (default 30) that are unpinned and not recently edited (7-day grace window). The operator selects which to archive. `POST /ops/media/stale/archive` re-validates server-side before archiving, silently skipping any items that have been pinned since the preview was fetched.
+
+#### 9.4 — Restore never permanently deletes
+
+`POST /ops/media/publications/:id/restore` restores archived items back to `draft`. Permanent deletion has no UI surface. Archive first, review, then restore or leave archived.
+
+#### 9.5 — Needs Review is a triage state, not a status
+
+`media_publications.needs_review = true` means the parser detected low confidence. It is a separate flag, not a literal `status` value. In the UI, "Needs Review" is a virtual filter (maps to `needsReview=true` query param). Items with `needsReview = true` show an animated "Needs Review" badge. Operator approval clears the flag.
+
+#### 9.6 — Parser confidence is advisory only
+
+`media_publications.parser_confidence` (0.0–1.0) is advisory metadata set by the AI ingest pipeline. Operator-selected league/surface/category always overrides parser guesses. Never invent labels — uncertain fields should be `null`.
+
+#### 9.7 — Sort defaults to newest first
+
+`GET /ops/list/media` defaults to `sortBy=newest` (ordered by `media_assets.created_at DESC`). `sortBy=sort_order` enables manual drag ordering. `sortBy=oldest` is available for triage workflows.
+
+#### Component map (new/updated in v1.5.0)
+
+| Component | File | Purpose |
+|---|---|---|
+| `MediaCard` | `OpsMediaLibrary/MediaCard.tsx` | Pin badge, needs-review badge, confidence badge, bulk-select checkbox, restore button |
+| `MediaFilterBar` | `OpsMediaLibrary/MediaFilterBar.tsx` | Search, sort selector, needs_review filter |
+| `BulkSelectBar` | `OpsMediaLibrary/BulkSelectBar.tsx` | Sticky bulk selection toolbar |
+| `RestoreModal` | `OpsMediaLibrary/RestoreModal.tsx` | Confirm restore-from-archive |
+| `StaleCleanupModal` | `OpsMediaLibrary/StaleCleanupModal.tsx` | Two-phase stale cleanup preview+confirm |
+| `useOpsMediaLibrary` | `hooks/useOpsMediaLibrary.ts` | Hook: all media state, mutations, and actions |
+
 ---
 
-Last verified: 2026-05-11
+Last verified: 2026-05-14

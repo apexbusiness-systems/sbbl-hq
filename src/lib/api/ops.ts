@@ -108,12 +108,27 @@ export type OpsMediaPublication = {
   type: string;
   thumbnail: string;
   createdAt: string | null;
+  pinnedAt: string | null;
+  needsReview: boolean;
+  parserConfidence: number | null;
+};
+
+export type OpsStaleMedia = {
+  id: string;
+  title: string;
+  surface: string;
+  status: string;
+  thumbnail: string;
+  createdAt: string | null;
 };
 
 export type OpsMediaListFilters = {
   status?: MediaPublicationStatus | 'all';
   surface?: string | 'all';
   leagueId?: string;
+  needsReview?: boolean;
+  search?: string;
+  sortBy?: 'newest' | 'oldest' | 'sort_order';
   limit?: number;
 };
 
@@ -122,6 +137,9 @@ export async function fetchOpsMediaList(filters: OpsMediaListFilters = {}) {
   if (filters.status && filters.status !== 'all') params.set('status', filters.status);
   if (filters.surface && filters.surface !== 'all') params.set('surface', filters.surface);
   if (filters.leagueId) params.set('leagueId', filters.leagueId);
+  if (filters.needsReview) params.set('needsReview', 'true');
+  if (filters.search) params.set('search', filters.search);
+  if (filters.sortBy) params.set('sortBy', filters.sortBy);
   if (filters.limit) params.set('limit', String(filters.limit));
   const qs = params.toString();
   const suffix = qs.length > 0 ? `?${qs}` : '';
@@ -395,6 +413,75 @@ export async function ingestReplay(jobId: string) {
       method: 'POST',
       headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ingest-replay-${jobId}`) },
       body: JSON.stringify({}),
+    }
+  );
+}
+
+// ── Media Command Center — new endpoints ─────────────────────────────────
+
+/** Bulk archive up to 100 media publications (all-or-nothing; pinned items rejected). */
+export async function bulkArchiveOpsMedia(ids: string[]) {
+  return apiFetch<{ ok: boolean; archived: number; ids: string[]; error?: string; invalidIds?: string[] }>(
+    '/ops/media/bulk-archive',
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-media-bulk-archive-${ids.sort().join('-').slice(0, 64)}`) },
+      body: JSON.stringify({ ids }),
+    }
+  );
+}
+
+/** Pin a media publication (excludes from stale cleanup; blocks archive until unpinned). */
+export async function pinOpsMediaPublication(id: string) {
+  return apiFetch<{ ok: boolean; data: { id: string; pinnedAt: string } }>(
+    `/ops/media/publications/${id}/pin`,
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-media-pin-${id}`) },
+      body: JSON.stringify({ pin: true }),
+    }
+  );
+}
+
+/** Unpin a media publication. */
+export async function unpinOpsMediaPublication(id: string) {
+  return apiFetch<{ ok: boolean; data: { id: string; pinnedAt: null } }>(
+    `/ops/media/publications/${id}/pin`,
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-media-unpin-${id}`) },
+      body: JSON.stringify({ pin: false }),
+    }
+  );
+}
+
+/** Restore an archived media publication back to draft. */
+export async function restoreOpsMediaPublication(id: string) {
+  return apiFetch<{ ok: boolean; data: { id: string; status: string } }>(
+    `/ops/media/publications/${id}/restore`,
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-media-restore-${id}`) },
+      body: JSON.stringify({}),
+    }
+  );
+}
+
+/** List stale unpinned media older than `days` days (default 30). */
+export async function fetchOpsStaleMedia(days = 30) {
+  return apiFetch<{ ok: boolean; data: OpsStaleMedia[]; days: number }>(
+    `/ops/media/stale?days=${days}`
+  );
+}
+
+/** Archive a confirmed set of stale media IDs. Server re-validates and skips pinned items. */
+export async function archiveOpsStaleMedia(ids: string[], idempotencyKey: string) {
+  return apiFetch<{ ok: boolean; archived: number }>(
+    '/ops/media/stale/archive',
+    {
+      method: 'POST',
+      headers: { [IDEMPOTENCY_HEADER]: idempotencyKey },
+      body: JSON.stringify({ ids }),
     }
   );
 }
