@@ -64,8 +64,8 @@ function AccessCodeRedeem({
     try {
       await redeemAccessCode(
         trimmed,
-        { captchaToken: await resolveToken() },
         null,
+        { captchaToken: await resolveToken() },
       );
       toast.success('Access granted — loading stream…');
       if (onRedeemed) {

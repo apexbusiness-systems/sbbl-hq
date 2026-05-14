@@ -82,7 +82,6 @@ function mapHomeGameToUi(row: Record<string, unknown>): Game {
     status: String(row.status ?? 'upcoming') as Game['status'],
     score: { home: Number(row.home_score ?? 0), away: Number(row.away_score ?? 0) },
     ppvPrice: 4.99,
-    stream_url: typeof row.stream_url === 'string' ? row.stream_url : null,
   };
 }
 
@@ -243,8 +242,8 @@ function AdminStreamOverlay({
       const expiresInHours = Number.isFinite(hours) && hours > 0 ? Math.min(168, hours) : 24;
       const res = await generateCompCode(
         gameId,
-        { note: compNote.trim() || undefined, expiresInHours },
         token,
+        { note: compNote.trim() || undefined, expiresInHours },
       );
       if (res.ok) {
         setCompCode(res.code);
@@ -1292,7 +1291,7 @@ const LivePage = () => {
               ) : (liveGame || fallbackBroadcastGame) ? (
                <PlayerErrorBoundary key={streamNonce}>
   {(() => {
-    const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.stream_url || "";
+    const rawUrl = customStreamUrl || "";
 const playable = toPlayableUrl(rawUrl);
 const playableUrl = playable.url || rawUrl;   // ← the fix
 const streamType = detectStreamUrlType(playableUrl);

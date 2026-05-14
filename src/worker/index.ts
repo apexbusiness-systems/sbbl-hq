@@ -312,7 +312,7 @@ async function verifyProxyToken(token: string, secret: string): Promise<ProxyTok
     false,
     ["verify"],
   );
-  const valid = await crypto.subtle.verify("HMAC", key, signatureBytes, payloadBytes);
+  const valid = await crypto.subtle.verify("HMAC", key, signatureBytes as BufferSource, payloadBytes as BufferSource);
   if (!valid) return null;
   const payload = JSON.parse(new TextDecoder().decode(payloadBytes)) as ProxyTokenPayload;
   if (
@@ -1750,7 +1750,7 @@ async function verifyOmnihubCommandSignature(
   return crypto.subtle.verify(
     "HMAC",
     key,
-    sigBytes,
+    sigBytes as BufferSource,
     new TextEncoder().encode(JSON.stringify(command)),
   );
 }
