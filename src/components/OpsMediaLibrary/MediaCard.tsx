@@ -13,8 +13,7 @@ import {
 import type { OpsMediaPublication } from '@/lib/api/ops';
 import type { LeagueId } from '@/types';
 import { getLeagueConfig } from '@/lib/leagues';
-import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities';
-import type { DraggableAttributes } from '@dnd-kit/core';
+import type { DraggableAttributes, DraggableSyntheticListeners } from '@dnd-kit/core';
 
 export type MediaCardProps = {
   publication: OpsMediaPublication;
@@ -29,7 +28,7 @@ export type MediaCardProps = {
   onToggleSelect: () => void;
   isLoading: boolean;
   editsDisabled: boolean;
-  dragListeners?: SyntheticListenerMap;
+  dragListeners?: DraggableSyntheticListeners;
   dragAttributes?: DraggableAttributes;
   isDragging?: boolean;
 };
