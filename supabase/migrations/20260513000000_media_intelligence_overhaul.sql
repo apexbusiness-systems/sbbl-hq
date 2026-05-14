@@ -31,7 +31,27 @@ ALTER TABLE media_publications
   ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
 
 -- ============================================================
--- 4. Indexes
+-- 4. Trigger to maintain updated_at on every mutation
+--    DEFAULT now() only applies on INSERT. Without this trigger,
+--    stale cleanup (which depends on updated_at) would treat every
+--    row as "never edited since creation", causing false positives.
+-- ============================================================
+CREATE OR REPLACE FUNCTION media_publications_set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_media_publications_updated_at ON media_publications;
+CREATE TRIGGER trg_media_publications_updated_at
+  BEFORE UPDATE ON media_publications
+  FOR EACH ROW
+  EXECUTE FUNCTION media_publications_set_updated_at();
+
+-- ============================================================
+-- 5. Indexes
 -- ============================================================
 
 -- Stale cleanup: published items by age, pin status, and edit recency
@@ -50,18 +70,19 @@ CREATE INDEX IF NOT EXISTS idx_media_publications_title_lower
   ON media_publications (lower(title));
 
 -- ============================================================
--- 5. Bulk archive RPC (transactional: validates all IDs + archives in single TX)
---    All-or-nothing: if any ID is invalid, pinned, or already archived, the
---    entire operation is rejected and no rows are modified.
+-- 6. Bulk archive RPC (transactional: validates all IDs + archives in single TX)
+--    All-or-nothing: if any ID is invalid or pinned, the entire operation
+--    is rejected and no rows are modified. Already-archived IDs are silently
+--    skipped (idempotent) and NOT returned — the caller gets only the IDs
+--    that were actually transitioned to archived in this call.
 -- ============================================================
 CREATE OR REPLACE FUNCTION bulk_archive_media_publications(p_ids uuid[])
 RETURNS TABLE(archived_id uuid) AS $$
 DECLARE
   v_invalid_ids uuid[];
   v_pinned_ids uuid[];
-  v_already_archived_ids uuid[];
 BEGIN
-  -- Validate: find IDs that don't exist
+  -- Validate: find IDs that do not exist
   SELECT array_agg(t.id) INTO v_invalid_ids
     FROM UNNEST(p_ids) AS t(id)
     WHERE NOT EXISTS (
@@ -79,20 +100,18 @@ BEGIN
     RAISE EXCEPTION 'pinned_ids: %', v_pinned_ids;
   END IF;
 
-  -- Validate: find IDs that are already archived (idempotent skip, not error,
-  -- but we report them so the caller knows the actual count of newly archived)
-  -- Already-archived items are simply excluded from the UPDATE below.
-
-  -- Atomic update: archive all eligible items
+  -- Atomic update: archive eligible items and return ONLY the rows
+  -- actually changed. Already-archived IDs are excluded by the WHERE
+  -- clause, so they never appear in the result set. The caller gets
+  -- the true count of newly archived items.
+  RETURN QUERY
   UPDATE media_publications
     SET status = 'archived',
         published_at = NULL,
         updated_at = now()
     WHERE id = ANY(p_ids)
-      AND status != 'archived';
-
-  -- Return all IDs that were in the request (for caller confirmation)
-  RETURN QUERY SELECT t.id FROM UNNEST(p_ids) AS t(id);
+      AND status != 'archived'
+  RETURNING id;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

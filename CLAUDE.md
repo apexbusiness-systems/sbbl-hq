@@ -1,14 +1,5 @@
 # Claude / Agent Operating Guide â SBBL-HQ
 
-**Version:** 2.0.0  
-**Last Updated:** 2026-05-13  
-**Verified Against:** Full repo audit — `package.json v1.3.0`, `ci.yml`, `deploy.yml`, `wrangler.jsonc`, `src/worker/bindings.d.ts`  
-
-> **Extended documentation:** See [`docs/MASTER_INDEX.md`](docs/MASTER_INDEX.md) for the complete doc hub, runbooks, and onboarding guides.  
-> **Full onboarding:** See [`docs/onboarding/AGENT_ONBOARDING.md`](docs/onboarding/AGENT_ONBOARDING.md).
-
-
-
 Welcome. This document is the **single source of truth** for agents
 working in this repo. Read it in full before your first edit.
 
@@ -122,11 +113,13 @@ This rule is enforced by:
 ### 5. Media Publications — Pin Before Archive, Two-Phase Cleanup
 
 Pinned media CANNOT be archived (worker returns 409). Unpin before archiving.
-Stale cleanup is two-phase: preview → confirm (type "ARCHIVE") → execute.
+Stale cleanup is two-phase: preview → confirm (type ARCHIVE) → execute.
 The execute phase re-validates server-side (never trusts client-sent IDs).
-Bulk archive uses `bulk_archive_media_publications()` RPC for true transactional atomicity.
-Default media ordering is newest-first (`created_at DESC`), not `sort_order ASC`.
-
+Bulk archive uses bulk_archive_media_publications() RPC for true transactional atomicity.
+updated_at is maintained by a BEFORE UPDATE trigger on media_publications.
+Default media ordering is newest-first (created_at DESC), not sort_order ASC.
+Already-archived IDs passed to bulk archive are silently skipped and not returned;
+the response ids array contains only IDs that were actually transitioned.
 ### 6. Live Player Invariants — do not regress v1.4.0
 
 The live-stream player (`src/components/LiveStreamPlayer.tsx`) is the
@@ -423,7 +416,7 @@ const hasAccess = hasPrivilegedRole || isRegisteredFan;
 ```
 
 **Known tech debt (S1 — LOW):** `useLiveAccess.ts` reads `stream_admin_config`
-directly at line 39 to obtain `active_game_id`. Per rule 7.1 this should come
+directly at line 39 to obtain `active_game_id`. Per rule 6.1 this should come
 from `get_active_broadcast()`, which already returns `active_game_id`. The hook
 is chrome-only (guarded by `Live.tsx:1458`) so it is low risk, but it is a
 tracked contract violation.
@@ -454,7 +447,7 @@ If a regression test fails on your branch, **read the failing assertion**.
 Each one maps to a real production incident from v1.3.x. Disabling the
 test is never the right answer.
 
-## §9 OmniBridge — APEX-OmniHub Integration (DO NOT DRIFT)
+## §8 OmniBridge — APEX-OmniHub Integration (DO NOT DRIFT)
 
 This section documents the bidirectional sync bridge between SBBL-HQ and
 APEX-OmniHub, merged in PR #502. All rules below are permanent. Agents
@@ -619,7 +612,7 @@ a PPV entitlement, or any other entity.**
 The following invariants are permanent. No agent, PR, or migration may
 violate them without explicit written approval from the repo owner:
 
-#### 7.1 — `/api/broadcast/*` is frozen to agents
+#### 8.1 — `/api/broadcast/*` is frozen to agents
 
 The route family `POST /api/broadcast/access`, `POST /api/broadcast/session`,
 `POST /api/broadcast/session/heartbeat`, and `POST /api/broadcast/session/end`
@@ -631,14 +624,14 @@ a change. Do not:
 - Rename or move these routes.
 - Add authentication layers beyond the existing `requireAuth`.
 
-#### 7.2 — Broadcast access = registration only
+#### 8.2 — Broadcast access = registration only
 
 The only requirement to watch a broadcast is a completed SBBL HQ account
 (`onboarding_completed_at IS NOT NULL`). There is no PPV, no game
 entitlement, no `can_user_view_stream` call, and no `stream_entitlements`
 row involved. This is intentional.
 
-#### 7.3 — `LiveStreamPlayer` must route `game.id === 'broadcast'` to `/api/broadcast/*`
+#### 8.3 — `LiveStreamPlayer` must route `game.id === 'broadcast'` to `/api/broadcast/*`
 
 When `game.id === 'broadcast'`, all session API calls in `LiveStreamPlayer.tsx`
 MUST target the canonical broadcast endpoints:
@@ -654,7 +647,7 @@ Do NOT route the broadcast alias through `/api/streams/broadcast/*`. The
 legacy alias routes exist only for backward compatibility and are not
 guaranteed to remain.
 
-#### 7.4 — No further modifications without owner approval
+#### 8.4 — No further modifications without owner approval
 
 If you are an agent reading this: **stop**. Do not plan, propose, or
 implement any change to the broadcast stream system unless the operator
@@ -675,16 +668,14 @@ Cloudflare Worker (src/worker/index.ts, src/worker/routes/*)
   âââ requireAuth(req)          â throws on missing x-sbbl-user-id-verified
   âââ admin = getAdminClient()  â Supabase service-role
   âââ route table at bottom     â append new routes here
-Supabase
-  ├── tables                    ← players, teams, games, leagues, seasons,
-  │                               player_game_stats, store_products,
-  │                               media_publications, …
-  │    └─ media_publications: pinned_at, needs_review, parser_confidence,
-  │       parser_uncertain_fields columns; bulk_archive_media_publications() RPC
-  ├── RPCs                      ← get_stats_dashboard, get_leaderboards,
-  │                               mark_order_paid, finalize_game_stats, …
-  └── migrations                ← supabase/migrations/*.sql (date-prefixed)
 
+Supabase
+  âââ tables                    â players, teams, games, leagues, seasons,
+  â                               player_game_stats, store_products,
+  â                               media_publications, â¦
+  âââ RPCs                      â get_stats_dashboard, get_leaderboards,
+  â                               mark_order_paid, finalize_game_stats, â¦
+  âââ migrations                â supabase/migrations/*.sql (date-prefixed)
 ```
 
 Data flow for any page:
@@ -767,13 +758,6 @@ CI runs all of these. Do not merge red.
   + vitest guardrails (this guide). See
   [`docs/protocols/no-mock-in-production.md`](docs/protocols/no-mock-in-production.md)
   for details.
-
-- **2026-05-13** — Media Intelligence Overhaul. Added `pinned_at`,
-  `needs_review`, `parser_confidence`, `parser_uncertain_fields` columns
-  to `media_publications`; `bulk_archive_media_publications()` RPC for
-  transactional bulk archive; pin-before-archive guard (409 on pinned);
-  two-phase stale cleanup (preview → confirm → execute with server-side
-  re-validation); default ordering changed to newest-first (`created_at DESC`).
 
 ---
 

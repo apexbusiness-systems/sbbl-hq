@@ -292,6 +292,22 @@ function AdminStreamOverlay({
           onGoLive?.();
           toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
           if (nextLive) setOpen(false);
+        // Sync stream_sessions + stream_sources so non-admin RLS queries resolve.
+        // This is additive — it runs after the primary stream_admin_config write.
+        // Non-fatal: a failure here does not roll back the go-live action.
+        try {
+          const supabase = getSupabaseClient();
+          if (supabase) {
+            await supabase.rpc('admin_sync_broadcast_to_sessions', {
+              p_game_id:       activeGameId ?? null,
+              p_stream_url:    nextLive ? (normalizedUrl || null) : null,
+              p_is_going_live: nextLive,
+            });
+          }
+        } catch {
+          // Non-fatal: primary broadcast state already saved above.
+        }
+
         }
       } catch {
         // Atomic endpoint not yet deployed — fall back to sequential calls
@@ -312,6 +328,22 @@ function AdminStreamOverlay({
         setTimeout(() => { onGoLive?.(); }, 500);
         toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
         if (nextLive) setOpen(false);
+        // Sync stream_sessions + stream_sources so non-admin RLS queries resolve.
+        // This is additive — it runs after the primary stream_admin_config write.
+        // Non-fatal: a failure here does not roll back the go-live action.
+        try {
+          const supabase = getSupabaseClient();
+          if (supabase) {
+            await supabase.rpc('admin_sync_broadcast_to_sessions', {
+              p_game_id:       activeGameId ?? null,
+              p_stream_url:    nextLive ? (normalizedUrl || null) : null,
+              p_is_going_live: nextLive,
+            });
+          }
+        } catch {
+          // Non-fatal: primary broadcast state already saved above.
+        }
+
       }
     } catch (err) {
       toast.error(`Failed to save config: ${err instanceof Error ? err.message : String(err)}`);
@@ -1179,7 +1211,7 @@ const LivePage = () => {
   // Fan who registered but hasn't completed onboarding must finish it before
   // reaching the PPV paywall.
   if (!authLoading && needsOnboarding) {
-    return <Navigate to="/onboarding?redirect=/live" replace />;
+    return <Navigate to='/onboarding?intent=fan&redirect=/live' replace />;
   }
 
   const sidebar = (

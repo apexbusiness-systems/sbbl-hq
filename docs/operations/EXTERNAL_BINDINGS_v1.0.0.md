@@ -1,0 +1,8 @@
+<!-- Version: v1.0.0 | Date: 2026-04-04 | Status: Current -->
+- set SUPABASE_SERVICE_ROLE_KEY in Cloudflare secrets
+- set payment provider secrets and webhook signing secret
+- set email provider secret
+- optionally set social API keys
+- attach custom domain
+- run production acceptance QA
+- confirm upstream stream privacy settings for hard PPV enforcement

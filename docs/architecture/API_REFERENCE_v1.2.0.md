@@ -1,9 +1,9 @@
-<!-- Version: v1.4.0 | Date: 2026-05-13 | Status: Current -->
+<!-- Version: v1.4.0 | Date: 2026-05-11 | Status: Current -->
 # SBBL Worker API Reference
 
 **Version:** v1.4.0
 **Previous:** v1.3.0 (2026-05-06)
-**Last Updated:** 2026-05-13
+**Last Updated:** 2026-05-11
 
 **Changelog (v1.3.0 → v1.4.0):**
 - Added **OmniBridge** section documenting `POST /webhooks/omnihub`
@@ -139,11 +139,6 @@ Require `league_admin`, `super_admin`, or `team_manager` role.
 - `POST /ops/imports/:kind` — CSV import (teams, players, schedules, events).
 - `GET /ops/imports/history` — Import job history.
 - `POST /ops/store/media` — Upload store media.
-- `GET /api/ops/list/media` — List media publications. Query params: `q` (ILIKE search on title+subtitle), `pinned` (boolean filter), `orderBy` (`'newest'` default or `'sort_order'`). Returns: `pinned_at`, `needs_review`, `parser_confidence`, `parser_uncertain_fields`, `updated_at` in addition to existing columns. Default ORDER BY: `created_at DESC NULLS LAST, id DESC` (was `sort_order ASC`).
-- `POST /api/ops/media/publications/:id/restore` — Restore archived media to draft status. Auth: super_admin + mutation.
-- `POST /api/ops/media/stale-cleanup-preview` — Preview which publications would be affected by stale cleanup. Auth: super_admin.
-- `POST /api/ops/media/stale-cleanup-execute` — Execute stale cleanup (re-validates server-side). Auth: super_admin + mutation.
-- `POST /api/ops/media/bulk-archive` — Bulk archive via `bulk_archive_media_publications()` RPC (transactional). Auth: super_admin + mutation.
 - `POST /ops/potg/parse` — Parse POTG image with AI.
 - `POST /ops/potg/submit` — Submit POTG record.
 - `POST /api/coach/request` — Coach approval request.
