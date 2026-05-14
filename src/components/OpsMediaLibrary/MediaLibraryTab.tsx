@@ -220,7 +220,7 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
       {/* Count bar */}
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
-          {isFetching ? 'Refreshing…' : `${orderedMediaPublications.length} publication${orderedMediaPublications.length !== 1 ? 's' : ''}`}
+          {isFetching ? 'Refreshing…' : `${orderedMediaPublications.length} publications`}
         </span>
         {isBulkMode && (
           <span className="text-primary font-semibold">{bulkSelectedIds.size} selected</span>

@@ -27,6 +27,9 @@ type MediaRow = {
   type: string;
   thumbnail: string;
   createdAt: string;
+  pinnedAt: string | null;
+  needsReview: boolean;
+  parserConfidence: number | null;
 };
 
 const SBBL_LEAGUE_UUID = '11111111-1111-1111-1111-111111111111';
@@ -53,6 +56,9 @@ function buildInitialRows(): MediaRow[] {
       type: 'poster',
       thumbnail: TRANSPARENT_PIXEL,
       createdAt: '2026-04-10T12:00:00Z',
+      pinnedAt: null,
+      needsReview: false,
+      parserConfidence: null,
     },
     {
       id: 'pub-event-001',
@@ -70,6 +76,9 @@ function buildInitialRows(): MediaRow[] {
       type: 'photo',
       thumbnail: TRANSPARENT_PIXEL,
       createdAt: '2026-04-09T18:00:00Z',
+      pinnedAt: null,
+      needsReview: false,
+      parserConfidence: null,
     },
     {
       id: 'pub-store-001',
@@ -87,6 +96,9 @@ function buildInitialRows(): MediaRow[] {
       type: 'poster',
       thumbnail: TRANSPARENT_PIXEL,
       createdAt: '2026-04-08T12:00:00Z',
+      pinnedAt: null,
+      needsReview: false,
+      parserConfidence: null,
     },
   ];
 }
@@ -306,8 +318,10 @@ test.describe('ops media editor admin', () => {
     expect(deleteCaptures[0].id).toBe('pub-store-001');
     expect(deleteCaptures[0].idempotency).toBeTruthy();
 
-    // Once archived, the Archive button must disable (operator can't double-archive).
-    await expect(storeRow.getByRole('button', { name: 'Archive' })).toBeDisabled();
+    // Once archived, the card shows a Restore button instead of Archive
+    // (archived items can only be restored, not re-archived).
+    await expect(storeRow.getByRole('button', { name: /Restore/ })).toBeVisible();
+    await expect(storeRow.getByRole('button', { name: 'Archive' })).toHaveCount(0);
 
     // ── Dismissing the archive modal must NOT fire a DELETE ───────────
     await eventRow.getByRole('button', { name: 'Archive' }).click();
