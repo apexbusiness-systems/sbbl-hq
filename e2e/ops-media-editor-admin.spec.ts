@@ -296,8 +296,8 @@ test.describe('ops media editor admin', () => {
     // Click Archive button to open the ArchiveModal
     await storeRow.getByRole('button', { name: 'Archive' }).click();
 
-    // Confirm in the archive modal
-    const archiveModal = page.locator('[role="dialog"]').filter({ hasText: 'Archive Media' });
+    // Confirm in the archive modal (aria-label="Archive Media")
+    const archiveModal = page.getByRole('dialog', { name: 'Archive Media' });
     await expect(archiveModal).toBeVisible();
     await archiveModal.getByRole('button', { name: 'Archive' }).click();
 
@@ -314,7 +314,7 @@ test.describe('ops media editor admin', () => {
     await eventRow.getByRole('button', { name: 'Archive' }).click();
 
     // Cancel in the archive modal
-    const archiveModal2 = page.locator('[role="dialog"]').filter({ hasText: 'Archive Media' });
+    const archiveModal2 = page.getByRole('dialog', { name: 'Archive Media' });
     await expect(archiveModal2).toBeVisible();
     await archiveModal2.getByRole('button', { name: 'Keep' }).click();
 
