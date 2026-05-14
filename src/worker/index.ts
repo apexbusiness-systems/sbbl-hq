@@ -386,17 +386,18 @@ async function getStreamUrlForGame(
   const cacheHit = streamUrlCache.get(gameId);
   if (cacheHit && cacheHit.expiresAtMs > nowMs) return cacheHit.url;
 
-  // Resolve via stream_admin_config.collection_id (canonical source — same path
-  // used by handlePlaybackSession). Never reads games.stream_url; raw origin is
-  // never returned to clients (handleStreamProxy proxies it).
+  // Prefer normalized playback_asset_id while preserving collection_id fallback
+  // during additive migration rollout. Never reads games.stream_url.
   const cfg = await admin
     .from("stream_admin_config")
-    .select("collection_id")
+    .select("playback_asset_id,collection_id")
     .eq("id", true)
     .maybeSingle();
   if (cfg.error) throw new Error(cfg.error.message);
+  const cfgData = cfg.data as { playback_asset_id?: string | null; collection_id?: string | null } | null;
   const streamUrl =
-    String((cfg.data as { collection_id?: string } | null)?.collection_id ?? "").trim() ||
+    String(cfgData?.playback_asset_id ?? "").trim() ||
+    String(cfgData?.collection_id ?? "").trim() ||
     String(env.VITE_STREAM_URL ?? "").trim();
   if (!streamUrl) throw new Error("stream_not_configured");
 
@@ -874,11 +875,17 @@ async function requireSuperAdminSession(req: Request, admin: SupabaseClient) {
   return session;
 }
 
+function resolveStreamConfigPlaybackUrl(cfg: Record<string, unknown>, env: Env): string {
+  return String(cfg.playback_asset_id ?? "").trim()
+    || String(cfg.collection_id ?? "").trim()
+    || String(env.VITE_STREAM_URL ?? "").trim();
+}
+
 async function getOrCreateStreamConfig(admin: SupabaseClient) {
   const existing = await admin
     .from("stream_admin_config")
     .select(
-      "collection_id,title,source,is_live,updated_at,live_started_at,live_ended_at",
+      "collection_id,playback_asset_id,title,source,is_live,updated_at,live_started_at,live_ended_at",
     )
     .eq("id", true)
     .maybeSingle();
@@ -890,12 +897,13 @@ async function getOrCreateStreamConfig(admin: SupabaseClient) {
     .insert({
       id: true,
       collection_id: "",
+      playback_asset_id: "",
       title: "SBBL Live Stream",
       source: "main",
       is_live: false,
     })
     .select(
-      "collection_id,title,source,is_live,updated_at,live_started_at,live_ended_at",
+      "collection_id,playback_asset_id,title,source,is_live,updated_at,live_started_at,live_ended_at",
     )
     .single();
   if (created.error) throw new Error(created.error.message);
@@ -991,15 +999,17 @@ export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   };
 
   if (mayReceiveStreamUrl) {
-    payload.streamUrl = String(cfg.collection_id ?? "");
+    payload.streamUrl = String(cfg.playback_asset_id ?? cfg.collection_id ?? "");
   }
 
   const response = new Response(JSON.stringify(payload), {
     status: 200,
     headers: {
       "content-type": "application/json; charset=utf-8",
-      // Cache-Control tells Cloudflare edge to hold this for TTL seconds
-      "Cache-Control": `public, max-age=${STREAM_STATUS_TTL_S}`,
+      // Authenticated payloads can include streamUrl; never mark them public.
+      "Cache-Control": authenticatedUserId
+        ? "private, no-store"
+        : `public, max-age=${STREAM_STATUS_TTL_S}`,
     },
   });
 
@@ -1059,6 +1069,7 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
       }
     }
     patch.collection_id = safeUrl;
+    patch.playback_asset_id = safeUrl;
   }
   if (typeof body.title === "string") patch.title = body.title.trim();
   if (typeof body.source === "string") patch.source = body.source;
@@ -1072,7 +1083,7 @@ async function handleUpdateStreamConfig(ctx: HandlerCtx) {
       { id: true, ...patch, updated_by: session.userId },
       { onConflict: "id" },
     )
-    .select("collection_id,title,source,is_live,updated_at")
+    .select("collection_id,playback_asset_id,title,source,is_live,updated_at")
     .single();
   if (error) throw new Error(error.message);
 
@@ -4799,9 +4810,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   // Returns a synthetic session UUID — the heartbeat fast-path accepts it.
   if (isSuperAdmin) {
     const cfg = await getOrCreateStreamConfig(ctx.admin);
-    const playbackUrl =
-      String(cfg.collection_id ?? "").trim() ||
-      String(ctx.env.VITE_STREAM_URL ?? "").trim();
+    const playbackUrl = resolveStreamConfigPlaybackUrl(cfg, ctx.env);
     const deliveryClass = getStreamDeliveryClass(playbackUrl);
     const fakeSessionId = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + 70_000).toISOString();
@@ -4884,9 +4893,7 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     }
   }
 
-  const playbackUrl =
-    String(cfg.collection_id ?? "").trim() ||
-    String(ctx.env.VITE_STREAM_URL ?? "").trim();
+  const playbackUrl = resolveStreamConfigPlaybackUrl(cfg, ctx.env);
   // RC-4: Return named 409 (not silent 503) so the frontend can surface it.
   if (!playbackUrl) {
     return json({
@@ -5598,9 +5605,7 @@ export async function handleBroadcastSessionStart(ctx: HandlerCtx) {
   // Super admin: no access checks, synthetic session so they can preview before going live.
   const roles = await getUserRolesFromDB(userId, ctx.admin);
   if (roles.includes("super_admin")) {
-    const playbackUrl =
-      String(cfg.collection_id ?? "").trim() ||
-      String(ctx.env.VITE_STREAM_URL ?? "").trim();
+    const playbackUrl = resolveStreamConfigPlaybackUrl(cfg, ctx.env);
     const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
     return json({
       ok: true,
@@ -5613,9 +5618,7 @@ export async function handleBroadcastSessionStart(ctx: HandlerCtx) {
     return json({ ok: false, error: "stream_offline" }, 403);
   }
 
-  const playbackUrl =
-    String(cfg.collection_id ?? "").trim() ||
-    String(ctx.env.VITE_STREAM_URL ?? "").trim();
+  const playbackUrl = resolveStreamConfigPlaybackUrl(cfg, ctx.env);
   if (!playbackUrl) {
     return json({ ok: false, error: "stream_not_configured" }, 409);
   }
@@ -5711,6 +5714,7 @@ export async function handleGoLive(ctx: HandlerCtx) {
   };
   if (typeof body.collectionId === "string") {
     patch.collection_id = safeUrl;
+    patch.playback_asset_id = safeUrl;
   }
   if (typeof body.title === "string" && body.title.trim()) {
     patch.title = body.title.trim();
@@ -5733,7 +5737,7 @@ export async function handleGoLive(ctx: HandlerCtx) {
   const { data, error } = await ctx.admin
     .from("stream_admin_config")
     .upsert(patch, { onConflict: "id" })
-    .select("collection_id,title,is_live,active_game_id,updated_at")
+    .select("collection_id,playback_asset_id,title,is_live,active_game_id,updated_at")
     .single();
 
   if (error) {

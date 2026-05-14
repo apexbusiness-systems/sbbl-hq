@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { apiFetch } from '@/lib/api/client';
 import { type AppRole } from '@/lib/auth/roles';
 
 const DEVICE_KEY = 'sbbl_stream_device';
@@ -21,6 +22,13 @@ export interface LiveConfig {
   title: string;
 }
 
+interface StreamStatusPayload {
+  ok?: boolean;
+  isLive?: boolean | null;
+  title?: string | null;
+  streamUrl?: string | null;
+}
+
 function resolveDirectStreamUrl(rawUrl: string | null | undefined): string | null {
   const resolvedUrl = typeof rawUrl === 'string' ? rawUrl.trim() : '';
   if (!resolvedUrl) return null;
@@ -31,6 +39,18 @@ function resolveDirectStreamUrl(rawUrl: string | null | undefined): string | nul
     throw new Error('blob_stream_url_rejected');
   }
   return resolvedUrl;
+}
+
+async function fetchStatusStreamUrl(activeGameId: string | null): Promise<string | null> {
+  const qs = activeGameId ? `?gameId=${encodeURIComponent(activeGameId)}` : '';
+  try {
+    const status = await apiFetch<StreamStatusPayload>(`/api/streams/status${qs}`);
+    return resolveDirectStreamUrl(status.streamUrl);
+  } catch (error) {
+    if (error instanceof Error && error.message === 'blob_stream_url_rejected') throw error;
+    console.error('[useLiveAccess] Status endpoint streamUrl resolution failed', error);
+    return null;
+  }
 }
 
 export function useLiveAccess() {
@@ -83,17 +103,6 @@ export function useLiveAccess() {
         });
       }
 
-      const directStreamUrl = resolveDirectStreamUrl(view?.stream_url);
-
-      const grantPlaybackConfig = () => {
-        if (cancelled || !view) return;
-        setConfig({
-          isLive: Boolean(view.is_live),
-          videoUrl: directStreamUrl,
-          title: String(view.title ?? 'SBBL Live'),
-        });
-      };
-
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
         if (!cancelled) setAccess('unauthenticated');
@@ -109,15 +118,26 @@ export function useLiveAccess() {
       const isFreeRole = (roles as AppRole[]).some(
         (r) => r === 'player' || r === 'paid_fan' || r === 'super_admin',
       );
+      const activeGameId = view?.active_game_id ?? null;
+      const statusStreamUrl = await fetchStatusStreamUrl(activeGameId);
+      const directStreamUrl = statusStreamUrl ?? resolveDirectStreamUrl(view?.stream_url);
 
-      if (isFreeRole || Boolean(view?.is_subscribed) || Boolean(view?.has_entitlement)) {
+      const grantPlaybackConfig = () => {
+        if (cancelled || !view) return;
+        setConfig({
+          isLive: Boolean(view.is_live),
+          videoUrl: directStreamUrl,
+          title: String(view.title ?? 'SBBL Live'),
+        });
+      };
+
+      if (isFreeRole || Boolean(view?.is_subscribed) || Boolean(view?.has_entitlement) || statusStreamUrl) {
         localStorage.setItem(DEVICE_KEY, user.id);
         grantPlaybackConfig();
-        if (!cancelled) setAccess((isFreeRole || Boolean(view?.is_subscribed)) ? 'free' : 'paid');
+        if (!cancelled) setAccess((isFreeRole || Boolean(view?.is_subscribed) || statusStreamUrl) ? 'free' : 'paid');
         return;
       }
 
-      const activeGameId = view?.active_game_id ?? null;
       if (activeGameId) {
         const { data: entitlements } = await supabase
           .from('stream_entitlements')
@@ -140,7 +160,12 @@ export function useLiveAccess() {
     }
 
     setAccess('loading');
-    void resolve();
+    void resolve().catch((error) => {
+      if (!cancelled) {
+        console.error('[useLiveAccess] Failed to resolve live access', error);
+        setAccess('misconfigured');
+      }
+    });
     return () => { cancelled = true; };
   }, [resolveSignal]);
 
