@@ -1,4 +1,3 @@
-import ReactPlayer from "react-player";
 import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
 import { Navigate } from 'react-router-dom';
 import { useState, useRef, useEffect, useCallback } from 'react';
@@ -11,6 +10,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { useLiveAccess } from '@/hooks/useLiveAccess';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
+import { PaywallGate } from '@/components/live/PaywallGate';
 import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
 import { ViewerPreflight } from '@/components/preflight/ViewerPreflight';
 import { TokenWalletBadge } from '@/components/tokens/TokenWalletBadge';
@@ -48,7 +48,7 @@ import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
   Radio, Eye, DollarSign, Settings, X, Ticket, Copy,
-  Upload, Wifi,
+  Upload, Wifi, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Game, PlayerProfile, Product } from '@/types';
@@ -727,6 +727,7 @@ const LivePage = () => {
   // real game + PPV entitlement.
   const hasPrivilegedBroadcastAccess =
     roles.includes('player') || roles.includes('paid_fan') || isSuperAdmin;
+  const hasBroadcastFallbackAccess = hasPrivilegedBroadcastAccess || access === 'paid';
   const [liveGame, setLiveGame] = useState<Game | null>(null);
   // Incremented each time the admin saves a Go Live / End Stream action.
   // Used as React key on PlayerErrorBoundary to force a fresh session fetch
@@ -748,6 +749,43 @@ const LivePage = () => {
   const [initialPollDone, setInitialPollDone] = useState(false);
   const [initialPollError, setInitialPollError] = useState(false);
 
+  // ── Broadcast oracle (non-admin path) ──────────────────────────────────────
+  // get_active_broadcast() resolves all paywall signals server-side.
+  // stream_url is withheld for unpermitted users — no client-side-only guard.
+  // Admin users skip this and use fetchAdminStreamConfig directly.
+  const broadcastQuery = useQuery({
+    queryKey: ['get-active-broadcast', streamNonce],
+    queryFn: async () => {
+      const supabase = getSupabaseClient();
+      if (!supabase) {
+        throw new Error('supabase_client_unavailable');
+      }
+      const { data, error } = await supabase.rpc('get_active_broadcast');
+      if (error) throw new Error(error.message);
+      return data as {
+        is_live: boolean;
+        stream_url: string | null;
+        title: string | null;
+        active_game_id: string | null;
+        live_started_at: string | null;
+        requires_payment: boolean;
+        is_subscribed: boolean;
+        has_entitlement: boolean;
+        user_registered: boolean;
+      } | null;
+    },
+    enabled: !isSuperAdmin,
+    staleTime: 15_000,
+    refetchInterval: 15_000,
+    retry: 1,
+  });
+  const broadcast = broadcastQuery.data ?? null;
+  const broadcastOracleBroken = !isSuperAdmin && broadcastQuery.isError;
+
+  const handleBroadcastRefetch = () => {
+    setStreamNonce(n => n + 1);
+  };
+
   // Auto-sync stream status from backend
   useEffect(() => {
     let active = true;
@@ -757,7 +795,7 @@ const LivePage = () => {
         const home = await fetchPublicHome();
         const liveRows = (home.data?.liveGames ?? []) as Array<Record<string, unknown>>;
         const upcomingRows = (home.data?.upcomingGames ?? []) as Array<Record<string, unknown>>;
-        const selected = liveRows[0] ?? upcomingRows[0] ?? null;
+        const selected = liveRows[0] ?? (!isSuperAdmin ? upcomingRows[0] : null) ?? null;
         if (active && selected) {
           setLiveGame(mapHomeGameToUi(selected));
           setActiveGameId(String(selected.id));
@@ -874,11 +912,13 @@ const LivePage = () => {
     }
   }, [activeGameId, user?.id, session]);
 
+  const serverGrantedBroadcastAccess = Boolean(broadcast?.stream_url);
   const fallbackBroadcastGame = useMemo<Game | null>(() => {
-    // Camera-only live mode has no real game row; use "broadcast" alias routes.
-    // Accessible to any privileged role (player, paid_fan, super_admin). Regular
-    // fans still see "No Active Broadcast" and must wait for a real game + PPV.
-    if (!hasPrivilegedBroadcastAccess || !isStreamLive || liveGame) return null;
+    // Universal live playback contract: when the broadcast oracle grants a
+    // stream URL, playback uses the game-agnostic broadcast session. Score rows
+    // and optional active_game_id are metadata only and must not re-route the
+    // viewer into stricter game-specific PPV/session paths.
+    if (!(hasBroadcastFallbackAccess || serverGrantedBroadcastAccess) || !isStreamLive) return null;
     return {
       id: 'broadcast',
       leagueId: 'sbbl',
@@ -892,8 +932,14 @@ const LivePage = () => {
       score: { home: 0, away: 0 },
       ppvPrice: 0,
     };
-  }, [hasPrivilegedBroadcastAccess, isStreamLive, liveGame]);
-  const showPreflight = isViewerPreflightEnabled() && !!activeGameId && activeGameId !== 'broadcast' && !preflightReady;
+  }, [hasBroadcastFallbackAccess, isStreamLive, serverGrantedBroadcastAccess]);
+  const playerGame = useMemo<Game | null>(() => {
+    // Server-granted broadcast access is universal: always use /api/broadcast/*
+    // for playback and let liveGame continue to drive surrounding metadata.
+    if (serverGrantedBroadcastAccess && fallbackBroadcastGame) return fallbackBroadcastGame;
+    return liveGame ?? fallbackBroadcastGame;
+  }, [fallbackBroadcastGame, liveGame, serverGrantedBroadcastAccess]);
+  const showPreflight = isViewerPreflightEnabled() && !!activeGameId && activeGameId !== 'broadcast' && !serverGrantedBroadcastAccess && !preflightReady;
   const tokenEnabled = isFanTokenSystemEnabled();
   const biometricsEnabled = isBiometricOverlayEnabled();
   const micUpEnabled = isMicUpSeriesEnabled();
@@ -1288,71 +1334,55 @@ const LivePage = () => {
                     onRetry={() => void preflightQuery.refetch()}
                   />
                 </div>
-              ) : (liveGame || fallbackBroadcastGame) ? (
+              ) : playerGame ? (
                <PlayerErrorBoundary key={streamNonce}>
-  {(() => {
-    const rawUrl = customStreamUrl || "";
-const playable = toPlayableUrl(rawUrl);
-const playableUrl = playable.url || rawUrl;   // ← the fix
-const streamType = detectStreamUrlType(playableUrl);
-
-    if (streamType === "twitch" || streamType === "youtube") {
-      return (
-        <div className="relative w-full aspect-video bg-[#0A0A0A] rounded-xl overflow-hidden border border-[#111111]">
-          <ReactPlayer
-            url={playableUrl}
-            width="100%"
-            height="100%"
-            playing
-            muted
-            controls
-            config={{
-              twitch: {
-                options: {
-                  // MANDATORY for production on sbbl-hq.icu
-                  parent: ["sbbl-hq.icu", "www.sbbl-hq.icu", "localhost"],
-                  muted: true,
-                  autoplay: true,
-                },
-              },
-              youtube: {
-                playerVars: {
-                  modestbranding: 1,
-                  rel: 0,
-                  autoplay: 1,
-                },
-              },
-            }}
-            style={{ position: "absolute", top: 0, left: 0 }}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onError={(e: any) => {
-              console.error(`[Live] ${streamType} player error:`, e);
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              if (typeof window !== "undefined" && (window as any).toast) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                (window as any).toast.error(`Failed to load ${streamType} stream`);
-              }
-            }}
-          />
-          <div className="absolute top-3 right-3 z-20 flex items-center gap-1.5 rounded-full bg-red-600/90 px-2.5 py-0.5 text-[10px] font-bold tracking-[0.5px] text-white">
-            LIVE
-          </div>
-        </div>
-      );
-    }
-
-    // All existing WHEP / HLS / native paths unchanged
-    return (
-      <LiveStreamPlayer
-        game={(liveGame ?? fallbackBroadcastGame)!}
-        userId={user?.id ?? null}
-        roles={roles}
-        hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-        isStreamLive={isStreamLive}
-      />
-    );
-  })()}
-</PlayerErrorBoundary>
+                  <LiveStreamPlayer
+                    game={playerGame}
+                    userId={user?.id ?? null}
+                    roles={roles}
+                    hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                    isStreamLive={isStreamLive}
+                    serverGrantedAccess={serverGrantedBroadcastAccess}
+                  />
+              </PlayerErrorBoundary>
+              ) : broadcastOracleBroken && !serverGrantedBroadcastAccess ? (
+                <div data-testid="live-misconfigured" className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
+                  <div className="w-14 h-14 rounded-full bg-destructive/50 flex items-center justify-center mb-3">
+                    <AlertTriangle className="w-6 h-6 text-destructive" />
+                  </div>
+                  <p className="text-sm text-red-400 font-medium">Live service unavailable</p>
+                  <p className="text-xs text-white/40 mt-1">
+                    The broadcast service could not be reached. Try again in a few minutes.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleBroadcastRefetch}
+                    className="mt-3 px-4 py-2 text-xs bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : !isSuperAdmin && broadcast?.is_live && !broadcast?.stream_url ? (
+                // Broadcast is live but user is not permitted server-side.
+                // RULE 2: anon → register CTA.
+                // RULE 5: registered non-subscriber → code + purchase panels.
+                !user ? (
+                  <PaywallGate
+                    isAnon
+                    title={broadcast.title}
+                    isLive={broadcast.is_live}
+                    onWatchClick={() => {
+                      window.location.assign('/onboarding?intent=fan&redirect=/live');
+                    }}
+                  />
+                ) : (
+                  <PaywallGate
+                    gameId={broadcast.active_game_id}
+                    title={broadcast.title}
+                    isLive={broadcast.is_live}
+                    onSuccess={handleBroadcastRefetch}
+                  />
+                )
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
                   <div className="w-14 h-14 rounded-full bg-secondary/50 flex items-center justify-center mb-3">

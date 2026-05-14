@@ -18,16 +18,14 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { Lock, Play, Pause, Ticket, Copy, Check, KeyRound, Volume2, VolumeX, Maximize, AlertTriangle } from 'lucide-react';
-import ReactPlayer from 'react-player';
+import ReactPlayer from 'react-player/lazy';
 import { toast } from 'sonner';
 import { apiFetch } from '@/lib/api/client';
 import { redeemAccessCode } from '@/lib/api/stream';
 import { IDEMPOTENCY_HEADER, createIdempotencyKey } from '@/lib/api/idempotency';
 import { isYoutubeUrl } from '@/lib/stream/youtube-url';
 import { detectStreamUrlType, toPlayableUrl } from '@/lib/stream/url-detector';
-import { CustomTwitchPlayer } from '@/lib/playback/CustomTwitchPlayer';
-
-ReactPlayer.addCustomPlayer(CustomTwitchPlayer as unknown as Parameters<typeof ReactPlayer.addCustomPlayer>[0]);
+import type { StreamUrlType } from '@/lib/stream/url-detector';
 import { WhepPlayer } from '@/components/WhepPlayer';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { useStreamForge } from '@/hooks/use-streamforge';
@@ -144,15 +142,13 @@ const YOUTUBE_ERROR_MESSAGES: Partial<Record<number, string>> = {
 };
 
 function parsePlayerError(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  err: any,
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  data: any,
+  err: unknown,
+  data: { error?: number } | null | undefined,
 ): string {
   if (data != null && typeof data.error === 'number') {
     return (
-      YOUTUBE_ERROR_MESSAGES[data.error as number] ??
-      `Stream error (YouTube code ${data.error as number}). Try a different URL.`
+      YOUTUBE_ERROR_MESSAGES[data.error] ??
+      `Stream error (YouTube code ${data.error}). Try a different URL.`
     );
   }
   if (err instanceof Event) {
@@ -169,18 +165,41 @@ function parsePlayerError(
 function StreamPlayer({
   url,
   isSuperAdmin: _isSuperAdmin,
+  providerHint,
   onReady,
   onPlay,
   onError,
 }: Readonly<{
   url: string;
   isSuperAdmin: boolean;
+  providerHint?: StreamUrlType | null;
   onReady: () => void;
   onPlay: () => void;
   onError: (message: string) => void;
 }>) {
+  const urlType = detectStreamUrlType(url);
+  const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
+  // Playback URLs may be signed/proxied and hide provider hostnames; use the
+  // upstream source hint from session/game config to preserve provider logic.
+  const isTwitch = urlType === 'twitch' || providerHint === 'twitch';
+  const isVimeo = urlType === 'vimeo';
+  const isWhep = urlType === 'whep';
+  const isRtmp = urlType === 'rtmp';
+  // Facebook: short-circuit before ReactPlayer so the FB SDK never loads.
+  // Rendered via plugins/video.php iframe — no connect.facebook.net request.
+  // Kick/Instagram/X-Spaces: no public embed surface; still show advisory.
+  const isFacebook = urlType === 'facebook';
+  const isUnembeddable =
+    urlType === 'kick' || urlType === 'instagram' || urlType === 'x-spaces';
+  // HLS and DASH use ReactPlayer with explicit forcing flags
+  const forceHls = urlType === 'hls';
+  const forceDash = urlType === 'dash';
+
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [playing, setPlaying] = useState(true);
+  // Twitch autoplay is fragile under provider visibility checks; start paused
+  // and require a user gesture for deterministic playback.
+  const [playing, setPlaying] = useState(!isTwitch);
+  const [hasUserStarted, setHasUserStarted] = useState(!isTwitch);
   // Start muted so cross-origin autoplay is permitted by Chrome. Unmuted
   // autoplay is blocked for cross-origin iframes regardless of
   // Permissions-Policy — the browser requires a user gesture.
@@ -188,22 +207,63 @@ function StreamPlayer({
   // True once the stream fires its first onPlay event. Used to gate the
   // tap-to-unmute overlay so it never appears before playback has started.
   const [hasStartedPlaying, setHasStartedPlaying] = useState(false);
-  // Twitch's embed SDK measures iframe dimensions at creation time. When the
-  // player mounts inside a CSS aspect-ratio container, layout can resolve in
-  // a later frame, causing the SDK to capture a 0×0 iframe and permanently
-  // disable autoplay with the misleading error:
-  //   "Autoplay disabled. style visibility, size, viewport visibility."
-  // Defer ReactPlayer mount until after the browser's next paint so that
-  // aspect-ratio has resolved before the embed SDK measures dimensions.
+  // Twitch's embed SDK measures iframe dimensions/visibility at creation time.
+  // If it initializes while the aspect-ratio box is still resolving, Twitch
+  // latches a 0×0 or off-viewport state and disables autoplay permanently.
+  // Gate mount until the host is both sized and in viewport.
   const [containerReady, setContainerReady] = useState(false);
   useEffect(() => {
-    let frame2: number;
-    const frame1 = requestAnimationFrame(() => {
-      frame2 = requestAnimationFrame(() => setContainerReady(true));
-    });
+    const host = containerRef.current;
+    if (!host) return;
+
+    let raf = 0;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let activated = false;
+
+    const promoteWhenVisible = () => {
+      if (activated) return;
+      const rect = host.getBoundingClientRect();
+      // Require practical embed dimensions + viewport intersection before mount.
+      const hasPlayableSize = rect.width >= 200 && rect.height >= 120;
+      const inViewport =
+        rect.bottom > 0 &&
+        rect.right > 0 &&
+        rect.top < window.innerHeight &&
+        rect.left < window.innerWidth;
+      if (hasPlayableSize && inViewport) {
+        activated = true;
+        setContainerReady(true);
+      }
+    };
+
+    const schedulePromote = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(promoteWhenVisible);
+    };
+
+    schedulePromote();
+    const resizeObserver = new ResizeObserver(schedulePromote);
+    resizeObserver.observe(host);
+    const intersectionObserver = new IntersectionObserver(schedulePromote, { threshold: [0, 0.01] });
+    intersectionObserver.observe(host);
+    window.addEventListener('resize', schedulePromote);
+    window.addEventListener('scroll', schedulePromote, { passive: true });
+
+    // Safety net: never leave the player unmounted indefinitely.
+    timeoutId = setTimeout(() => {
+      if (!activated) {
+        activated = true;
+        setContainerReady(true);
+      }
+    }, 2000);
+
     return () => {
-      cancelAnimationFrame(frame1);
-      if (frame2) cancelAnimationFrame(frame2);
+      cancelAnimationFrame(raf);
+      resizeObserver.disconnect();
+      intersectionObserver.disconnect();
+      if (timeoutId) clearTimeout(timeoutId);
+      window.removeEventListener('resize', schedulePromote);
+      window.removeEventListener('scroll', schedulePromote);
     };
   }, []);
   const [volume, setVolume] = useState(0.8);
@@ -212,21 +272,21 @@ function StreamPlayer({
   const [durationSeconds, setDurationSeconds] = useState(0);
   // Auto-retry: allow one silent retry on transient errors before showing error UI
   const retryCountRef = useRef(0);
+  const autoRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reactPlayerRef = useRef<ReactPlayer | null>(null);
   const MAX_AUTO_RETRIES = 1;
 
-  const urlType = detectStreamUrlType(url);
-  const isYoutube = urlType === 'youtube' || isYoutubeUrl(url);
-  const isTwitch = urlType === 'twitch';
-  const isVimeo = urlType === 'vimeo';
-  const isFacebook = urlType === 'facebook';
-  const isWhep = urlType === 'whep';
-  const isRtmp = urlType === 'rtmp';
-  // HLS and DASH use ReactPlayer with explicit forcing flags
-  const forceHls = urlType === 'hls';
-  const forceDash = urlType === 'dash';
-  // Force unified in-app controls for all providers except Facebook, which strictly requires native interactions.
-  const showNativeControls = isFacebook;
+  useEffect(() => {
+    return () => {
+      if (autoRetryTimerRef.current) {
+        clearTimeout(autoRetryTimerRef.current);
+        autoRetryTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Force unified in-app controls for all providers.
+  const showNativeControls = false;
   const canSeek = Number.isFinite(durationSeconds) && durationSeconds > 0 && !isWhep && !isRtmp;
 
   const formatClock = (total: number) => {
@@ -262,6 +322,44 @@ function StreamPlayer({
         <p className="text-xs text-white/60 max-w-xs leading-relaxed">
           RTMP cannot play directly in the browser. Configure an HLS endpoint
           (e.g. <code className="text-amber-400">https://…/live/stream.m3u8</code>) in Broadcast Controls.
+        </p>
+      </div>
+    );
+  }
+
+  // Facebook: use the official plugins/video.php sandboxed iframe — no FB SDK
+  // ever loads (connect.facebook.net remains blocked in script-src). ReactPlayer
+  // never mounts for this branch; the frame-src CSP allows facebook.com only.
+  if (isFacebook) {
+    return (
+      <div className="absolute inset-0 bg-black" data-testid="stream-player">
+        <iframe
+          src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false&allowfullscreen=true&autoplay=true`}
+          className="w-full h-full"
+          style={{ border: 'none', overflow: 'hidden' }}
+          scrolling="no"
+          allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share; fullscreen"
+          allowFullScreen
+          title="Facebook Live Stream"
+        />
+      </div>
+    );
+  }
+
+  // Other walled-garden providers (Kick, Instagram Live, X Spaces) advertise
+  // no public embed surface compatible with our CSP; treat them like Facebook.
+  if (isUnembeddable) {
+    const label =
+      urlType === 'kick' ? 'Kick'
+      : urlType === 'instagram' ? 'Instagram Live'
+      : 'X Spaces';
+    return (
+      <div className="absolute inset-0 bg-black flex flex-col items-center justify-center gap-3 px-6 text-center" data-testid="stream-player">
+        <AlertTriangle className="w-10 h-10 text-amber-400" />
+        <p className="text-sm font-semibold text-white">{label} Not Supported</p>
+        <p className="text-xs text-white/60 max-w-xs leading-relaxed">
+          {label} does not provide an embeddable player URL. Configure an HLS
+          endpoint, or a YouTube / Twitch / Vimeo URL, in Broadcast Controls.
         </p>
       </div>
     );
@@ -326,13 +424,12 @@ function StreamPlayer({
         // REQUIRED: Twitch embeds will not load without every allowed parent.
         // https://dev.twitch.tv/docs/embed/everything/#required-parameters
         parent: twitchParents,
-        // REQUIRED for autoplay: Twitch's embed SDK enforces muted=true for
-        // cross-origin autoplay. The ReactPlayer `muted` prop does NOT map to
-        // the Twitch embed URL — it must be set here explicitly.
+        // Explicitly disable provider-level autoplay; playback starts from an
+        // explicit user gesture to avoid Twitch visibility-gated failures.
+        autoplay: false,
+        // Keep muted true in embed options so Twitch starts cleanly once the
+        // viewer clicks Start Stream and playback begins.
         muted: true,
-        // FIX: Override ReactPlayer's default `autoplay: playing` which gets spread LAST
-        // and defaults to false during mount if playing state is out of sync.
-        autoplay: true,
         playsinline: true,
       },
     },
@@ -355,70 +452,62 @@ function StreamPlayer({
         : { attributes: { crossOrigin: isProxyAuthedUrl ? 'use-credentials' : 'anonymous' } }),
     },
   };
+  // Mount the player only after the host element has practical dimensions
+  // and is in the viewport. Twitch's embed SDK runs its visibility checks
+  // synchronously at init: if the iframe is 0×0 or off-viewport when the
+  // SDK initializes, it latches autoplay-disabled with errors like
+  // "minimum requirements for autoplay were not met: style visibility, size,
+  // viewport visibility" and never recovers without a remount.
+  const shouldRenderPlayer = containerReady;
 
   return (
     <div
       ref={containerRef}
       className="absolute inset-0 bg-black"
+      style={{ width: '100%', height: '100%', minWidth: 400, minHeight: 300 }}
       data-testid="stream-player"
       data-container-ready={containerReady ? 'true' : 'false'}
     >
-      {containerReady && (
-        isFacebook ? (
-          <iframe
-            src={`https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(url)}&show_text=false&width=auto`}
-            width="100%"
-            height="100%"
-            style={{ border: 'none', overflow: 'hidden' }}
-            scrolling="no"
-            frameBorder="0"
-            allowFullScreen={true}
-            allow="autoplay; clipboard-write; encrypted-media; picture-in-picture; web-share"
-            onLoad={() => {
-              retryCountRef.current = 0;
-              setHasStartedPlaying(true);
-              onReady();
-              onPlay();
-            }}
-            onError={() => onError('Failed to load Facebook iframe.')}
-          />
-        ) : (
-          <ReactPlayer
-            ref={(instance) => { reactPlayerRef.current = instance; }}
-            url={url}
-            width="100%"
-            height="100%"
-            playing={playing}
-            controls={showNativeControls}
-            muted={muted}
-            volume={volume}
-            onReady={() => { retryCountRef.current = 0; onReady(); }}
-            onDuration={(seconds) => setDurationSeconds(seconds)}
-            onProgress={({ played, playedSeconds: elapsed }) => {
-              setPlayedFraction(played);
-              setPlayedSeconds(elapsed);
-            }}
-            onPlay={() => { setPlaying(true); retryCountRef.current = 0; setHasStartedPlaying(true); onPlay(); }}
-            onPause={() => setPlaying(false)}
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            onError={(err: any, data: any) => {
-              // Auto-retry: on first transient error, retry silently after 3s
-              // to avoid killing the player for 20k viewers on a single hiccup.
-              if (retryCountRef.current < MAX_AUTO_RETRIES) {
-                retryCountRef.current += 1;
-                setPlaying(false);
-                setTimeout(() => setPlaying(true), 3_000);
-                return;
-              }
-              onError(parsePlayerError(err, data));
-            }}
-            config={reactPlayerConfig}
-          />
-        )
+      {shouldRenderPlayer && (
+        <ReactPlayer
+          ref={(instance) => { reactPlayerRef.current = instance; }}
+          url={url}
+          width="100%"
+          height="100%"
+          playing={hasUserStarted ? playing : false}
+          controls={showNativeControls}
+          muted={muted}
+          volume={volume}
+          onReady={() => { retryCountRef.current = 0; onReady(); }}
+          onDuration={(seconds) => setDurationSeconds(seconds)}
+          onProgress={({ played, playedSeconds: elapsed }) => {
+            setPlayedFraction(played);
+            setPlayedSeconds(elapsed);
+          }}
+          onPlay={() => { setPlaying(true); retryCountRef.current = 0; setHasStartedPlaying(true); onPlay(); }}
+          onPause={() => setPlaying(false)}
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          onError={(err: any, data: any) => {
+            // Auto-retry: on first transient error, retry silently after 3s
+            // to avoid killing the player for 20k viewers on a single hiccup.
+            if (retryCountRef.current < MAX_AUTO_RETRIES) {
+              retryCountRef.current += 1;
+              setPlaying(false);
+              if (autoRetryTimerRef.current) clearTimeout(autoRetryTimerRef.current);
+              autoRetryTimerRef.current = setTimeout(() => {
+                autoRetryTimerRef.current = null;
+                setPlaying(true);
+              }, 3_000);
+              return;
+            }
+            onError(parsePlayerError(err, data));
+          }}
+          config={reactPlayerConfig}
+        />
       )}
       {/* Tap-to-unmute overlay — only shown after the stream fires its first
           onPlay event, so it never appears during the connecting spinner. */}
-      {containerReady && muted && hasStartedPlaying && !isFacebook && (
+      {shouldRenderPlayer && muted && hasStartedPlaying && (
         <button
           type="button"
           onClick={() => setMuted(false)}
@@ -429,6 +518,23 @@ function StreamPlayer({
           <VolumeX className="w-4 h-4" />
           Tap to unmute
         </button>
+      )}
+      {isTwitch && !hasUserStarted && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/35">
+          <button
+            type="button"
+            onClick={() => {
+              setMuted(true);
+              setHasUserStarted(true);
+              setPlaying(true);
+            }}
+            className="inline-flex items-center gap-2 rounded-full bg-amber-500 px-5 py-3 text-sm font-bold uppercase tracking-wider text-black shadow-lg hover:bg-amber-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+            aria-label="Start Twitch playback"
+          >
+            <Play className="h-4 w-4" />
+            Start Stream
+          </button>
+        </div>
       )}
       {/* Block iframe click-through for YouTube/Vimeo only.
           Twitch's embed SDK validates iframe visibility at init — an opaque
@@ -442,11 +548,10 @@ function StreamPlayer({
           onContextMenu={(e) => e.preventDefault()}
         />
       )}
-      {!isFacebook && (
-        <div
-          className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm"
-          onContextMenu={(e) => e.preventDefault()}
-        >
+      <div
+        className="absolute bottom-3 left-3 right-3 z-20 flex items-center gap-2 rounded-md bg-black/60 border border-white/10 p-2 backdrop-blur-sm"
+        onContextMenu={(e) => e.preventDefault()}
+      >
           <button type="button" className="p-2 rounded hover:bg-white/10 text-white transition-colors"
             aria-label={playing ? 'Pause playback' : 'Play playback'} onClick={() => setPlaying(v => !v)}>
             {playing ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
@@ -481,8 +586,7 @@ function StreamPlayer({
             aria-label="Toggle fullscreen" onClick={() => void handleFullscreen()}>
             <Maximize className="w-4 h-4" />
           </button>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -511,6 +615,8 @@ interface LiveStreamPlayerProps {
   hasPremiumPlayerAccess: boolean;
   /** Whether admin has set stream to live */
   isStreamLive?: boolean;
+  /** Server oracle already confirmed this viewer may watch this broadcast. */
+  serverGrantedAccess?: boolean;
 }
 
 export function LiveStreamPlayer({
@@ -519,6 +625,7 @@ export function LiveStreamPlayer({
   roles,
   hasPremiumPlayerAccess,
   isStreamLive,
+  serverGrantedAccess = false,
 }: Readonly<LiveStreamPlayerProps>) {
   const [ppvEntitled, setPpvEntitled] = useState(false);
   const [inviteGranted, setInviteGranted] = useState(false);
@@ -532,21 +639,11 @@ export function LiveStreamPlayer({
 
 
   const [playbackUrl, setPlaybackUrl] = useState('');
+  const [playbackTypeHint, setPlaybackTypeHint] = useState<StreamUrlType | null>(null);
   const [playbackLoading, setPlaybackLoading] = useState(false);
   const [playerError, setPlayerError] = useState<string | null>(null);
   const [heartbeatFailures, setHeartbeatFailures] = useState(0);
   const { containerRef: turnstileRef, resolveToken } = useTurnstile();
-
-  // Auto-recover when admin flips stream to live (fixes rescue a player stuck in disabled state)
-  const prevIsStreamLive = useRef(isStreamLive);
-  useEffect(() => {
-    if (prevIsStreamLive.current === false && isStreamLive === true) {
-      // The stream just went live! Rescue any stuck players.
-      setPlayerError(null);
-      setRetryKey(k => k + 1);
-    }
-    prevIsStreamLive.current = isStreamLive;
-  }, [isStreamLive]);
 
   // ── StreamForge QoE telemetry (observational — never mutates player) ──────
   const sessionSeed = useMemo(
@@ -566,24 +663,27 @@ export function LiveStreamPlayer({
 
   const hasRoleAccess = isPlayer || isPaidFan || isSuperAdmin;
   const canGenerateInvite = hasPremiumPlayerAccess || isPaidFan || isSuperAdmin;
-  const hasAccess = hasRoleAccess || ppvEntitled || inviteGranted;
+  const hasAccess = hasRoleAccess || serverGrantedAccess || ppvEntitled || inviteGranted;
 
   // ── Fetch stream entitlement (skip if role already grants access) ─────────
   // Pass null instead of explicit token — apiFetch auto-fetches a fresh JWT
   // via getAuthToken(), preventing stale-token 401 loops.
   useEffect(() => {
-    if (!userId || hasRoleAccess) {
+    if (!userId || hasRoleAccess || serverGrantedAccess) {
       setAccessChecked(true);
       return;
     }
 
-    apiFetch<{ hasAccess: boolean }>(`/api/streams/${game.id}/access`, {}, null)
+    const accessEndpoint = game.id === 'broadcast'
+      ? '/api/broadcast/access'
+      : `/api/streams/${game.id}/access`;
+    apiFetch<{ hasAccess: boolean }>(accessEndpoint, {}, null)
       .then(res => {
         if (res.hasAccess) setPpvEntitled(true);
       })
       .catch(() => { /* network error — stay in preview; user can retry purchase */ })
       .finally(() => setAccessChecked(true));
-  }, [userId, game.id, hasRoleAccess]);
+  }, [userId, game.id, hasRoleAccess, serverGrantedAccess]);
 
   // Retry key: incrementing this re-triggers the session effect after the
   // user clicks "Retry" on the player error screen, without requiring a full
@@ -601,10 +701,15 @@ export function LiveStreamPlayer({
     if (!hasAccess || !userId) return;
     let active = true;
     let heartbeatId: ReturnType<typeof globalThis.setInterval> | null = null;
+    // Store the hard-cap timer so unmount can clear it. Without this
+    // reference the timer lingered for up to 6 hours after navigation,
+    // pinning the heartbeat closure in memory.
+    let hardCapTimerId: ReturnType<typeof globalThis.setTimeout> | null = null;
     let sessionIdForCleanup: string | null = null;
     let consecutiveFailures = 0;
     setPlaybackLoading(true);
     setPlayerError(null);
+    setPlaybackTypeHint(null);
     setHeartbeatFailures(0);
     const deviceToken = getOrCreateDeviceToken();
     const sessionKey = `playback-${game.id}-${deviceToken}`;
@@ -613,7 +718,7 @@ export function LiveStreamPlayer({
         const res = await apiFetch<{
           playback: { url: string; heartbeatIntervalSec: number; maxExpiresAt?: string };
           session: { id: string; maxExpiresAt?: string };
-        }>(`/api/streams/${game.id}/session`, {
+        }>(game.id === 'broadcast' ? '/api/broadcast/session' : `/api/streams/${game.id}/session`, {
           method: 'POST',
           headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('stream-session') },
           body: JSON.stringify({ sessionKey }),
@@ -632,7 +737,9 @@ export function LiveStreamPlayer({
           );
           return;
         }
-        const { url: resolvedUrl } = toPlayableUrl(rawResolved);
+        const rawType = detectStreamUrlType(rawResolved);
+        const { url: resolvedUrl, type: normalizedType } = toPlayableUrl(rawResolved);
+        setPlaybackTypeHint(normalizedType === 'unknown' ? rawType : normalizedType);
         setPlaybackUrl(resolvedUrl);
         sessionIdForCleanup = res.session.id;
         const hbMs = Math.max(10000, res.playback.heartbeatIntervalSec * 1000);
@@ -641,7 +748,8 @@ export function LiveStreamPlayer({
         if (res.session.maxExpiresAt) {
           const msUntilCap = new Date(res.session.maxExpiresAt).getTime() - Date.now();
           if (msUntilCap > 0) {
-            setTimeout(() => {
+            hardCapTimerId = globalThis.setTimeout(() => {
+              hardCapTimerId = null;
               if (!active) return;
               if (heartbeatId) { clearInterval(heartbeatId); heartbeatId = null; }
               toast.error('Your 6-hour viewing session has ended. Purchase a new pass to continue.');
@@ -649,7 +757,7 @@ export function LiveStreamPlayer({
           }
         }
         heartbeatId = globalThis.setInterval(() => {
-          void apiFetch(`/api/streams/${game.id}/session/heartbeat`, {
+          void apiFetch(game.id === 'broadcast' ? '/api/broadcast/session/heartbeat' : `/api/streams/${game.id}/session/heartbeat`, {
             method: 'POST',
             body: JSON.stringify({ sessionId: res.session.id }),
           }, null)
@@ -715,8 +823,9 @@ export function LiveStreamPlayer({
     return () => {
       active = false;
       if (heartbeatId) clearInterval(heartbeatId);
+      if (hardCapTimerId) clearTimeout(hardCapTimerId);
       if (sessionIdForCleanup) {
-        void apiFetch(`/api/streams/${game.id}/session/end`, {
+        void apiFetch(game.id === 'broadcast' ? '/api/broadcast/session/end' : `/api/streams/${game.id}/session/end`, {
           method: 'POST',
           body: JSON.stringify({ sessionId: sessionIdForCleanup }),
         }, null).catch(() => {});
@@ -763,8 +872,11 @@ export function LiveStreamPlayer({
 
   // ── Gate 2: Access granted → Player ──────────────────────
   if (hasAccess) {
+    const providerHint = playbackTypeHint && playbackTypeHint !== 'unknown'
+      ? playbackTypeHint
+      : null;
     return (
-      <div className="absolute inset-0 flex flex-col relative z-0">
+      <div className="absolute inset-0 flex flex-col z-0">
         {/* Stream Player Area */}
         {playbackLoading ? (
           <div className="absolute inset-0 flex items-center justify-center bg-black">
@@ -788,6 +900,7 @@ export function LiveStreamPlayer({
           <StreamPlayer
             url={playbackUrl}
             isSuperAdmin={isSuperAdmin}
+            providerHint={providerHint}
             onReady={() => { sf.reportEvent('play'); sf.recordSuccess(); }}
             onPlay={() => sf.reportEvent('playing')}
             onError={(message) => { setPlayerError(message); sf.recordFailure(); }}
