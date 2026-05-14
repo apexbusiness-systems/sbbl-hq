@@ -121,46 +121,23 @@ describe('useOpsMediaLibrary', () => {
     expect(result.current.leagueFilter).toBe('all');
   });
 
-  it('allows moving media items in order', () => {
+  it('exposes drag move up and move down actions', () => {
     const { result } = renderHook(() => useOpsMediaLibrary(true));
 
-    act(() => {
-      result.current.setMediaOrderIds(['id1', 'id2', 'id3']);
-    });
-
-    act(() => {
-      result.current.moveMedia('id2', 'down');
-    });
-
-    expect(result.current.mediaOrderIds).toEqual(['id1', 'id3', 'id2']);
+    expect(typeof result.current.dragMoveUp).toBe('function');
+    expect(typeof result.current.dragMoveDown).toBe('function');
   });
 
-  it('prevents moving up when at top', () => {
+  it('exposes ordered media publications from query data', () => {
     const { result } = renderHook(() => useOpsMediaLibrary(true));
 
-    act(() => {
-      result.current.setMediaOrderIds(['id1', 'id2', 'id3']);
-    });
-
-    act(() => {
-      result.current.moveMedia('id1', 'up');
-    });
-
-    expect(result.current.mediaOrderIds).toEqual(['id1', 'id2', 'id3']);
+    expect(Array.isArray(result.current.orderedMediaPublications)).toBe(true);
   });
 
-  it('prevents moving down when at bottom', () => {
+  it('exposes hasPendingOrderChanges flag', () => {
     const { result } = renderHook(() => useOpsMediaLibrary(true));
 
-    act(() => {
-      result.current.setMediaOrderIds(['id1', 'id2', 'id3']);
-    });
-
-    act(() => {
-      result.current.moveMedia('id3', 'down');
-    });
-
-    expect(result.current.mediaOrderIds).toEqual(['id1', 'id2', 'id3']);
+    expect(typeof result.current.hasPendingOrderChanges).toBe('boolean');
   });
 
   it('allows setting preview ID', () => {

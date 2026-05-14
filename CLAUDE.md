@@ -110,13 +110,23 @@ This rule is enforced by:
 - **Vitest chaos battery** (`src/test/stream-chaos-battery.test.ts`).
 - **Sentry alert** on `stream.access.v2` error rate > 0.1%.
 
-### 5. Live Player Invariants — do not regress v1.4.0
+### 5. Media Publications — Pin Before Archive, Two-Phase Cleanup
+
+Pinned media CANNOT be archived (worker returns 409). Unpin before archiving.
+Stale cleanup is two-phase: preview → confirm (type ARCHIVE) → execute.
+The execute phase re-validates server-side (never trusts client-sent IDs).
+Bulk archive uses bulk_archive_media_publications() RPC for true transactional atomicity.
+updated_at is maintained by a BEFORE UPDATE trigger on media_publications.
+Default media ordering is newest-first (created_at DESC), not sort_order ASC.
+Already-archived IDs passed to bulk archive are silently skipped and not returned;
+the response ids array contains only IDs that were actually transitioned.
+### 6. Live Player Invariants — do not regress v1.4.0
 
 The live-stream player (`src/components/LiveStreamPlayer.tsx`) is the
 **single most regression-prone surface in the app**. v1.4.0 hardened it
 after a five-incident cascade. The invariants below MUST hold:
 
-#### 5.1 — Layout: never combine `absolute` with `relative` on the player wrapper
+#### 6.1 — Layout: never combine `absolute` with `relative` on the player wrapper
 
 The Gate-2 wrapper must be:
 
@@ -134,7 +144,7 @@ The Gate-2 wrapper must be:
 
 `z-0` alone gives an absolute element its own stacking context.
 
-#### 5.2 — Timers: every `setTimeout` / `setInterval` must be cleared on unmount
+#### 6.2 — Timers: every `setTimeout` / `setInterval` must be cleared on unmount
 
 Both the **6-hour session-cap timer** and the **3-second auto-retry timer**
 previously leaked closures for up to six hours after navigation. Every
@@ -146,7 +156,7 @@ new timer in the player MUST:
 
 Pattern reference: `hardCapTimerId` and `autoRetryTimerRef` in `LiveStreamPlayer.tsx`.
 
-#### 5.3 — Unembeddable URLs must bail before ReactPlayer mounts
+#### 6.3 — Unembeddable URLs must bail before ReactPlayer mounts
 
 Provider types that cannot play through ReactPlayer under our locked-down CSP
 MUST short-circuit in `StreamPlayer` before ReactPlayer mounts:
@@ -172,7 +182,7 @@ Required:
 if (isFacebook) return <FacebookIframeEmbed url={url} />;
 ```
 
-#### 5.4 — `react-player` must be lazy-loaded
+#### 6.4 — `react-player` must be lazy-loaded
 
 ```ts
 // CORRECT — each provider is a separate dynamic chunk; FB code
@@ -183,7 +193,7 @@ import ReactPlayer from 'react-player/lazy';
 The bare `react-player` import is **lint-blocked** by
 `no-restricted-imports` in `eslint.config.js`. Do not bypass.
 
-### 6. Broadcast & Paywall System — single oracle, server-side gating
+### 7. Broadcast & Paywall System — single oracle, server-side gating
 
 The broadcast/paywall system was hardened in PR #461 (and audited in PR
 #462). Two latent bugs from #461 were fixed in migration
@@ -193,7 +203,7 @@ editing any of: `get_active_broadcast`, `redeem_ppv_invite`,
 `Live.tsx` broadcast query, or any `ppv_invites`/`stream_entitlements`
 schema.**
 
-#### 6.1 — `get_active_broadcast()` is the SINGLE access oracle
+#### 7.1 — `get_active_broadcast()` is the SINGLE access oracle
 
 Non-admin clients MUST resolve broadcast state via the
 `get_active_broadcast()` RPC. It returns:
@@ -236,7 +246,7 @@ else if (broadcast.requires_payment) showPaywallGate();
 Super-admin is the only role that may read `stream_admin_config.collection_id`
 directly (via `fetchAdminStreamConfig`) for the broadcast control panel.
 
-#### 6.2 — `can_user_view_stream` argument order: `(text, uuid)`
+#### 7.2 — `can_user_view_stream` argument order: `(text, uuid)`
 
 The published signature (per migration `20260402120000_ppv_invites_relax_game_id.sql`)
 is `(p_game_id text, p_user_id uuid)`. **Multiple overloads exist** (the
@@ -259,7 +269,7 @@ public.can_user_view_stream(v_user_id, v_game_id);
 
 This was bug #1 of the post-merge audit.
 
-#### 6.3 — `ppv_invites.game_id` is TEXT — never cast unconditionally
+#### 7.3 — `ppv_invites.game_id` is TEXT — never cast unconditionally
 
 Per migration `20260402120000_ppv_invites_relax_game_id.sql`, the column
 is `text` and may legitimately hold the literal string `'broadcast'` for
@@ -298,7 +308,7 @@ END IF;
 
 This was bug #2 of the post-merge audit.
 
-#### 6.4 — `entitlement_status = 'active'` (never `'purchased'`)
+#### 7.4 — `entitlement_status = 'active'` (never `'purchased'`)
 
 `can_user_view_stream` filters on `status = 'active'`. The original
 `create_stream_entitlement` inserted `'purchased'` — every PPV purchase
@@ -308,7 +318,7 @@ new path that creates an entitlement, insert `'active'`.
 The `'purchased'` value still exists in the enum for historical rows;
 do **not** drop it (would require backfill + downtime).
 
-#### 6.5 — Fan onboarding never sets `bio` or `avatar_url`
+#### 7.5 — Fan onboarding never sets `bio` or `avatar_url`
 
 Use `complete_fan_onboarding(p_display_name, p_full_name, p_preferred_league)`
 RPC. The function deliberately omits `bio` and `avatar_url` from its
@@ -320,7 +330,7 @@ If you add a fan-side form anywhere, **never** prompt for bio or avatar.
 Do **not** call `saveOnboarding()` from a fan code path — it would write
 empty strings or null overrides into player-only columns.
 
-#### 6.6 — Admin `Go Live` MUST sync stream_sessions + stream_sources
+#### 7.6 — Admin `Go Live` MUST sync stream_sessions + stream_sources
 
 The admin overlay's `handleGoLive()` writes `stream_admin_config` first
 (unchanged), THEN calls `admin_sync_broadcast_to_sessions()` so the
@@ -331,7 +341,7 @@ return empty even after RLS fixes).
 The sync call is intentionally non-fatal (try/catch) so a transient
 sync failure cannot roll back the primary go-live action.
 
-#### 6.7 — Paywall fallback game must honor server-granted access
+#### 7.7 — Paywall fallback game must honor server-granted access
 
 `fallbackBroadcastGame` in `Live.tsx` activates when the camera-only
 broadcast is live but no real game row exists. It MUST honor BOTH:
@@ -344,7 +354,7 @@ Without #2, registered fans whose access was just granted server-side
 see "No Active Broadcast" because `useLiveAccess` returns `'paywall'`
 for broadcasts with no `active_game_id`. This was bug #3 of the audit.
 
-#### 6.8 — `?intent=fan` must survive sign-in round-trips
+#### 7.8 — `?intent=fan` must survive sign-in round-trips
 
 The fan paywall flow depends on `?intent=fan` reaching `/onboarding` so
 the form hides bio/avatar. Three round-trip points must preserve it:
@@ -358,7 +368,7 @@ the form hides bio/avatar. Three round-trip points must preserve it:
 
 This was bug #4 of the audit (Google OAuth path was missed in PR #461).
 
-#### 6.9 — Worker endpoints MUST mirror the DB oracle for open broadcasts (M-01)
+#### 7.9 — Worker endpoints MUST mirror the DB oracle for open broadcasts (M-01)
 
 **Root cause (M-01 audit, 2026-05-06):** `get_active_broadcast()` correctly
 grants registered fans access to an open (camera-only) broadcast and returns
@@ -445,7 +455,7 @@ MUST read this section before touching any code in or adjacent to
 `handleOmnihubWebhook`, `handleOmniportCommand`, `deliverSyncEnvelope`,
 or `handleSyncDrain`.
 
-### 8.1 — New endpoints (PR #502)
+### 9.1 — New endpoints (PR #502)
 
 #### `POST /webhooks/omnihub` — `handleOmnihubWebhook`
 
@@ -514,7 +524,7 @@ JWT-authenticated diagnostic surface for OmniHub operator sessions.
 
 Any other command returns `400 unsupported_command`.
 
-### 8.2 — Outbound sync: `handleSyncDrain` + `deliverSyncEnvelope`
+### 9.2 — Outbound sync: `handleSyncDrain` + `deliverSyncEnvelope`
 
 `handleSyncDrain` (`POST /sync/drain`) sends a canonical envelope to
 `OMNIHUB_SYNC_URL`:
@@ -543,7 +553,7 @@ delivery loop:
 Per-attempt timeout: 5 seconds. 4xx responses are treated as fast-fail
 (non-retryable target rejection — do not retry on client errors).
 
-### 8.3 — Required Cloudflare Worker secrets
+### 9.3 — Required Cloudflare Worker secrets
 
 | Secret | Purpose |
 |---|---|
@@ -556,7 +566,7 @@ the worker falls back to `OMNIHUB_SIGNING_SECRET` as the verification
 key. This allows a shared-secret dev/staging setup without requiring a
 separate key pair.
 
-### 8.4 — HARD RULES (enforce in every review)
+### 9.4 — HARD RULES (enforce in every review)
 
 - **NEVER** bypass the 9-action allowlist. If a new action is needed,
   add it explicitly to the allowlist with repo owner approval.
@@ -569,7 +579,7 @@ separate key pair.
   valid. Risk-lane rejection happens before action dispatch.
 - **NEVER** remove or weaken the `target_source === "sbbl-hq"` pin.
 
-### 8.5 — Integration tests
+### 9.5 — Integration tests
 
 `src/worker/tests/omnihub-bridge.integration.test.ts` — 14 tests
 covering all new/changed surfaces:
@@ -593,7 +603,7 @@ All 14 tests must pass before merging any change to OmniBridge surfaces.
 
 ---
 
-### 7. Broadcast Stream Independence — HARD FREEZE, DO NOT TOUCH
+### 8. Broadcast Stream Independence — HARD FREEZE, DO NOT TOUCH
 
 **This is a hard owner rule. The broadcast stream is a standalone media
 resource owned exclusively by the operator. It is NEVER tied to a game,
@@ -602,7 +612,7 @@ a PPV entitlement, or any other entity.**
 The following invariants are permanent. No agent, PR, or migration may
 violate them without explicit written approval from the repo owner:
 
-#### 7.1 — `/api/broadcast/*` is frozen to agents
+#### 8.1 — `/api/broadcast/*` is frozen to agents
 
 The route family `POST /api/broadcast/access`, `POST /api/broadcast/session`,
 `POST /api/broadcast/session/heartbeat`, and `POST /api/broadcast/session/end`
@@ -614,14 +624,14 @@ a change. Do not:
 - Rename or move these routes.
 - Add authentication layers beyond the existing `requireAuth`.
 
-#### 7.2 — Broadcast access = registration only
+#### 8.2 — Broadcast access = registration only
 
 The only requirement to watch a broadcast is a completed SBBL HQ account
 (`onboarding_completed_at IS NOT NULL`). There is no PPV, no game
 entitlement, no `can_user_view_stream` call, and no `stream_entitlements`
 row involved. This is intentional.
 
-#### 7.3 — `LiveStreamPlayer` must route `game.id === 'broadcast'` to `/api/broadcast/*`
+#### 8.3 — `LiveStreamPlayer` must route `game.id === 'broadcast'` to `/api/broadcast/*`
 
 When `game.id === 'broadcast'`, all session API calls in `LiveStreamPlayer.tsx`
 MUST target the canonical broadcast endpoints:
@@ -637,7 +647,7 @@ Do NOT route the broadcast alias through `/api/streams/broadcast/*`. The
 legacy alias routes exist only for backward compatibility and are not
 guaranteed to remain.
 
-#### 7.4 — No further modifications without owner approval
+#### 8.4 — No further modifications without owner approval
 
 If you are an agent reading this: **stop**. Do not plan, propose, or
 implement any change to the broadcast stream system unless the operator

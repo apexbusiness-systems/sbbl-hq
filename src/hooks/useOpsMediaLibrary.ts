@@ -9,26 +9,48 @@ import {
   type OpsMediaPublication,
 } from '@/lib/api/ops';
 import { createIdempotencyKey, IDEMPOTENCY_HEADER } from '@/lib/api/idempotency';
+import { useMediaSearch } from './useMediaSearch';
+import { useMediaBulkSelection } from './useMediaBulkSelection';
+import { useMediaDragOrder } from './useMediaDragOrder';
+import { useMediaStaleCleanup } from './useMediaStaleCleanup';
+import { useMediaPin } from './useMediaPin';
+import { useMediaUploadFlow } from './useMediaUploadFlow';
 
+/**
+ * Composed hook for the Ops Console media library tab.
+ * Orchestrates all sub-hooks for search, bulk selection, drag order,
+ * stale cleanup, pinning, upload flow, and core CRUD.
+ */
 export function useOpsMediaLibrary(enabled: boolean) {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<MediaPublicationStatus | 'all'>('all');
   const [surfaceFilter, setSurfaceFilter] = useState<string>('all');
   const [leagueFilter, setLeagueFilter] = useState<string>('all');
-  const [mediaOrderIds, setMediaOrderIds] = useState<string[]>([]);
+  const [orderBy, setOrderBy] = useState<'newest' | 'sort_order'>('newest');
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [archiveId, setArchiveId] = useState<string | null>(null);
+  const [staleCleanupOpen, setStaleCleanupOpen] = useState(false);
+  const [uploadModeActive, setUploadModeActive] = useState(false);
 
+  // Sub-hooks
+  const search = useMediaSearch(enabled);
+  const bulk = useMediaBulkSelection();
+  const stale = useMediaStaleCleanup();
+  const pin = useMediaPin();
+  const upload = useMediaUploadFlow();
+
+  // Core media list query (used when NOT searching)
   const mediaListQuery = useQuery({
-    queryKey: ['ops-media-list', statusFilter, surfaceFilter, leagueFilter],
+    queryKey: ['ops-media-list', statusFilter, surfaceFilter, leagueFilter, orderBy],
     queryFn: () =>
       fetchOpsMediaList({
         status: statusFilter === 'all' ? undefined : statusFilter,
         surface: surfaceFilter === 'all' ? undefined : surfaceFilter,
         leagueId: leagueFilter === 'all' ? undefined : leagueFilter,
+        orderBy,
       }),
-    enabled,
+    enabled: enabled && !search.isSearching,
     retry: (_, error) => {
       const message = error instanceof Error ? error.message : '';
       return !(message === 'unauthorized' || message === 'reauth_required');
@@ -37,26 +59,25 @@ export function useOpsMediaLibrary(enabled: boolean) {
   });
 
   const mediaPublications = useMemo<OpsMediaPublication[]>(
-    () => mediaListQuery.data?.data ?? [],
-    [mediaListQuery.data?.data],
+    () => search.isSearching ? search.searchResults : (mediaListQuery.data?.data ?? []),
+    [search.isSearching, search.searchResults, mediaListQuery.data?.data],
   );
 
+  const publicationIds = useMemo(() => mediaPublications.map((p) => p.id), [mediaPublications]);
+  const drag = useMediaDragOrder(publicationIds);
+
   const orderedMediaPublications = useMemo<OpsMediaPublication[]>(() => {
-    if (mediaOrderIds.length === 0) return mediaPublications;
+    const orderIds = drag.localOrderIds;
+    if (orderIds.length === 0) return mediaPublications;
     const byId = new Map(mediaPublications.map((pub) => [pub.id, pub]));
     const ordered: OpsMediaPublication[] = [];
-    mediaOrderIds.forEach((id) => {
+    orderIds.forEach((id) => {
       const row = byId.get(id);
       if (row) ordered.push(row);
       byId.delete(id);
     });
     return [...ordered, ...byId.values()];
-  }, [mediaOrderIds, mediaPublications]);
-
-  const hasPendingOrderChanges = useMemo(() => {
-    if (mediaOrderIds.length !== mediaPublications.length) return false;
-    return mediaOrderIds.some((id, index) => id !== mediaPublications[index]?.id);
-  }, [mediaOrderIds, mediaPublications]);
+  }, [drag.localOrderIds, mediaPublications]);
 
   const patchMutation = useMutation({
     mutationFn: async ({
@@ -78,6 +99,7 @@ export function useOpsMediaLibrary(enabled: boolean) {
     onSuccess: async () => {
       setEditId(null);
       await queryClient.invalidateQueries({ queryKey: ['ops-media-list'] });
+      await queryClient.invalidateQueries({ queryKey: ['ops-media-search'] });
       await queryClient.invalidateQueries({ queryKey: ['public-media'] });
       await queryClient.invalidateQueries({ queryKey: ['public-media-posters'] });
     },
@@ -88,16 +110,7 @@ export function useOpsMediaLibrary(enabled: boolean) {
     onSuccess: async () => {
       setArchiveId(null);
       await queryClient.invalidateQueries({ queryKey: ['ops-media-list'] });
-      await queryClient.invalidateQueries({ queryKey: ['public-media'] });
-      await queryClient.invalidateQueries({ queryKey: ['public-media-posters'] });
-    },
-  });
-
-  const orderMutation = useMutation({
-    mutationFn: async (items: Array<{ id: string; sortOrder: number }>) =>
-      updateOpsMediaPublicationOrder(items),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['ops-media-list'] });
+      await queryClient.invalidateQueries({ queryKey: ['ops-media-search'] });
       await queryClient.invalidateQueries({ queryKey: ['public-media'] });
       await queryClient.invalidateQueries({ queryKey: ['public-media-posters'] });
     },
@@ -123,65 +136,110 @@ export function useOpsMediaLibrary(enabled: boolean) {
     [deleteMutation],
   );
 
-  const saveOrder = useCallback(() => {
-    if (!hasPendingOrderChanges) return;
-    orderMutation.mutate(mediaOrderIds.map((id, index) => ({ id, sortOrder: index })));
-  }, [hasPendingOrderChanges, mediaOrderIds, orderMutation]);
-
-  const moveMedia = useCallback((id: string, direction: 'up' | 'down') => {
-    setMediaOrderIds((prev) => {
-      const index = prev.indexOf(id);
-      if (index < 0) return prev;
-      const nextIndex = direction === 'up' ? index - 1 : index + 1;
-      if (nextIndex < 0 || nextIndex >= prev.length) return prev;
-      const next = [...prev];
-      [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-      return next;
-    });
-  }, []);
-
   return {
-    // State
+    // Filter state
     statusFilter,
     surfaceFilter,
     leagueFilter,
-    mediaOrderIds,
+    orderBy,
     previewId,
     editId,
     archiveId,
+    staleCleanupOpen,
+    uploadModeActive,
 
     // Setters
     setStatusFilter,
     setSurfaceFilter,
     setLeagueFilter,
-    setMediaOrderIds,
+    setOrderBy,
     setPreviewId,
     setEditId,
     setArchiveId,
+    setStaleCleanupOpen,
+    setUploadModeActive,
     resetFilters,
 
     // Data
     mediaPublications,
     orderedMediaPublications,
-    hasPendingOrderChanges,
+    hasPendingOrderChanges: drag.hasPendingChanges,
 
-    // Query/Mutation states
+    // Search sub-hook
+    searchQuery: search.query,
+    isSearching: search.isSearching,
+    onSearchChange: search.onQueryChange,
+    clearSearch: search.clearSearch,
+    isSearchFetching: search.isSearchFetching,
+
+    // Bulk sub-hook
+    isBulkMode: bulk.isBulkMode,
+    selectedIds: bulk.selectedIds,
+    selectedCount: bulk.selectedCount,
+    bulkError: bulk.bulkError,
+    invalidIds: bulk.invalidIds,
+    isBulkArchivePending: bulk.isBulkArchivePending,
+    toggleBulkMode: bulk.toggleBulkMode,
+    toggleSelection: bulk.toggleSelection,
+    selectAll: bulk.selectAll,
+    deselectAll: bulk.deselectAll,
+    bulkArchive: bulk.bulkArchive,
+
+    // Drag sub-hook
+    dragSensors: drag.sensors,
+    handleDragEnd: drag.handleDragEnd,
+    dragMoveUp: drag.moveUp,
+    dragMoveDown: drag.moveDown,
+    isOrderSaving: drag.isSaving,
+    orderError: drag.orderError,
+    resetOrder: drag.resetOrder,
+
+    // Stale cleanup sub-hook
+    staleOlderThanDays: stale.olderThanDays,
+    setStaleOlderThanDays: stale.setOlderThanDays,
+    stalePreviewResult: stale.previewResult,
+    staleExecuteResult: stale.executeResult,
+    isStalePreviewLoading: stale.isPreviewLoading,
+    isStaleExecuteLoading: stale.isExecuteLoading,
+    stalePreviewError: stale.previewError,
+    staleExecuteError: stale.executeError,
+    fetchStalePreview: stale.fetchPreview,
+    executeStaleCleanup: stale.executeCleanup,
+    resetStaleCleanup: stale.reset,
+
+    // Pin sub-hook
+    isPinning: pin.isPinning,
+    pinError: pin.pinError,
+    togglePin: pin.togglePin,
+
+    // Upload sub-hook
+    uploadFlow: upload.flowState,
+    isUploading: upload.isUploading,
+    uploadError: upload.uploadError,
+    setUploadLeague: upload.setLeague,
+    setUploadSurface: upload.setSurface,
+    setUploadPublishStatus: upload.setPublishStatus,
+    uploadPresign: upload.presignMutation,
+    uploadSubmit: upload.submitMutation,
+    overrideParserField: upload.overrideParserField,
+    resetUpload: upload.reset,
+    uploadGoBack: upload.goBack,
+
+    // Core query/mutation states
     isLoading: mediaListQuery.isLoading,
     isError: mediaListQuery.isError,
     isSuccess: mediaListQuery.isSuccess,
-    isFetching: mediaListQuery.isFetching,
+    isFetching: mediaListQuery.isFetching || search.isSearchFetching,
+    error: mediaListQuery.error,
     isPatchingPending: patchMutation.isPending,
     isDeletingPending: deleteMutation.isPending,
-    isOrderingPending: orderMutation.isPending,
-    error: mediaListQuery.error,
     patchError: patchMutation.error,
     deleteError: deleteMutation.error,
-    orderError: orderMutation.error,
 
-    // Actions
+    // Core actions
     saveMetadata,
     archiveMedia,
-    saveOrder,
-    moveMedia,
+    saveOrder: drag.saveOrder,
+    moveMedia: drag.moveUp, // legacy compat — use dragMoveUp/dragMoveDown
   };
 }

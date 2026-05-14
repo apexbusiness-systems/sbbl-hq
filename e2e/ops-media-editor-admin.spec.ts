@@ -263,7 +263,7 @@ test.describe('ops media editor admin', () => {
     // ── Edit flow: rename POTG + force status back to draft ─────────────
     await potgRow.getByRole('button', { name: 'Edit' }).click();
 
-    // The EditMetadataModal should appear with title input and status dropdown
+    // The MediaMetadataSheet should appear with title input and status chips
     const modal = page.locator('[role="dialog"]');
     await expect(modal).toBeVisible();
 
@@ -271,9 +271,10 @@ test.describe('ops media editor admin', () => {
     await expect(titleInput).toBeVisible();
     await titleInput.fill('Michael Ramos POTG (Updated)');
 
-    // Change the status to draft using the first select in the modal (status dropdown)
-    const statusSelect = modal.locator('select').first();
-    await statusSelect.selectOption('draft');
+    // Change the status to draft using the radio chips (MediaMetadataSheet uses
+    // role="radio" buttons instead of native <select>).
+    const draftRadio = modal.getByRole('radio', { name: 'Draft' });
+    await draftRadio.click();
 
     // Click the Save Changes button in the modal
     await modal.getByRole('button', { name: 'Save Changes' }).click();
@@ -295,8 +296,8 @@ test.describe('ops media editor admin', () => {
     // Click Archive button to open the ArchiveModal
     await storeRow.getByRole('button', { name: 'Archive' }).click();
 
-    // Confirm in the archive modal
-    const archiveModal = page.locator('[role="dialog"]').filter({ hasText: 'Archive Media' });
+    // Confirm in the archive modal (aria-label="Archive Media")
+    const archiveModal = page.getByRole('dialog', { name: 'Archive Media' });
     await expect(archiveModal).toBeVisible();
     await archiveModal.getByRole('button', { name: 'Archive' }).click();
 
@@ -313,7 +314,7 @@ test.describe('ops media editor admin', () => {
     await eventRow.getByRole('button', { name: 'Archive' }).click();
 
     // Cancel in the archive modal
-    const archiveModal2 = page.locator('[role="dialog"]').filter({ hasText: 'Archive Media' });
+    const archiveModal2 = page.getByRole('dialog', { name: 'Archive Media' });
     await expect(archiveModal2).toBeVisible();
     await archiveModal2.getByRole('button', { name: 'Keep' }).click();
 
