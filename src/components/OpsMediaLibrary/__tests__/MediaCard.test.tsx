@@ -20,66 +20,44 @@ const mockPublication: OpsMediaPublication = {
   type: 'image',
   thumbnail: '/test.jpg',
   createdAt: '2024-05-01T00:00:00Z',
+  pinnedAt: null,
+  needsReview: false,
+  confidence: null,
+  uncertainFields: null,
+  updatedAt: null,
+};
+
+const defaultProps = {
+  isEditing: false as const,
+  isBulkMode: false as const,
+  isSelected: false as const,
+  isLoading: false,
+  editsDisabled: false,
+  onEdit: vi.fn(),
+  onArchive: vi.fn(),
+  onPreview: vi.fn(),
+  onRestore: vi.fn(),
+  onTogglePin: vi.fn(),
+  onToggleSelect: vi.fn(),
+  onMoveUp: vi.fn(),
+  onMoveDown: vi.fn(),
+  canMoveUp: true,
+  canMoveDown: true,
 };
 
 describe('MediaCard', () => {
   it('renders media title', () => {
-    render(
-      <MediaCard
-        publication={mockPublication}
-        isEditing={false}
-        onEdit={vi.fn()}
-        onArchive={vi.fn()}
-        onPreview={vi.fn()}
-        onMoveUp={vi.fn()}
-        onMoveDown={vi.fn()}
-        canMoveUp={true}
-        canMoveDown={true}
-        isLoading={false}
-        editsDisabled={false}
-      />
-    );
-
+    render(<MediaCard publication={mockPublication} {...defaultProps} />);
     expect(screen.getByText('Test Media')).toBeInTheDocument();
   });
 
   it('renders league badge for league-associated media', () => {
-    render(
-      <MediaCard
-        publication={mockPublication}
-        isEditing={false}
-        onEdit={vi.fn()}
-        onArchive={vi.fn()}
-        onPreview={vi.fn()}
-        onMoveUp={vi.fn()}
-        onMoveDown={vi.fn()}
-        canMoveUp={true}
-        canMoveDown={true}
-        isLoading={false}
-        editsDisabled={false}
-      />
-    );
-
+    render(<MediaCard publication={mockPublication} {...defaultProps} />);
     expect(screen.getByText('WBL')).toBeInTheDocument();
   });
 
   it('renders status badge with correct styling', () => {
-    render(
-      <MediaCard
-        publication={mockPublication}
-        isEditing={false}
-        onEdit={vi.fn()}
-        onArchive={vi.fn()}
-        onPreview={vi.fn()}
-        onMoveUp={vi.fn()}
-        onMoveDown={vi.fn()}
-        canMoveUp={true}
-        canMoveDown={true}
-        isLoading={false}
-        editsDisabled={false}
-      />
-    );
-
+    render(<MediaCard publication={mockPublication} {...defaultProps} />);
     expect(screen.getByText('published')).toBeInTheDocument();
   });
 
@@ -89,21 +67,7 @@ describe('MediaCard', () => {
       status: 'archived',
     };
 
-    render(
-      <MediaCard
-        publication={archivedMedia}
-        isEditing={false}
-        onEdit={vi.fn()}
-        onArchive={vi.fn()}
-        onPreview={vi.fn()}
-        onMoveUp={vi.fn()}
-        onMoveDown={vi.fn()}
-        canMoveUp={true}
-        canMoveDown={true}
-        isLoading={false}
-        editsDisabled={false}
-      />
-    );
+    render(<MediaCard publication={archivedMedia} {...defaultProps} />);
 
     const buttons = screen.getAllByRole('button');
     const archiveButton = buttons.find((btn) => btn.getAttribute('aria-label')?.includes('Archive'));
@@ -112,22 +76,7 @@ describe('MediaCard', () => {
 
   it('calls onEdit when edit button clicked', () => {
     const onEdit = vi.fn();
-
-    render(
-      <MediaCard
-        publication={mockPublication}
-        isEditing={false}
-        onEdit={onEdit}
-        onArchive={vi.fn()}
-        onPreview={vi.fn()}
-        onMoveUp={vi.fn()}
-        onMoveDown={vi.fn()}
-        canMoveUp={true}
-        canMoveDown={true}
-        isLoading={false}
-        editsDisabled={false}
-      />
-    );
+    render(<MediaCard publication={mockPublication} {...defaultProps} onEdit={onEdit} />);
 
     const buttons = screen.getAllByRole('button');
     const editButton = buttons.find((btn) => btn.getAttribute('aria-label')?.includes('Edit'));
@@ -142,63 +91,24 @@ describe('MediaCard', () => {
       title: '',
     };
 
-    render(
-      <MediaCard
-        publication={untitledMedia}
-        isEditing={false}
-        onEdit={vi.fn()}
-        onArchive={vi.fn()}
-        onPreview={vi.fn()}
-        onMoveUp={vi.fn()}
-        onMoveDown={vi.fn()}
-        canMoveUp={true}
-        canMoveDown={true}
-        isLoading={false}
-        editsDisabled={false}
-      />
-    );
-
+    render(<MediaCard publication={untitledMedia} {...defaultProps} />);
     expect(screen.getByText('(untitled)')).toBeInTheDocument();
   });
 
   it('disables move up button when canMoveUp is false', () => {
-    render(
-      <MediaCard
-        publication={mockPublication}
-        isEditing={false}
-        onEdit={vi.fn()}
-        onArchive={vi.fn()}
-        onPreview={vi.fn()}
-        onMoveUp={vi.fn()}
-        onMoveDown={vi.fn()}
-        canMoveUp={false}
-        canMoveDown={true}
-        isLoading={false}
-        editsDisabled={false}
-      />
-    );
+    render(<MediaCard publication={mockPublication} {...defaultProps} canMoveUp={false} />);
 
     const buttons = screen.getAllByRole('button');
-    const moveUpButton = buttons.find((btn) => btn.getAttribute('aria-label')?.includes('Move') && btn.getAttribute('aria-label')?.includes('up'));
+    const moveUpButton = buttons.find(
+      (btn) =>
+        btn.getAttribute('aria-label')?.includes('Move') &&
+        btn.getAttribute('aria-label')?.includes('up'),
+    );
     expect(moveUpButton).toBeDisabled();
   });
 
   it('disables all buttons when editsDisabled is true', () => {
-    render(
-      <MediaCard
-        publication={mockPublication}
-        isEditing={false}
-        onEdit={vi.fn()}
-        onArchive={vi.fn()}
-        onPreview={vi.fn()}
-        onMoveUp={vi.fn()}
-        onMoveDown={vi.fn()}
-        canMoveUp={true}
-        canMoveDown={true}
-        isLoading={false}
-        editsDisabled={true}
-      />
-    );
+    render(<MediaCard publication={mockPublication} {...defaultProps} editsDisabled={true} />);
 
     const buttons = screen.getAllByRole('button');
     buttons.forEach((btn) => {

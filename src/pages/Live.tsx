@@ -10,8 +10,8 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { useLiveAccess } from '@/hooks/useLiveAccess';
 import { apiFetch, getAuthToken } from '@/lib/api/client';
 import { LiveStreamPlayer } from '@/components/LiveStreamPlayer';
-import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
 import { PaywallGate } from '@/components/live/PaywallGate';
+import { PlayerErrorBoundary } from '@/components/PlayerErrorBoundary';
 import { ViewerPreflight } from '@/components/preflight/ViewerPreflight';
 import { TokenWalletBadge } from '@/components/tokens/TokenWalletBadge';
 import { TokenPurchaseModal } from '@/components/tokens/TokenPurchaseModal';
@@ -48,7 +48,7 @@ import {
   MessageSquare, Share2, Scissors, ShoppingBag, Check,
   ChevronLeft, ChevronRight, Tag,
   Radio, Eye, DollarSign, Settings, X, Ticket, Copy,
-  Upload, Wifi,
+  Upload, Wifi, AlertTriangle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Game, PlayerProfile, Product } from '@/types';
@@ -312,22 +312,6 @@ function AdminStreamOverlay({
         setTimeout(() => { onGoLive?.(); }, 500);
         toast.success(nextLive ? 'Stream is LIVE' : 'Stream ended');
         if (nextLive) setOpen(false);
-      }
-
-      // Sync stream_sessions + stream_sources so non-admin RLS queries resolve.
-      // This is additive — it runs after the primary stream_admin_config write.
-      // Non-fatal: a failure here does not roll back the go-live action.
-      try {
-        const supabase = getSupabaseClient();
-        if (supabase) {
-          await supabase.rpc('admin_sync_broadcast_to_sessions', {
-            p_game_id:       activeGameId ?? null,
-            p_stream_url:    nextLive ? (normalizedUrl || null) : null,
-            p_is_going_live: nextLive,
-          });
-        }
-      } catch {
-        // Non-fatal: primary broadcast state already saved above.
       }
     } catch (err) {
       toast.error(`Failed to save config: ${err instanceof Error ? err.message : String(err)}`);
@@ -743,10 +727,6 @@ const LivePage = () => {
   // real game + PPV entitlement.
   const hasPrivilegedBroadcastAccess =
     roles.includes('player') || roles.includes('paid_fan') || isSuperAdmin;
-  // Entitled fan path: when stream runs camera-only (broadcast alias),
-  // users with active PPV entitlement must still receive a playable container.
-  // Without this, paid fans can see "No Live Broadcast Available" despite
-  // valid access because fallbackBroadcastGame only admitted privileged roles.
   const hasBroadcastFallbackAccess = hasPrivilegedBroadcastAccess || access === 'paid';
   const [liveGame, setLiveGame] = useState<Game | null>(null);
   // Incremented each time the admin saves a Go Live / End Stream action.
@@ -778,9 +758,6 @@ const LivePage = () => {
     queryFn: async () => {
       const supabase = getSupabaseClient();
       if (!supabase) {
-        // No Supabase client — runtime config / public-config has not yet
-        // resolved. Surface as a misconfiguration so the misconfigured branch
-        // renders instead of "No Active Broadcast" (which would hide the bug).
         throw new Error('supabase_client_unavailable');
       }
       const { data, error } = await supabase.rpc('get_active_broadcast');
@@ -800,16 +777,9 @@ const LivePage = () => {
     enabled: !isSuperAdmin,
     staleTime: 15_000,
     refetchInterval: 15_000,
-    // Limit retries so a missing RPC / wrong project surfaces quickly as a
-    // misconfiguration banner instead of spinning silently on the skeleton.
     retry: 1,
   });
   const broadcast = broadcastQuery.data ?? null;
-  // Distinct from "not live": the oracle itself failed (RPC missing, schema
-  // drift, wrong Supabase project, no client). Triggers the fail-closed
-  // misconfiguration render so live-service breakage is visible, not silent.
-  // Admins bypass the oracle (they read stream_admin_config directly) so this
-  // flag must be ignored when isSuperAdmin is true.
   const broadcastOracleBroken = !isSuperAdmin && broadcastQuery.isError;
 
   const handleBroadcastRefetch = () => {
@@ -825,18 +795,10 @@ const LivePage = () => {
         const home = await fetchPublicHome();
         const liveRows = (home.data?.liveGames ?? []) as Array<Record<string, unknown>>;
         const upcomingRows = (home.data?.upcomingGames ?? []) as Array<Record<string, unknown>>;
-        // Super admins can run spontaneous broadcasts from /live with no game row,
-        // so never auto-bind them to upcomingGames[0]. Viewers still resolve to
-        // live -> upcoming for preflight/paywall flows.
         const selected = liveRows[0] ?? (!isSuperAdmin ? upcomingRows[0] : null) ?? null;
-        if (active) {
-          const nextGameId = selected ? String(selected.id) : null;
-          setActiveGameId((prev) => (prev === nextGameId ? prev : nextGameId));
-          setLiveGame((prev) => {
-            if (!selected) return null;
-            if (prev?.id === nextGameId) return prev;
-            return mapHomeGameToUi(selected);
-          });
+        if (active && selected) {
+          setLiveGame(mapHomeGameToUi(selected));
+          setActiveGameId(String(selected.id));
         }
         if (isSuperAdmin) {
           // Admin needs full config — pass null so apiFetch uses getAuthToken()
@@ -1215,10 +1177,9 @@ const LivePage = () => {
   }
 
   // Fan who registered but hasn't completed onboarding must finish it before
-  // reaching the PPV paywall. Pass intent=fan so the onboarding form hides
-  // bio/avatar fields and calls complete_fan_onboarding() instead.
+  // reaching the PPV paywall.
   if (!authLoading && needsOnboarding) {
-    return <Navigate to="/onboarding?intent=fan&redirect=/live" replace />;
+    return <Navigate to="/onboarding?redirect=/live" replace />;
   }
 
   const sidebar = (
@@ -1341,16 +1302,7 @@ const LivePage = () => {
           <div className="lg:col-span-2 flex flex-col">
 
             {/* Broadcast Area — admin overlay + access-gate player */}
-            <div
-              className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm"
-              style={{
-                width: '100%',
-                height: '100%',
-                minWidth: '400px',
-                minHeight: '300px',
-              }}
-            >
-              {/* Twitch embed parent: ['sbbl-hq.icu'] is enforced in LiveStreamPlayer. */}
+            <div className="relative aspect-video bg-muted overflow-hidden lg:rounded-sm">
               {/* Admin stream overlay — inside the video wrapper, super_admin only */}
               {isSuperAdmin && (
                   <AdminStreamOverlay
@@ -1382,32 +1334,30 @@ const LivePage = () => {
                     onRetry={() => void preflightQuery.refetch()}
                   />
                 </div>
+              ) : playerGame ? (
+               <PlayerErrorBoundary key={streamNonce}>
+                  <LiveStreamPlayer
+                    game={playerGame}
+                    userId={user?.id ?? null}
+                    roles={roles}
+                    hasPremiumPlayerAccess={hasPremiumPlayerAccess}
+                    isStreamLive={isStreamLive}
+                    serverGrantedAccess={serverGrantedBroadcastAccess}
+                  />
+              </PlayerErrorBoundary>
               ) : broadcastOracleBroken && !serverGrantedBroadcastAccess ? (
-                // Live-service misconfiguration: the broadcast oracle (RPC,
-                // schema, or project binding) failed. Fail closed — render an
-                // explicit error state instead of silently falling through to
-                // "No Active Broadcast" (which would hide the outage). This
-                // branch is intentionally subordinate to serverGrantedAccess
-                // so the PR #500 contract still holds: when a stream_url has
-                // already been granted server-side, playback continues.
-                <div
-                  className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/85 px-6"
-                  data-testid="live-misconfigured"
-                  role="alert"
-                >
-                  <div className="w-14 h-14 rounded-full bg-red-900/40 border border-red-600/40 flex items-center justify-center mb-3">
-                    <Radio className="w-6 h-6 text-red-400" />
+                <div data-testid="live-misconfigured" className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
+                  <div className="w-14 h-14 rounded-full bg-destructive/50 flex items-center justify-center mb-3">
+                    <AlertTriangle className="w-6 h-6 text-destructive" />
                   </div>
-                  <p className="text-sm font-semibold text-white">Live service unavailable</p>
-                  <p className="text-xs text-white/60 mt-2 max-w-xs leading-relaxed">
-                    The broadcast service can't be reached right now. This usually
-                    means the server is being updated. No stream is being shown for
-                    safety — please refresh in a minute.
+                  <p className="text-sm text-red-400 font-medium">Live service unavailable</p>
+                  <p className="text-xs text-white/40 mt-1">
+                    The broadcast service could not be reached. Try again in a few minutes.
                   </p>
                   <button
                     type="button"
                     onClick={handleBroadcastRefetch}
-                    className="mt-4 px-4 py-2 rounded-sm bg-white/10 border border-white/15 text-xs font-semibold text-white hover:bg-white/15"
+                    className="mt-3 px-4 py-2 text-xs bg-primary text-primary-foreground rounded-md hover:bg-primary/90 transition-colors"
                   >
                     Retry
                   </button>
@@ -1433,34 +1383,6 @@ const LivePage = () => {
                     onSuccess={handleBroadcastRefetch}
                   />
                 )
-              ) : playerGame ? (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    width: '100%',
-                    height: '100%',
-                    minWidth: '400px',
-                    minHeight: '300px',
-                    visibility: 'visible',
-                    overflow: 'hidden',
-                  }}
-                >
-                  {/* Twitch embed config source-of-truth includes parent: ['sbbl-hq.icu'] in LiveStreamPlayer. */}
-                  <PlayerErrorBoundary key={streamNonce}>
-                    <LiveStreamPlayer
-                      game={playerGame}
-                      userId={user?.id ?? null}
-                      roles={roles}
-                      hasPremiumPlayerAccess={hasPremiumPlayerAccess}
-                      isStreamLive={isStreamLive}
-                      serverGrantedAccess={Boolean(broadcast?.stream_url)}
-                    />
-                  </PlayerErrorBoundary>
-                </div>
               ) : (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-black/80 px-6">
                   <div className="w-14 h-14 rounded-full bg-secondary/50 flex items-center justify-center mb-3">

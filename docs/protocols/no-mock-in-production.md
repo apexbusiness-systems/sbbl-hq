@@ -2,7 +2,7 @@
 
 **Status**: MANDATORY — enforced by ESLint + vitest + CI.
 **Owner**: Data Pipeline (SBBL-HQ).
-**Last updated**: 2026-05-11.
+**Last updated**: 2026-05-13.
 
 ## TL;DR
 
@@ -80,6 +80,12 @@ is cached at the edge.
 | Home snapshot | `GET /api/public/home`         | `{ ok, teams, liveGames, … }`     | None                         | multiple tables              |
 | Teams         | `GET /api/teams`               | `{ ok, teams: TeamCard[] }`       | None                         | `teams` + `mvw_standings`    |
 | Products      | `GET /api/public/products`     | `{ ok, data: Product[] }`         | None                         | `store_products`             |
+| Media Library | `GET /api/ops/list/media` | `{ ok, data: OpsMediaPublication[] }` | Super-admin required | `media_publications` + joins |
+| Media Search  | `GET /api/ops/list/media?q=...` | `{ ok, data: OpsMediaPublication[] }` | Super-admin required | `media_publications` ILIKE |
+| Bulk Archive  | `POST /api/ops/media/bulk-archive` | `{ ok, archived, ids }` | Super-admin required | `bulk_archive_media_publications()` RPC |
+| Restore Media | `POST /api/ops/media/publications/:id/restore` | `{ ok, data }` | Super-admin required | `media_publications` UPDATE |
+| Stale Preview | `POST /api/ops/media/stale-cleanup-preview` | `{ ok, totalAffected, ... }` | Super-admin required | `media_publications` SELECT |
+| Stale Execute | `POST /api/ops/media/stale-cleanup-execute` | `{ ok, archived, ids }` | Super-admin required | `media_publications` UPDATE |
 | OmniBridge inbound | `POST /webhooks/omnihub`  | `{ ok, status, command_id }`      | HMAC-SHA256 (no mock)        | `api_idempotency_keys` + `log_admin_action` RPC |
 | OmniPort command   | `POST /api/omniport/command` | `{ ok, result }`               | Operator JWT only (no mock)  | Worker-only, no DB write     |
 
