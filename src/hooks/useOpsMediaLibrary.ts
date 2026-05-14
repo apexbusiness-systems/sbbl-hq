@@ -265,6 +265,18 @@ export function useOpsMediaLibrary(enabled: boolean) {
     });
   }, []);
 
+  const reorderMedia = useCallback((activeId: string, overId: string) => {
+    setMediaOrderIds((prev) => {
+      const activeIndex = prev.indexOf(activeId);
+      const overIndex = prev.indexOf(overId);
+      if (activeIndex < 0 || overIndex < 0 || activeIndex === overIndex) return prev;
+      const next = [...prev];
+      next.splice(activeIndex, 1);
+      next.splice(overIndex, 0, activeId);
+      return next;
+    });
+  }, []);
+
   const togglePin = useCallback(
     (id: string) => {
       const pub = mediaPublications.find((p) => p.id === id);
@@ -408,6 +420,7 @@ export function useOpsMediaLibrary(enabled: boolean) {
     restoreMedia,
     saveOrder,
     moveMedia,
+    reorderMedia,
     togglePin,
     toggleBulkSelect,
     selectAll,

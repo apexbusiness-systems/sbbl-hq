@@ -27,19 +27,15 @@ const mockPublication: OpsMediaPublication = {
 
 const defaultProps = {
   publication: mockPublication,
-  isEditing: false,
   isSelected: false,
   isBulkMode: false,
+  isDragMode: false,
   onEdit: vi.fn(),
   onArchive: vi.fn(),
   onPreview: vi.fn(),
   onRestore: vi.fn(),
   onPin: vi.fn(),
-  onMoveUp: vi.fn(),
-  onMoveDown: vi.fn(),
   onToggleSelect: vi.fn(),
-  canMoveUp: true,
-  canMoveDown: true,
   isLoading: false,
   editsDisabled: false,
 };
@@ -84,13 +80,14 @@ describe('MediaCard', () => {
     expect(screen.getByText('(untitled)')).toBeInTheDocument();
   });
 
-  it('disables move up button when canMoveUp is false', () => {
-    render(<MediaCard {...defaultProps} canMoveUp={false} />);
-    const buttons = screen.getAllByRole('button');
-    const moveUpButton = buttons.find(
-      (btn) => btn.getAttribute('aria-label')?.includes('Move') && btn.getAttribute('aria-label')?.includes('up'),
-    );
-    expect(moveUpButton).toBeDisabled();
+  it('shows drag handle in drag mode', () => {
+    render(<MediaCard {...defaultProps} isDragMode={true} />);
+    expect(screen.getByRole('button', { name: /Drag to reorder/i })).toBeInTheDocument();
+  });
+
+  it('hides drag handle when not in drag mode', () => {
+    render(<MediaCard {...defaultProps} isDragMode={false} />);
+    expect(screen.queryByRole('button', { name: /Drag to reorder/i })).not.toBeInTheDocument();
   });
 
   it('disables all buttons when editsDisabled is true', () => {

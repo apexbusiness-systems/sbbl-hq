@@ -45,19 +45,15 @@ const basePublication: OpsMediaPublication = {
 
 const defaultCardProps = {
   publication: basePublication,
-  isEditing: false,
   isSelected: false,
   isBulkMode: false,
+  isDragMode: false,
   onEdit: vi.fn(),
   onArchive: vi.fn(),
   onPreview: vi.fn(),
   onRestore: vi.fn(),
   onPin: vi.fn(),
-  onMoveUp: vi.fn(),
-  onMoveDown: vi.fn(),
   onToggleSelect: vi.fn(),
-  canMoveUp: true,
-  canMoveDown: true,
   isLoading: false,
   editsDisabled: false,
 };
@@ -133,19 +129,20 @@ describe('MediaCard — parser confidence badge', () => {
   it('renders confidence badge when parserConfidence is set', () => {
     const confident: OpsMediaPublication = { ...basePublication, parserConfidence: 0.87 };
     render(<MediaCard {...defaultCardProps} publication={confident} />);
-    expect(screen.getByText('87% confidence')).toBeInTheDocument();
+    expect(screen.getByText('87%')).toBeInTheDocument();
   });
 
   it('renders low-confidence badge in red styling', () => {
     const lowConf: OpsMediaPublication = { ...basePublication, parserConfidence: 0.35 };
     render(<MediaCard {...defaultCardProps} publication={lowConf} />);
-    const badge = screen.getByText('35% confidence');
+    const badge = screen.getByText('35%');
     expect(badge).toHaveClass('text-destructive');
   });
 
   it('does not render confidence badge when parserConfidence is null', () => {
     render(<MediaCard {...defaultCardProps} />);
-    expect(screen.queryByText(/confidence/i)).not.toBeInTheDocument();
+    // No percentage text for confidence when null
+    expect(screen.queryByText(/%$/)).not.toBeInTheDocument();
   });
 });
 
@@ -172,10 +169,9 @@ describe('MediaCard — bulk select', () => {
     expect(screen.queryByRole('button', { name: /Select "Test Media"/i })).not.toBeInTheDocument();
   });
 
-  it('hides move-up/move-down buttons in bulk mode', () => {
-    render(<MediaCard {...defaultCardProps} isBulkMode={true} />);
-    expect(screen.queryByRole('button', { name: /Move.*up/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Move.*down/i })).not.toBeInTheDocument();
+  it('does not render drag handle in bulk mode (drag mode is independent)', () => {
+    render(<MediaCard {...defaultCardProps} isBulkMode={true} isDragMode={false} />);
+    expect(screen.queryByRole('button', { name: /Drag to reorder/i })).not.toBeInTheDocument();
   });
 });
 

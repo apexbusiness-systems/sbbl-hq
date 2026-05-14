@@ -1,10 +1,33 @@
-import { ImageIcon, Save, Loader2, Trash2, CheckSquare, Archive } from 'lucide-react';
+import {
+  ImageIcon,
+  Save,
+  Loader2,
+  Trash2,
+  CheckSquare,
+  Archive,
+} from 'lucide-react';
 import { useEffect } from 'react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { MediaFilterBar } from './MediaFilterBar';
-import { MediaCard } from './MediaCard';
+import { MediaCard, type MediaCardProps } from './MediaCard';
 import { ArchiveModal } from './ArchiveModal';
-import { EditMetadataModal } from './EditMetadataModal';
-import { PreviewModal } from './PreviewModal';
+import { EditMetadataSheet } from './EditMetadataSheet';
+import { PreviewSheet } from './PreviewSheet';
 import { RestoreModal } from './RestoreModal';
 import { StaleCleanupModal } from './StaleCleanupModal';
 import { BulkSelectBar } from './BulkSelectBar';
@@ -14,6 +37,40 @@ import type { MediaPublicationStatus } from '@/lib/api/ops';
 export type MediaLibraryTabProps = {
   enabled: boolean;
 };
+
+// SortableItem wrapper — uses @dnd-kit/sortable to inject drag props
+function SortableMediaCard({
+  id,
+  isDragMode,
+  ...props
+}: { id: string; isDragMode: boolean } & Omit<MediaCardProps, 'isDragMode' | 'dragListeners' | 'dragAttributes' | 'isDragging'>) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id, disabled: !isDragMode });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      <MediaCard
+        {...props}
+        isDragMode={isDragMode}
+        dragListeners={isDragMode ? listeners : undefined}
+        dragAttributes={isDragMode ? attributes : undefined}
+        isDragging={isDragging}
+      />
+    </div>
+  );
+}
 
 export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
   const {
@@ -25,7 +82,7 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
     search,
     mediaOrderIds,
 
-    // Modal state
+    // Modal / sheet state
     previewId,
     editId,
     archiveId,
@@ -85,7 +142,7 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
     archiveMedia,
     restoreMedia,
     saveOrder,
-    moveMedia,
+    reorderMedia,
     togglePin,
     toggleBulkSelect,
     selectAll,
@@ -117,39 +174,55 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
     isPatchingPending || isDeletingPending || isOrderingPending ||
     isBulkArchivingPending || isPinningPending || isRestoringPending;
 
+  const isDragMode = sortBy === 'sort_order';
+
+  // DnD sensors — pointer (mouse + touch) and keyboard
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      reorderMedia(String(active.id), String(over.id));
+    }
+  }
+
   return (
-    <div className="panel p-4 max-w-6xl space-y-4">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <ImageIcon className="w-5 h-5 text-primary" />
+    <div className="panel p-3 sm:p-4 lg:p-6 max-w-6xl space-y-3 sm:space-y-4">
+
+      {/* ── Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <ImageIcon className="w-5 h-5 text-primary flex-shrink-0" />
           <div>
-            <h2 className="font-display text-xl">Media Library</h2>
-            <p className="text-xs text-muted-foreground">
-              Manage all media publications — Store, POTG, Events, and more. Public{' '}
-              <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">/media</code> shows
-              published only.
+            <h2 className="font-display text-lg sm:text-xl">Media Library</h2>
+            <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+              Manage publications — Store, POTG, Events, and more.{' '}
+              <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">/media</code>{' '}
+              shows published only.
             </p>
           </div>
         </div>
 
-        {/* Toolbar actions */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        {/* Toolbar */}
+        <div className="flex items-center gap-1.5 flex-shrink-0 flex-wrap">
+
           {/* Bulk select toggle */}
           <button
             type="button"
             onClick={() => (isBulkMode ? exitBulkMode() : setIsBulkMode(true))}
             disabled={anythingPending}
-            className={`flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-sm border transition-colors disabled:opacity-50 min-h-[44px] ${
+            aria-label={isBulkMode ? 'Exit bulk select mode' : 'Enter bulk select mode'}
+            className={`flex items-center gap-1.5 px-2.5 py-2 text-xs font-semibold rounded-sm border transition-colors disabled:opacity-50 min-h-[40px] ${
               isBulkMode
                 ? 'bg-primary text-primary-foreground border-primary'
                 : 'border-border text-muted-foreground hover:text-foreground hover:bg-secondary'
             }`}
-            aria-label={isBulkMode ? 'Exit bulk select mode' : 'Enter bulk select mode'}
-            title={isBulkMode ? 'Exit bulk select' : 'Bulk select'}
           >
-            <CheckSquare className="w-4 h-4" />
-            {isBulkMode ? 'Exit Select' : 'Bulk Select'}
+            <CheckSquare className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{isBulkMode ? 'Exit Select' : 'Bulk Select'}</span>
           </button>
 
           {/* Stale cleanup */}
@@ -157,31 +230,30 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
             type="button"
             onClick={openStaleCleanup}
             disabled={anythingPending}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-sm border border-border text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50 transition-colors min-h-[44px]"
             aria-label="Stale media cleanup"
-            title="Archive stale unpinned media"
+            className="flex items-center gap-1.5 px-2.5 py-2 text-xs font-semibold rounded-sm border border-border text-muted-foreground hover:text-foreground hover:bg-secondary disabled:opacity-50 transition-colors min-h-[40px]"
           >
-            <Archive className="w-4 h-4" />
-            Stale Cleanup
+            <Archive className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Stale Cleanup</span>
           </button>
 
-          {/* Save order (visible when sort_order mode and pending changes) */}
-          {sortBy === 'sort_order' && hasPendingOrderChanges && (
+          {/* Save Order — only in drag mode with pending changes */}
+          {isDragMode && hasPendingOrderChanges && (
             <button
               type="button"
               onClick={saveOrder}
               disabled={isOrderingPending || isFetching}
-              className="flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-primary text-primary-foreground rounded-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-h-[44px]"
+              className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold bg-primary text-primary-foreground rounded-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors min-h-[40px]"
             >
               {isOrderingPending ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Saving Order…
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span className="hidden sm:inline">Saving…</span>
                 </>
               ) : (
                 <>
-                  <Save className="w-4 h-4" />
-                  Save Order
+                  <Save className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Save Order</span>
                 </>
               )}
             </button>
@@ -189,7 +261,7 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
         </div>
       </div>
 
-      {/* Filter Bar */}
+      {/* ── Filter Bar ── */}
       <MediaFilterBar
         statusFilter={statusFilter}
         surfaceFilter={surfaceFilter}
@@ -205,7 +277,7 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
         isLoading={isFetching || isLoading}
       />
 
-      {/* Bulk select bar (sticky) */}
+      {/* ── Bulk select bar (sticky top) ── */}
       {isBulkMode && (
         <BulkSelectBar
           selectedCount={bulkSelectedIds.size}
@@ -217,20 +289,33 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
         />
       )}
 
-      {/* Count bar */}
+      {/* ── Count + status bar ── */}
       <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
         <span>
-          {isFetching ? 'Refreshing…' : `${orderedMediaPublications.length} publications`}
+          {isFetching ? (
+            <span className="flex items-center gap-1.5">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              Refreshing…
+            </span>
+          ) : (
+            `${orderedMediaPublications.length} publications`
+          )}
         </span>
-        {isBulkMode && (
-          <span className="text-primary font-semibold">{bulkSelectedIds.size} selected</span>
-        )}
+        <div className="flex items-center gap-3">
+          {isDragMode && hasPendingOrderChanges && !isFetching && (
+            <span className="text-warning font-semibold">Unsaved order changes</span>
+          )}
+          {isBulkMode && (
+            <span className="text-primary font-semibold">{bulkSelectedIds.size} selected</span>
+          )}
+        </div>
       </div>
 
-      {/* Status messages */}
+      {/* ── Status messages ── */}
       {isLoading && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <Loader2 className="w-4 h-4 animate-spin" /> Loading media…
+        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
+          <Loader2 className="w-4 h-4 animate-spin" />
+          Loading media…
         </div>
       )}
       {isError && (
@@ -239,13 +324,19 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
         </p>
       )}
       {isSuccess && mediaPublications.length === 0 && (
-        <p className="text-xs text-muted-foreground">No publications match these filters.</p>
+        <div className="py-8 text-center text-xs text-muted-foreground">
+          No publications match these filters.
+        </div>
       )}
-      {patchError && <p className="text-xs text-destructive">Edit failed: {(patchError as Error).message}</p>}
+      {patchError && (
+        <p className="text-xs text-destructive">Edit failed: {(patchError as Error).message}</p>
+      )}
       {deleteError && (
         <p className="text-xs text-destructive">Archive failed: {(deleteError as Error).message}</p>
       )}
-      {orderError && <p className="text-xs text-destructive">Save order failed: {(orderError as Error).message}</p>}
+      {orderError && (
+        <p className="text-xs text-destructive">Save order failed: {(orderError as Error).message}</p>
+      )}
       {bulkArchiveError && (
         <p className="text-xs text-destructive">Bulk archive failed: {(bulkArchiveError as Error).message}</p>
       )}
@@ -253,39 +344,47 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
         <p className="text-xs text-destructive">Restore failed: {(restoreError as Error).message}</p>
       )}
 
-      {/* Media Grid */}
-      <div className="space-y-2">
-        {orderedMediaPublications.map((publication, index) => (
-          <MediaCard
-            key={publication.id}
-            publication={publication}
-            isEditing={editId === publication.id}
-            isSelected={bulkSelectedIds.has(publication.id)}
-            isBulkMode={isBulkMode}
-            onEdit={() => setEditId(publication.id)}
-            onArchive={() => setArchiveId(publication.id)}
-            onPreview={() => setPreviewId(publication.id)}
-            onRestore={() => setRestoreId(publication.id)}
-            onPin={() => togglePin(publication.id)}
-            onMoveUp={() => moveMedia(publication.id, 'up')}
-            onMoveDown={() => moveMedia(publication.id, 'down')}
-            onToggleSelect={() => toggleBulkSelect(publication.id)}
-            canMoveUp={index > 0}
-            canMoveDown={index < orderedMediaPublications.length - 1}
-            isLoading={isOrderingPending || isFetching}
-            editsDisabled={anythingPending}
-          />
-        ))}
-      </div>
+      {/* ── Media list with DnD ── */}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={orderedMediaPublications.map((p) => p.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="space-y-1.5 sm:space-y-2">
+            {orderedMediaPublications.map((publication) => (
+              <SortableMediaCard
+                key={publication.id}
+                id={publication.id}
+                publication={publication}
+                isSelected={bulkSelectedIds.has(publication.id)}
+                isBulkMode={isBulkMode}
+                isDragMode={isDragMode}
+                onEdit={() => setEditId(publication.id)}
+                onArchive={() => setArchiveId(publication.id)}
+                onPreview={() => setPreviewId(publication.id)}
+                onRestore={() => setRestoreId(publication.id)}
+                onPin={() => togglePin(publication.id)}
+                onToggleSelect={() => toggleBulkSelect(publication.id)}
+                isLoading={isOrderingPending || isFetching}
+                editsDisabled={anythingPending}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
 
-      {/* Modals */}
-      <PreviewModal
+      {/* ── Sheets ── */}
+      <PreviewSheet
         publication={previewPublication ?? null}
         isOpen={Boolean(previewId)}
         onClose={() => setPreviewId(null)}
       />
 
-      <EditMetadataModal
+      <EditMetadataSheet
         publication={editPublication ?? null}
         isOpen={Boolean(editId)}
         isLoading={isPatchingPending}
@@ -297,15 +396,12 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
         onCancel={() => setEditId(null)}
       />
 
+      {/* ── Confirmation Modals ── */}
       <ArchiveModal
         publication={archivePublication ?? null}
         isOpen={Boolean(archiveId)}
         isLoading={isDeletingPending}
-        onConfirm={() => {
-          if (archivePublication) {
-            archiveMedia(archivePublication.id);
-          }
-        }}
+        onConfirm={() => { if (archivePublication) archiveMedia(archivePublication.id); }}
         onCancel={() => setArchiveId(null)}
       />
 
@@ -313,11 +409,7 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
         publication={restorePublication ?? null}
         isOpen={Boolean(restoreId)}
         isLoading={isRestoringPending}
-        onConfirm={() => {
-          if (restorePublication) {
-            restoreMedia(restorePublication.id);
-          }
-        }}
+        onConfirm={() => { if (restorePublication) restoreMedia(restorePublication.id); }}
         onCancel={() => setRestoreId(null)}
       />
 

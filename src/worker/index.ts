@@ -2864,11 +2864,12 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   if (surfaceFilter) query = query.eq('surface', surfaceFilter);
   if (leagueFilter) query = query.eq('league_id', leagueFilter);
   if (needsReviewFilter) query = query.eq('needs_review', true);
+  if (searchFilter.length > 0) query = query.ilike('title', `%${searchFilter}%`);
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
 
-  let rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((raw) => {
+  const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map((raw) => {
     const asset = (raw.media_assets as Record<string, unknown> | null) ?? {};
     const assetMeta = (asset.metadata as Record<string, unknown> | null) ?? {};
     const payload = (raw.render_payload as Record<string, unknown> | null) ?? {};
@@ -2899,12 +2900,6 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
       parserConfidence: raw.parser_confidence == null ? null : Number(raw.parser_confidence),
     };
   });
-
-  // Client-side search filter (title contains search term, case-insensitive)
-  if (searchFilter.length > 0) {
-    const term = searchFilter.toLowerCase();
-    rows = rows.filter((r) => r.title.toLowerCase().includes(term));
-  }
 
   return json({ ok: true, data: rows });
 }
@@ -3081,24 +3076,34 @@ async function handleOpsBulkArchiveMedia(ctx: HandlerCtx) {
   if (pinned.length > 0) {
     return json({ ok: false, error: 'pinned_items_cannot_be_archived', invalidIds: pinned }, 400);
   }
+  const alreadyArchived = uniqueIds.filter((id) => found.get(id)?.status === 'archived');
+  if (alreadyArchived.length > 0) {
+    return json({ ok: false, error: 'already_archived', invalidIds: alreadyArchived }, 400);
+  }
 
-  const { error: updateErr } = await ctx.admin
+  // Update with pinned_at IS NULL guard to close the race window between validation and mutation.
+  // If an item was pinned after validation completed, the row will not be updated.
+  const { data: updated, error: updateErr } = await ctx.admin
     .from('media_publications')
     .update({ status: 'archived', published_at: null })
     .in('id', uniqueIds)
-    .neq('status', 'archived');
+    .is('pinned_at', null)
+    .neq('status', 'archived')
+    .select('id');
   if (updateErr) throw new Error(updateErr.message);
+
+  const archivedIds = (updated ?? []).map((r) => String(r.id));
 
   await ctx.admin.from('audit_logs').insert({
     actor_id: userId,
     action: 'ops_bulk_archive_media',
     ref_type: 'media_publications',
     ref_id: null,
-    payload: { count: uniqueIds.length, ids: uniqueIds },
+    payload: { count: archivedIds.length, ids: archivedIds },
     idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
   });
 
-  return json({ ok: true, archived: uniqueIds.length, ids: uniqueIds });
+  return json({ ok: true, archived: archivedIds.length, ids: archivedIds });
 }
 
 // ── POST /ops/media/publications/:id/pin ─────────────────────────────────
@@ -3240,25 +3245,28 @@ async function handleOpsArchiveStaleMedia(ctx: HandlerCtx) {
   }
   const validIds = [...new Set(ids as string[])];
 
-  // Re-validate: skip pinned items; archive the rest
-  const { error } = await ctx.admin
+  // Re-validate: skip pinned items; archive the rest — return actual count
+  const { data: archived, error } = await ctx.admin
     .from('media_publications')
     .update({ status: 'archived', published_at: null })
     .in('id', validIds)
     .is('pinned_at', null)
-    .neq('status', 'archived');
+    .neq('status', 'archived')
+    .select('id');
   if (error) throw new Error(error.message);
+
+  const archivedIds = (archived ?? []).map((r) => String(r.id));
 
   await ctx.admin.from('audit_logs').insert({
     actor_id: userId,
     action: 'ops_archive_stale_media',
     ref_type: 'media_publications',
     ref_id: null,
-    payload: { count: validIds.length, ids: validIds },
+    payload: { count: archivedIds.length, ids: archivedIds },
     idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
   });
 
-  return json({ ok: true, archived: validIds.length });
+  return json({ ok: true, archived: archivedIds.length, ids: archivedIds });
 }
 
 
@@ -7549,6 +7557,28 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     .update({ state: "written", media_asset_id: asset.id }).eq("id", jobId);
 
   // ── Step 4: Project into media_publications (state=projected) ───────────
+  // Compute parser confidence from meta (frontend AI estimate) or derive from completeness.
+  let parserConfidence: number | null = null;
+  const rawConf = meta.parserConfidence;
+  if (typeof rawConf === "number" && Number.isFinite(rawConf)) {
+    parserConfidence = Math.min(1, Math.max(0, rawConf));
+  } else {
+    // Derive confidence from metadata completeness
+    if (body.kind === "potg") {
+      const hasPts = typeof meta.pts === "number" || (typeof meta.pts === "string" && meta.pts !== "");
+      const hasRebs = typeof meta.rebs === "number" || (typeof meta.rebs === "string" && meta.rebs !== "");
+      const hasPlayer = typeof meta.playerName === "string" && meta.playerName.trim().length > 0;
+      const score = (hasPlayer ? 0.5 : 0) + (hasPts ? 0.3 : 0) + (hasRebs ? 0.1 : 0) + (leagueUuid ? 0.1 : 0);
+      parserConfidence = Math.min(1, score);
+    } else if (body.kind === "store" || body.kind === "event") {
+      parserConfidence = leagueUuid ? 0.9 : 0.7;
+    } else {
+      parserConfidence = 0.6; // generic — lower confidence
+    }
+  }
+  // Operator-published items bypass review; draft low-confidence items need review
+  const needsReview = pubStatus === "draft" && parserConfidence < 0.7;
+
   const { data: pub, error: pubErr } = await ctx.admin
     .from("media_publications")
     .insert({
@@ -7559,6 +7589,8 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
       status: pubStatus,
       published_at: pubStatus === "published" ? new Date().toISOString() : null,
       render_payload: assetMeta,
+      parser_confidence: parserConfidence,
+      needs_review: needsReview,
     })
     .select("id")
     .single();
@@ -7577,7 +7609,14 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     action: "ingest_submit",
     ref_type: "ingest_jobs",
     ref_id: jobId,
-    payload: { kind: body.kind, surface, media_asset_id: asset.id, publication_id: pub.id },
+    payload: {
+      kind: body.kind,
+      surface,
+      media_asset_id: asset.id,
+      publication_id: pub.id,
+      parser_confidence: parserConfidence,
+      needs_review: needsReview,
+    },
     idempotency_key: idempotencyKey ?? crypto.randomUUID(),
   });
 
