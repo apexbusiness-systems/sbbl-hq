@@ -1292,7 +1292,7 @@ const LivePage = () => {
               ) : (liveGame || fallbackBroadcastGame) ? (
                <PlayerErrorBoundary key={streamNonce}>
   {(() => {
-    const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.streamUrl || "";
+    const rawUrl = customStreamUrl || (liveGame ?? fallbackBroadcastGame)?.stream_url || "";
 const playable = toPlayableUrl(rawUrl);
 const playableUrl = playable.url || rawUrl;   // ← the fix
 const streamType = detectStreamUrlType(playableUrl);
@@ -1305,14 +1305,14 @@ const streamType = detectStreamUrlType(playableUrl);
             width="100%"
             height="100%"
             playing
-            muted={false}
+            muted
             controls
             config={{
               twitch: {
                 options: {
                   // MANDATORY for production on sbbl-hq.icu
-                  parent: ["sbbl-hq.icu", "localhost"],
-                  muted: false,
+                  parent: ["sbbl-hq.icu", "www.sbbl-hq.icu", "localhost"],
+                  muted: true,
                   autoplay: true,
                 },
               },
@@ -1325,9 +1325,12 @@ const streamType = detectStreamUrlType(playableUrl);
               },
             }}
             style={{ position: "absolute", top: 0, left: 0 }}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             onError={(e: any) => {
               console.error(`[Live] ${streamType} player error:`, e);
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
               if (typeof window !== "undefined" && (window as any).toast) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 (window as any).toast.error(`Failed to load ${streamType} stream`);
               }
             }}

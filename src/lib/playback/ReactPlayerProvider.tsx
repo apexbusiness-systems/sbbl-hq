@@ -1,8 +1,13 @@
 import React from 'react';
 import ReactPlayer from 'react-player';
-import type { IPlaybackProvider, PlaybackConfig } from './IPlaybackProvider';
 
-export class ReactPlayerProvider implements IPlaybackProvider {
+export type PlaybackConfig = {
+  url: string;
+  muted?: boolean;
+  autoplay?: boolean;
+};
+
+export class ReactPlayerProvider {
   canHandle(url: string): boolean {
     return url.includes('twitch.tv') ||
             url.includes('youtube.com') ||
@@ -30,8 +35,10 @@ export class ReactPlayerProvider implements IPlaybackProvider {
             twitch: {
               options: {
                 // MANDATORY: Without this, Twitch will block the embed in production
-                parent: ["sbbl-hq.icu", "localhost"], 
-                muted: muted,
+                parent: ["sbbl-hq.icu", "www.sbbl-hq.icu", "localhost"],
+                // Twitch requires muted=true for cross-origin autoplay.
+                // Without this the SDK sets autoplay=false in the iframe URL.
+                muted: true,
                 autoplay: autoplay,
               },
             },
