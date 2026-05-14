@@ -101,7 +101,7 @@ describe('MediaFilterBar', () => {
     expect(onSurfaceChange).toHaveBeenCalledWith('store');
   });
 
-  it('calls onReset when Reset All button is clicked', () => {
+  it('calls onReset when Reset button is clicked', () => {
     const onReset = vi.fn();
 
     render(
@@ -116,13 +116,14 @@ describe('MediaFilterBar', () => {
       />
     );
 
-    const resetButton = screen.getByText('Reset All');
-    resetButton.click();
+    // Both desktop and mobile reset buttons render in JSDOM; click the first.
+    const resetButtons = screen.getAllByText('Reset');
+    resetButtons[0].click();
 
     expect(onReset).toHaveBeenCalled();
   });
 
-  it('hides Reset All button when no filters are active', () => {
+  it('hides Reset button when no filters are active', () => {
     const { queryByText } = render(
       <MediaFilterBar
         statusFilter="all"
@@ -135,10 +136,10 @@ describe('MediaFilterBar', () => {
       />
     );
 
-    expect(queryByText('Reset All')).not.toBeInTheDocument();
+    expect(queryByText('Reset')).not.toBeInTheDocument();
   });
 
-  it('shows Reset All button when filters are active', () => {
+  it('shows Reset button when filters are active', () => {
     render(
       <MediaFilterBar
         statusFilter="published"
@@ -151,7 +152,7 @@ describe('MediaFilterBar', () => {
       />
     );
 
-    expect(screen.getByText('Reset All')).toBeInTheDocument();
+    expect(screen.getAllByText('Reset').length).toBeGreaterThan(0);
   });
 
   it('highlights selected status filter button', () => {

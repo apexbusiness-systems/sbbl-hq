@@ -176,7 +176,7 @@ export function MediaFilterBar({
             className="flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-50"
           >
             <X className="w-3 h-3" />
-            Reset All
+            Reset
           </button>
         </div>
       )}
