@@ -963,13 +963,16 @@ export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const gameId = url.searchParams.get("gameId") ?? null;
   const cacheKey = new Request(streamCacheUrl(gameId));
+  const authenticatedUserId = optionalAuth(req);
 
   // ── Cache API hit (free, edge-local, unlimited) ───────────────────────────
   // Cast: DOM lib's CacheStorage lacks .default; CF Workers runtime adds it.
   const cfCaches = caches as unknown as { default: Cache };
   const cache = cfCaches.default;
-  const cachedRes = await cache.match(cacheKey);
-  if (cachedRes) return cachedRes;
+  if (!authenticatedUserId) {
+    const cachedRes = await cache.match(cacheKey);
+    if (cachedRes) return cachedRes;
+  }
 
   // ── Cache miss — hit Supabase once, write back, serve ────────────────────
   const cfg = await getOrCreateStreamConfig(admin);
@@ -977,12 +980,19 @@ export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
   viewerCount = await getActiveViewerCount(admin, gameId);
   await refreshLiveSessionMetrics(admin, gameId, viewerCount);
 
-  const payload = {
+  const roles = authenticatedUserId ? getRolesFromVerifiedSession(req) : [];
+  const mayReceiveStreamUrl = Boolean(authenticatedUserId)
+    && !roles.includes("anonymous");
+  const payload: Record<string, unknown> = {
     ok: true,
     isLive: Boolean(cfg.is_live),
     title: String(cfg.title ?? "SBBL Live Stream"),
     viewerCount,
   };
+
+  if (mayReceiveStreamUrl) {
+    payload.streamUrl = String(cfg.collection_id ?? "");
+  }
 
   const response = new Response(JSON.stringify(payload), {
     status: 200,
@@ -993,10 +1003,13 @@ export async function handlePublicStreamStatus({ req, admin }: HandlerCtx) {
     },
   });
 
-  // Write to edge cache — best-effort with single retry
-  cache.put(cacheKey, response.clone()).catch(() => {
-    cache.put(cacheKey, response.clone()).catch(() => {});
-  });
+  // Write anonymous responses to edge cache — best-effort with single retry.
+  // Authenticated responses can include streamUrl and must never be shared.
+  if (!authenticatedUserId) {
+    cache.put(cacheKey, response.clone()).catch(() => {
+      cache.put(cacheKey, response.clone()).catch(() => {});
+    });
+  }
 
   return response;
 }

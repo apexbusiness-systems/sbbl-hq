@@ -21,6 +21,18 @@ export interface LiveConfig {
   title: string;
 }
 
+function resolveDirectStreamUrl(rawUrl: string | null | undefined): string | null {
+  const resolvedUrl = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+  if (!resolvedUrl) return null;
+  if (resolvedUrl.startsWith('blob:')) {
+    console.error('[useLiveAccess] Refusing to persist blob URL for live playback', {
+      urlPrefix: resolvedUrl.slice(0, 32),
+    });
+    throw new Error('blob_stream_url_rejected');
+  }
+  return resolvedUrl;
+}
+
 export function useLiveAccess() {
   const [access, setAccess] = useState<AccessState>('loading');
   const [config, setConfig] = useState<LiveConfig>({
@@ -66,11 +78,21 @@ export function useLiveAccess() {
       if (!cancelled && view) {
         setConfig({
           isLive: Boolean(view.is_live),
-          // Never expose raw upstream URL from client-side reads.
           videoUrl: null,
           title: String(view.title ?? 'SBBL Live'),
         });
       }
+
+      const directStreamUrl = resolveDirectStreamUrl(view?.stream_url);
+
+      const grantPlaybackConfig = () => {
+        if (cancelled || !view) return;
+        setConfig({
+          isLive: Boolean(view.is_live),
+          videoUrl: directStreamUrl,
+          title: String(view.title ?? 'SBBL Live'),
+        });
+      };
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -90,6 +112,7 @@ export function useLiveAccess() {
 
       if (isFreeRole || Boolean(view?.is_subscribed) || Boolean(view?.has_entitlement)) {
         localStorage.setItem(DEVICE_KEY, user.id);
+        grantPlaybackConfig();
         if (!cancelled) setAccess((isFreeRole || Boolean(view?.is_subscribed)) ? 'free' : 'paid');
         return;
       }
@@ -107,6 +130,7 @@ export function useLiveAccess() {
         );
         if (hasActive) {
           localStorage.setItem(DEVICE_KEY, user.id);
+          grantPlaybackConfig();
           if (!cancelled) setAccess('paid');
           return;
         }
