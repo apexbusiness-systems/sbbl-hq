@@ -2864,7 +2864,9 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   if (surfaceFilter) query = query.eq('surface', surfaceFilter);
   if (leagueFilter) query = query.eq('league_id', leagueFilter);
   if (needsReviewFilter) query = query.eq('needs_review', true);
-  if (searchFilter.length > 0) query = query.ilike('title', `%${searchFilter}%`);
+  if (searchFilter.length > 0) {
+    query = query.or(`title.ilike.%${searchFilter}%,subtitle.ilike.%${searchFilter}%`);
+  }
 
   const { data, error } = await query;
   if (error) throw new Error(error.message);
@@ -2974,6 +2976,17 @@ async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
   const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const id = ctx.params.id;
   if (!id) return json({ ok: false, error: 'missing_id' }, 400);
+
+  // Server-side pinned guard — client UI also prevents this but we enforce it here.
+  const { data: existing, error: fetchErr } = await ctx.admin
+    .from('media_publications')
+    .select('id,pinned_at')
+    .eq('id', id)
+    .single();
+  if (fetchErr || !existing) return json({ ok: false, error: 'not_found' }, 404);
+  if ((existing as Record<string, unknown>).pinned_at != null) {
+    return json({ ok: false, error: 'pinned_items_cannot_be_archived' }, 409);
+  }
 
   const { data, error } = await ctx.admin
     .from('media_publications')
@@ -3094,6 +3107,18 @@ async function handleOpsBulkArchiveMedia(ctx: HandlerCtx) {
 
   const archivedIds = (updated ?? []).map((r) => String(r.id));
 
+  // All-or-nothing check: if a race caused any item to be skipped (pinned after
+  // our validation query completed), treat the whole batch as failed rather than
+  // silently archiving a partial set.
+  if (archivedIds.length !== uniqueIds.length) {
+    return json({
+      ok: false,
+      error: 'archive_race_or_validation_failed',
+      archived: archivedIds.length,
+      expected: uniqueIds.length,
+    }, 409);
+  }
+
   await ctx.admin.from('audit_logs').insert({
     actor_id: userId,
     action: 'ops_bulk_archive_media',
@@ -3137,7 +3162,9 @@ async function handleOpsPinMediaPublication(ctx: HandlerCtx) {
     idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
   });
 
-  return json({ ok: true, data });
+  // Normalize to camelCase — API wrapper types expect { id, pinnedAt }.
+  const row = data as Record<string, unknown>;
+  return json({ ok: true, data: { id: String(row.id), pinnedAt: row.pinned_at ?? null } });
 }
 
 // ── POST /ops/media/publications/:id/restore ──────────────────────────────
@@ -7557,7 +7584,9 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     .update({ state: "written", media_asset_id: asset.id }).eq("id", jobId);
 
   // ── Step 4: Project into media_publications (state=projected) ───────────
-  // Compute parser confidence from meta (frontend AI estimate) or derive from completeness.
+  // Parser confidence is an advisory completeness heuristic (PR #507 scope).
+  // Full parser schema with uncertainFields and no-hallucination guarantees
+  // is deferred to PR #508.
   let parserConfidence: number | null = null;
   const rawConf = meta.parserConfidence;
   if (typeof rawConf === "number" && Number.isFinite(rawConf)) {
