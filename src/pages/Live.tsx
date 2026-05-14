@@ -284,7 +284,7 @@ function AdminStreamOverlay({
       let atomicSuccess = false;
       // RC-6: Try atomic go-live endpoint first
       try {
-        const res = await goLive({ isLive: nextLive, collectionId: normalizedUrl, title: streamTitle }, token);
+        const res = await goLive({ isLive: nextLive, collectionId: normalizedUrl, title: streamTitle, activeGameId }, token);
         if (res.ok) {
           atomicSuccess = true;
           setIsLive(nextLive);
