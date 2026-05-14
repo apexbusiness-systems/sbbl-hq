@@ -3005,39 +3005,51 @@ async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
   const id = ctx.params.id;
   if (!id) return json({ ok: false, error: 'missing_id' }, 400);
 
-  // NEW: refuse archive if pinned (must unpin first)
-  const { data: existing, error: fetchError } = await ctx.admin
-    .from('media_publications')
-    .select('id,status,pinned_at')
-    .eq('id', id)
-    .single();
-  if (fetchError || !existing) {
-    return json({ ok: false, error: 'not_found' }, 404);
-  }
-  if (existing.pinned_at != null) {
-    return json({ ok: false, error: 'unpin_before_archiving' }, 409);
-  }
-
+  // Guarded mutation: archive only if pinned_at IS NULL at mutation time.
+  // This closes the race window where an item could be pinned between a
+  // separate check and the update. If 0 rows are affected, we disambiguate
+  // whether the item doesn't exist or is pinned.
   const { data, error } = await ctx.admin
     .from('media_publications')
-    .update({ status: 'archived', published_at: null, updated_at: new Date().toISOString() })
+    .update({
+      status: 'archived',
+      published_at: null,
+      updated_at: new Date().toISOString(),
+    })
     .eq('id', id)
+    .is('pinned_at', null)
     .select('id,status')
-    .single();
+    .maybeSingle();
+
   if (error) throw new Error(error.message);
+  if (!data) {
+    // Either the item doesn't exist, or it is pinned. Disambiguate.
+    const { data: existing, error: fetchError } = await ctx.admin
+      .from('media_publications')
+      .select('id,pinned_at')
+      .eq('id', id)
+      .maybeSingle();
+    if (fetchError || !existing) {
+      return json({ ok: false, error: 'not_found' }, 404);
+    }
+    if (existing.pinned_at != null) {
+      return json({ ok: false, error: 'unpin_before_archiving' }, 409);
+    }
+    // Should not reach here, but fail safely
+    return json({ ok: false, error: 'archive_failed' }, 500);
+  }
 
   await ctx.admin.from('audit_logs').insert({
     actor_id: userId,
     action: 'ops_archive_media_publication',
     ref_type: 'media_publications',
     ref_id: id,
-    payload: { previous_status: existing.status },
+    payload: { previous_status: data.status === 'archived' ? 'archived' : undefined },
     idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
   });
 
   return json({ ok: true, data });
 }
-
 async function handleOpsReorderMediaPublications(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
@@ -3236,13 +3248,23 @@ async function handleOpsMediaStaleExecute(ctx: HandlerCtx) {
     return json({ ok: true, archived: 0, ids: [] });
   }
 
-  // Atomic batch archive
-  const { error: updateErr } = await ctx.admin
+  // Guarded batch archive: require pinned_at IS NULL at mutation time.
+  // This closes the race window where an item could be pinned between the
+  // server-side preview query and the execute update.
+  const { data: archivedRows, error: updateErr } = await ctx.admin
     .from('media_publications')
     .update({ status: 'archived', published_at: null, updated_at: new Date().toISOString() })
     .in('id', staleIds)
-    .eq('status', 'published');
+    .eq('status', 'published')
+    .is('pinned_at', null)
+    .select('id');
   if (updateErr) throw new Error(updateErr.message);
+
+  // Return only IDs that were actually archived (may be fewer than preview
+  // if items were pinned between preview and execute).
+  const actuallyArchivedIds = ((archivedRows ?? []) as unknown as Record<string, unknown>[]).map(
+    (raw) => String(raw.id)
+  );
 
   await ctx.admin.from('audit_logs').insert({
     actor_id: userId,
@@ -3250,14 +3272,14 @@ async function handleOpsMediaStaleExecute(ctx: HandlerCtx) {
     ref_type: 'media_publications',
     ref_id: null,
     payload: {
-      count: staleIds.length,
-      ids: staleIds,
+      count: actuallyArchivedIds.length,
+      ids: actuallyArchivedIds,
       criteria: { olderThanDays, excludeRecentlyEditedDays },
     },
     idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
   });
 
-  return json({ ok: true, archived: staleIds.length, ids: staleIds });
+  return json({ ok: true, archived: actuallyArchivedIds.length, ids: actuallyArchivedIds });
 }
 
 /** POST /ops/media/bulk-archive — transactional bulk archive via RPC */
