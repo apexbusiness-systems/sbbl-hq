@@ -23,6 +23,8 @@ jobs:
   lint:
     name: Lint & Typecheck
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 10
 
     steps:
@@ -30,7 +32,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
           cache: npm
 
       - name: Install dependencies
@@ -46,27 +48,41 @@ jobs:
         run: npx tsc --noEmit -p tsconfig.node.json
         continue-on-error: true
 
-  # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
+      # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
   test:
     name: Unit & Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests with coverage
-        run: npx vitest run --coverage --reporter=dot --max-workers=2
+      - name: Run unit/integration tests (no coverage, shard 1/2)
+        run: npm run test:ci:shard1
         env:
-          NODE_OPTIONS: --max-old-space-size=8192
+          NODE_OPTIONS: --max-old-space-size=6144
+          CI: true
+
+      - name: Run unit/integration tests (no coverage, shard 2/2)
+        run: npm run test:ci:shard2
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+          CI: true
+
+      - name: Run critical-surface coverage
+        run: npm run test:coverage:critical
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
           CI: true
 
       - name: Upload coverage report
@@ -81,6 +97,8 @@ jobs:
   build:
     name: Build & Bundle Check
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 15
     needs: lint
 
@@ -89,7 +107,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
           cache: npm
 
       - name: Install dependencies
@@ -150,6 +168,8 @@ jobs:
   lighthouse:
     name: Lighthouse LCP Budget
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 15
     needs: build
 
@@ -158,7 +178,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
           cache: npm
 
       - name: Install dependencies
@@ -193,6 +213,8 @@ jobs:
   e2e:
     name: Playwright E2E
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 20
     needs: build
 
@@ -201,14 +223,14 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
           cache: npm
 
       - name: Install dependencies
         run: npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -228,3 +250,84 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  # ── Job 6: Broadcast Evidence Capture ──────────────────────────────────────
+  broadcast-evidence:
+    name: Broadcast Evidence Capture
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+    timeout-minutes: 25
+    needs: build
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Run Broadcast Evidence Tests
+        run: npx playwright test tests/e2e/broadcast-paywall-evidence.spec.ts --project=chromium --trace=on --reporter=list,html
+        env:
+          CI: true
+
+      - name: Verify Broadcast Evidence Artifacts
+        run: |
+          test -s artifacts/broadcast-evidence/manifest.json
+          node -e "const fs=require('fs'); const m=JSON.parse(fs.readFileSync('artifacts/broadcast-evidence/manifest.json','utf8')); if (m.passFail !== 'PASS') { console.error(m); process.exit(1); } if (!m.screenshots?.length || !m.networkLogs?.length) { console.error('missing evidence artifacts', m); process.exit(1); }"
+          find artifacts/broadcast-evidence/screenshots -type f -name '*.png' -print -quit | grep -q .
+          find artifacts/broadcast-evidence/network-logs -type f -name '*.json' -print -quit | grep -q .
+          find test-results -type f -name '*.zip' -print -quit | grep -q .
+          test -d playwright-report
+
+      - name: Upload Broadcast Evidence Playwright Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-evidence-playwright-report
+          path: playwright-report/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Broadcast Evidence Screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-evidence-screenshots
+          path: artifacts/broadcast-evidence/screenshots/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Broadcast Evidence Traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-evidence-traces
+          path: test-results/**/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Broadcast Evidence Network Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: broadcast-evidence-network-logs
+          path: |
+            artifacts/broadcast-evidence/manifest.json
+            artifacts/broadcast-evidence/network-logs/
+          if-no-files-found: error
+          retention-days: 14

@@ -1,12 +1,15 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it } from 'vitest';
 import {
+  handleBroadcastSessionStart,
+  handleBroadcastStreamAccess,
   handleListComments,
   handleModerateComment,
   handlePublicStreamStatus,
   handlePlaybackSession,
   handlePostComment,
   handleResetReactions,
+  handleStreamAccess,
   handleStreamReactions,
   handleStreamSessionHeartbeat,
 } from '@/worker/index';
@@ -47,6 +50,10 @@ function createQuery(table: string, state: Record<string, Row[]>) {
       };
       const builder: any = {
         eq(col: string, val: unknown) {
+          colFilters.push((r) => r[col] === val);
+          return builder;
+        },
+        is(col: string, val: unknown) {
           colFilters.push((r) => r[col] === val);
           return builder;
         },
@@ -459,5 +466,214 @@ describe('stream hardening worker handlers', () => {
       admin: createAdmin(state),
     } as any);
     await expect(countsRes.json()).resolves.toMatchObject({ ok: true, fire: 0, heart: 0, clap: 0 });
+  });
+
+  // ── M-01 Broadcast Audit — Regression tests for fan-view stream gap ────────
+  // Root cause: handleStreamAccess and handlePlaybackSession both denied registered
+  // fans on the 'broadcast' alias (open broadcast, no active_game_id). The worker
+  // only checked hasPrivilegedRole (player/paid_fan) and can_user_view_stream for
+  // the null gameId path — registered fans had neither an entitlement row nor a
+  // privileged role, so both endpoints returned 403/false even though
+  // get_active_broadcast() had already granted them stream_url server-side.
+
+  it('handleStreamAccess grants access to PPV-entitled user for a game', async () => {
+    const res = await handleStreamAccess({
+      req: new Request('https://local/api/streams/game-ppv/access', {
+        headers: { 'x-sbbl-user-id-verified': 'allowed-user' },
+      }),
+      admin: createAdmin({}),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: true });
+  });
+
+  it('handleStreamAccess denies access to non-entitled user for a game', async () => {
+    const res = await handleStreamAccess({
+      req: new Request('https://local/api/streams/game-ppv/access', {
+        headers: { 'x-sbbl-user-id-verified': 'blocked-user' },
+      }),
+      admin: createAdmin({}),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: false });
+  });
+
+  // ── /api/broadcast/* standalone handlers ────────────────────────────────
+  // These handlers own the open-broadcast path. They have zero game coupling.
+  // handlePlaybackSession must reject any request routed here with gameId=null.
+
+  it('handlePlaybackSession rejects null gameId — broadcast must use /api/broadcast/*', async () => {
+    const res = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'fan-broadcast-session-guard',
+          'x-sbbl-user-id-verified': 'registered-fan',
+        },
+        body: JSON.stringify({ sessionKey: 'fan-session-key-guard' }),
+      }),
+      params: { gameId: null },
+      env,
+      admin: createAdmin({}),
+    } as any);
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'use_broadcast_endpoint' });
+  });
+
+  it('handlePlaybackSession rejects broadcast string alias — must use /api/broadcast/*', async () => {
+    const res = await handlePlaybackSession({
+      req: new Request('https://local/api/streams/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'fan-broadcast-alias-guard',
+          'x-sbbl-user-id-verified': 'registered-fan',
+        },
+        body: JSON.stringify({ sessionKey: 'fan-alias-key-guard' }),
+      }),
+      params: { gameId: 'broadcast' },
+      env,
+      admin: createAdmin({}),
+    } as any);
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'use_broadcast_endpoint' });
+  });
+
+  it('handleBroadcastStreamAccess grants access to registered fan when live', async () => {
+    const state = {
+      stream_admin_config: [{ id: true, is_live: true, collection_id: 'https://stream.example/live.m3u8' }],
+      profiles: [{ user_id: 'registered-fan', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
+    } as Record<string, Row[]>;
+
+    const res = await handleBroadcastStreamAccess({
+      req: new Request('https://local/api/broadcast/access', {
+        headers: { 'x-sbbl-user-id-verified': 'registered-fan' },
+      }),
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: true });
+  });
+
+  it('handleBroadcastStreamAccess denies unregistered user', async () => {
+    const state = {
+      stream_admin_config: [{ id: true, is_live: true, collection_id: 'https://stream.example/live.m3u8' }],
+      profiles: [{ user_id: 'unregistered', onboarding_completed_at: null }],
+    } as Record<string, Row[]>;
+
+    const res = await handleBroadcastStreamAccess({
+      req: new Request('https://local/api/broadcast/access', {
+        headers: { 'x-sbbl-user-id-verified': 'unregistered' },
+      }),
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: false });
+  });
+
+  it('handleBroadcastStreamAccess returns hasAccess=false when stream is offline', async () => {
+    const state = {
+      stream_admin_config: [{ id: true, is_live: false, collection_id: 'https://stream.example/live.m3u8' }],
+      profiles: [{ user_id: 'registered-fan', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
+    } as Record<string, Row[]>;
+
+    const res = await handleBroadcastStreamAccess({
+      req: new Request('https://local/api/broadcast/access', {
+        headers: { 'x-sbbl-user-id-verified': 'registered-fan' },
+      }),
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({ ok: true, hasAccess: false });
+  });
+
+  it('handleBroadcastSessionStart grants session to registered fan', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      stream_admin_config: [{ id: true, collection_id: 'https://stream.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_access_sessions: [],
+      profiles: [{ user_id: 'registered-fan', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
+    } as Record<string, Row[]>;
+
+    const res = await handleBroadcastSessionStart({
+      req: new Request('https://local/api/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'broadcast-session-start-1',
+          'x-sbbl-user-id-verified': 'registered-fan',
+        },
+        body: JSON.stringify({ sessionKey: 'broadcast-key-001' }),
+      }),
+      params: {},
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(200);
+    const body = await res.json() as Record<string, any>;
+    expect(body.ok).toBe(true);
+    expect(body.session?.id).toBeTruthy();
+    expect(body.playback?.url).toBeTruthy();
+  });
+
+  it('handleBroadcastSessionStart denies unregistered user', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      stream_admin_config: [{ id: true, collection_id: 'https://stream.example/live.m3u8', title: 'Live', is_live: true }],
+      stream_access_sessions: [],
+      profiles: [{ user_id: 'unregistered', onboarding_completed_at: null }],
+    } as Record<string, Row[]>;
+
+    const res = await handleBroadcastSessionStart({
+      req: new Request('https://local/api/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'broadcast-session-start-2',
+          'x-sbbl-user-id-verified': 'unregistered',
+        },
+        body: JSON.stringify({ sessionKey: 'broadcast-key-002' }),
+      }),
+      params: {},
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'forbidden' });
+  });
+
+  it('handleBroadcastSessionStart returns stream_offline when not live', async () => {
+    const state = {
+      api_idempotency_keys: [],
+      user_role_assignments: [],
+      stream_admin_config: [{ id: true, collection_id: 'https://stream.example/live.m3u8', title: 'Live', is_live: false }],
+      stream_access_sessions: [],
+      profiles: [{ user_id: 'registered-fan', onboarding_completed_at: '2026-01-01T00:00:00Z' }],
+    } as Record<string, Row[]>;
+
+    const res = await handleBroadcastSessionStart({
+      req: new Request('https://local/api/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'broadcast-session-start-3',
+          'x-sbbl-user-id-verified': 'registered-fan',
+        },
+        body: JSON.stringify({ sessionKey: 'broadcast-key-003' }),
+      }),
+      params: {},
+      env,
+      admin: createAdmin(state),
+    } as any);
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'stream_offline' });
   });
 });

@@ -39,6 +39,7 @@ describe('Worker security headers', () => {
     expect(csp).toContain('script-src');
     expect(csp).toContain('script-src-elem');
     expect(csp).toContain('https://s.ytimg.com');
+    expect(csp).toContain('https://player.twitch.tv');
     // YouTube live runtime opens websocket channels on www.youtube.com.
     expect(csp).toContain("connect-src 'self'");
     expect(csp).toContain('wss://www.youtube.com');

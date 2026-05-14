@@ -42,6 +42,7 @@ const Scorekeeper = lazy(() => import('./pages/Scorekeeper'));
 const Engage = lazy(() => import('./pages/Engage'));
 const Digest = lazy(() => import('./pages/Digest'));
 const OpsBiometrics = lazy(() => import('./pages/OpsBiometrics'));
+const OperatorLanding = lazy(() => import('./pages/OperatorLanding'));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -150,6 +151,7 @@ const AppShell = () => (
           <Route path="/teams" element={<Teams />} />
           <Route path="/engage" element={<Engage />} />
           <Route path="/digest" element={<Digest />} />
+          <Route path="/operators" element={<OperatorLanding />} />
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<RegisterRedirect />} />
           <Route path="/onboarding" element={<RequireAuth><Onboarding /></RequireAuth>} />

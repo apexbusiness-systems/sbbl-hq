@@ -7,36 +7,16 @@ import {
   handleBiometricIngest,
   handleBiometricLatest,
 } from '@/worker/routes/biometrics';
+import { createTestCtx } from './worker-test-utils';
 
 function ctxWithEnv(envOverrides: Partial<Env> = {}) {
-  const env = {
-    SUPABASE_URL: 'http://local',
-    SUPABASE_SERVICE_ROLE_KEY: 'srk',
-    STRIPE_SECRET_KEY: 'sk',
-    STRIPE_WEBHOOK_SECRET: 'whs',
-    RESEND_API_KEY: 'rk',
-    ASSETS: { fetch: async () => new Response('') },
-    ...envOverrides,
-  } as unknown as Env;
-  return {
-    req: new Request('http://local/api/streams/g-1/biometrics', {
-      method: 'POST',
-      headers: { 'x-sbbl-user-id-verified': 'u-1' },
-    }),
-    env,
+  return createTestCtx({
+    url: 'http://local/api/streams/g-1/biometrics',
+    method: 'POST',
+    headers: { 'x-sbbl-user-id-verified': 'u-1' },
     params: { gameId: 'g-1' },
-    admin: {
-      from() {
-        throw new Error('DB accessed despite flag off');
-      },
-      rpc() {
-        throw new Error('RPC called despite flag off');
-      },
-      channel() {
-        throw new Error('Channel accessed despite flag off');
-      },
-    } as unknown as import('@/worker/shared').HandlerCtx['admin'],
-  } as import('@/worker/shared').HandlerCtx;
+    envOverrides,
+  });
 }
 
 describe('biometric flag-off invariants', () => {
@@ -45,7 +25,7 @@ describe('biometric flag-off invariants', () => {
     ['latest', handleBiometricLatest],
   ] as const) {
     it(`${name} returns 403 biometric_disabled when flag unset`, async () => {
-      const ctx = ctxWithEnv({});
+      const ctx = ctxWithEnv();
       const res = await handler(ctx);
       expect(res.status).toBe(403);
       const body = await res.json();

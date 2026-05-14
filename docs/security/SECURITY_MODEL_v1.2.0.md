@@ -1,8 +1,8 @@
-<!-- Version: v1.2.0 | Date: 2026-04-04 | Status: Current -->
+<!-- Version: v1.3.0 | Date: 2026-05-11 | Status: Current -->
 # Security Model
 
-**Version:** v1.2.0
-**Last Updated:** 2026-04-04
+**Version:** v1.3.0
+**Last Updated:** 2026-05-11
 
 ## Runtime Environment Security
 
@@ -50,8 +50,45 @@ All responses include:
 - `X-Content-Type-Options: nosniff`
 - `X-Frame-Options: DENY`
 - `X-XSS-Protection: 1; mode=block`
-- `Content-Security-Policy` with strict directives (self, Cloudflare challenges, Stripe, Supabase)
+- `Content-Security-Policy` with strict directives (self, Cloudflare challenges, Stripe, Supabase); `frame-src` includes `https://www.facebook.com` for the `plugins/video.php` sandboxed iframe embed — `connect.facebook.net` (FB SDK) is intentionally absent from `script-src`
 - `Strict-Transport-Security: max-age=63072000; includeSubDomains; preload`
+
+## OmniBridge Trust Boundary
+
+Added in v1.5.0 (PR #502). The OmniBridge integration introduces a bidirectional channel between SBBL-HQ and APEX-OmniHub. All inbound commands arrive at `POST /webhooks/omnihub`; outbound telemetry is delivered via `POST /sync/drain` → `OMNIHUB_SYNC_URL`.
+
+### Authentication mechanism
+
+All inbound OmniHub commands are authenticated with **HMAC-SHA256** using a shared key. The receiving worker computes `HMAC-SHA256(OMNIHUB_VERIFY_KEY, JSON.stringify(packet))`, encodes the result as base64url, and compares it to the `X-Omni-Signature` request header. A missing or mismatched signature is rejected with `401` before any further processing.
+
+### Risk-lane re-classification (defence-in-depth)
+
+Inbound command payloads are run through a risk-lane classifier after HMAC verification. Payloads whose content matches BLOCKED-lane patterns (e.g. `DROP TABLE`, `ALTER ROLE`, `DISABLE RLS`, `TRUNCATE`, `GRANT ALL PRIVILEGES`) are **always rejected** — even when the HMAC signature is cryptographically valid. This is intentional defence-in-depth: signature validity proves the message came from OmniHub, but it does not override the content-level blast-radius controls.
+
+### Replay attack prevention
+
+- **Idempotency deduplication:** Every accepted command's `X-Omni-Packet-Id` is stored in `api_idempotency_keys`. A replayed packet ID returns `200 already_processed` without re-executing the action. The idempotency check runs before action dispatch.
+- **Clock-skew window (±300 s):** Commands whose `timestamp` field falls outside a ±300-second window of the server's current time are rejected with `400`. This prevents an attacker who captures a valid signed command from replaying it at an arbitrary later time.
+
+### Action allowlist (scope creep prevention)
+
+Only 9 actions may be dispatched by an inbound OmniHub command:
+
+```
+disable_stream, enable_stream, revoke_access, grant_access,
+emergency_halt, broadcast_message, force_man_review, hotfix_dispatch, ping
+```
+
+Any action not on this list is rejected with `400 action_not_allowed`. New actions require explicit repo-owner approval and a CLAUDE.md §8 update before implementation.
+
+### Separate inbound / outbound keys (production recommendation)
+
+| Key | Direction | Secret name |
+|---|---|---|
+| Inbound verify key | OmniHub → SBBL-HQ | `OMNIHUB_VERIFY_KEY` |
+| Outbound signing key | SBBL-HQ → OmniHub | `OMNIHUB_SIGNING_SECRET` |
+
+Using distinct key material for each direction limits blast radius on key compromise: a leaked inbound key does not expose the ability to forge outbound telemetry, and vice versa. Sharing a single key is supported in dev/staging (when `OMNIHUB_VERIFY_KEY` is absent, the worker falls back to `OMNIHUB_SIGNING_SECRET` for verification), but must not be used in production.
 
 ## Defensive Migration Patterns
 

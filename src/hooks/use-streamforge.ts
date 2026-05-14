@@ -270,6 +270,13 @@ export function useStreamForge(
     };
   }, [playbackUrl]);
 
+  // The "broadcast" gameId is a non-game placeholder used by the camera-only
+  // admin preview. It has no real aggregation value — every admin's beacons
+  // would land in the same bucket — and it eats the per-IP rate-limit budget,
+  // 429ing legitimate per-game beacons. Treat it as "no telemetry routing".
+  const isPlaceholderGameId = gameId === 'broadcast';
+  const beaconRoutable = Boolean(gameId) && !isPlaceholderGameId;
+
   // ── Beacon shipper ─────────────────────────────────────────────────────
   const buildBeacon = useCallback(() => {
     const s = snapshotRef.current;
@@ -292,17 +299,17 @@ export function useStreamForge(
 
   const flushBeacon = useCallback(() => {
     if (disabled) return;
-    if (!gameId) return;
+    if (!beaconRoutable || !gameId) return;
     const beacon = buildBeacon();
     try {
       chosenTransport.send(gameId, beacon);
     } catch {
       /* swallow — beacon delivery is never allowed to break playback */
     }
-  }, [disabled, gameId, buildBeacon, chosenTransport]);
+  }, [disabled, beaconRoutable, gameId, buildBeacon, chosenTransport]);
 
   useEffect(() => {
-    if (disabled || !gameId) return undefined;
+    if (disabled || !beaconRoutable) return undefined;
     const interval = Math.max(5_000, beaconIntervalMs);
     // Also mark heartbeat ticks in the snapshot so playbackMs stays current.
     const id = setInterval(() => {
@@ -312,7 +319,7 @@ export function useStreamForge(
       flushBeacon();
     }, interval);
     return () => clearInterval(id);
-  }, [disabled, gameId, beaconIntervalMs, flushBeacon]);
+  }, [disabled, beaconRoutable, beaconIntervalMs, flushBeacon]);
 
   useEffect(() => {
     if (disabled || typeof window === 'undefined') return undefined;

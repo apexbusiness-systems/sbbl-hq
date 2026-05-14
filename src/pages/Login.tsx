@@ -5,6 +5,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useTurnstile } from '@/hooks/use-turnstile';
 import { LEAGUE_CONFIGS } from '@/lib/leagues';
 import { requireSupabaseClient } from '@/lib/supabase/client';
+import { getRuntimeConfig, getRuntimeConfigSync } from '@/lib/runtime-config';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { Shield, BarChart3, Users, Zap, CheckCircle2 } from 'lucide-react';
 
@@ -23,27 +24,74 @@ const LoginPage = () => {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [googleSubmitting, setGoogleSubmitting] = useState(false);
+  // Google OAuth capability flag — sourced from /api/public-config so the UI
+  // cannot falsely advertise the provider when Google Cloud has the OAuth
+  // client in `org_internal` state or the operator has explicitly disabled it.
+  // Defaults to false so the button is hidden until the worker confirms it is
+  // safe to render. The sync read covers a cache hit after first paint; the
+  // async read covers first-load.
+  const [googleOAuthEnabled, setGoogleOAuthEnabled] = useState<boolean>(
+    () => getRuntimeConfigSync()?.googleOAuthEnabled ?? false,
+  );
   const { isSignedIn, needsOnboarding, configAvailable, loading } = useAuth();
   const { containerRef: turnstileRef, resolveToken, ready: captchaReady } = useTurnstile();
   const navigate = useNavigate();
 
-  // Redirect after login — respect ?redirect= param from /register flow.
+  useEffect(() => {
+    let cancelled = false;
+    void getRuntimeConfig().then((cfg) => {
+      if (!cancelled) setGoogleOAuthEnabled(Boolean(cfg.googleOAuthEnabled));
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Redirect after login — respect ?redirect= and ?intent= params.
+  // ?intent=fan is preserved so /onboarding renders the fan branch (no bio/avatar).
   // Wait for loading to settle so profile/roles are known before deciding
   // between /onboarding and the target page (avoids wrong redirect flash).
   const redirectTo = urlParams.get('redirect');
+  const intentParam = urlParams.get('intent');
+
+  useEffect(() => {
+    const oauthParams = new URLSearchParams(location.search);
+    const oauthError = oauthParams.get('error');
+    const oauthErrorDescription = oauthParams.get('error_description');
+    if (!oauthError && !oauthErrorDescription) return;
+
+    const normalizedDetails = `${oauthError ?? ''} ${oauthErrorDescription ?? ''}`.toLowerCase();
+    if (normalizedDetails.includes('org_internal')) {
+      setError('Google sign-in is blocked: this OAuth app is set to Internal-only in Google Cloud. Switch OAuth consent to External and add your Google account as a test user, or publish the app.');
+      return;
+    }
+    if (normalizedDetails.includes('provider_disabled') || normalizedDetails.includes('provider is not enabled')) {
+      setError('Google sign-in is not yet enabled on this platform. Please use email and password sign-in.');
+      return;
+    }
+    if (normalizedDetails.includes('redirect_uri_mismatch') || normalizedDetails.includes('redirect_to_not_allowed')) {
+      setError('Google sign-in configuration error: callback URL mismatch. Please contact support.');
+      return;
+    }
+    if (normalizedDetails.includes('access_denied')) {
+      setError('Google sign-in was cancelled. Please try again or use email sign-in.');
+      return;
+    }
+
+    setError('Google sign-in was denied by the provider. Please try again or use email sign-in.');
+  }, [location.search]);
   useEffect(() => {
     if (!isSignedIn || loading) return;
     if (needsOnboarding) {
-      // Pass the original redirect target through onboarding so fans land on
-      // /live (or their intended page) immediately after setup completes.
-      const onboardingUrl = redirectTo
-        ? `/onboarding?redirect=${encodeURIComponent(redirectTo)}`
-        : '/onboarding';
-      navigate(onboardingUrl);
+      // Build onboarding URL preserving both intent and redirect so fans land
+      // on their intended page (e.g. /live) immediately after setup completes.
+      const params = new URLSearchParams();
+      if (intentParam) params.set('intent', intentParam);
+      if (redirectTo) params.set('redirect', redirectTo);
+      const qs = params.toString();
+      navigate(qs ? `/onboarding?${qs}` : '/onboarding');
     } else {
       navigate(redirectTo || '/live');
     }
-  }, [isSignedIn, loading, needsOnboarding, navigate, redirectTo]);
+  }, [isSignedIn, loading, needsOnboarding, navigate, redirectTo, intentParam]);
 
   const switchMode = (next: Mode) => {
     setMode(next);
@@ -57,14 +105,26 @@ const LoginPage = () => {
     setGoogleSubmitting(true);
     try {
       const supabase = requireSupabaseClient();
+      // Preserve ?intent= and ?redirect= through the OAuth round-trip so the
+      // fan paywall flow lands the user back on the correct onboarding variant.
+      // Supabase resolves redirectTo via its allowlist; pointing back to
+      // /login keeps the flow inside our shell and the SIGNED_IN useEffect
+      // forwards the user to /onboarding (with intent) or the redirect target.
+      const callbackParams = new URLSearchParams();
+      if (intentParam) callbackParams.set('intent', intentParam);
+      if (redirectTo) callbackParams.set('redirect', redirectTo);
+      const postLoginRedirect = callbackParams.toString()
+        ? `${window.location.origin}/login?${callbackParams.toString()}`
+        : `${window.location.origin}/login`;
+
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
-          redirectTo: 'https://sbbl-hq.icu/auth/v1/callback',
+          redirectTo: postLoginRedirect,
         },
       });
       if (oauthError) {
-        setError('Google sign-in could not start. Please try again.');
+        setError('Google sign-in could not start. Please try again or use email sign-in.');
         console.error('Google OAuth error:', oauthError.message);
       }
     } catch (oauthClientError) {
@@ -220,28 +280,41 @@ const LoginPage = () => {
               </div>
               {/* Hidden Turnstile widget mount point — rendered invisibly, executed on submit */}
               <div ref={turnstileRef} className="sr-only" aria-hidden="true" />
-              {/* Divider */}
-              <div className="flex items-center gap-3 my-4">
-                <div className="flex-1 h-px bg-white/10" />
-                <span className="text-xs text-white/40 uppercase tracking-widest">or</span>
-                <div className="flex-1 h-px bg-white/10" />
-              </div>
+              {/* Divider + Google block — only rendered when the worker reports
+                  the provider as available. Hidden entirely otherwise so the
+                  email/password flow stands on its own without a dead-end pill. */}
+              {googleOAuthEnabled ? (
+                <>
+                  <div className="flex items-center gap-3 my-4">
+                    <div className="flex-1 h-px bg-white/10" />
+                    <span className="text-xs text-white/40 uppercase tracking-widest">or</span>
+                    <div className="flex-1 h-px bg-white/10" />
+                  </div>
 
-              {/* Google OAuth Pill */}
-              <button
-                type="button"
-                onClick={handleGoogleSignIn}
-                disabled={!configAvailable || googleSubmitting}
-                className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 hover:border-[#C9A84C]/40 transition-all duration-200 text-sm font-medium text-white"
-              >
-                <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
-                  <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
-                  <path d="M3.964 10.707A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z" fill="#FBBC05"/>
-                  <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
-                </svg>
-                {googleSubmitting ? 'Redirecting…' : 'Continue with Google'}
-              </button>
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    disabled={!configAvailable || googleSubmitting}
+                    data-testid="google-signin-button"
+                    className="w-full flex items-center justify-center gap-3 px-4 py-2.5 rounded-full bg-white/5 border border-white/10 hover:bg-white/10 hover:border-[#C9A84C]/40 transition-all duration-200 text-sm font-medium text-white"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.874 2.684-6.615z" fill="#4285F4"/>
+                      <path d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" fill="#34A853"/>
+                      <path d="M3.964 10.707A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z" fill="#FBBC05"/>
+                      <path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 7.293C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/>
+                    </svg>
+                    {googleSubmitting ? 'Redirecting…' : 'Continue with Google'}
+                  </button>
+                </>
+              ) : (
+                <p
+                  className="mt-2 text-xs text-muted-foreground text-center"
+                  data-testid="google-signin-unavailable"
+                >
+                  Google sign-in is temporarily unavailable. Use email and password below.
+                </p>
+              )}
               <button
                 type="submit"
                 disabled={!canSubmit}

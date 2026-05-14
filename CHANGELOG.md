@@ -1,8 +1,130 @@
-<!-- Version: v1.3.0 | Date: 2026-04-19 | Status: Current -->
+<!-- Version: v1.5.0 | Date: 2026-05-11 | Status: Current -->
 # CHANGELOG
 
 All notable changes to SBBL HQ are documented in this file.
 Versioning follows [semantic versioning](https://semver.org) with UTC date stamps.
+
+---
+
+## [1.5.0] - 2026-05-11
+
+### Added — OmniBridge Integration (APEX-OmniHub bidirectional sync)
+
+- **`POST /webhooks/omnihub`** (`handleOmnihubWebhook`) — new inbound command
+  receiver from APEX-OmniHub control plane. Enforces:
+  - HMAC-SHA256 signature verification via `OMNIHUB_VERIFY_KEY` (falls back to
+    `OMNIHUB_SIGNING_SECRET` for shared-secret dev/staging).
+  - 9-action allowlist: `disable_stream`, `enable_stream`, `revoke_access`,
+    `grant_access`, `emergency_halt`, `broadcast_message`, `force_man_review`,
+    `hotfix_dispatch`, `ping`.
+  - `target_source === "sbbl-hq"` pin.
+  - Clock-skew check (±300 seconds).
+  - Idempotency dedup via `api_idempotency_keys` table.
+  - Risk-lane re-classification — BLOCKED payloads (DROP TABLE, ALTER ROLE,
+    DISABLE RLS, TRUNCATE, GRANT ALL PRIVILEGES) rejected regardless of signature.
+  - Full audit trail via `log_admin_action` RPC.
+
+- **`POST /api/omniport/command`** (`handleOmniportCommand`) — JWT-authenticated
+  diagnostic surface for OmniHub operator sessions. Supported commands:
+  `PING`, `ECHO`, `HEALTH_CHECK`, `TELEMETRY_SNAPSHOT`.
+
+- **`deliverSyncEnvelope()`** — hardened outbound telemetry delivery with 4-attempt
+  exponential backoff (0 / 250ms / 1s / 4s), 5-second per-attempt timeout, and
+  4xx fast-fail (non-retryable target rejection).
+
+### Changed
+- **`handleSyncDrain()`** — now sends canonical `{ packet, signature }` envelope
+  with required headers `X-Omni-Source`, `X-Omni-Signature`, `X-Omni-Packet-Id`,
+  `X-Omni-Trace-Id` (fixes silent 400 rejection on OmniHub side).
+- **`wrangler.jsonc`** — documented `OMNIHUB_VERIFY_KEY` with fallback semantics.
+
+### Tests
+- `src/worker/tests/omnihub-bridge.integration.test.ts` — 14 new integration tests
+  covering all new/changed surfaces (header presence, signature failure, target
+  mismatch, clock-skew, valid ping, BLOCKED payload, replay dedup, 401 unauth,
+  PING, unsupported command, HEALTH_CHECK, sync drain envelope, 5xx retry, 4xx fast-fail).
+
+---
+
+## 2026-05-04 — v1.4.1 — Facebook Live playback via iframe embed
+
+- **Facebook URLs now play** via the official `plugins/video.php` sandboxed iframe.
+  Paste a `facebook.com/…/videos/…` or `fb.watch` URL into Broadcast Controls and
+  it renders immediately — no SDK, no CSP violation, no advisory.
+- **CSP** (`src/worker/index.ts`): `https://www.facebook.com` added to `frame-src`
+  only. `connect.facebook.net` remains absent from `script-src` permanently.
+- **Invariant preserved**: `isFacebook` early-return in `LiveStreamPlayer.tsx`
+  is unchanged — ReactPlayer never sees a Facebook URL.
+- **Tests updated**: `live-stream-player-regressions.test.ts` now asserts
+  `plugins/video.php` iframe + `encodeURIComponent(url)`; `worker-ops-health.test.ts`
+  asserts FB SDK blocked + `frame-src` allows `facebook.com`.
+
+---
+
+## 2026-04-29 — v1.4.0 — Live Player Hardening (BASELINE REFERENCE BUILD)
+
+> **This is the canonical baseline build for the live-stream player.**
+> Onboarding agents and devs MUST read this entry, the Live Player
+> Invariants section in `CLAUDE.md`, and the runbook at
+> `ops/runbooks/universal-ingest.md` before touching anything in
+> `src/components/LiveStreamPlayer.tsx` or `src/lib/stream/`.
+
+Closes a five-incident cascade caused by stale/invisible regressions in
+the broadcast surface: a half-rendered player container, two orphaned
+timers leaking the heartbeat closure for up to six hours, and a
+silent CSP-trip on Facebook URLs that surfaced as a generic
+"no supported sources" error with no admin-actionable hint.
+
+### What landed
+
+- **Layout fix** (`820949e`). Removed the conflicting
+  `absolute inset-0 flex flex-col relative z-0` Tailwind classes on the
+  Gate-2 wrapper of `LiveStreamPlayer.tsx`. Tailwind emitted
+  `position: relative` last, collapsing the wrapper out of its absolute
+  ancestor and rendering the iframe at min-height while the controls
+  bar floated mid-canvas above empty black space.
+- **Timer hygiene** (`fd4bf71`). The 6-hour session-cap `setTimeout` and
+  the 3-second auto-retry `setTimeout` were started without retaining
+  their handles. The cap timer pinned the heartbeat closure for up to
+  six hours after navigation; the retry timer could call `setPlaying`
+  on a torn-down `ReactPlayer`. Both now stored and cleared on unmount.
+- **Unembeddable-URL bail** (`0cacfb1`). `StreamPlayer` now short-circuits
+  before `ReactPlayer` mounts for `facebook | kick | instagram | x-spaces`
+  URLs, mirroring the existing RTMP advisory pattern. ReactPlayer never
+  attempts the `connect.facebook.net/sdk.js` load (intentionally blocked
+  by CSP since `89d9696`), so the silent `FilePlayer` fall-through into
+  "no supported sources" is gone.
+- **Regression guards** (`de7c49f`). Added
+  `src/test/live-stream-player-regressions.test.ts` — 11 cheap,
+  deterministic source-level assertions that lock in every fix above.
+  Mutation-tested by re-introducing each bug locally and confirming the
+  relevant assertion failed before reverting.
+- **Pipeline simulation** (`scripts/simulate-broadcast.ts`). New
+  `npm run simulate:broadcast` walks every supported provider type
+  (HLS / DASH / MP4 / YouTube / Twitch / Vimeo / WHEP / RTMP / Facebook /
+  Kick / Instagram / X-Spaces / blob: / garbage) through the full
+  ingest → playback pipeline (`canonicalizeStreamSourceUrl` →
+  `detectStreamUrlType` → `toPlayableUrl` → `getStreamDeliveryClass` →
+  `StreamPlayer` outcome) and asserts each scenario produces the right
+  result. **19 / 19 scenarios pass** at v1.4.0; the script exits non-zero
+  on any mismatch and is the canonical baseline reference.
+
+### Validation gates green at release
+
+| Gate | Result |
+|---|---|
+| `npm run typecheck` | clean |
+| `npm run lint` (max-warnings 0) | clean |
+| `npm test` | 97 files, 1001 passed / 7 skipped / 0 failed in ~30s |
+| `npm run build` | clean (PWA 81 entries / 1.7 MiB) |
+| `npm run simulate:broadcast` | 19 / 19 scenarios pass |
+
+### Required reading before changing the player
+
+1. The **Live Player Invariants** HARD RULE in `CLAUDE.md` §1.5.
+2. `src/test/live-stream-player-regressions.test.ts` — every assertion
+   maps to a real production incident.
+3. `ops/runbooks/universal-ingest.md` — the validation checklist.
 
 ---
 

@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
+import { ROUTER_FUTURE } from '@/test/utils/router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RequireAdmin } from '@/components/auth/RouteGuards';
 
@@ -32,7 +33,7 @@ describe('RequireAdmin', () => {
 
   it('enforces admin access when bypass is disabled', () => {
     render(
-      <MemoryRouter>
+      <MemoryRouter future={ROUTER_FUTURE}>
         <RequireAdmin>
           <div>ops content</div>
         </RequireAdmin>
@@ -46,7 +47,7 @@ describe('RequireAdmin', () => {
     vi.stubEnv('VITE_E2E_BYPASS_ADMIN', 'true');
 
     render(
-      <MemoryRouter>
+      <MemoryRouter future={ROUTER_FUTURE}>
         <RequireAdmin>
           <div>ops content</div>
         </RequireAdmin>
@@ -61,7 +62,7 @@ describe('RequireAdmin', () => {
     vi.stubEnv('VITE_E2E_BYPASS_ADMIN', 'true');
 
     render(
-      <MemoryRouter>
+      <MemoryRouter future={ROUTER_FUTURE}>
         <RequireAdmin>
           <div>ops content</div>
         </RequireAdmin>

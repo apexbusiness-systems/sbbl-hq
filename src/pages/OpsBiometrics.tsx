@@ -31,7 +31,10 @@ export default function OpsBiometricsPage() {
     }));
   }, [homeQuery.data]);
 
-  const selectedGame = games.find((g) => g.id === selectedGameId) ?? games[0] ?? null;
+  // ⚡ Bolt Performance Optimization: Memoize the selected game lookup to prevent O(N) .find() execution on every render
+  const selectedGame = useMemo(() =>
+    games.find((g) => g.id === selectedGameId) ?? games[0] ?? null
+  , [games, selectedGameId]);
 
   const onPublish = async (args: Parameters<typeof ingestBiometric>[0]) => {
     setBusy(true);

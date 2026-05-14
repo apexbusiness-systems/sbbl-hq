@@ -19,6 +19,11 @@ const clientEnvSchema = z.object({
   VITE_FEATURE_FAN_TOKEN_SYSTEM: z.string().optional().default('false'),
   VITE_FEATURE_BIOMETRIC_OVERLAY: z.string().optional().default('false'),
   VITE_FEATURE_MIC_UP_SERIES: z.string().optional().default('false'),
+  VITE_FEATURE_SHADOW_EVENT_LEDGER: z.string().optional().default('false'),
+  VITE_FEATURE_SHADOW_GAME_PROJECTION: z.string().optional().default('false'),
+  VITE_FEATURE_BROADCAST_OVERLAY_V2: z.string().optional().default('false'),
+  VITE_FEATURE_SPONSOR_ANALYTICS_V2: z.string().optional().default('false'),
+  VITE_FEATURE_ENTITLEMENT_TOKENS_V2: z.string().optional().default('false'),
 });
 
 // Normalize empty secrets from runtime env/deploy systems.

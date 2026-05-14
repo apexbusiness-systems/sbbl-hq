@@ -218,35 +218,36 @@ test.describe('ops media editor admin', () => {
     const panel = page.locator('[role="tabpanel"]').filter({ hasText: 'Media Library' });
     await expect(panel).toBeVisible();
 
-    // Filter bar holds the status/surface selects. The status select has the
-    // sentinel option "All statuses" — we match on it to disambiguate.
-    const filterBar = panel.locator('div.flex.flex-wrap.gap-4.items-end');
-    const statusSelect = filterBar.locator('select').filter({ hasText: 'All statuses' });
-    const surfaceSelect = filterBar.locator('select').filter({ hasText: 'All surfaces' });
-    await expect(statusSelect).toBeVisible();
-    await expect(surfaceSelect).toBeVisible();
+    // Filter bar holds the status/surface filter buttons. We click the chip
+    // buttons instead of using selects (the new MediaFilterBar uses visual chips).
+    const filterBar = panel.locator('div.border.border-border.rounded-sm.p-4.bg-secondary\\/20');
+    await expect(filterBar).toBeVisible();
+
+    // Wait for data to load by checking the publication counter
+    await expect(panel.getByText(/3 publications/)).toBeVisible();
 
     // Initial load: all three rows render — POTG, Event, Store.
-    // Row selectors key off the stable `id: <uuid>` text node so they keep
-    // matching even after the edit UI replaces the title <p> with an <input>.
-    const rowBase = panel.locator('div.border.border-border.rounded-sm.bg-card');
-    const potgRow = rowBase.filter({ hasText: 'pub-potg-001' });
-    const eventRow = rowBase.filter({ hasText: 'pub-event-001' });
-    const storeRow = rowBase.filter({ hasText: 'pub-store-001' });
+    // Find media cards by their title h3 element and use locator chaining.
+    // Each h3 with a title is inside exactly one media card container.
+    const getCardByTitle = (title: string) =>
+      panel.locator('h3').filter({ hasText: title }).locator('xpath=ancestor::div[@class and contains(@class, "border")]').first();
+
+    const potgRow = getCardByTitle('Michael Ramos POTG');
+    const eventRow = getCardByTitle('Friday Night Run Flyer');
+    const storeRow = getCardByTitle('Hype Shirt Promo');
     await expect(potgRow).toBeVisible();
     await expect(eventRow).toBeVisible();
     await expect(storeRow).toBeVisible();
-
-    // Row counter reflects unfiltered list size.
-    await expect(panel.getByText(/3 rows/)).toBeVisible();
 
     // Draft badge is visible on the event row (proves we're showing
     // non-published rows that /media intentionally hides).
     await expect(eventRow.getByText('draft', { exact: true })).toBeVisible();
 
     // ── Filter by status=draft — a new list fetch fires with ?status=draft
-    await statusSelect.selectOption('draft');
-    await expect(panel.getByText(/1 rows/)).toBeVisible();
+    // Find and click the "Draft" filter button in the filter bar
+    const draftButton = filterBar.locator('button').filter({ hasText: 'Draft' });
+    await draftButton.click();
+    await expect(panel.getByText(/1 publications/)).toBeVisible();
     await expect(potgRow).toHaveCount(0);
     await expect(storeRow).toHaveCount(0);
     await expect(eventRow).toBeVisible();
@@ -254,20 +255,28 @@ test.describe('ops media editor admin', () => {
     expect(listCaptures.some((c) => c.query.includes('status=draft'))).toBeTruthy();
 
     // Reset filter back to "all" so we can edit the POTG row.
-    await statusSelect.selectOption('all');
-    await expect(panel.getByText(/3 rows/)).toBeVisible();
+    // Click the first "All" button (status filter)
+    const allStatusButton = filterBar.locator('button').filter({ hasText: 'All' }).first();
+    await allStatusButton.click();
+    await expect(panel.getByText(/3 publications/)).toBeVisible();
 
     // ── Edit flow: rename POTG + force status back to draft ─────────────
     await potgRow.getByRole('button', { name: 'Edit' }).click();
-    const titleInput = potgRow.locator('input[placeholder="Publication title"]');
+
+    // The EditMetadataModal should appear with title input and status dropdown
+    const modal = page.locator('[role="dialog"]');
+    await expect(modal).toBeVisible();
+
+    const titleInput = modal.locator('input[placeholder="Publication title"]');
     await expect(titleInput).toBeVisible();
     await titleInput.fill('Michael Ramos POTG (Updated)');
 
-    // Use the row-scoped select to move status → draft. (The only <select>
-    // inside the edit UI of this row is the status dropdown.)
-    await potgRow.locator('select').selectOption('draft');
+    // Change the status to draft using the first select in the modal (status dropdown)
+    const statusSelect = modal.locator('select').first();
+    await statusSelect.selectOption('draft');
 
-    await potgRow.getByRole('button', { name: 'Save' }).click();
+    // Click the Save Changes button in the modal
+    await modal.getByRole('button', { name: 'Save Changes' }).click();
 
     // Wait for PATCH to land + optimistic refetch to repaint the row.
     await expect(potgRow.getByText('draft', { exact: true })).toBeVisible();
@@ -283,11 +292,13 @@ test.describe('ops media editor admin', () => {
     expect(patchCaptures[0].idempotency).toBeTruthy();
 
     // ── Archive flow: store row → DELETE + status flips to archived ─────
-    page.once('dialog', (dialog) => {
-      expect(dialog.message()).toContain('Hype Shirt Promo');
-      void dialog.accept();
-    });
+    // Click Archive button to open the ArchiveModal
     await storeRow.getByRole('button', { name: 'Archive' }).click();
+
+    // Confirm in the archive modal
+    const archiveModal = page.locator('[role="dialog"]').filter({ hasText: 'Archive Media' });
+    await expect(archiveModal).toBeVisible();
+    await archiveModal.getByRole('button', { name: 'Archive' }).click();
 
     await expect(storeRow.getByText('archived', { exact: true })).toBeVisible();
 
@@ -298,11 +309,14 @@ test.describe('ops media editor admin', () => {
     // Once archived, the Archive button must disable (operator can't double-archive).
     await expect(storeRow.getByRole('button', { name: 'Archive' })).toBeDisabled();
 
-    // ── Dismissing the confirm dialog must NOT fire a DELETE ───────────
-    page.once('dialog', (dialog) => {
-      void dialog.dismiss();
-    });
+    // ── Dismissing the archive modal must NOT fire a DELETE ───────────
     await eventRow.getByRole('button', { name: 'Archive' }).click();
+
+    // Cancel in the archive modal
+    const archiveModal2 = page.locator('[role="dialog"]').filter({ hasText: 'Archive Media' });
+    await expect(archiveModal2).toBeVisible();
+    await archiveModal2.getByRole('button', { name: 'Keep' }).click();
+
     expect(deleteCaptures).toHaveLength(1); // still just the one from earlier
   });
 });

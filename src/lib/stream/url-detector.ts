@@ -67,7 +67,8 @@ export function getStreamDeliveryClass(url: string): StreamDeliveryClass {
     normalized.includes('youtu.be') ||
     normalized.includes('twitch.tv') ||
     normalized.includes('vimeo.com') ||
-    normalized.includes('facebook.com')
+    normalized.includes('facebook.com') ||
+    normalized.includes('fb.watch')
   ) {
     return 'embed';
   }
@@ -135,7 +136,7 @@ export function detectStreamUrlType(url: string): StreamUrlType {
   if (isYoutubeUrl(url)) return 'youtube';
   if (/(?:^|[./])twitch\.tv(?:\/|$)/i.test(url)) return 'twitch';
   if (/(?:^|[./])vimeo\.com(?:\/|$)/i.test(url)) return 'vimeo';
-  if (/(?:^|[./])(?:facebook\.com|fb\.me|fbcdn\.net)(?:\/|$)/i.test(url)) return 'facebook';
+  if (/(?:^|[./])(?:facebook\.com|fb\.watch|fb\.me|fbcdn\.net)(?:\/|$)/i.test(url)) return 'facebook';
   if (/(?:^|[./])kick\.com(?:\/|$)/i.test(url)) return 'kick';
   if (/(?:^|[./])rumble\.com(?:\/|$)/i.test(url)) return 'rumble';
   if (/(?:^|[./])(?:dailymotion\.com|dai\.ly)(?:\/|$)/i.test(url)) return 'dailymotion';
@@ -258,7 +259,7 @@ export function toPlayableUrl(raw: string): PlayableUrl {
     return {
       url: trimmed,
       type: 'facebook',
-      warning: 'Facebook embedding may be limited. Verify playback after going live.',
+      warning: 'Facebook stream URLs are not supported. Use YouTube, Twitch, Vimeo, or HLS instead.',
     };
   }
 
@@ -366,7 +367,7 @@ export function getStreamTypeAdvisory(type: StreamUrlType): StreamAdvisory {
     case 'rtmp':
       return { level: 'warn', message: 'RTMP cannot play in browser — use an HLS endpoint instead.' };
     case 'facebook':
-      return { level: 'warn', message: 'Facebook embedding may be limited. Verify playback after going live.' };
+      return { level: 'warn', message: 'Facebook stream URLs are not supported. Use YouTube, Twitch, Vimeo, or HLS instead.' };
     case 'instagram':
       return { level: 'warn', message: 'Instagram Live does not support external embedding.' };
     case 'kick':

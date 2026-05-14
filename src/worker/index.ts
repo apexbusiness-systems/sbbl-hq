@@ -33,6 +33,7 @@ import {
   handleOverlayFoul,
   handleOverlayPeriod,
   handleOverlayReset,
+  handleOverlayStatus,
 } from "./routes/overlay";
 import {
   handlePublicPollsList,
@@ -6995,6 +6996,7 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/api/ops/overlay/:gameId/foul",       handler: handleOverlayFoul },
   { method: "POST", path: "/api/ops/overlay/:gameId/period",     handler: handleOverlayPeriod },
   { method: "POST", path: "/api/ops/overlay/:gameId/reset",      handler: handleOverlayReset },
+  { method: "POST", path: "/api/ops/overlay/:gameId/status",     handler: handleOverlayStatus },
 
   // ── Engagement (polls, predictions, trivia, gamification) ────────────
   { method: "GET",  path: "/api/public/engagement/polls",            handler: handlePublicPollsList },

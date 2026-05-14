@@ -86,6 +86,8 @@ is cached at the edge.
 | Restore Media | `POST /api/ops/media/publications/:id/restore` | `{ ok, data }` | Super-admin required | `media_publications` UPDATE |
 | Stale Preview | `POST /api/ops/media/stale-cleanup-preview` | `{ ok, totalAffected, ... }` | Super-admin required | `media_publications` SELECT |
 | Stale Execute | `POST /api/ops/media/stale-cleanup-execute` | `{ ok, archived, ids }` | Super-admin required | `media_publications` UPDATE |
+| OmniBridge inbound | `POST /webhooks/omnihub`  | `{ ok, status, command_id }`      | HMAC-SHA256 (no mock)        | `api_idempotency_keys` + `log_admin_action` RPC |
+| OmniPort command   | `POST /api/omniport/command` | `{ ok, result }`               | Operator JWT only (no mock)  | Worker-only, no DB write     |
 
 † `/api/stats` is tier-aware: anonymous callers receive a limited stat line
 (pts/reb/ast only). Authenticated paid players/coaches/admins get the full

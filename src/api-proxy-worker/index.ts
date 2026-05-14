@@ -56,14 +56,34 @@ const DEFAULT_STATE: BackendState = {
 };
 
 const STATE_KEY = 'state';
-const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
+
+const BASE_CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
   'Access-Control-Allow-Headers':
     'Content-Type,Authorization,apikey,x-client-info,Prefer,Range,Accept-Profile,Content-Profile',
   'Access-Control-Expose-Headers': 'Content-Range,Range-Unit,X-Supabase-*',
   'Access-Control-Max-Age': '86400',
 };
+
+const ALLOWED_ORIGINS = [
+  'https://sbbl-hq.icu',
+  'https://www.sbbl-hq.icu',
+  'http://localhost:5173',
+  'capacitor://localhost',
+  'http://localhost',
+];
+
+function getSafeCorsHeaders(request: Request): Record<string, string> {
+  const origin = request.headers.get('Origin');
+  const headers: Record<string, string> = { ...BASE_CORS_HEADERS };
+
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    headers['Access-Control-Allow-Origin'] = origin;
+    headers['Vary'] = 'Origin';
+  }
+
+  return headers;
+}
 
 // ── State helpers ─────────────────────────────────────────────────────────────
 
@@ -170,9 +190,10 @@ async function forwardRequest(
   }
 }
 
-function addCorsHeaders(response: Response): Response {
+function addCorsHeaders(response: Response, request: Request): Response {
   const newHeaders = new Headers(response.headers);
-  for (const [k, v] of Object.entries(CORS_HEADERS)) {
+  const corsHeaders = getSafeCorsHeaders(request);
+  for (const [k, v] of Object.entries(corsHeaders)) {
     newHeaders.set(k, v);
   }
   return new Response(response.body, {
@@ -249,7 +270,7 @@ const handler = {
 
     // CORS preflight
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: CORS_HEADERS });
+      return new Response(null, { status: 204, headers: getSafeCorsHeaders(request) });
     }
 
     // Internal ops endpoints (do not proxy)
@@ -283,7 +304,7 @@ const handler = {
       // Success — reset failure count in background
       ctx.waitUntil(recordSuccess(env, state));
 
-      return addCorsHeaders(resp);
+      return addCorsHeaders(resp, request);
 
     } catch (primaryErr) {
       console.error(`[SBBL-PROXY] Primary (${state.active}) error:`, primaryErr);
@@ -308,10 +329,16 @@ const handler = {
             new Response(fallbackResp.body, {
               status: fallbackResp.status,
               headers: taggedHeaders,
-            })
+            }),
+            request
           );
         } catch (fallbackErr) {
           console.error('[SBBL-PROXY] Fallback also failed:', fallbackErr);
+          const errorHeaders = {
+            'Content-Type': 'application/json',
+            'Retry-After': '30',
+            ...getSafeCorsHeaders(request),
+          };
           return new Response(
             JSON.stringify({
               error: 'Both backends unavailable. Please try again in 30 seconds.',
@@ -319,17 +346,18 @@ const handler = {
             }),
             {
               status: 503,
-              headers: {
-                'Content-Type': 'application/json',
-                'Retry-After': '30',
-                ...CORS_HEADERS,
-              },
+              headers: errorHeaders,
             }
           );
         }
       }
 
       // Cloud is already active and failed — return 503
+      const errorHeaders = {
+        'Content-Type': 'application/json',
+        'Retry-After': '30',
+        ...getSafeCorsHeaders(request),
+      };
       return new Response(
         JSON.stringify({
           error: 'Backend unavailable. Our team has been notified.',
@@ -337,11 +365,7 @@ const handler = {
         }),
         {
           status: 503,
-          headers: {
-            'Content-Type': 'application/json',
-            'Retry-After': '30',
-            ...CORS_HEADERS,
-          },
+          headers: errorHeaders,
         }
       );
     }

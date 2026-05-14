@@ -16,6 +16,16 @@ interface Env {
   VITE_STREAM_URL?: string;
   OBS_AGENT_TOKEN?: string;
 
+  // ── Auth capability flags ──────────────────────────────────────────────
+  // Whether Google OAuth is currently a working sign-in path. Must be
+  // explicitly set to "true" in worker vars (or wrangler.jsonc) to enable
+  // the Google sign-in button in the frontend. Defaults to false so a
+  // misconfigured Google Cloud OAuth client (e.g. `org_internal`) cannot
+  // silently break the UX. The legacy FEATURE_GOOGLE_OAUTH alias is read
+  // for back-compat with older deploy configs.
+  GOOGLE_OAUTH_ENABLED?: string;
+  FEATURE_GOOGLE_OAUTH?: string;
+
   // ── Phase 1+2 feature flags (default off; opt-in per deploy). ──────────
   // Enables playback provider abstraction + signed playback token minting
   // on the session endpoint (WS2). When false, the legacy embed path is

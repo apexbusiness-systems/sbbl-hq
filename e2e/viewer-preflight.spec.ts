@@ -12,14 +12,56 @@ test.beforeEach(async ({ page }) => {
     HTMLVideoElement.prototype.play = () => Promise.reject(new Error('headless test mock'));
   });
 
+  // Mock /api/public-config so the bundle boots with a working Supabase client.
+  // vite.config.ts no longer ships hardcoded prod fallbacks for security.
+  await page.route('**/api/public-config', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        appName: 'SBBL HQ',
+        defaultLeague: 'SBBL',
+        supabaseUrl: 'https://ezanilxygnpucwkwpsoc.supabase.co',
+        supabasePublishableKey: 'playwright-publishable-key',
+        googleOAuthEnabled: false,
+      }),
+    });
+  });
+
+  // Mock get_active_broadcast — not live, no entitlement. Preflight overlay
+  // tests don't care about broadcast state but the Live page now fails closed
+  // on oracle errors, so we mock the RPC to a known "not live" response.
+  await page.route('**/rest/v1/**', async (route) => {
+    const url = route.request().url();
+    if (url.includes('/rpc/get_active_broadcast')) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          is_live: false,
+          stream_url: null,
+          title: null,
+          active_game_id: null,
+          live_started_at: null,
+          requires_payment: false,
+          is_subscribed: false,
+          has_entitlement: false,
+          user_registered: false,
+        }),
+      });
+      return;
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+  });
+
   await page.route('**/api/public/home**', async (route) => {
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
       body: JSON.stringify({
         ok: true,
-        liveGames: [],
-        upcomingGames: [
+        liveGames: [
           {
             id: GAME_ID,
             home_team_id: 'home-team',
@@ -27,10 +69,12 @@ test.beforeEach(async ({ page }) => {
             home_team: { name: 'Home' },
             away_team: { name: 'Away' },
             league_code: 'SBBL',
-            status: 'upcoming',
+            status: 'live',
             scheduled_at: new Date().toISOString(),
+            stream_url: '',
           },
         ],
+        upcomingGames: [],
       }),
     });
   });

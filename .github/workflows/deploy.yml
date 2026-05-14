@@ -13,13 +13,15 @@ jobs:
   deploy:
     name: Deploy to Cloudflare
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: '24'
           cache: npm
 
       - name: Install dependencies
@@ -36,7 +38,7 @@ jobs:
           VITE_DEFAULT_LEAGUE: SBBL
 
       - name: Generate Pre-Live Evidence
-        run: python update_livestream.py
+        run: python scripts/archive/update_livestream.py
 
       - name: Deploy to Cloudflare Workers
         run: npx wrangler deploy --config wrangler.deploy.jsonc

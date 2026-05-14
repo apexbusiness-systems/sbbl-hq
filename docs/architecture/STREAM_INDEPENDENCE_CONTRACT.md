@@ -1,9 +1,20 @@
 # Stream Independence Contract
 
-**Status:** ACTIVE — enforced by CLAUDE.md Rule #4, CI AST gate, and runtime tests.
-**Version:** 1.0.0
-**Effective:** 2026-04-17
+**Status:** ACTIVE — enforced by CLAUDE.md Rules #4 and #7, CI AST gate, and runtime tests.
+**Version:** 1.1.0
+**Previous version:** 1.0.0 (2026-04-17)
+**Effective:** 2026-05-06
 **Owner:** APEX Business Systems Ltd. — SBBL-HQ engineering
+
+**Changelog (v1.0.0 → v1.1.0):**
+- Added §7 — Open Broadcast Route Freeze (`/api/broadcast/*` family).
+  The broadcast path is atomically independent of games and PPV.
+  `handlePlaybackSession` now rejects the `'broadcast'` alias and null
+  gameId with `400 use_broadcast_endpoint` — those must use `/api/broadcast/*`.
+- `LiveStreamPlayer` routes `game.id === 'broadcast'` to `/api/broadcast/*`
+  instead of the legacy `/api/streams/broadcast/*` aliases.
+- CLAUDE.md Rule 7 added as the human-layer freeze for the broadcast path.
+- E2E test suite `src/test/broadcast-access-e2e.test.ts` added (15 assertions).
 
 ---
 
@@ -79,7 +90,7 @@ This contract decouples **streams** from **games** so that:
 |-------|-----------|----------|
 | 1. Human doctrine | CLAUDE.md Rule #4 | `CLAUDE.md` |
 | 2. Static CI gate | pglast AST parser scans migration diffs | `.github/workflows/stream-contract-gate.yml` |
-| 3. Runtime tests | Vitest stage-test battery | `src/test/stream-independence-stage*.test.ts` |
+| 3. Runtime tests | Vitest chaos battery | `src/test/stream-chaos-battery.test.ts` |
 | 4. Armageddon suite | Adversarial invariant probes | `src/test/armageddon-stream-invariants.test.ts` |
 | 5. Observability | Sentry span `stream.access.v2` + alerts | Sentry project `sbbl-hq-worker` |
 
@@ -125,10 +136,45 @@ If a stage fails verification:
 
 ---
 
+---
+
+## §7 — Open Broadcast Route Freeze (added v1.1.0)
+
+> **Hard owner rule. Do not modify without JR's written approval.**
+
+An open broadcast is a standalone media resource that is **never** tied
+to a game, PPV purchase, or entitlement row. The route family below is
+frozen:
+
+| Route | Handler | Freeze date |
+|---|---|---|
+| `POST /api/broadcast/access` | `handleBroadcastStreamAccess` | 2026-05-06 |
+| `POST /api/broadcast/session` | `handleBroadcastSessionStart` | 2026-05-06 |
+| `POST /api/broadcast/session/heartbeat` | `handleBroadcastHeartbeatRoute` | 2026-05-06 |
+| `POST /api/broadcast/session/end` | `handleBroadcastSessionEndRoute` | 2026-05-06 |
+
+**Access model:**
+
+```
+One requirement: onboarding_completed_at IS NOT NULL
+No game. No PPV. No entitlement. No can_user_view_stream.
+```
+
+**Guard:** `handlePlaybackSession` returns `400 use_broadcast_endpoint`
+for `gameId === null` or `gameId === 'broadcast'`. This prevents any
+future code from silently re-coupling the broadcast path to PPV logic.
+
+**Tests:** `src/test/broadcast-access-e2e.test.ts` (15 assertions,
+user classes A–E: registered fan, player, super admin, unregistered,
+offline stream).
+
+---
+
 ## References
 
 - Incident history: `docs/status/` (2026-04-16 refund postmortem)
 - Skill doctrine: sbbl-agent (Iron Laws), apex-live (broadcast),
   omnidev-v2, apex-qa, apex-master-debug, one-pass-debug-skill
 - Related docs: `docs/protocols/no-mock-in-production.md`,
-  `docs/features/STREAM_GATING_v1.7.0.md`
+  `docs/features/STREAM_GATING_v1.7.0.md`,
+  `docs/architecture/BROADCAST_PAYWALL_SYSTEM.md`

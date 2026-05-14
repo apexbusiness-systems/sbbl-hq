@@ -1,9 +1,25 @@
-<!-- Version: v1.3.0 | Date: 2026-05-13 | Status: Current -->
+<!-- Version: v1.4.0 | Date: 2026-05-13 | Status: Current -->
 # SBBL Worker API Reference
 
-**Version:** v1.3.0
-**Previous:** v1.2.0 (2026-04-05)
+**Version:** v1.4.0
+**Previous:** v1.3.0 (2026-05-06)
 **Last Updated:** 2026-05-13
+
+**Changelog (v1.3.0 → v1.4.0):**
+- Added **OmniBridge** section documenting `POST /webhooks/omnihub`
+  (`handleOmnihubWebhook`) and `POST /api/omniport/command`
+  (`handleOmniportCommand`) — new endpoints from PR #502.
+- Documented `OMNIHUB_VERIFY_KEY` fallback semantics and the 9-action
+  inbound allowlist.
+
+**Changelog (v1.2.0 → v1.3.0):**
+- Added **Broadcast** section documenting the `/api/broadcast/*` route
+  family (open-broadcast access, session, heartbeat, end). These routes
+  are independent of games and PPV — see CLAUDE.md Rule 7 and
+  `BROADCAST_PAYWALL_SYSTEM.md §10` for the freeze policy.
+- Clarified that `/api/streams/:gameId/*` is PPV/game-specific only.
+  The `'broadcast'` gameId alias is rejected by `handlePlaybackSession`
+  with `400 use_broadcast_endpoint` as of v1.3.0.
 
 Base: Worker routes in `src/worker/index.ts`.
 
@@ -55,15 +71,44 @@ All mutating methods (`POST/PUT/PATCH/DELETE`) require a valid idempotency key v
 - `GET /api/stats` — Stats dashboard (RPC `get_stats_dashboard`).
 - `GET /api/leaderboards` — Leaderboards (RPC `get_leaderboards`).
 
-### Streams (Authenticated)
-- `GET /api/streams/:gameId/access` — Check user's stream access.
+### Broadcast — Open Broadcast (Authenticated, FROZEN — see CLAUDE.md Rule 7)
+
+These routes own the open-broadcast path. They have zero game coupling.
+Access requirement: `onboarding_completed_at IS NOT NULL` (completed fan
+onboarding). No PPV, no entitlement rows, no `can_user_view_stream`.
+
+- `GET /api/broadcast/access` — `{ ok, hasAccess: boolean }`. Returns
+  `hasAccess=false` when stream is offline regardless of registration status.
+- `POST /api/broadcast/session` — Start or refresh a broadcast viewing session.
+  Body: `{ sessionKey: string (≥8 chars) }`.
+  Returns: `{ ok, playback: { url, type, heartbeatIntervalSec, maxExpiresAt }, session: { id, maxExpiresAt } }`.
+  Super admins bypass all checks and get the URL even when `is_live=false`.
+  One-device enforcement: a new session displaces the previous active session
+  for the same user; the displaced device's next heartbeat gets `session_not_found`.
+- `POST /api/broadcast/session/heartbeat` — Extend session TTL. Body: `{ sessionId }`.
+  Returns: `{ ok, expiresAt }`. Returns `404 session_not_found` if session is
+  missing, expired, or displaced.
+- `POST /api/broadcast/session/end` — Teardown session. Body: `{ sessionId }`.
+
+> **Do NOT add `game_id`, PPV, or entitlement logic to these routes.**
+> See `BROADCAST_PAYWALL_SYSTEM.md §10` and `STREAM_INDEPENDENCE_CONTRACT.md §7`.
+
+### Streams — PPV / Game-Specific (Authenticated)
+
+`:gameId` must be a real UUID from the `games` table. Passing `'broadcast'`
+or omitting gameId returns `400 use_broadcast_endpoint` — use `/api/broadcast/*`.
+
+- `GET /api/streams/:gameId/access` — Check PPV entitlement for a game.
+  Returns `{ ok, hasAccess: boolean }` via `can_user_view_stream` RPC.
 - `POST /api/streams/:gameId/purchase` — Create Stripe PPV checkout. Turnstile-protected.
-- `POST /api/streams/:gameId/session` — Create secure playback session. Returns `{ playback: { url, expiresAt, heartbeatIntervalSec }, session: { id, gameId } }`.
+- `POST /api/streams/:gameId/session` — Create secure playback session for a PPV game.
+  Returns `{ playback: { url, expiresAt, heartbeatIntervalSec }, session: { id, gameId } }`.
 - `POST /api/streams/:gameId/session/heartbeat` — Keep session alive. TTL: 70s.
 - `POST /api/streams/:gameId/session/end` — Teardown session.
 - `GET /api/streams/:gameId/comments` — Recent chat messages.
 - `POST /api/streams/:gameId/comments` — Post chat message. Rate-limited (10/user/30s, 20/IP/30s).
 - `POST /api/streams/:gameId/react` — Post reaction (fire/heart/clap).
+- `GET /api/streams/:gameId/replay/status` — Replay availability, embargo state, and price.
 
 ### Invites
 - `POST /api/invite/generate` — Generate single-use fan invite. Eligible: player, paid_fan, super_admin.
@@ -118,10 +163,166 @@ Authenticated fan endpoints (non-admin):
 
 ### Webhooks
 - `POST /webhooks/stripe` — Stripe webhook (HMAC-SHA256 verified).
+- `POST /webhooks/omnihub` — OmniHub inbound command receiver (HMAC-SHA256 verified). See OmniBridge section below.
 
 ### Sync
 - `POST /api/ingress` — OmniHub ingress.
-- `POST /sync/drain` — Sync drain.
+- `POST /sync/drain` — Outbound sync drain (`handleSyncDrain`). Sends `{ packet, signature }` envelope to `OMNIHUB_SYNC_URL` via `deliverSyncEnvelope()`.
+
+### OmniPort Diagnostic
+- `POST /api/omniport/command` — JWT-authenticated OmniHub operator diagnostic surface. See OmniBridge section below.
+
+---
+
+## OmniBridge Endpoints (PR #502 — v1.4.0)
+
+### `POST /webhooks/omnihub` — `handleOmnihubWebhook`
+
+Inbound command receiver from the APEX-OmniHub control plane. No Supabase JWT required — authentication is HMAC-based.
+
+#### Authentication
+
+HMAC-SHA256 via `OMNIHUB_VERIFY_KEY`. Falls back to `OMNIHUB_SIGNING_SECRET` in dev/staging when `OMNIHUB_VERIFY_KEY` is absent. Clock-skew window: ±300 seconds.
+
+#### Required Request Headers
+
+| Header | Description |
+|---|---|
+| `X-Omni-Source` | Must equal `"sbbl-hq"` (target source pin). Any other value → `400 target_mismatch`. |
+| `X-Omni-Signature` | `base64url(HMAC-SHA256(OMNIHUB_VERIFY_KEY, JSON.stringify(packet)))` |
+| `X-Omni-Packet-Id` | Unique packet ID used as the idempotency key. |
+| `X-Omni-Trace-Id` | Trace ID propagated in logs and audit records. |
+
+#### Request Body
+
+```json
+{
+  "packet": {
+    "action": "<action>",
+    "command_id": "<uuid>",
+    "payload": { ... },
+    "timestamp": "<ISO-8601>"
+  },
+  "signature": "<base64url-HMAC-SHA256>"
+}
+```
+
+`signature` = `base64url(HMAC-SHA256(secret, JSON.stringify(packet)))`
+
+#### 9-Action Allowlist
+
+Only the following actions are accepted. Any other value → `400 action_not_allowed`.
+
+| Action | Description |
+|---|---|
+| `disable_stream` | Disable a stream |
+| `enable_stream` | Enable a stream |
+| `revoke_access` | Revoke a user's access |
+| `grant_access` | Grant a user access |
+| `emergency_halt` | Emergency halt — kills all active sessions |
+| `broadcast_message` | Send a broadcast message |
+| `force_man_review` | Force a manual review queue item |
+| `hotfix_dispatch` | Trigger a hotfix dispatch |
+| `ping` | Liveness check — returns `{ ok: true }` |
+
+#### Validation Pipeline (in order)
+
+1. Header presence check — `400 missing_headers` if any required header is absent.
+2. `target_source` pin — `400 target_mismatch` if `X-Omni-Source !== "sbbl-hq"`.
+3. Clock-skew check — `400 clock_skew` if `|now - packet.timestamp| > 300s`.
+4. HMAC verify — `401 invalid_signature` if signature does not match.
+5. Risk-lane re-classification — `400 blocked_payload` if packet content matches BLOCKED patterns (`DROP TABLE`, `ALTER ROLE`, `DISABLE RLS`, `TRUNCATE`, `GRANT ALL PRIVILEGES`), even if signature is valid.
+6. Action allowlist — `400 action_not_allowed` if action is not in the 9-item list.
+7. Idempotency dedup — `200 already_processed` if `X-Omni-Packet-Id` is found in `api_idempotency_keys`.
+8. Action dispatch + audit via `log_admin_action` RPC.
+
+#### Responses
+
+| Status | Body | Meaning |
+|---|---|---|
+| `200` | `{ "ok": true, "result": { ... } }` | Command accepted and executed. |
+| `200` | `{ "ok": true, "status": "already_processed" }` | Duplicate packet — idempotency dedup triggered. |
+| `400` | `{ "ok": false, "error": "missing_headers" }` | One or more required headers absent. |
+| `400` | `{ "ok": false, "error": "target_mismatch" }` | `X-Omni-Source` is not `"sbbl-hq"`. |
+| `400` | `{ "ok": false, "error": "clock_skew" }` | Timestamp outside ±300-second window. |
+| `400` | `{ "ok": false, "error": "blocked_payload" }` | Payload matched BLOCKED risk-lane pattern. |
+| `400` | `{ "ok": false, "error": "action_not_allowed" }` | Action not in the 9-item allowlist. |
+| `401` | `{ "ok": false, "error": "invalid_signature" }` | HMAC verification failed. |
+
+---
+
+### `POST /api/omniport/command` — `handleOmniportCommand`
+
+JWT-authenticated diagnostic surface for OmniHub operator sessions.
+
+#### Authentication
+
+Standard Supabase JWT via `Authorization: Bearer <jwt>` (`requireAuth`). No HMAC.
+
+#### Request Body
+
+```json
+{
+  "command": "PING | ECHO | HEALTH_CHECK | TELEMETRY_SNAPSHOT",
+  "payload": { ... }
+}
+```
+
+#### Supported Commands
+
+| Command | Request Payload | Response |
+|---|---|---|
+| `PING` | (none required) | `{ "ok": true, "ts": "<ISO-8601>" }` |
+| `ECHO` | Any object | `{ "ok": true, "echo": <request payload> }` |
+| `HEALTH_CHECK` | (none required) | `{ "ok": true, "health": { "status": "ok", "worker": "sbbl-hq-worker", ... } }` |
+| `TELEMETRY_SNAPSHOT` | (none required) | `{ "ok": true, "telemetry": { ... recent QoE/telemetry metrics ... } }` |
+
+Any other command value → `400 unsupported_command`.
+
+#### Responses
+
+| Status | Body | Meaning |
+|---|---|---|
+| `200` | `{ "ok": true, ... }` | Command executed successfully. |
+| `400` | `{ "ok": false, "error": "unsupported_command" }` | Command not in supported set. |
+| `401` | `{ "ok": false, "error": "unauthorized" }` | JWT missing or invalid. |
+
+---
+
+### Outbound Sync — `POST /sync/drain` → `deliverSyncEnvelope()`
+
+`handleSyncDrain` accepts inbound sync events and forwards them to `OMNIHUB_SYNC_URL` via `deliverSyncEnvelope()`.
+
+#### Outbound Envelope Shape
+
+```json
+{
+  "packet": { ... },
+  "signature": "<base64url(HMAC-SHA256(OMNIHUB_SIGNING_SECRET, JSON.stringify(packet)))>"
+}
+```
+
+#### Outbound Headers
+
+| Header | Value |
+|---|---|
+| `X-Omni-Source` | `"sbbl-hq"` |
+| `X-Omni-Signature` | `base64url` HMAC-SHA256 of the serialized packet |
+| `X-Omni-Packet-Id` | `packet.id` |
+| `X-Omni-Trace-Id` | Trace ID for this delivery attempt |
+
+#### Retry Policy (`deliverSyncEnvelope`)
+
+| Attempt | Delay Before Attempt |
+|---|---|
+| 1 (initial) | — |
+| 2 | 250 ms |
+| 3 | 1 s |
+| 4 | 4 s |
+
+Per-attempt timeout: 5 seconds. 4xx responses are fast-fail (non-retryable). 5xx responses trigger retry up to the 4-attempt limit.
+
+---
 
 ## Error Model
 

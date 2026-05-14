@@ -261,10 +261,10 @@ export async function setStreamLive(
  * Falls back gracefully if the endpoint is not yet deployed.
  */
 export async function goLive(
-  payload: { isLive: boolean; collectionId: string; title: string },
+  payload: { isLive: boolean; collectionId: string; title: string; activeGameId?: string | null },
   token: string | null,
 ) {
-  return apiFetch<{ ok: boolean; isLive: boolean; collectionId: string; title: string; updatedAt: string }>(
+  return apiFetch<{ ok: boolean; isLive: boolean; collectionId: string; title: string; activeGameId: string | null; updatedAt: string }>(
     '/ops/streams/go-live',
     {
       method: 'POST',
@@ -294,8 +294,8 @@ export interface CompCode {
  */
 export async function generateCompCode(
   gameId: string,
-  options: { note?: string; expiresInHours?: number } = {},
   token: string | null,
+  options: { note?: string; expiresInHours?: number } = {},
 ) {
   return apiFetch<{ ok: boolean; code: string; gameId: string; expiresAt: string; note?: string | null; createdAt: string }>(
     '/ops/streams/comp-code',
@@ -327,8 +327,8 @@ export async function listCompCodes(token: string | null) {
  */
 export async function redeemAccessCode(
   code: string,
-  options: { captchaToken?: string } = {},
   token: string | null,
+  options: { captchaToken?: string } = {},
 ) {
   return apiFetch<{ ok: boolean; granted: boolean; idempotent?: boolean }>(
     '/api/invite/redeem',
