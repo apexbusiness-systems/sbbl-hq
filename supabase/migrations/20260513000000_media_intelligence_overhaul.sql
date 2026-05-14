@@ -25,7 +25,13 @@ ALTER TABLE media_publications
   ADD COLUMN IF NOT EXISTS parser_uncertain_fields TEXT[] DEFAULT NULL;
 
 -- ============================================================
--- 3. Indexes
+-- 3. updated_at column (must exist before index + RPC reference it)
+-- ============================================================
+ALTER TABLE media_publications
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT now();
+
+-- ============================================================
+-- 4. Indexes
 -- ============================================================
 
 -- Stale cleanup: published items by age, pin status, and edit recency
@@ -44,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_media_publications_title_lower
   ON media_publications (lower(title));
 
 -- ============================================================
--- 4. Bulk archive RPC (transactional: validates all IDs + archives in single TX)
+-- 5. Bulk archive RPC (transactional: validates all IDs + archives in single TX)
 --    All-or-nothing: if any ID is invalid, pinned, or already archived, the
 --    entire operation is rejected and no rows are modified.
 -- ============================================================
