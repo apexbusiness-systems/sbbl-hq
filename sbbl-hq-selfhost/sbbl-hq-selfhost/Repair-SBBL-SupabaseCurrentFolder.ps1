@@ -219,7 +219,7 @@ if ($NoRestart) {
 
 Write-Step 'Recreating affected Supabase services'
 Assert-CommandSucceeded -CommandName 'docker compose up' -ScriptBlock {
-    docker compose up -d --force-recreate analytics vector auth rest storage supavisor realtime kong
+    docker compose up -d --force-recreate vector auth rest storage supavisor realtime kong
 }
 
 Write-Step 'Post-run checks'

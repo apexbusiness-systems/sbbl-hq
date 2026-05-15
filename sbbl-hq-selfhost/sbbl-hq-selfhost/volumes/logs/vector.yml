@@ -1,0 +1,13 @@
+api:
+  enabled: true
+  address: 0.0.0.0:9001
+
+sources:
+  internal_logs:
+    type: internal_logs
+
+sinks:
+  discard_internal_logs:
+    type: blackhole
+    inputs:
+      - internal_logs

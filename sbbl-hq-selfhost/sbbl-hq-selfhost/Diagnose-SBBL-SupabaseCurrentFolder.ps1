@@ -55,7 +55,7 @@ function Get-ComposeServicesNeedingLogs {
             Write-Warning "Could not parse docker compose ps JSON; falling back to known Supabase services. $($_.Exception.Message)"
         }
     }
-    return @('analytics', 'vector', 'auth', 'rest', 'storage', 'supavisor', 'realtime', 'kong')
+    return @('vector', 'auth', 'rest', 'storage', 'supavisor', 'realtime', 'kong')
 }
 
 Write-Step 'Validating current folder'
