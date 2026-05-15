@@ -92,14 +92,15 @@ const StorePage = () => {
     }
   }, []);
 
-  const { session, user } = useAuth();
+  const { session } = useAuth();
 
   const handleQuoteSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!detail) return;
 
-    if (!session && !localStorage.getItem('sb-zofpeqwrmxemymvtdwct-auth-token')) {
-      console.log("NOT SIGNED IN"); toast.error("Please sign in to submit a quote request.");
+    const token = session?.access_token ?? null;
+    if (!token) {
+      toast.error('Please sign in to submit a quote request.');
       return;
     }
 
@@ -117,7 +118,7 @@ const StorePage = () => {
           quantity: parseInt(quoteForm.qty, 10),
           notes: quoteForm.notes
         })
-      }, session?.access_token ?? 'eyMock');
+      }, token);
 
       if (res.ok) {
         toast.success('Quote request sent! The SBBL sales team will contact you shortly.');
