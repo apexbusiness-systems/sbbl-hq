@@ -1,0 +1,9 @@
+.env.example text eol=lf
+.gitattributes text eol=lf
+.gitignore text eol=lf
+*.sh text eol=lf
+*.sql text eol=lf
+*.ts text eol=lf
+*.exs text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf

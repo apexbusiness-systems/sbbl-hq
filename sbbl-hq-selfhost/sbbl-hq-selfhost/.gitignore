@@ -1,0 +1,8 @@
+.env
+.env.backup-*
+docker-compose.yml.bak.*
+docker-compose.yml.broken.bak
+volumes/db/data/
+volumes/storage/
+volumes/logs/vector/
+volumes/logs/*.log
