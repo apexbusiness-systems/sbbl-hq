@@ -34,7 +34,8 @@
     "test:coverage:critical": "vitest run src/test/playback-provider-legacy.test.ts src/test/playback-provider-native-hls.test.ts src/test/playback-signed-path-contract.test.ts --coverage --reporter=dot --max-workers=1",
     "test:ci:shard1": "vitest run --reporter=dot --max-workers=1 --shard=1/2",
     "test:ci:shard2": "vitest run --reporter=dot --max-workers=1 --shard=2/2",
-    "simulate:broadcast": "tsx scripts/simulate-broadcast.ts"
+    "simulate:broadcast": "tsx scripts/simulate-broadcast.ts",
+    "test:selfhost:owner": "playwright test e2e/selfhost-owner-auth-ingest.spec.ts --project=chromium"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.0",

@@ -348,9 +348,10 @@ describe('Class C — Super admin (fast-path, bypasses all checks)', () => {
     expect(body.ok).toBe(true);
     expect(body.playback.url).toBe(STREAM_URL);
     expect(body.session.id).toBeTruthy();
+    expect(state.stream_access_sessions).toHaveLength(0);
   });
 
-  it('C2: heartbeat is always accepted (no DB session row required)', async () => {
+  it('C2: heartbeat is always accepted with a synthetic session and no DB session row', async () => {
     const fakeSessionId = crypto.randomUUID();
     const state = liveStreamState({
       user_role_assignments: [{ user_id: userId, role: 'super_admin' }],
@@ -372,8 +373,53 @@ describe('Class C — Super admin (fast-path, bypasses all checks)', () => {
     } as never);
 
     expect(res.status).toBe(200);
-    const body = await res.json() as { ok: boolean };
+    const body = await res.json() as { ok: boolean; sessionId: string };
     expect(body.ok).toBe(true);
+    expect(body.sessionId).toBe(fakeSessionId);
+    expect(state.stream_access_sessions).toHaveLength(0);
+  });
+
+  it('C3: second broadcast session does not displace super_admin because no DB rows are created', async () => {
+    const state = liveStreamState({
+      user_role_assignments: [{ user_id: userId, role: 'super_admin' }],
+      stream_access_sessions: [],
+    });
+
+    const first = await handleBroadcastSessionStart({
+      req: new Request('https://local/api/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'idem-admin-c3-first',
+          'x-sbbl-user-id-verified': userId,
+        },
+        body: JSON.stringify({ sessionKey: 'admin-session-c3-first' }),
+      }),
+      params: {},
+      env: ENV,
+      admin: makeAdmin(state),
+    } as never);
+    const second = await handleBroadcastSessionStart({
+      req: new Request('https://local/api/broadcast/session', {
+        method: 'POST',
+        headers: {
+          'x-idempotency-key': 'idem-admin-c3-second',
+          'x-sbbl-user-id-verified': userId,
+        },
+        body: JSON.stringify({ sessionKey: 'admin-session-c3-second' }),
+      }),
+      params: {},
+      env: ENV,
+      admin: makeAdmin(state),
+    } as never);
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    const firstBody = await first.json() as { session: { id: string } };
+    const secondBody = await second.json() as { session: { id: string } };
+    expect(firstBody.session.id).toBeTruthy();
+    expect(secondBody.session.id).toBeTruthy();
+    expect(firstBody.session.id).not.toBe(secondBody.session.id);
+    expect(state.stream_access_sessions).toHaveLength(0);
   });
 });
 
