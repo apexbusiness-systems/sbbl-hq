@@ -161,7 +161,7 @@ export default defineConfig(({ mode }) => {
             }
           ],
         },
-        devOptions: { enabled: true },
+        devOptions: { enabled: env.VITE_ENABLE_PWA_DEV === 'true' },
       }),
       ...sentryPlugins,
     ],

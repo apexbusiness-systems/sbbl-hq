@@ -281,12 +281,36 @@ services:
         "postgrest"
       ]
 
+  realtime-bootstrap:
+    container_name: supabase-realtime-bootstrap
+    image: supabase/postgres:15.8.1.085
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: supabase_admin
+    volumes:
+      - ./volumes/db/realtime.sql:/tmp/realtime.sql:ro,Z
+    entrypoint:
+      [
+        "/bin/sh",
+        "-c"
+      ]
+    command:
+      [
+        "psql -v ON_ERROR_STOP=1 -h ${POSTGRES_HOST} -p ${POSTGRES_PORT} -U postgres -d ${POSTGRES_DB} -f /tmp/realtime.sql"
+      ]
+
   realtime:
     # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
     container_name: realtime-dev.supabase-realtime
     image: supabase/realtime:v2.76.5
     restart: unless-stopped
     depends_on:
+      realtime-bootstrap:
+        condition: service_completed_successfully
       db:
         # Disable this if you are using an external Postgres database
         condition: service_healthy
