@@ -234,44 +234,6 @@ const HomePage = () => {
 
       <div className="container py-8 space-y-12">
 
-        {/* ── SBBL FEATURED EVENT BANNER ───────────────────────── */}
-        {resolvedLeague === 'sbbl' && (
-          <motion.section
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45, delay: 0.1 }}
-            className="panel overflow-hidden border-primary/30"
-          >
-            <div className="flex flex-col md:flex-row gap-0">
-              {/* Flyer image */}
-              <div className="md:w-1/2 lg:w-[480px] flex-shrink-0 bg-black flex items-center justify-center overflow-hidden">
-                <img
-                  src="/assets/events/sbbl-season-11.jpg"
-                  alt="SBBL Season 11 Week 4 schedule poster for May 10, 2026"
-                  className="w-full md:h-full object-contain object-top md:max-h-[320px]"
-                  loading="lazy"
-                  onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                />
-              </div>
-              {/* Info */}
-              <div className="flex-1 p-6 flex flex-col justify-center">
-                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary mb-2">Featured Schedule · SBBL</p>
-                <h2 className="font-display text-3xl md:text-4xl font-bold uppercase leading-none mb-1">SEASON 11</h2>
-                <p className="font-display text-xl md:text-2xl font-bold text-primary uppercase leading-none mb-4">Week 4 · Sunday Game Day</p>
-                <div className="space-y-1 text-sm text-muted-foreground mb-6">
-                  <p className="font-medium text-foreground">Crawford School, 531 Finch Ave W</p>
-                  <p>Sunday, May 10, 2026</p>
-                </div>
-                <Link
-                  to="/schedules"
-                  className="inline-flex items-center gap-2 px-5 py-2.5 gold-bg font-display font-bold text-sm uppercase tracking-wider rounded-sm w-fit"
-                >
-                  <Calendar className="w-4 h-4" /> View Schedule
-                </Link>
-              </div>
-            </div>
-          </motion.section>
-        )}
 
         {/* Players of the Game — always rendered; empty state when no data for this league yet */}
         {(() => {

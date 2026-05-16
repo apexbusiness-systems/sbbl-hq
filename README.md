@@ -28,8 +28,8 @@ Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alber
 Set in `.env` locally. Set as GitHub Actions Secrets in CI.
 
 ```
-VITE_SUPABASE_URL=https://ezanilxygnpucwkwpsoc.supabase.co
-VITE_SUPABASE_ANON_KEY=eyJ...   ← anon JWT from Supabase dashboard → Project Settings → API
+VITE_SUPABASE_URL=https://supabase.sbbl-hq.icu
+VITE_SUPABASE_ANON_KEY=eyJ...   ← anon JWT from self-hosted Supabase gateway/Kong public URL
 ```
 
 > Both `VITE_SUPABASE_PUBLISHABLE_KEY` and `VITE_SUPABASE_ANON_KEY` are supported.
@@ -90,3 +90,7 @@ All documentation lives in [`docs/`](docs/README.md). Key entry points:
 | Policies | [One Device](ONE_DEVICE_POLICY.md) · [Paywall Enforcement](PAYWALL_ENFORCEMENT_POLICY.md) · [Resume Policy](RESUME_POLICY.md) · [Stream Test Strategy](STREAM_TEST_STRATEGY.md) |
 
 → **[Full documentation index](docs/README.md)**
+
+## Production Supabase contract
+
+Production Supabase for SBBL-HQ is self-hosted. Do not use Supabase Cloud project refs or hosted-only assumptions for production. The production app-facing URL is supplied by Worker `SUPABASE_URL` / public config and currently targets `https://supabase.sbbl-hq.icu`; browser code may use only publishable/anon keys. `SUPABASE_SERVICE_ROLE_KEY` is server-only, must be set with `wrangler secret put SUPABASE_SERVICE_ROLE_KEY`, and privileged validation routes such as `/ops/validation-runs` require existing `super_admin` auth first. JR is the sole super-admin unless repo policy changes. Self-hosted operations own OS/service updates, Docker service updates, Postgres maintenance, backups/restore, monitoring, uptime, and disaster recovery.

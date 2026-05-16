@@ -7,10 +7,25 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchPublicSchedule } from '@/lib/api/public';
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { SBBL_WEEK4_MAY_10_2026 } from '@/data/sbblWeek4Schedule';
 
 type ScheduleGame = { time: string; home: string; away: string };
 type ScheduleCourt = { name: string; games: ScheduleGame[] };
+type PublicScheduleRow = {
+  starts_at?: unknown;
+  start_time?: unknown;
+  league_id?: unknown;
+  week?: unknown;
+  venue?: unknown;
+  address?: unknown;
+  court?: unknown;
+  court_name?: unknown;
+  home_team_name?: unknown;
+  home_team?: unknown;
+  home_team_id?: unknown;
+  away_team_name?: unknown;
+  away_team?: unknown;
+  away_team_id?: unknown;
+};
 type ScheduleDay = {
   leagueId: LeagueId;
   season: string;
@@ -42,12 +57,12 @@ const SchedulesPage = () => {
       ? (paramLeague as LeagueId | 'all')
       : (activeLeague || 'all')
   );
-  const { data: liveDataRes, isLoading } = useQuery({
+  const { data: liveDataRes, isLoading, isError } = useQuery({
     queryKey: ['public-schedule', leagueFilter],
     queryFn: () => fetchPublicSchedule(leagueFilter),
     staleTime: 1000 * 60 * 5,
   });
-  const liveSchedules = useMemo(() => liveDataRes?.data || [], [liveDataRes?.data]);
+  const liveSchedules = useMemo(() => (liveDataRes?.data || []) as PublicScheduleRow[], [liveDataRes?.data]);
 
   // Keep URL and local state in sync when user clicks page filters
   const handleLeagueFilterChange = (val: LeagueId | 'all') => {
@@ -69,51 +84,48 @@ const SchedulesPage = () => {
   const mappedLiveSchedules: ScheduleDay[] = useMemo(() => {
     if (!liveSchedules || liveSchedules.length === 0) return [];
 
-    // Normalize known worker payload variants (starts_at/start_time + team labels/ids).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const groupedLive = liveSchedules.reduce((acc: Record<string, any>, curr: any) => {
-      const startsAt = curr.starts_at || curr.start_time;
-      if (!startsAt || typeof startsAt !== 'string') return acc;
+    const groupedLive = liveSchedules.reduce<Record<string, Omit<ScheduleDay, 'courts'> & { courts: Record<string, ScheduleGame[]> }>>((acc, curr) => {
+      const startsAt = typeof curr.starts_at === 'string' ? curr.starts_at : curr.start_time;
+      if (typeof startsAt !== 'string' || startsAt.length === 0) return acc;
       const gameDate = startsAt.split('T')[0];
-      const key = `${curr.league_id || 'sbbl'}-${gameDate}`;
+      const rawLeagueId = typeof curr.league_id === 'string' ? curr.league_id : 'sbbl';
+      const key = `${rawLeagueId}-${gameDate}`;
       if (!acc[key]) {
-        const leagueId = LEAGUE_REGISTRY.some((l) => l.id === curr.league_id)
-          ? (curr.league_id as LeagueId)
+        const leagueId = LEAGUE_REGISTRY.some((l) => l.id === rawLeagueId)
+          ? (rawLeagueId as LeagueId)
           : 'sbbl';
         acc[key] = {
           leagueId,
           season: getLeagueSeasonLabel(leagueId),
           week: String(curr.week || '1'),
           date: gameDate,
-          venue: curr.venue || 'TBA',
-          address: curr.address || 'TBA',
+          venue: typeof curr.venue === 'string' && curr.venue ? curr.venue : 'TBA',
+          address: typeof curr.address === 'string' && curr.address ? curr.address : 'TBA',
           courts: {}
         };
       }
-      const courtName = curr.court || curr.court_name || 'Main Court';
+      const courtName = typeof curr.court === 'string' && curr.court
+        ? curr.court
+        : typeof curr.court_name === 'string' && curr.court_name
+          ? curr.court_name
+          : 'Main Court';
       if (!acc[key].courts[courtName]) acc[key].courts[courtName] = [];
-      const time = formatScheduleTime(startsAt);
+      const label = (value: unknown) => (typeof value === 'string' && value.trim() ? value : null);
       acc[key].courts[courtName].push({
-        time,
-        home: curr.home_team_name || curr.home_team || curr.home_team_id || 'TBA',
-        away: curr.away_team_name || curr.away_team || curr.away_team_id || 'TBA'
+        time: formatScheduleTime(startsAt),
+        home: label(curr.home_team_name) || label(curr.home_team) || label(curr.home_team_id) || 'TBA',
+        away: label(curr.away_team_name) || label(curr.away_team) || label(curr.away_team_id) || 'TBA'
       });
       return acc;
     }, {});
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return Object.values(groupedLive).map((g: any) => ({
+    return Object.values(groupedLive).map((g) => ({
       ...g,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      courts: Object.entries(g.courts).map(([name, games]) => ({ name, games: games as any[] }))
+      courts: Object.entries(g.courts).map(([name, games]) => ({ name, games }))
     }));
   }, [liveSchedules]);
 
-  const displayData = useMemo(() => {
-    if (leagueFilter !== 'all' && leagueFilter !== 'sbbl') return mappedLiveSchedules;
-    const hasWeek4 = mappedLiveSchedules.some((day) => day.date === SBBL_WEEK4_MAY_10_2026.date && day.leagueId === 'sbbl');
-    return hasWeek4 ? mappedLiveSchedules : [...mappedLiveSchedules, SBBL_WEEK4_MAY_10_2026];
-  }, [mappedLiveSchedules, leagueFilter]);
+  const displayData = mappedLiveSchedules;
 
 
   return (
@@ -146,7 +158,17 @@ const SchedulesPage = () => {
           ))}
         </div>
 
-        {displayData.length === 0 && !isLoading && (
+        {isError && (
+          <div className="panel p-8 text-center border-destructive/30">
+            <Calendar className="w-8 h-8 text-destructive/60 mx-auto mb-3" />
+            <h2 className="font-display text-lg font-bold">Unable to load schedules</h2>
+            <p className="text-sm text-muted-foreground mt-1 max-w-md mx-auto">
+              Please refresh or try again after the live schedule service recovers.
+            </p>
+          </div>
+        )}
+
+        {displayData.length === 0 && !isLoading && !isError && (
           <div className="panel p-8 text-center">
             <Calendar className="w-8 h-8 text-primary/40 mx-auto mb-3" />
             <h2 className="font-display text-lg font-bold">No games scheduled</h2>

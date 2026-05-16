@@ -55,8 +55,8 @@
     }
   ],
   "vars": {
-    "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
-    "SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo",
+    "SUPABASE_URL": "https://supabase.sbbl-hq.icu",
+    "SUPABASE_PUBLISHABLE_KEY": "replace-with-self-hosted-anon-key",
     // SENTRY_DSN is a secret — set via: npx wrangler secret put SENTRY_DSN --env=""
     // Do NOT add it here as a var; secrets and vars cannot share the same binding name.
     "ENABLE_STREAM_VALIDATION": "false",
@@ -70,8 +70,8 @@
     "staging": {
       "name": "sbbl-hq-staging",
       "vars": {
-        "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
-        "SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo",
+        "SUPABASE_URL": "https://staging-supabase.sbbl-hq.icu",
+        "SUPABASE_PUBLISHABLE_KEY": "replace-with-staging-self-hosted-anon-key",
         "GOOGLE_OAUTH_ENABLED": "true"
         // SENTRY_DSN for staging: npx wrangler secret put SENTRY_DSN --env staging
       }

@@ -1,9 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
-import baseWorker from './index';
+import baseWorker, { getSession } from './index';
 
 const MUTATION_IDEMPOTENCY_RE = [
   /^\/api\/streams\/[^/]+\/(purchase|access|resume|revoke|expire|comments|reactions)$/,
-  /^\/ops\/validation-runs$/,
 ];
 
 // Sliding-window buckets keyed by rate-limit token.
@@ -85,12 +84,66 @@ function rewriteRequest(req: Request, targetPath: string) {
   });
 }
 
-async function handleOpsValidationRuns(req: Request, env: Env) {
-  const url = new URL(req.url);
-  const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID();
-  const admin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+type QueryResult<T> = PromiseLike<{ data: T | null; error: { message?: string } | null }>;
+type MaybeSingleQuery<T> = { maybeSingle(): QueryResult<T> };
+type SingleQuery<T> = { single(): QueryResult<T> };
+type EqQuery<T> = MaybeSingleQuery<T> & { limit(count: number): MaybeSingleQuery<T> };
+type SelectQuery<T> = SingleQuery<T> & { eq(column: string, value: string): EqQuery<T> };
+type InsertQuery<T> = { select(columns: string): SingleQuery<T> };
+type ValidationRunRow = { id: string; status: string; [key: string]: unknown };
+type ValidationRunsAdmin = {
+  from(table: 'validation_runs'): {
+    select(columns: string): SelectQuery<ValidationRunRow>;
+    insert(payload: Record<string, unknown>): InsertQuery<ValidationRunRow>;
+  };
+  from(table: 'audit_logs'): { insert(payload: Record<string, unknown>): QueryResult<unknown> };
+};
+
+type CreateValidationAdmin = (env: Env) => ValidationRunsAdmin;
+type ValidationAuthSession = { userId: string; roles: string[] };
+type RequireValidationAuth = (req: Request, env: Env) => Promise<
+  | { ok: true; session: ValidationAuthSession }
+  | { ok: false; response: Response }
+>;
+
+const createValidationAdmin: CreateValidationAdmin = (env) => {
+  const client = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
+  return client as unknown as ValidationRunsAdmin;
+};
+
+function stripVerifiedIdentityHeaders(req: Request) {
+  const headers = new Headers(req.headers);
+  headers.delete('x-sbbl-user-id');
+  headers.delete('x-sbbl-user-id-verified');
+  headers.delete('x-sbbl-roles');
+  headers.delete('x-sbbl-roles-verified');
+  return new Request(req, { headers });
+}
+
+const requireValidationRunSuperAdmin: RequireValidationAuth = async (req, env) => {
+  const session = await getSession(stripVerifiedIdentityHeaders(req), env);
+  if (!session) return { ok: false as const, response: json({ ok: false, error: 'unauthorized' }, 401) };
+  if (!session.roles.includes('super_admin')) {
+    return { ok: false as const, response: json({ ok: false, error: 'forbidden' }, 403) };
+  }
+  return { ok: true as const, session };
+};
+
+export async function handleOpsValidationRuns(
+  req: Request,
+  env: Env,
+  makeAdmin: CreateValidationAdmin = createValidationAdmin,
+  requireAuth: RequireValidationAuth = requireValidationRunSuperAdmin,
+) {
+  const url = new URL(req.url);
+  const requestId = req.headers.get('x-request-id') ?? crypto.randomUUID();
+  const auth = await requireAuth(req, env);
+  if (auth.ok === false) return auth.response;
+
+  // Service-role access for validation rows starts only after verified super_admin auth.
+  const admin = makeAdmin(env);
 
   if (req.method === 'POST' && url.pathname === '/ops/validation-runs') {
     const body = (await req.json().catch(() => ({}))) as {

@@ -77,7 +77,7 @@ All required secrets are listed in `wrangler.jsonc` under `[vars]` / `[[secrets]
 
 | Secret | Purpose |
 |---|---|
-| `SUPABASE_URL` | Supabase project URL |
+| `SUPABASE_URL` | Self-hosted Supabase public URL |
 | `SUPABASE_PUBLISHABLE_KEY` | Supabase anon/publishable key (JWT verify) |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role (admin DB client) |
 | `STRIPE_SECRET_KEY` | Stripe server-side key |
@@ -93,7 +93,7 @@ Client-side env vars (Vite build-time, set as GitHub Actions secrets):
 
 | Variable | Purpose |
 |---|---|
-| `VITE_SUPABASE_URL` | Supabase project URL |
+| `VITE_SUPABASE_URL` | Self-hosted Supabase public URL |
 | `VITE_SUPABASE_ANON_KEY` | Supabase anon key (client SDK init) |
 | `VITE_TURNSTILE_SITE_KEY` | Turnstile site key (optional — captcha UI hidden when absent) |
 | `VITE_SENTRY_DSN` | Sentry DSN for client-side error tracking (optional) |

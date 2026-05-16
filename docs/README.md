@@ -89,8 +89,8 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
-| [RELEASE GATE AUDIT 2026-04-11](./quality/RELEASE_GATE_AUDIT_2026-04-11_v1.4.0.md) | v1.4.0 | Comp codes + 20K chaos battery — gate decision: GO |
-| [RELEASE GATE AUDIT 2026-04-09](./quality/RELEASE_GATE_AUDIT_2026-04-09_v1.3.0.md) | v1.3.0 | Final RC gate run — lint/typecheck/tests/build all PASS; gate decision: GO |
+| [RELEASE GATE AUDIT 2026-04-11](./quality/RELEASE_GATE_AUDIT_2026-04-11_v1.4.0.md) | v1.4.0 | Comp codes + 20K chaos battery — historical gate decision: GO (superseded; re-run current gates) |
+| [RELEASE GATE AUDIT 2026-04-09](./quality/RELEASE_GATE_AUDIT_2026-04-09_v1.3.0.md) | v1.3.0 | Final RC gate run — lint/typecheck/tests/build all PASS; historical gate decision: GO (superseded; re-run current gates) |
 | [LIVESTREAM INTEGRITY AUDIT 2026-04-09](./quality/LIVESTREAM_INGEST_BROADCAST_SYSTEM_INTEGRITY_AUDIT_2026-04-09_v1.0.0.md) | v1.0.0 | 20K-oriented livestream/ingest/broadcast integrity audit (Rev B) |
 | [INGRESS/RENDER QA MATRIX 2026-04-07](./quality/INGRESS_RENDER_QA_MATRIX_2026-04-07_v1.3.0.md) | v1.3.0 | Endpoint-by-endpoint QA matrix — ingress, parsers, render, auto-resize |
 | [PRODUCTION ENV VERIFICATION 2026-04-15](./quality/PRODUCTION_ENV_VERIFICATION_2026-04-15_v1.0.0.md) | v1.0.0 | Livestream/broadcast production evidence — local gates PASS, prod blockers logged |

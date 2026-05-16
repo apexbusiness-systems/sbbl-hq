@@ -28,7 +28,7 @@ Prereqs: access to the prod Postgres connection string (pooler URI with
 password). Export as `SUPABASE_DB_URL`. Never commit it.
 
 ```bash
-export SUPABASE_DB_URL='postgres://...pooler.supabase.com:6543/postgres'
+export SUPABASE_DB_URL='postgres://...@<self-hosted-db-host>:5432/postgres'
 
 # 1. Dry-run (prints the plan — name-match pairs, remote-only, local-only).
 ./scripts/repair-migration-drift.sh

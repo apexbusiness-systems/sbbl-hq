@@ -5,7 +5,7 @@
 **Owner:** SBBL HQ Release Engineering
 **Scope:** Super-admin comp access codes, viewer redeem widget, Facebook embed lockdown, 20K chaos battery hardening
 **Branch:** `claude/admin-access-codes-redeem-kIXsa`
-**Decision:** **GO**
+**Decision:** **HISTORICAL GO — superseded by current self-hosted Supabase/service-role gates**
 
 ---
 
@@ -171,7 +171,7 @@ V8 isolate with no event-loop queueing — the real-world p99 ≈ the in-process
 
 ## Operational Recommendation
 
-**Release recommendation: GO.**
+**Historical release recommendation only; current production launch requires fresh validation of self-hosted Supabase and blocking CI gates.**
 
 All gates pass. Facebook embed lockdown, comp code feature, and ESLint hygiene are production-ready.
 Proceed with standard merge review and post-deploy monitoring per operations runbook.
