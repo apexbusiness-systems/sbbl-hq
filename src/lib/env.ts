@@ -1,15 +1,25 @@
 import { z } from 'zod';
 
+// Normalize empty secrets from runtime env/deploy systems.
+// Cloudflare/GitHub can materialize unset optional secrets as empty strings,
+// which should be treated as "not set" instead of hard-failing validation.
+const emptyToUndefined = (value: unknown) => {
+  if (typeof value !== 'string') return value;
+  return value.trim() === '' ? undefined : value;
+};
+
 const clientEnvSchema = z.object({
   VITE_APP_NAME: z.string().min(1).default('SBBL HQ'),
   VITE_DEFAULT_LEAGUE: z.enum(['SBBL', 'WBL', 'TGIFBL']).default('SBBL'),
   VITE_DEFAULT_PPV_PRICE: z.coerce.number().positive().default(2.5),
   VITE_PUBLIC_BASE_URL: z.string().url().default('http://localhost:5173'),
   // Optional to avoid hard-crashing the SPA when env vars are missing in preview/prod.
-  VITE_SUPABASE_URL: z.string().url().optional(),
-  VITE_SUPABASE_PUBLISHABLE_KEY: z.string().min(10).optional(),
+  // Use the same emptyToUndefined preprocess as the server schema so that
+  // vite.config.ts's `""` fallback (for unset vars) doesn't fail URL validation.
+  VITE_SUPABASE_URL: z.preprocess(emptyToUndefined, z.string().url().optional()),
+  VITE_SUPABASE_PUBLISHABLE_KEY: z.preprocess(emptyToUndefined, z.string().min(10).optional()),
   // Backward-compatible alias used by many Supabase/Vite templates.
-  VITE_SUPABASE_ANON_KEY: z.string().min(10).optional(),
+  VITE_SUPABASE_ANON_KEY: z.preprocess(emptyToUndefined, z.string().min(10).optional()),
   VITE_WORKER_API_BASE: z.string().optional(),
   // ── Phase 1+2 client feature flags ───────────────────────────────────
   // Every flag defaults off. Accepts any string so unexpected values
@@ -25,14 +35,6 @@ const clientEnvSchema = z.object({
   VITE_FEATURE_SPONSOR_ANALYTICS_V2: z.string().optional().default('false'),
   VITE_FEATURE_ENTITLEMENT_TOKENS_V2: z.string().optional().default('false'),
 });
-
-// Normalize empty secrets from runtime env/deploy systems.
-// Cloudflare/GitHub can materialize unset optional secrets as empty strings,
-// which should be treated as "not set" instead of hard-failing validation.
-const emptyToUndefined = (value: unknown) => {
-  if (typeof value !== 'string') return value;
-  return value.trim() === '' ? undefined : value;
-};
 
 const optionalServerKey = z.preprocess(emptyToUndefined, z.string().min(10).optional());
 const optionalServerSecret = z.preprocess(emptyToUndefined, z.string().min(16).optional());

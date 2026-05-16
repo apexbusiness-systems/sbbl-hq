@@ -1,25 +1,60 @@
-# Owner Live + Self-Host Auth Evidence
+# Owner Live + Self-Host Auth — Clean Consolidation Evidence
 
-## Commit SHA
+## Branch
 
-- Commit SHA: `210cd1afb20076ed32d6dac75a1db66ca7a54e2e`
+`fix/owner-selfhost-auth-live-ingest-clean` — supersedes PR #514 and PR #515.
 
-## Commands Run + Outputs
+## Cherry-picked commits (from PR #514)
 
-### `npm ci`
+| Order | SHA (original) | Subject |
+|---|---|---|
+| 1 | `b1f6d17` | Auto-fix applied by CodeX: add owner selfhost evidence |
+| 2 | `43e3ec7` | Auto-fix applied by CodeX: repair realtime schema bootstrap |
+| 3 | `4bcbe5e` | Auto-fix applied by CodeX: repair Store Playwright auth regression |
 
-- Result: passed.
-- Output summary: installed 1168 packages; audited 1169 packages.
-- Warnings: current Node `v20.20.2` does not satisfy some package engine hints requiring Node `>=22.0.0`; npm reported 10 audit findings.
+## PR #515 disposition
 
-### `npm run typecheck`
+PR #515 (`codex/implement-owner-first-self-host-auth-features-dyda8j`) has **exactly one commit** (`e0288f2`) on top of PR #514's head, and `git diff --stat` between the two branch heads produced **no output** — the trees are identical. PR #515 is a pure duplicate. No content from PR #515 was cherry-picked; everything it contained is already included via the three PR #514 commits above.
 
-- Result: passed.
-- Output summary: `tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json` completed with exit code 0.
+## Key changes included
 
-### Targeted Vitest validation
+- **Store auth**: `src/pages/Store.tsx` uses `useAuth().session.access_token` only. The hardcoded localStorage key and `eyMock` fallback are removed.
+- **Owner go-live**: `handleGoLive` sends `activeGameId: null` for broadcast-only mode; per-game cache is only busted when the previous/current config is game-bound.
+- **Owner/super_admin fast-path**: `handleStreamSessionHeartbeat` returns a synthetic session acknowledgement for super_admins without creating `stream_access_sessions` DB rows. No game-bound PPV/session gate is crossed.
+- **NULL heartbeat fix**: `batch_heartbeat_upsert` uses `IS NOT DISTINCT FROM` for `game_id` comparisons so broadcast (NULL `game_id`) heartbeats match correctly.
+- **NULL idempotency**: `UNIQUE NULLS NOT DISTINCT (user_id, game_id, idempotency_key)` replaces the old `UNIQUE` constraint so broadcast sessions are properly deduplicated.
+- **Realtime bootstrap**: `sbbl-hq-selfhost/sbbl-hq-selfhost/volumes/db/realtime.sql` idempotently creates `_realtime` and `realtime` schemas; `docker-compose.yml` runs a one-shot `realtime-bootstrap` service before Realtime starts.
+- **Store Playwright auth regression**: `e2e/store.spec.ts` now seeds a Supabase-compatible AuthContext session, mocks `/auth/v1/user` + PostgREST profile/role reads, and asserts `/api/store/quote` receives the AuthContext bearer token.
+- **PWA dev service worker opt-in**: `vite.config.ts` makes service-worker generation opt-in to suppress the missing `dev-dist` Workbox warning.
+- **SplashScreen React warning fix**: `loading="eager"` replaces the invalid `fetchPriority` prop.
+- **/scores chaos-battery fix**: `e2e/build-chaos-battery.spec.ts` now wraps each route verification in `visitAndVerify` which: (a) asserts the URL settled on the expected path, (b) waits for `networkidle`, and (c) on failure attaches URL, headings, body text, and a full-page screenshot via `attachRouteDiagnostics`. The `Scores` heading assertion is unchanged.
 
-Command:
+## Explicit owner fast-path statement
+
+`super_admin was not routed through game-bound PPV/session gates.`
+
+Regression coverage confirms:
+
+- `/api/broadcast/session` is used for owner playback (`game.id === 'broadcast'` routes there, not through `/api/streams/broadcast/*`).
+- Super admin broadcast sessions do not create `stream_access_sessions` rows (synthetic heartbeat only).
+- Super admin heartbeat accepts synthetic session IDs without a DB row.
+- A second super admin broadcast session does not displace the first.
+
+## Validation — npm ci
+
+- Result: passed (1168 packages installed, 10 audit warnings — pre-existing).
+
+## Validation — npm run typecheck
+
+- Result: passed (`tsc --noEmit` exit code 0).
+
+## Validation — npm run lint
+
+- Result: see CI.
+
+## Validation — targeted Vitest
+
+Command run on this branch:
 
 ```bash
 npx vitest run \
@@ -31,198 +66,33 @@ npx vitest run \
   src/test/worker-auth.test.ts \
   src/test/ingest-auth-regression.test.ts \
   src/test/ingest-storage-regression.test.ts \
+  src/test/store-auth-token.test.tsx \
   --reporter=dot --max-workers=1
 ```
 
-- Result: passed.
-- Output summary: 8 test files passed; 96 tests passed.
-- Warnings: React Router future-flag warnings in login tests only.
+- Result: see CI. (Prior CodeX run on the same code: 9 files, 98 tests passed.)
 
-### Store auth regression
-
-Command:
+## Validation — Store Playwright
 
 ```bash
-npx vitest run src/test/store-auth-token.test.tsx --reporter=dot --max-workers=1
+npx playwright test e2e/store.spec.ts --project=chromium
 ```
 
-- Result: passed.
-- Output summary: 1 test file passed; 2 tests passed.
-- Warning: React `act(...)` warning from async dialog state cleanup; assertions passed and no mocked/localStorage auth token was used.
+- Result: see CI. (Prior CodeX run: 2 tests passed including `custom quote request submits idempotently`.)
 
-### Broadcast ingest/go-live regression spot check
-
-Command:
+## Validation — chaos battery
 
 ```bash
-npx vitest run src/test/broadcast-ingest-pipeline.test.ts src/test/broadcast-access-e2e.test.ts src/test/store-auth-token.test.tsx --reporter=dot --max-workers=1
+npx playwright test e2e/build-chaos-battery.spec.ts --project=chromium --trace on
 ```
 
-- Result: passed.
-- Output summary: 3 test files passed; 48 tests passed.
+- Result: see CI. The `/scores` route check now attaches diagnostics on failure so the next failure is traceable.
 
-### Docker validation
-
-Command:
-
-```bash
-docker compose config
-```
-
-- Result: warning / skipped.
-- Output: `docker not available`.
-
-### Self-host owner Playwright validation
-
-Commands:
-
-```bash
-npx playwright install chromium
-npx playwright install-deps chromium
-npm run test:selfhost:owner
-```
-
-- Result: passed as skipped in this local container.
-- Output summary: 2 Playwright tests skipped because required self-host Supabase env vars were not present.
-- The test file is ready to run against a real self-host stack with `SELFHOST_SUPABASE_URL`, `SELFHOST_SUPABASE_ANON_KEY`, `SELFHOST_SUPABASE_SERVICE_ROLE_KEY`, `SELFHOST_OWNER_EMAIL`, and `SELFHOST_OWNER_PASSWORD`.
-
-## Auth Screenshots
-
-The targeted self-host Playwright test attaches the following screenshots when run against a configured self-host environment:
-
-- `signup`
-- `signin`
-- `session`
-- `signout`
-
-Local run status: skipped because self-host Supabase env vars were unavailable in this container.
-
-## Owner Go-Live Screenshot with `activeGameId: null`
-
-The owner self-host Playwright test attaches `owner-go-live-activeGameId-null` containing the `/ops/streams/go-live` response for:
-
-```json
-{
-  "isLive": true,
-  "collectionId": "https://cdn.example/live.m3u8",
-  "title": "Owner Broadcast",
-  "activeGameId": null
-}
-```
-
-Local run status: skipped because self-host Supabase env vars were unavailable in this container.
-
-## Playback URL / Session Response Proof
-
-The owner self-host Playwright test posts to `/api/broadcast/session` and attaches `broadcast-session-response` with the playback URL and synthetic/owner session payload.
-
-Local run status: skipped because self-host Supabase env vars were unavailable in this container.
-
-## Ingest DB Proof
-
-The owner self-host Playwright test attaches `ingest-db-proof`, containing selected rows from:
-
-- `ingest_jobs`
-- `media_publications`
-- `audit_logs`
-
-Local run status: skipped because self-host Supabase env vars were unavailable in this container.
-
-## Explicit Owner Fast-Path Statement
-
-`super_admin was not routed through game-bound PPV/session gates`.
-
-Regression coverage confirms:
-
-- `/api/broadcast/session` is used for owner playback.
-- Super admin broadcast sessions do not create `stream_access_sessions` rows.
-- Super admin heartbeat accepts synthetic session IDs without a DB row.
-- A second super admin broadcast session does not displace the first.
-
-## Follow-up: Realtime Schema Bootstrap Fix
-
-- Commit SHA: `cdd6613c2177c8c2766ed3d6809ca3434a6feaf4`
-- Diagnosis: self-host Realtime v2.76.5 logs reported `MigrationsFailedToRun` with Postgres error `schema "realtime" does not exist` during tenant migration startup.
-- Fix summary: `volumes/db/realtime.sql` now idempotently creates both `_realtime` and `realtime`; `docker-compose.yml` now runs a one-shot `realtime-bootstrap` service before Realtime so existing persisted Docker volumes are repaired before Realtime migrations run.
-
-### Follow-up commands
-
-```bash
-npm run typecheck
-```
-
-- Result: passed.
-- Output summary: TypeScript app and node configs completed with exit code 0.
-
-```bash
-docker compose -f sbbl-hq-selfhost/sbbl-hq-selfhost/docker-compose.yml config
-```
-
-- Result: warning / not runnable in this container.
-- Output: `/bin/bash: line 1: docker: command not found`.
-
-```bash
-npx playwright install chromium
-npx playwright install-deps chromium
-npm run test:selfhost:owner
-```
-
-- Result: passed as skipped in this container.
-- Output summary: Playwright Chromium and OS dependencies installed; `npm run test:selfhost:owner` executed and reported 2 skipped tests because required self-host Supabase env vars were not present in this container.
-
-## Follow-up: Store Playwright Auth Regression + Docker CLI Rerun
-
-- Commit SHA: `554d4b909773a00ecd7b3489e64e644ddc690437`
-- Diagnosis: `e2e/store.spec.ts` still seeded the removed `eyMock` localStorage fallback, so the Store quote button correctly blocked submission after Store auth was changed to use only `AuthContext.session.access_token`.
-- Fix summary: Store Playwright now seeds a Supabase-compatible test session for AuthContext, mocks Supabase `/auth/v1/user` + PostgREST profile/role reads, and asserts `/api/store/quote` receives the AuthContext bearer token exactly once. PWA dev service-worker generation is opt-in to remove the missing `dev-dist` Workbox warning, and SplashScreen now uses `loading="eager"` instead of the React-warning `fetchPriority` prop.
-
-### Follow-up commands
-
-```bash
-apt-get update && apt-get install -y docker.io docker-compose-v2
-```
-
-- Result: passed.
-- Output summary: installed Docker CLI `29.1.3` and Docker Compose v2 `2.40.3`.
-
-```bash
-docker --version && docker compose version && docker compose --env-file sbbl-hq-selfhost/sbbl-hq-selfhost/.env.example -f sbbl-hq-selfhost/sbbl-hq-selfhost/docker-compose.yml config
-```
-
-- Result: passed.
-- Output summary: Docker CLI and Compose v2 are available; self-host Compose config rendered successfully using `.env.example`.
-
-```bash
-npm run typecheck
-```
-
-- Result: passed.
-- Output summary: TypeScript app and node configs completed with exit code 0.
-
-```bash
-npx vitest run src/test/broadcast-access-e2e.test.ts src/test/paywall-rbac-audit.test.ts src/test/login-page.test.tsx src/test/login-google-capability.test.tsx src/test/supabase-client-pkce.test.ts src/test/worker-auth.test.ts src/test/ingest-auth-regression.test.ts src/test/ingest-storage-regression.test.ts src/test/store-auth-token.test.tsx --reporter=dot --max-workers=1
-```
-
-- Result: passed.
-- Output summary: 9 test files passed; 98 tests passed.
-
-```bash
-npx playwright test e2e/store.spec.ts --project=chromium --workers=2
-```
-
-- Result: passed.
-- Output summary: 2 Store Playwright tests passed, including `custom quote request submits idempotently`.
+## Validation — self-host owner Playwright
 
 ```bash
 npm run test:selfhost:owner
 ```
 
-- Result: passed as skipped in this container.
-- Output summary: 2 Playwright tests skipped because required self-host Supabase env vars were not present in this container.
-
-```bash
-npx playwright test
-```
-
-- Result: warning / environment-limited full-suite run.
-- Output summary: Store tests passed, but unrelated live-data tests could not reach `https://sbbl-hq.icu` from this container (`ENETUNREACH`), WebKit projects were not installed locally, and several live/overlay tests timed out under the incomplete local environment. The reported CI Store failure is fixed by the targeted Store Playwright pass above.
+- Result: **skipped** — env vars `SELFHOST_SUPABASE_URL`, `SELFHOST_SUPABASE_ANON_KEY`, `SELFHOST_SUPABASE_SERVICE_ROLE_KEY`, `SELFHOST_OWNER_EMAIL`, `SELFHOST_OWNER_PASSWORD` were not present in this container. The spec is ready to run against a configured self-host stack.
+- These tests are **not** presented as runtime proof of the live flow. They are a scaffold for operator validation.

@@ -118,7 +118,11 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
     });
   });
 
-  await page.route('**/api/scores**', async (route) => {
+  // Use regex instead of glob so the pattern only matches the API endpoint and
+  // not the Vite-served source module src/lib/api/scores.ts (which also contains
+  // the literal path segment /api/scores and would receive application/json,
+  // causing Chrome's strict MIME-type check to abort the dynamic import).
+  await page.route(/\/api\/scores(\?|$)/, async (route) => {
     const call = bump(state, 'api/scores');
     if (call === 1) {
       await route.fulfill({
@@ -151,7 +155,8 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
     });
   });
 
-  await page.route('**/api/teams**', async (route) => {
+  // Same fix: src/lib/api/teams.ts contains /api/teams in its path.
+  await page.route(/\/api\/teams(\?|$)/, async (route) => {
     const call = bump(state, 'api/teams');
     if (call === 1) {
       await route.fulfill({
@@ -245,8 +250,49 @@ async function registerBuildChaosRoutes(page: import('@playwright/test').Page) {
   return state;
 }
 
+async function attachRouteDiagnostics(
+  page: import('@playwright/test').Page,
+  testInfo: import('@playwright/test').TestInfo,
+  stepPath: string,
+) {
+  const tag = stepPath.replaceAll('/', '_');
+  await testInfo.attach(`route-${tag}-url`, { body: page.url(), contentType: 'text/plain' });
+  await testInfo.attach(`route-${tag}-headings`, {
+    body: JSON.stringify(
+      await page.locator('h1,h2,[role="heading"]').allTextContents(),
+      null,
+      2,
+    ),
+    contentType: 'application/json',
+  });
+  await testInfo.attach(`route-${tag}-body`, {
+    body: (await page.locator('body').innerText().catch(() => '')).slice(0, 2000),
+    contentType: 'text/plain',
+  });
+  await testInfo.attach(`route-${tag}-screenshot`, {
+    body: await page.screenshot({ fullPage: true }),
+    contentType: 'image/png',
+  });
+}
+
+async function visitAndVerify(
+  page: import('@playwright/test').Page,
+  step: { path: string; verify: () => Promise<void> },
+  testInfo: import('@playwright/test').TestInfo,
+) {
+  await page.goto(step.path, { waitUntil: 'domcontentloaded' });
+  await expect(page).toHaveURL(new RegExp(`${step.path}(?:[?#]|$)`));
+  await page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+  try {
+    await step.verify();
+  } catch (error) {
+    await attachRouteDiagnostics(page, testInfo, step.path);
+    throw error;
+  }
+}
+
 test.describe('full-build chaos battery', () => {
-  test('cross-route orchestration survives auth/network turbulence', async ({ page }) => {
+  test('cross-route orchestration survives auth/network turbulence', async ({ page }, testInfo) => {
     test.setTimeout(90_000);
     await seedSuperAdminSession(page);
     const state = await registerBuildChaosRoutes(page);
@@ -318,8 +364,7 @@ test.describe('full-build chaos battery', () => {
 
     for (let round = 0; round < 3; round += 1) {
       for (const step of routeChecks) {
-        await page.goto(step.path, { waitUntil: 'domcontentloaded' });
-        await step.verify();
+        await visitAndVerify(page, step, testInfo);
       }
     }
 
