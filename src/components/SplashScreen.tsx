@@ -125,7 +125,7 @@ export function SplashScreen() {
           alt="SBBL HQ"
           width={160}
           height={160}
-          fetchPriority="high"
+          loading="eager"
           style={{
             display: 'block',
             borderRadius: 36,
