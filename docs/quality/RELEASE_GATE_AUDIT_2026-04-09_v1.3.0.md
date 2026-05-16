@@ -4,7 +4,7 @@
 **Date:** 2026-04-09 (UTC)  
 **Owner:** SBBL HQ Release Engineering  
 **Scope:** Final RC gate for Vite + React + TypeScript app, Cloudflare Worker API, Supabase/Stripe integration  
-**Decision:** **GO**
+**Decision:** **HISTORICAL GO — superseded by current self-hosted Supabase/service-role gates**
 
 ---
 
@@ -85,6 +85,6 @@ These observations do not affect correctness, security posture, or release readi
 
 ## Operational Recommendation
 
-**Release recommendation: GO (Production launch approved).**
+**Historical release recommendation only; current production launch requires fresh validation of self-hosted Supabase and blocking CI gates.**
 
 Proceed with standard release checklist execution and post-deploy monitoring window per operations runbook.

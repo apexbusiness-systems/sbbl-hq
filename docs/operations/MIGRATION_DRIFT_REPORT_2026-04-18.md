@@ -1,8 +1,7 @@
 <!-- Version: v1.0.0 | Date: 2026-04-18 | Status: Active incident -->
 # Migration Drift Report — 2026-04-18
 
-Snapshot of `supabase_migrations.schema_migrations` (prod, project
-`ezanilxygnpucwkwpsoc`) compared against `supabase/migrations/` on
+Historical snapshot of `supabase_migrations.schema_migrations` (legacy Supabase Cloud project ref, not current production) compared against `supabase/migrations/` on
 `main@2526dec`.
 
 Paired with `scripts/repair-migration-drift.sh` and
@@ -153,7 +152,7 @@ pair.
 ## Blocker for this session
 
 This session has Management API SQL access (read+write via
-`https://api.supabase.com/v1/projects/<ref>/database/query`) but
+`psql`/self-hosted Postgres admin access (legacy Supabase Cloud platform API examples do not apply to production) but
 **no pooler URI with password**, so the Supabase CLI (`db pull`,
 `migration repair`, `db diff`) cannot be invoked. Handoff to an
 operator with pooler credentials; they can run the script directly.

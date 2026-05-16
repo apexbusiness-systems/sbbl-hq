@@ -302,6 +302,10 @@ const StorePage = () => {
               />
             </div>
 
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              By submitting, you agree that SBBL may use these quote details to contact you about this custom order.
+            </p>
+
             <div className="pt-4 flex justify-end gap-3">
               <DialogClose asChild>
                 <button type="button" className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors">

@@ -33,7 +33,7 @@ in the Cloudflare Worker environment. Default is `false`. Set to `"true"`
 5. Copy the **Callback URL (for OAuth)** from this page. It looks like:
 
    ```
-   https://<your-project-ref>.supabase.co/auth/v1/callback
+   https://<self-hosted-supabase-public-url>/auth/v1/callback
    ```
 
    This **exact** URL — including scheme, host, path, and `/callback` — must
@@ -70,7 +70,7 @@ in the Cloudflare Worker environment. Default is `false`. Set to `"true"`
      `https://sbbl-hq.icu`, `https://www.sbbl-hq.icu`, and the Supabase
      project domain.
    - **Authorized redirect URIs** must include the Supabase callback URL
-     copied in Stage 1 step 5 (`https://<ref>.supabase.co/auth/v1/callback`).
+     copied in Stage 1 step 5 (`https://<self-hosted-supabase-public-url>/auth/v1/callback`).
      A missing entry returns `redirect_uri_mismatch` from Google.
    - Confirm the Client ID + Client Secret match what Supabase has.
 

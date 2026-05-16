@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-const SUPABASE_JWT_REGEX = /eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 const LEGACY_PLACEHOLDER_KEY_REGEX = /sb_publishable_/;
 
 /**
@@ -24,8 +23,9 @@ describe("wrangler.jsonc guardrails", () => {
     expect(raw).toMatch(/"name":\s*"sbbl-hq-worker"/);
   });
 
-  it("must define SUPABASE_URL in vars", () => {
-    expect(raw).toMatch(/"SUPABASE_URL":\s*"https:\/\/.*supabase\.co"/);
+  it("must define self-hosted SUPABASE_URL in vars", () => {
+    expect(raw).toContain('"SUPABASE_URL": "https://supabase.sbbl-hq.icu"');
+    expect(raw).not.toMatch(/supabase\.co/);
   });
 
   it("must define SUPABASE_PUBLISHABLE_KEY in vars", () => {
@@ -36,8 +36,8 @@ describe("wrangler.jsonc guardrails", () => {
     expect(raw).not.toMatch(LEGACY_PLACEHOLDER_KEY_REGEX);
   });
 
-  it("must use JWT-formatted SUPABASE_PUBLISHABLE_KEY values", () => {
-    expect(raw).toMatch(SUPABASE_JWT_REGEX);
+  it("must not commit hosted Supabase JWT fallback keys", () => {
+    expect(raw).not.toMatch(/eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/);
   });
 
   it("must have custom_domain routes for sbbl-hq.icu", () => {
@@ -63,26 +63,25 @@ describe("deploy.yml guardrails", () => {
     expect(deployYml).toContain("VITE_DEFAULT_LEAGUE");
   });
 
-  it("must include fallback for VITE_SUPABASE_URL", () => {
-    expect(deployYml).toMatch(/VITE_SUPABASE_URL:.*\|\|/);
+  it("must read VITE_SUPABASE_URL from explicit self-hosted secrets only", () => {
+    expect(deployYml).toContain('secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL');
+    expect(deployYml).not.toMatch(/supabase\.co/);
   });
 
   it("must support legacy SUPABASE_URL secret fallback", () => {
     expect(deployYml).toContain("secrets.SUPABASE_URL");
   });
 
-  it("must include fallback for VITE_SUPABASE_ANON_KEY", () => {
-    expect(deployYml).toMatch(/VITE_SUPABASE_ANON_KEY:.*\|\|/);
+  it("must read VITE_SUPABASE_ANON_KEY from explicit public key secrets only", () => {
+    expect(deployYml).toContain('secrets.VITE_SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY');
   });
 
   it("must not use legacy sb_publishable placeholder in fallback keys", () => {
     expect(deployYml).not.toMatch(LEGACY_PLACEHOLDER_KEY_REGEX);
   });
 
-  it("must use JWT-formatted fallback key for VITE_SUPABASE_ANON_KEY", () => {
-    const fallbackMatch = deployYml.match(/VITE_SUPABASE_ANON_KEY:.*\|\|\s*'([^']+)'/);
-    expect(fallbackMatch?.[1]).toBeTruthy();
-    expect(fallbackMatch?.[1]).toMatch(SUPABASE_JWT_REGEX);
+  it("must not commit VITE_SUPABASE_ANON_KEY fallback literals", () => {
+    expect(deployYml).not.toMatch(/VITE_SUPABASE_ANON_KEY:.*\|\|\s*'[^']+'/);
   });
 
   it("must parse /ops/health JSON with jq and gate on both ok + db_ok", () => {

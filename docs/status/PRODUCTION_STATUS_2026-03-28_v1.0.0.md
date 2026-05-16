@@ -27,5 +27,5 @@ Current repository state is **release-capable** based on local quality gates.
 
 ## Release Recommendation
 
-**GO** for standard deployment flow with routine monitoring.
+**HISTORICAL ONLY — current release requires fresh gates and self-hosted Supabase validation before public launch.**
 

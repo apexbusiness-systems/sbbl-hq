@@ -44,7 +44,7 @@ Current verification status is tied to executable evidence, not prose:
 | Python CI | `npm run ci:py` | ✅ PASS | Ruff pass; 891 passed / 20 skipped |
 | Live chaos guard | `npm run sim:validate` | ✅ PASS (safe block) | Guard correctly blocked — by design |
 
-*Source: `ARMAGEDDON_LIVE_VALIDATION_RESULTS_2026_05_08.md`, produced 2026-05-08 on `work` branch, Supabase target `rtopreovkywofgwgmozi.supabase.co`, `SIM_MODE=false`.*
+*Source: `ARMAGEDDON_LIVE_VALIDATION_RESULTS_2026_05_08.md`, produced 2026-05-08 on `work` branch, legacy validation Supabase target `rtopreovkywofgwgmozi.supabase.co` (historical artifact; not production self-hosted config), `SIM_MODE=false`.*
 
 ---
 

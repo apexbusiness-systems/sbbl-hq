@@ -91,6 +91,7 @@ export default defineConfig(({ mode }) => {
           ]
         },
         workbox: {
+          sourcemap: false,
           cleanupOutdatedCaches: true,
           clientsClaim: true,
           skipWaiting: true,
@@ -191,9 +192,8 @@ export default defineConfig(({ mode }) => {
     },
 
     build: {
-      // Hidden source maps: readable stack traces in Sentry without exposing
-      // source to end users. The sentryVitePlugin deletes .map files post-upload.
-      sourcemap: "hidden",
+      // Production artifacts must not publish source maps from Workers assets.
+      sourcemap: false,
 
       // Silence warnings only on chunks we know are intentionally large (rxdb, media)
       chunkSizeWarningLimit: 600,

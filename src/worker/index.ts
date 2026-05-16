@@ -530,7 +530,7 @@ export async function resolveUserRoles(
   return merged.size > 0 ? Array.from(merged) : ["fan"];
 }
 
-async function getSession(req: Request, env: Env) {
+export async function getSession(req: Request, env: Env) {
   const token = getBearerToken(req);
   if (!token || !env.SUPABASE_URL) return null;
 

@@ -26,8 +26,8 @@
     "run_worker_first": true
   },
   "vars": {
-    "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
-    "SUPABASE_PUBLISHABLE_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo",
+    "SUPABASE_URL": "https://supabase.sbbl-hq.icu",
+    "SUPABASE_PUBLISHABLE_KEY": "replace-with-self-hosted-anon-key",
     "SENTRY_DSN": ""
   }
 }

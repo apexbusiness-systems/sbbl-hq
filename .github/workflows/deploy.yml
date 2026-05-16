@@ -31,11 +31,20 @@ jobs:
         run: npm run build
         env:
           # Allow either Vite-prefixed or legacy Supabase secret names.
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL || 'https://ezanilxygnpucwkwpsoc.supabase.co' }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo' }}
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || secrets.SUPABASE_ANON_KEY }}
           VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY || '0x4AAAAAACz241-XHmFaqRrM' }}
           VITE_APP_NAME: SBBL HQ
           VITE_DEFAULT_LEAGUE: SBBL
+
+      - name: Verify production artifact excludes source maps
+        run: |
+          if find dist -name '*.map' -print -quit | grep -q .; then
+            echo '❌ dist contains source maps; refusing deploy'
+            find dist -name '*.map' -print
+            exit 1
+          fi
+          echo '✅ dist contains no source maps'
 
       - name: Generate Pre-Live Evidence
         run: python scripts/archive/update_livestream.py

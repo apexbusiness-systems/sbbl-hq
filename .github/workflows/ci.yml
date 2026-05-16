@@ -11,9 +11,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Build-time env — fallback public values safe in CI (Supabase RLS protects data)
-  VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://ezanilxygnpucwkwpsoc.supabase.co' }}
-  VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo' }}
+  # Build-time env stays optional; runtime /api/public-config is the source of truth.
+  VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || '' }}
+  VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || '' }}
   VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY || '' }}
   VITE_APP_NAME: SBBL HQ
   VITE_DEFAULT_LEAGUE: SBBL
@@ -46,7 +46,6 @@ jobs:
 
       - name: Typecheck (node/vite config)
         run: npx tsc --noEmit -p tsconfig.node.json
-        continue-on-error: true
 
       # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
   test:
@@ -100,7 +99,7 @@ jobs:
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 15
-    needs: lint
+    needs: [lint, test]
 
     steps:
       - uses: actions/checkout@v4
@@ -156,6 +155,15 @@ jobs:
           if [ "$total_kb" -gt 8192 ]; then
             echo "⚠️  Total assets exceed 8 MB — review bundle composition"
           fi
+
+      - name: Verify build artifact excludes source maps
+        run: |
+          if find dist -name '*.map' -print -quit | grep -q .; then
+            echo '❌ dist contains source maps'
+            find dist -name '*.map' -print
+            exit 1
+          fi
+          echo '✅ dist contains no source maps'
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

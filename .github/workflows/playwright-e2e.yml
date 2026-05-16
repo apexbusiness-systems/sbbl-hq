@@ -14,7 +14,7 @@ jobs:
       # /api/public-config rely on the bundle having build-time creds so the
       # Supabase client can boot. Provide test placeholders here — every
       # Supabase REST call is mocked at the page.route layer in the specs.
-      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://ezanilxygnpucwkwpsoc.supabase.co' }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || '' }}
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'test-anon-key' }}
       VITE_DEFAULT_LEAGUE: SBBL
     timeout-minutes: 15

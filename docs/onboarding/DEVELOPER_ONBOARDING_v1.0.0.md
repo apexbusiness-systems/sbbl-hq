@@ -69,8 +69,8 @@ These go in `.env` locally and as **GitHub Actions Secrets** in CI.
 
 | Variable | Description | Where to get it |
 |---|---|---|
-| `VITE_SUPABASE_URL` | Supabase project URL | Supabase dashboard → Project Settings → API |
-| `VITE_SUPABASE_ANON_KEY` | Supabase anon/public JWT (`eyJ...`) | Supabase dashboard → Project Settings → API |
+| `VITE_SUPABASE_URL` | Self-hosted Supabase public URL | self-hosted Supabase gateway/Kong public URL |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anon/public JWT (`eyJ...`) | self-hosted Supabase gateway/Kong public URL |
 
 > **`VITE_SUPABASE_ANON_KEY` is THE canonical variable.** Do not use `VITE_SUPABASE_PUBLISHABLE_KEY` — it is a deprecated alias. The fallback exists in `runtime-config.ts` but must never be set as the primary.
 
