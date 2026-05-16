@@ -88,6 +88,43 @@ npx playwright test e2e/build-chaos-battery.spec.ts --project=chromium --trace o
 
 - Result: see CI. The `/scores` route check now attaches diagnostics on failure so the next failure is traceable.
 
+## Validation — live operator smoke test (branch preview worker)
+
+Branch preview worker: `https://fix-owner-selfhost-auth-live-ingest-clean-sbbl-hq-worker.sbblhqapp.workers.dev`
+Supabase project: `ezanilxygnpucwkwpsoc`
+Operator: `jrmendozaceo@apexbusiness-systems.com` (super_admin role)
+
+| Step | Result | Notes |
+|---|---|---|
+| JWT via magic link | ✅ | Captcha-safe admin generate_link path |
+| `/ops/bootstrap` → roles | ✅ | `["super_admin"]` confirmed |
+| `/ops/imports/history` | ✅ | 4 historical jobs returned |
+| `/ops/ingest/presign` | ✅ | Signed upload URL generated |
+| Storage PUT | ✅ HTTP 200 | Object stored at `media/potg/<uuid>.jpg` |
+| `/ops/ingest/submit` (generic) | ✅ | state=`projected`, jobId=`34a4aabf` |
+| `/ops/ingest/:id` status | ✅ | Job record retrieved with all fields |
+| `/ops/ingest/:id/approve` | ✅ | `publishedAt: 2026-05-16T02:30:45Z` |
+| `/ops/streams/go-live` | ⚠️ pre-existing | See note below |
+| `/api/broadcast/session` | ⚠️ pre-existing | See note below |
+
+### Pre-existing DB schema gap (not introduced by this PR)
+
+`/ops/streams/go-live`, `/api/broadcast/session`, and `/ops/streams/config` all
+call `getOrCreateStreamConfig` which `SELECT`s `playback_asset_id` from
+`stream_admin_config`. That column is defined in migrations
+`20260418120000_playback_provider_abstraction.sql` and
+`20260514000100_reconcile_playback_asset_column.sql`, both of which are on `main`
+(merged before this PR) but were **never pushed to the production Supabase DB**.
+
+`git diff origin/main HEAD -- src/worker/index.ts | grep "^+" | grep "playback_asset_id"`
+produces **no output** — this PR adds zero new references to that column. The
+gap pre-dates this consolidation branch.
+
+**Operator action required at merge:** `supabase db push` (or apply the two
+migrations manually) against the production Supabase project to bring the DB
+schema current. Once applied, go-live and broadcast session will pass identically
+to the ingest pipeline verified above.
+
 ## Validation — self-host owner Playwright
 
 ```bash
