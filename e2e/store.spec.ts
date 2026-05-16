@@ -1,7 +1,105 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+
+const STORE_SUPABASE_URL = 'https://playwright-store.supabase.co';
+const STORE_SUPABASE_KEY = 'playwright-publishable-key';
+const STORE_ACCESS_TOKEN = 'test-authcontext-jwt';
+const STORE_USER_ID = '00000000-0000-4000-8000-000000000001';
+
+async function mockStoreNoAuth(page: Page) {
+  await page.route('**/api/public-config', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        appName: 'SBBL HQ',
+        defaultLeague: 'SBBL',
+        supabaseUrl: null,
+        supabasePublishableKey: null,
+        googleOAuthEnabled: false,
+      }),
+    });
+  });
+}
+
+async function mockStoreAuth(page: Page) {
+  await page.route('**/api/public-config', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        appName: 'SBBL HQ',
+        defaultLeague: 'SBBL',
+        supabaseUrl: STORE_SUPABASE_URL,
+        supabasePublishableKey: STORE_SUPABASE_KEY,
+        googleOAuthEnabled: false,
+      }),
+    });
+  });
+
+  await page.addInitScript(({ token, userId }) => {
+    localStorage.setItem('sb-playwright-store-auth-token', JSON.stringify({
+      access_token: token,
+      refresh_token: 'test-refresh-token',
+      token_type: 'bearer',
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      expires_in: 3600,
+      user: {
+        id: userId,
+        aud: 'authenticated',
+        role: 'authenticated',
+        email: 'store-e2e@example.test',
+        app_metadata: {},
+        user_metadata: {},
+      },
+    }));
+  }, { token: STORE_ACCESS_TOKEN, userId: STORE_USER_ID });
+
+  await page.route('**/auth/v1/user', async (route) => {
+    expect(route.request().headers().authorization).toBe(`Bearer ${STORE_ACCESS_TOKEN}`);
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: STORE_USER_ID,
+        aud: 'authenticated',
+        role: 'authenticated',
+        email: 'store-e2e@example.test',
+        app_metadata: {},
+        user_metadata: {},
+      }),
+    });
+  });
+
+  await page.route('**/rest/v1/profiles**', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        id: 'profile-store-e2e',
+        user_id: STORE_USER_ID,
+        display_name: 'Store E2E',
+        full_name: 'Store E2E',
+        bio: null,
+        avatar_url: null,
+        preferred_league: null,
+        primary_role_intent: null,
+        onboarding_completed_at: new Date().toISOString(),
+        stripe_customer_id: null,
+      }),
+    });
+  });
+
+  await page.route('**/rest/v1/user_role_assignments**', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
+  });
+}
 
 test.describe('store canonicalization', () => {
   test('store browse and add to bag works', async ({ page }) => {
+    await mockStoreNoAuth(page);
+
     // Override the public products API to simulate a fast DB response
     await page.route('/api/public/products', async (route) => {
       await route.fulfill({
@@ -83,33 +181,13 @@ test.describe('store canonicalization', () => {
     await page.route('/api/store/quote', async (route) => {
       quoteCallCount++;
       expect(route.request().headers()['idempotency-key']).toBeTruthy();
+      expect(route.request().headers().authorization).toBe(`Bearer ${STORE_ACCESS_TOKEN}`);
       await route.fulfill({ status: 200, json: { ok: true } });
     });
 
-    // Make UI think it has token
-    await page.addInitScript(() => {
-      window.localStorage.setItem('sb-zofpeqwrmxemymvtdwct-auth-token', JSON.stringify({
-        access_token: 'eyMock',
-        refresh_token: 'eyMock',
-        user: { id: 'user_1', role: 'authenticated' },
-        expires_at: Math.floor(Date.now() / 1000) + 3600,
-        expires_in: 3600
-      }));
-    });
-
-    // Mock session API to let useAuth pass
-    await page.route('/api/auth/session', async (route) => {
-        await route.fulfill({
-            status: 200,
-            json: {
-                ok: true,
-                session: {
-                    user: { id: "user_1", role: "authenticated" },
-                    access_token: "eyMock"
-                }
-            }
-        });
-    });
+    // Seed a real AuthContext session through Supabase's storage contract.
+    // Store.tsx must read this only via useAuth().session, never direct localStorage.
+    await mockStoreAuth(page);
 
     await page.goto('/store');
 
