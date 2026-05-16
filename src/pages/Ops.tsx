@@ -97,6 +97,7 @@ const OpsPage = () => {
   ]);
   const [storeSuspendId, setStoreSuspendId] = useState('');
   const [storeDeleteId, setStoreDeleteId] = useState('');
+  const [historySearch, setHistorySearch] = useState('');
 
   // ── Scores state ──────────────────────────────────────────────────────────
 
@@ -530,6 +531,28 @@ const OpsPage = () => {
 
   const jobs = useMemo(() => historyQuery.data?.jobs ?? bootstrapQuery.data?.importHistory ?? [], [historyQuery.data?.jobs, bootstrapQuery.data?.importHistory]);
   const latestSummary = useMemo(() => jobs.slice(0, 5), [jobs]);
+
+  const filteredJobs = useMemo(() => {
+    const q = historySearch.trim();
+    if (!q) return jobs;
+    const regexMatch = q.match(/^\/(.+)\/([gimsuy]*)$/);
+    if (regexMatch) {
+      try {
+        const re = new RegExp(regexMatch[1], regexMatch[2] || 'i');
+        return jobs.filter(j =>
+          re.test(j.job_type) || re.test(j.status) || re.test(j.error_summary ?? '')
+        );
+      } catch {
+        return jobs;
+      }
+    }
+    const lower = q.toLowerCase();
+    return jobs.filter(j =>
+      j.job_type.toLowerCase().includes(lower) ||
+      j.status.toLowerCase().includes(lower) ||
+      (j.error_summary ?? '').toLowerCase().includes(lower)
+    );
+  }, [jobs, historySearch]);
 
   // ⚡ Bolt Performance Optimization: Extract expensive O(N) array reduction
   // from the render loop into useMemo to prevent recalculating metric sums on every render.
@@ -1481,13 +1504,40 @@ const OpsPage = () => {
       </TabsContent>
 
       <TabsContent value="history"><div className="panel p-4">
-          <h2 className="font-display text-xl mb-3">Import History</h2>
-          {jobs.length === 0 ? <p className="text-sm text-muted-foreground">No import history.</p> : (
+          <div className="flex items-center justify-between mb-3 gap-3">
+            <h2 className="font-display text-xl shrink-0">Import History</h2>
+            <div className="relative flex-1 max-w-sm">
+              <input
+                type="text"
+                value={historySearch}
+                onChange={e => setHistorySearch(e.target.value)}
+                placeholder='Filter… or /error|warn/'
+                className="w-full bg-secondary border border-border rounded-sm px-3 py-1.5 text-sm pr-8 font-mono placeholder:font-sans placeholder:text-muted-foreground"
+              />
+              {historySearch && (
+                <button
+                  onClick={() => setHistorySearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
+                >✕</button>
+              )}
+            </div>
+            {historySearch && (
+              <span className="text-xs text-muted-foreground shrink-0">
+                {filteredJobs.length}/{jobs.length}
+              </span>
+            )}
+          </div>
+          {jobs.length === 0 ? <p className="text-sm text-muted-foreground">No import history.</p> : filteredJobs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No jobs match <span className="font-mono">{historySearch}</span>.</p>
+          ) : (
             <div className="space-y-2">
-              {jobs.map((job) => (
+              {filteredJobs.map((job) => (
                 <div key={job.id} className="border border-border rounded-sm p-3 text-sm">
                   <p className="font-medium">{job.job_type} · {job.status}</p>
                   <p className="text-xs text-muted-foreground">Rows {job.inserted_rows}/{job.total_rows} · failed {job.failed_rows}</p>
+                  {job.error_summary && (
+                    <p className="text-xs text-destructive mt-1 font-mono">{job.error_summary}</p>
+                  )}
                 </div>
               ))}
             </div>
