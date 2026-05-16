@@ -138,3 +138,34 @@ Regression coverage confirms:
 - Super admin broadcast sessions do not create `stream_access_sessions` rows.
 - Super admin heartbeat accepts synthetic session IDs without a DB row.
 - A second super admin broadcast session does not displace the first.
+
+## Follow-up: Realtime Schema Bootstrap Fix
+
+- Commit SHA: `cdd6613c2177c8c2766ed3d6809ca3434a6feaf4`
+- Diagnosis: self-host Realtime v2.76.5 logs reported `MigrationsFailedToRun` with Postgres error `schema "realtime" does not exist` during tenant migration startup.
+- Fix summary: `volumes/db/realtime.sql` now idempotently creates both `_realtime` and `realtime`; `docker-compose.yml` now runs a one-shot `realtime-bootstrap` service before Realtime so existing persisted Docker volumes are repaired before Realtime migrations run.
+
+### Follow-up commands
+
+```bash
+npm run typecheck
+```
+
+- Result: passed.
+- Output summary: TypeScript app and node configs completed with exit code 0.
+
+```bash
+docker compose -f sbbl-hq-selfhost/sbbl-hq-selfhost/docker-compose.yml config
+```
+
+- Result: warning / not runnable in this container.
+- Output: `/bin/bash: line 1: docker: command not found`.
+
+```bash
+npx playwright install chromium
+npx playwright install-deps chromium
+npm run test:selfhost:owner
+```
+
+- Result: passed as skipped in this container.
+- Output summary: Playwright Chromium and OS dependencies installed; `npm run test:selfhost:owner` executed and reported 2 skipped tests because required self-host Supabase env vars were not present in this container.
