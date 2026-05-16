@@ -284,7 +284,10 @@ function AdminStreamOverlay({
       let atomicSuccess = false;
       // RC-6: Try atomic go-live endpoint first
       try {
-        const res = await goLive({ isLive: nextLive, collectionId: normalizedUrl, title: streamTitle, activeGameId }, token);
+        const goLivePayload = activeGameId
+          ? { isLive: nextLive, collectionId: normalizedUrl, title: streamTitle, activeGameId }
+          : { isLive: nextLive, collectionId: normalizedUrl, title: streamTitle, activeGameId: null };
+        const res = await goLive(goLivePayload, token);
         if (res.ok) {
           atomicSuccess = true;
           setIsLive(nextLive);
@@ -544,6 +547,9 @@ function AdminStreamOverlay({
                 Uses MediaMTX WHIP ingest — viewers auto-connect via WHEP. Paste
                 <code className="mx-1 text-white/60">https://stream.sbbl-hq.icu/whep/{activeGameId ?? 'broadcast'}</code>
                 into Stream URL once publishing to gate access.
+              </p>
+              <p className="text-[11px] text-muted-foreground" data-testid="broadcast-only-mode-copy">
+                {activeGameId ? 'Game-bound PPV mode selected.' : 'Broadcast-only / no bound game — owner go-live will use activeGameId null.'}
               </p>
             </div>
 

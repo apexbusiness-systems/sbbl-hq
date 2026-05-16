@@ -5254,25 +5254,10 @@ export async function handleStreamSessionHeartbeat(ctx: HandlerCtx) {
   const isSuperAdmin = roles.includes("super_admin");
 
   // ── Super admin fast-path ──────────────────────────────────────────────
-  // Skip authoritative ACK gate, game-id match, and 6-hour cap guard. Super
-  // admin heartbeats are always accepted and queued for flush. They are not
-  // subject to displacement, expiry, or single-device enforcement.
+  // Synthetic owner sessions are intentionally DB-free: no lookup, no upsert,
+  // no batch heartbeat enqueue, no displacement, and no PPV/game gate.
   if (isSuperAdmin) {
-    const rawExpiry = Date.now() + 70_000;
-    const expiresAt = new Date(rawExpiry).toISOString();
-    heartbeatQueue.push({
-      session_id: body.sessionId,
-      user_id: userId,
-      game_id: gameId,
-      expires_at: expiresAt,
-      now_ts: now,
-    });
-    if (!heartbeatFlushTimer) {
-      heartbeatFlushTimer = setTimeout(async () => {
-        heartbeatFlushTimer = null;
-        await flushHeartbeatQueue(ctx.env);
-      }, HEARTBEAT_FLUSH_INTERVAL_MS);
-    }
+    const expiresAt = new Date(Date.now() + 70_000).toISOString();
     return json({ ok: true, sessionId: body.sessionId, expiresAt });
   }
 
@@ -5719,7 +5704,7 @@ export async function handleGoLive(ctx: HandlerCtx) {
   if (typeof body.title === "string" && body.title.trim()) {
     patch.title = body.title.trim();
   }
-  if (body.activeGameId === null) {
+  if (body.activeGameId === null || typeof body.activeGameId === "undefined") {
     patch.active_game_id = null;
   } else if (typeof body.activeGameId === "string" && body.activeGameId.trim()) {
     const activeGameId = body.activeGameId.trim();
@@ -5734,6 +5719,15 @@ export async function handleGoLive(ctx: HandlerCtx) {
     patch.live_ended_at = nowIso;
   }
 
+  const previousConfig = await ctx.admin
+    .from("stream_admin_config")
+    .select("active_game_id")
+    .eq("id", true)
+    .maybeSingle();
+  const previousGameId = previousConfig.data?.active_game_id
+    ? String(previousConfig.data.active_game_id)
+    : null;
+
   const { data, error } = await ctx.admin
     .from("stream_admin_config")
     .upsert(patch, { onConflict: "id" })
@@ -5744,18 +5738,21 @@ export async function handleGoLive(ctx: HandlerCtx) {
     return json({ ok: false, error: error.message }, 500);
   }
 
-  // Bust edge cache so viewers pick up the new live/offline status on their
-  // next 15-second poll without waiting out the 10-second TTL.
-  // We must bust BOTH the global key and the per-game key because clients
-  // that have an activeGameId poll with ?gameId=<uuid> which is a separate
-  // cache entry. Missing either bust causes viewers to see stale status for
-  // up to STREAM_STATUS_TTL_S seconds after Go Live / End Stream.
+  // Bust edge cache so viewers pick up live/offline status immediately.
+  // Global broadcast status is always busted. Per-game status is best-effort
+  // and only applies when the previous or current config is game-bound.
   const cfCachesGoLive = (caches as unknown as { default: Cache }).default;
-  // Global (no gameId) cache bust
   const globalBustKey = new Request(streamCacheUrl(null));
   cfCachesGoLive.delete(globalBustKey).catch(() => {
     cfCachesGoLive.delete(globalBustKey).catch(() => {});
   });
+  const currentGameId = data.active_game_id ? String(data.active_game_id) : null;
+  for (const gameIdToBust of new Set([previousGameId, currentGameId].filter(Boolean) as string[])) {
+    const gameBustKey = new Request(streamCacheUrl(gameIdToBust));
+    cfCachesGoLive.delete(gameBustKey).catch(() => {
+      cfCachesGoLive.delete(gameBustKey).catch(() => {});
+    });
+  }
   // Also bust the stream_url_cache in-process so the next playback session
   // request picks up the newly saved collectionId immediately.
   for (const [k] of streamUrlCache.entries()) {
