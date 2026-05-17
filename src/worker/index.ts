@@ -82,6 +82,14 @@ import {
 } from "./routes/obs";
 import { handlePublicDigest, handleRegenerateDigest } from "./routes/digest";
 import {
+  handleListBroadcastEvents,
+  handleGetBroadcastEvent,
+  handleCreateBroadcastEvent,
+  handleUpdateBroadcastEvent,
+  handleTransitionBroadcastStatus,
+  handleAdminListBroadcastEvents,
+} from "./routes/broadcast-events";
+import {
   handlePublicHighlights,
   handleMarkHighlight,
   handleDeleteHighlight,
@@ -7072,6 +7080,16 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "POST", path: "/api/ops/highlights/mark",                        handler: handleMarkHighlight },
   { method: "POST", path: "/api/ops/highlights/:id",                         handler: handleUpdateHighlight },
   { method: "POST", path: "/api/ops/highlights/:id/delete",                  handler: handleDeleteHighlight },
+
+  // ── Livestream Broadcast Events ───────────────────────────────────────
+  // Public routes — no auth required.
+  { method: "GET",  path: "/api/public/broadcast-events",          handler: handleListBroadcastEvents },
+  { method: "GET",  path: "/api/public/broadcast-events/:slug",    handler: handleGetBroadcastEvent },
+  // Ops routes — require super_admin or league_admin (enforced in handler).
+  { method: "GET",  path: "/api/ops/broadcast-events",             handler: handleAdminListBroadcastEvents },
+  { method: "POST", path: "/api/ops/broadcast-events",             handler: handleCreateBroadcastEvent },
+  { method: "PATCH", path: "/api/ops/broadcast-events/:id",        handler: handleUpdateBroadcastEvent },
+  { method: "POST", path: "/api/ops/broadcast-events/:id/status",  handler: handleTransitionBroadcastStatus },
 ];
 
 // Lazy-compile: routes are registered via push() throughout the module,

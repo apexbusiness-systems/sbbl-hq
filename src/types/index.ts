@@ -137,3 +137,36 @@ export interface Invoice {
   status: 'paid' | 'pending' | 'overdue';
   leagueId?: LeagueId;
 }
+
+export type BroadcastEventStatus =
+  | 'draft'
+  | 'scheduled'
+  | 'live'
+  | 'ended'
+  | 'cancelled'
+  | 'archived';
+
+export type BroadcastEventVisibility = 'public' | 'private' | 'unlisted';
+
+export interface LivestreamBroadcastEvent {
+  id: string;
+  title: string;
+  slug: string;
+  description: string | null;
+  status: BroadcastEventStatus;
+  scheduled_start_at: string | null;
+  actual_start_at: string | null;
+  actual_end_at: string | null;
+  /** Only present when status === 'live' on public detail endpoint. */
+  stream_url: string | null;
+  /** Only present when status === 'live' on public detail endpoint. */
+  embed_url: string | null;
+  thumbnail_url: string | null;
+  visibility: BroadcastEventVisibility;
+  created_at: string;
+  updated_at: string;
+  // Optional DB FK refs — nullable, not required by UI flow
+  league_id?: string | null;
+  season_id?: string | null;
+  game_id?: string | null;
+}

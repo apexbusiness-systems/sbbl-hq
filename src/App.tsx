@@ -20,6 +20,8 @@ const Home = lazy(() => import('./pages/Home'));
 const Live = lazy(() => import('./pages/Live'));
 const Schedules = lazy(() => import('./pages/Schedules'));
 const Store = lazy(() => import('./pages/Store'));
+const BroadcastEvents = lazy(() => import('./pages/BroadcastEvents'));
+const BroadcastEvent = lazy(() => import('./pages/BroadcastEvent'));
 const Profiles = lazy(() => import('./pages/Profiles'));
 const Stats = lazy(() => import('./pages/Stats'));
 const Leaderboards = lazy(() => import('./pages/Leaderboards'));
@@ -141,6 +143,8 @@ const AppShell = () => (
           <Route path="/" element={<AppHome />} />
           <Route path="/league/:leagueId" element={<Home />} />
           <Route path="/live" element={<Live />} />
+          <Route path="/broadcasts" element={<BroadcastEvents />} />
+          <Route path="/broadcasts/:slug" element={<BroadcastEvent />} />
           <Route path="/schedules" element={<Schedules />} />
           <Route path="/store" element={<Store />} />
           <Route path="/profiles" element={<Profiles />} />

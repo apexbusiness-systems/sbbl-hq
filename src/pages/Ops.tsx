@@ -15,19 +15,21 @@ import {
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
 import { fetchScores, submitScoreManual, submitScoresCsvImport, parseScoreboardImage } from '@/lib/api/scores';
+import { OpsBroadcastEventsTab } from '@/components/ops/OpsBroadcastEventsTab';
 import type { ScoreCategory } from '@/types';
 
-type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'media' | 'history';
+type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'media' | 'history' | 'broadcasts';
 
 const tabs: Array<{ id: Tab; label: string }> = [
-  { id: 'overview',  label: 'Overview'       },
-  { id: 'scores',    label: 'Scores'         },
-  { id: 'teams',     label: 'Teams'          },
-  { id: 'players',   label: 'Players'        },
-  { id: 'schedules', label: 'Schedules'      },
-  { id: 'events',    label: 'Events'         },
-  { id: 'store',     label: 'Store Media'    },
-  { id: 'potg',      label: 'POTG Parser'    },
+  { id: 'overview',    label: 'Overview'       },
+  { id: 'scores',      label: 'Scores'         },
+  { id: 'teams',       label: 'Teams'          },
+  { id: 'players',     label: 'Players'        },
+  { id: 'schedules',   label: 'Schedules'      },
+  { id: 'events',      label: 'Events'         },
+  { id: 'broadcasts',  label: 'Broadcasts'     },
+  { id: 'store',       label: 'Store Media'    },
+  { id: 'potg',        label: 'POTG Parser'    },
   { id: 'media',     label: 'Media Library'  },
   { id: 'history',   label: 'Import History' },
 ];
@@ -1501,6 +1503,10 @@ const OpsPage = () => {
 
       <TabsContent value="media">
         <MediaLibraryTab enabled={canRunOps} />
+      </TabsContent>
+
+      <TabsContent value="broadcasts">
+        <OpsBroadcastEventsTab enabled={canRunOps} />
       </TabsContent>
 
       <TabsContent value="history"><div className="panel p-4">
