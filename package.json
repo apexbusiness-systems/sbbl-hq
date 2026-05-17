@@ -35,7 +35,9 @@
     "test:ci:shard1": "vitest run --reporter=dot --max-workers=1 --shard=1/2",
     "test:ci:shard2": "vitest run --reporter=dot --max-workers=1 --shard=2/2",
     "simulate:broadcast": "tsx scripts/simulate-broadcast.ts",
-    "test:selfhost:owner": "playwright test e2e/selfhost-owner-auth-ingest.spec.ts --project=chromium"
+    "test:selfhost:owner": "playwright test e2e/selfhost-owner-auth-ingest.spec.ts --project=chromium",
+    "cf:security:plan": "node ops/cloudflare/apply-security-insights.mjs",
+    "cf:security:apply": "node ops/cloudflare/apply-security-insights.mjs --apply"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.0",

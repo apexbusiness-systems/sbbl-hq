@@ -1,0 +1,5 @@
+Contact: mailto:info-outreach@sbbl-hq.icu
+Contact: https://sbbl-hq.icu/support
+Preferred-Languages: en
+Canonical: https://sbbl-hq.icu/.well-known/security.txt
+Policy: https://sbbl-hq.icu/privacy
