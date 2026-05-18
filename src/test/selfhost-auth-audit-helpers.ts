@@ -1,33 +1,25 @@
 /**
- * Thin helpers that expose internal worker logic as pure functions so the
- * audit tests can assert against them without spinning up a full Worker.
- */
-
-// ── Proxy token secret resolution ────────────────────────────────────────────
-
-type ProxySecretEnv = {
-  STREAM_PROXY_SECRET?: string;
-  OMNIHUB_SIGNING_SECRET?: string;
-  SUPABASE_SERVICE_ROLE_KEY?: string;
-};
-
-/**
- * Mirrors the resolveProxyTokenSecret() function in src/worker/index.ts.
- * Must be kept in sync whenever that function changes.
+ * Re-exports from the real worker module so audit tests exercise the actual
+ * production code paths rather than mirrored copies.
  *
- * Invariant: NEVER returns SUPABASE_SERVICE_ROLE_KEY.
+ * Anything that was previously duplicated here has been moved to the source
+ * and exported — see resolveProxyTokenSecret() and addSecurityHeaders() in
+ * src/worker/index.ts.
  */
-export function resolveProxyTokenSecret(env: ProxySecretEnv): string | null {
-  return env.STREAM_PROXY_SECRET ?? env.OMNIHUB_SIGNING_SECRET ?? null;
-}
+
+export { resolveProxyTokenSecret, addSecurityHeaders } from '@/worker/index';
 
 // ── Admin client cache simulation ────────────────────────────────────────────
+// getAdminClient() is not exported from the worker (it holds module-level
+// singleton state that is unsafe to expose), so we test the cache invalidation
+// logic through a thin faithful re-implementation here.  If getAdminClient()
+// changes its cache keying, this helper must be updated to match.
 
 type AdminEnv = { SUPABASE_URL: string; SUPABASE_SERVICE_ROLE_KEY: string };
 
 /**
  * Simulates the getAdminClient() cache logic from src/worker/index.ts.
- * Returns a tracker so tests can assert on how many clients were created.
+ * The invariant under test: cache must invalidate on EITHER URL or key change.
  */
 export function makeAdminClientTracker() {
   let cachedClient: object | null = null;
@@ -36,10 +28,13 @@ export function makeAdminClientTracker() {
   let count = 0;
 
   function get(env: AdminEnv): object {
-    if (cachedClient && cachedUrl === env.SUPABASE_URL && cachedKey === env.SUPABASE_SERVICE_ROLE_KEY) {
+    if (
+      cachedClient &&
+      cachedUrl === env.SUPABASE_URL &&
+      cachedKey === env.SUPABASE_SERVICE_ROLE_KEY
+    ) {
       return cachedClient;
     }
-    // Simulate creating a new client.
     cachedClient = { _url: env.SUPABASE_URL, _key: env.SUPABASE_SERVICE_ROLE_KEY, _id: ++count };
     cachedUrl = env.SUPABASE_URL;
     cachedKey = env.SUPABASE_SERVICE_ROLE_KEY;
@@ -50,25 +45,4 @@ export function makeAdminClientTracker() {
     get,
     get createCount() { return count; },
   };
-}
-
-// ── Security headers ──────────────────────────────────────────────────────────
-
-/**
- * Applies the same security headers that addSecurityHeaders() applies in the
- * worker, so tests can assert header presence/absence without a live Worker.
- * Must be kept in sync with addSecurityHeaders() in src/worker/index.ts.
- */
-export function addSecurityHeadersForTest(res: Response): Response {
-  const headers = new Headers(res.headers);
-  headers.set('X-Content-Type-Options', 'nosniff');
-  headers.set('X-Frame-Options', 'DENY');
-  headers.set('Referrer-Policy', 'strict-origin-when-cross-origin');
-  // X-XSS-Protection intentionally NOT set — deprecated and exploitable in IE.
-  headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
-  headers.set(
-    'Content-Security-Policy',
-    "default-src 'self'; frame-ancestors 'none'; base-uri 'self';",
-  );
-  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
