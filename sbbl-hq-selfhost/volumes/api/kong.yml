@@ -47,6 +47,37 @@ services:
           - /auth/v1/verify
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
+
   - name: auth-v1-open-callback
     _comment: 'Auth: /auth/v1/callback* -> http://auth:9999/callback*'
     url: http://auth:9999/callback
@@ -57,6 +88,37 @@ services:
           - /auth/v1/callback
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
+
   - name: auth-v1-open-authorize
     _comment: 'Auth: /auth/v1/authorize* -> http://auth:9999/authorize*'
     url: http://auth:9999/authorize
@@ -67,6 +129,37 @@ services:
           - /auth/v1/authorize
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
+
   - name: auth-v1-open-jwks
     _comment: 'Auth: /auth/v1/.well-known/jwks.json -> http://auth:9999/.well-known/jwks.json'
     url: http://auth:9999/.well-known/jwks.json
@@ -77,6 +170,36 @@ services:
           - /auth/v1/.well-known/jwks.json
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
 
   - name: auth-v1-open-sso-acs
     url: "http://auth:9999/sso/saml/acs"
@@ -87,7 +210,7 @@ services:
         - /sso/saml/acs
     plugins:
       - name: cors
-      
+
   - name: auth-v1-open-sso-metadata
     url: "http://auth:9999/sso/saml/metadata"
     routes:
@@ -109,6 +232,36 @@ services:
           - /auth/v1/
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
       - name: key-auth
         config:
           hide_credentials: false
@@ -333,7 +486,7 @@ services:
 
   ## Secure Database routes
   - name: meta
-    _comment: 'pg-meta: /pg/* -> http://pg-meta:8080/*'
+    _comment: 'pg-meta: /pg/* -> http://meta:8080/*'
     url: http://meta:8080/
     routes:
       - name: meta-all

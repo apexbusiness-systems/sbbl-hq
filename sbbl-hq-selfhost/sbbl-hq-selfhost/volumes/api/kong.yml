@@ -34,6 +34,36 @@ services:
           - /auth/v1/verify
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
 
   - name: auth-v1-open-callback
     _comment: 'Auth: /auth/v1/callback* -> http://auth:9999/callback*'
@@ -45,6 +75,36 @@ services:
           - /auth/v1/callback
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
 
   - name: auth-v1-open-authorize
     _comment: 'Auth: /auth/v1/authorize* -> http://auth:9999/authorize*'
@@ -56,6 +116,36 @@ services:
           - /auth/v1/authorize
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
 
   - name: auth-v1-open-jwks
     _comment: 'Auth: /auth/v1/.well-known/jwks.json -> http://auth:9999/.well-known/jwks.json'
@@ -67,6 +157,36 @@ services:
           - /auth/v1/.well-known/jwks.json
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
 
   - name: auth-v1-open-health
     _comment: 'Auth: /auth/v1/health -> static 200 health response'
@@ -78,6 +198,36 @@ services:
           - /auth/v1/health
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
       - name: request-termination
         config:
           status_code: 200
@@ -114,6 +264,36 @@ services:
           - /auth/v1/
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Version
+            - Authorization
+            - Content-Length
+            - Content-MD5
+            - Content-Type
+            - Date
+            - apikey
+            - x-client-info
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
       - name: key-auth
         config:
           hide_credentials: false
