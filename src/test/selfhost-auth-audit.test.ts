@@ -17,17 +17,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-// ── Mocks must be declared before any imports from the worker ────────────────
+// ── createClientSpy hoisted so it is accessible in vi.mock factories ──────────
 
-vi.mock('jose', () => ({
-  createRemoteJWKSet: vi.fn(() => ({})),
-  // Returns a verified payload for any Bearer token — used only by A-03's
-  // positive case and does not affect the no-token (attacker) cases.
-  jwtVerify: vi.fn(async () => ({ payload: { sub: 'verified-user', user_role: 'fan' } })),
-}));
-
-vi.mock('@supabase/supabase-js', () => ({
-  createClient: () => ({
+const { createClientSpy } = vi.hoisted(() => ({
+  createClientSpy: vi.fn(() => ({
     from: () => ({
       select: () => ({
         eq: () => ({
@@ -39,7 +32,20 @@ vi.mock('@supabase/supabase-js', () => ({
     }),
     rpc: async () => ({ data: null, error: null }),
     auth: { admin: { listUsers: vi.fn(async () => ({ data: { users: [] }, error: null })) } },
-  }),
+  })),
+}));
+
+// ── Mocks must be declared before any imports from the worker ─────────────────
+
+vi.mock('jose', () => ({
+  createRemoteJWKSet: vi.fn(() => ({})),
+  // Returns a verified payload for any Bearer token — used only by A-03's
+  // positive case and does not affect the no-token (attacker) cases.
+  jwtVerify: vi.fn(async () => ({ payload: { sub: 'verified-user', user_role: 'fan' } })),
+}));
+
+vi.mock('@supabase/supabase-js', () => ({
+  createClient: createClientSpy,
 }));
 
 import worker from '@/worker/index';
@@ -55,32 +61,7 @@ const BASE_ENV = {
   ASSETS: { fetch: (req: Request) => Promise.resolve(new Response(`asset:${new URL(req.url).pathname}`)) },
 } as unknown as Env;
 
-// ── A-02 fixture: faithful re-implementation of getAdminClient() cache logic ──
-// getAdminClient() holds module-level singleton state and cannot be exported
-// safely. This tracker simulates the same URL+key dual-keyed cache and must be
-// updated if getAdminClient() changes its invalidation conditions.
-type AdminCacheEnv = { SUPABASE_URL: string; SUPABASE_SERVICE_ROLE_KEY: string };
-
-function makeAdminClientTracker() {
-  let cached: object | null = null;
-  let cachedUrl: string | null = null;
-  let cachedKey: string | null = null;
-  let count = 0;
-  return {
-    get(env: AdminCacheEnv): object {
-      if (cached && cachedUrl === env.SUPABASE_URL && cachedKey === env.SUPABASE_SERVICE_ROLE_KEY) {
-        return cached;
-      }
-      cached = { _url: env.SUPABASE_URL, _key: env.SUPABASE_SERVICE_ROLE_KEY, _id: ++count };
-      cachedUrl = env.SUPABASE_URL;
-      cachedKey = env.SUPABASE_SERVICE_ROLE_KEY;
-      return cached;
-    },
-    get createCount() { return count; },
-  };
-}
-
-// ── A-01: Proxy token secret resolution ─────────────────────────────────────
+// ── A-01: Proxy token secret resolution ──────────────────────────────────────
 
 describe('resolveProxyTokenSecret (A-01)', () => {
   it('prefers STREAM_PROXY_SECRET when set', () => {
@@ -112,30 +93,44 @@ describe('resolveProxyTokenSecret (A-01)', () => {
   });
 });
 
-// ── A-02: Admin client cache invalidation on key rotation ───────────────────
+// ── A-02: Admin client cache — real worker.fetch() path ──────────────────────
+// Each sub-test uses a distinct SUPABASE_URL so module-level singleton state
+// from previous tests never interferes with per-test call counting.
 
 describe('getAdminClient cache (A-02)', () => {
-  it('rebuilds client when SUPABASE_SERVICE_ROLE_KEY changes (same URL)', () => {
-    const tracker = makeAdminClientTracker();
-    const a = tracker.get({ SUPABASE_URL: 'https://db.example.com', SUPABASE_SERVICE_ROLE_KEY: 'key-v1' });
-    const b = tracker.get({ SUPABASE_URL: 'https://db.example.com', SUPABASE_SERVICE_ROLE_KEY: 'key-v2' });
-    expect(b).not.toBe(a);
-    expect(tracker.createCount).toBe(2);
+  // Keys must be >= 20 chars: worker rejects /auth/* requests with shorter keys.
+  const makeEnv = (url: string, key: string) =>
+    ({ ...BASE_ENV, SUPABASE_URL: url, SUPABASE_SERVICE_ROLE_KEY: key } as unknown as Env);
+
+  const bearerReq = () =>
+    new Request('https://local/auth/session', {
+      headers: { authorization: 'Bearer valid.jwt.token' },
+    });
+
+  it('creates a new client on cold cache — records URL and key', async () => {
+    const before = createClientSpy.mock.calls.length;
+    await worker.fetch(bearerReq(), makeEnv('https://a02-cold.supabase.co', 'a02-cold-svc-key-xxxxxxxxxxxx'));
+    expect(createClientSpy.mock.calls.length).toBe(before + 1);
+    expect(createClientSpy.mock.calls[before][0]).toBe('https://a02-cold.supabase.co');
   });
 
-  it('returns cached client when URL and key are both unchanged', () => {
-    const tracker = makeAdminClientTracker();
-    const env = { SUPABASE_URL: 'https://db.example.com', SUPABASE_SERVICE_ROLE_KEY: 'key-stable' };
-    expect(tracker.get(env)).toBe(tracker.get(env));
-    expect(tracker.createCount).toBe(1);
+  it('rebuilds client when SUPABASE_SERVICE_ROLE_KEY changes (same URL)', async () => {
+    const url = 'https://a02-rotation.supabase.co';
+    const before = createClientSpy.mock.calls.length;
+    await worker.fetch(bearerReq(), makeEnv(url, 'a02-key-v1-xxxxxxxxxxxxxxxxxxx'));
+    await worker.fetch(bearerReq(), makeEnv(url, 'a02-key-v2-xxxxxxxxxxxxxxxxxxx'));
+    expect(createClientSpy.mock.calls.length).toBe(before + 2);
+    expect(createClientSpy.mock.calls[before][1]).toBe('a02-key-v1-xxxxxxxxxxxxxxxxxxx');
+    expect(createClientSpy.mock.calls[before + 1][1]).toBe('a02-key-v2-xxxxxxxxxxxxxxxxxxx');
   });
 
-  it('rebuilds client when SUPABASE_URL changes (key unchanged)', () => {
-    const tracker = makeAdminClientTracker();
-    const a = tracker.get({ SUPABASE_URL: 'https://db-a.example.com', SUPABASE_SERVICE_ROLE_KEY: 'key-1' });
-    const b = tracker.get({ SUPABASE_URL: 'https://db-b.example.com', SUPABASE_SERVICE_ROLE_KEY: 'key-1' });
-    expect(b).not.toBe(a);
-    expect(tracker.createCount).toBe(2);
+  it('returns cached client when URL and key are both unchanged', async () => {
+    const env = makeEnv('https://a02-stable.supabase.co', 'a02-stable-svc-key-xxxxxxxxxx');
+    const before = createClientSpy.mock.calls.length;
+    await worker.fetch(bearerReq(), env);
+    await worker.fetch(bearerReq(), env);
+    // Only one new createClient call — second request hits the cache.
+    expect(createClientSpy.mock.calls.length).toBe(before + 1);
   });
 });
 
