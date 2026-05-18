@@ -118,6 +118,7 @@ const ALLOWED_ORIGINS = [
 // memory across requests, so we avoid creating a new client on every fetch.
 let _cachedAdmin: SupabaseClient | null = null;
 let _cachedAdminUrl: string | null = null;
+let _cachedAdminKey: string | null = null;
 
 // ── Heartbeat batch queue ────────────────────────────────────────────────
 // Instead of writing every 25-second heartbeat to the DB individually (800
@@ -168,13 +169,27 @@ async function flushHeartbeatQueue(env: Env): Promise<void> {
 }
 
 function getAdminClient(env: Env): SupabaseClient {
-  // Invalidate if the URL changed (e.g. secret rotation / preview deploy)
-  if (_cachedAdmin && _cachedAdminUrl === env.SUPABASE_URL) return _cachedAdmin;
+  // Invalidate on URL or key change (covers both config drift and key rotation).
+  if (
+    _cachedAdmin &&
+    _cachedAdminUrl === env.SUPABASE_URL &&
+    _cachedAdminKey === env.SUPABASE_SERVICE_ROLE_KEY
+  ) return _cachedAdmin;
   _cachedAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
   _cachedAdminUrl = env.SUPABASE_URL;
+  _cachedAdminKey = env.SUPABASE_SERVICE_ROLE_KEY;
   return _cachedAdmin;
+}
+
+// Returns the HMAC secret used to sign/verify stream proxy authentication cookies.
+// Priority: STREAM_PROXY_SECRET > OMNIHUB_SIGNING_SECRET.
+// NEVER falls back to SUPABASE_SERVICE_ROLE_KEY — the DB credential must not
+// be used as a proxy token secret (different security context; compromising one
+// must not compromise the other).
+function resolveProxyTokenSecret(env: Env): string | null {
+  return env.STREAM_PROXY_SECRET ?? env.OMNIHUB_SIGNING_SECRET ?? null;
 }
 
 function json(data: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
@@ -4819,7 +4834,8 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     let clientPlaybackUrl = playbackUrl;
     if (deliveryClass === "proxy" && gameId) {
       const exp = Math.floor(Date.now() / 1000) + 70;
-      const secret = ctx.env.OMNIHUB_SIGNING_SECRET ?? ctx.env.SUPABASE_SERVICE_ROLE_KEY;
+      const secret = resolveProxyTokenSecret(ctx.env);
+      if (!secret) return json({ ok: false, error: "stream_proxy_not_configured" }, 500);
       const token = await signProxyToken(
         { gameId, userId, sessionId: fakeSessionId, exp },
         secret,
@@ -4913,7 +4929,8 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   let clientPlaybackUrl = playbackUrl;
   if (deliveryClass === "proxy" && gameId) {
     const exp = Math.floor(Date.now() / 1000) + 70;
-    const secret = ctx.env.OMNIHUB_SIGNING_SECRET ?? ctx.env.SUPABASE_SERVICE_ROLE_KEY;
+    const secret = resolveProxyTokenSecret(ctx.env);
+    if (!secret) return json({ ok: false, error: "stream_proxy_not_configured" }, 500);
     const token = await signProxyToken(
       { gameId, userId, sessionId: session.id, exp },
       secret,
@@ -5355,7 +5372,8 @@ async function handleStreamProxy(ctx: HandlerCtx) {
   const token = readCookie(ctx.req, PROXY_AUTH_COOKIE);
   if (!token) return new Response("Forbidden", { status: 403 });
 
-  const secret = ctx.env.OMNIHUB_SIGNING_SECRET ?? ctx.env.SUPABASE_SERVICE_ROLE_KEY;
+  const secret = resolveProxyTokenSecret(ctx.env);
+  if (!secret) return new Response("Forbidden", { status: 403 });
   const payload = await verifyProxyToken(token, secret);
   if (!payload || payload.gameId !== gameId) return new Response("Forbidden", { status: 403 });
 
@@ -7180,7 +7198,6 @@ function addSecurityHeaders(res: Response): Response {
       `fullscreen=(self ${embedOrigins}), ` +
       `picture-in-picture=(self ${embedOrigins})`,
   );
-  headers.set('X-XSS-Protection', '1; mode=block');
   // CSP: restricts resource loading to trusted origins only.
   // Prevents XSS, data exfiltration, and clickjacking at the browser level.
   // Facebook is allowed in frame-src only — plugins/video.php iframe embed, no SDK.

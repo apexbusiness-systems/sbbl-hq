@@ -143,6 +143,8 @@ const env = {
   STRIPE_SECRET_KEY: 'stripe',
   STRIPE_WEBHOOK_SECRET: 'whsec',
   RESEND_API_KEY: 'resend',
+  // Required so resolveProxyTokenSecret returns a value on the proxy delivery path.
+  OMNIHUB_SIGNING_SECRET: 'test-omnihub-signing-secret',
 } as any;
 
 describe('stream hardening worker handlers', () => {

@@ -48,6 +48,12 @@ interface Env {
   // inlined in config.
   PLAYBACK_TOKEN_SECRET?: string;
 
+  // HMAC-SHA256 signing secret for HLS stream proxy authentication cookies.
+  // Falls back to OMNIHUB_SIGNING_SECRET if unset. Must NOT fall back to
+  // SUPABASE_SERVICE_ROLE_KEY — set this explicitly for any deployment that
+  // serves streams via the proxy delivery class.
+  STREAM_PROXY_SECRET?: string;
+
   // Per-user award rate limit (awards per minute) when the fan-token
   // feature is on. Defaults to 30 in code if unset.
   FAN_TOKEN_AWARD_RATE_PER_MIN?: string;
