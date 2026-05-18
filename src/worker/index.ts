@@ -188,7 +188,7 @@ function getAdminClient(env: Env): SupabaseClient {
 // NEVER falls back to SUPABASE_SERVICE_ROLE_KEY — the DB credential must not
 // be used as a proxy token secret (different security context; compromising one
 // must not compromise the other).
-function resolveProxyTokenSecret(env: Env): string | null {
+export function resolveProxyTokenSecret(env: Env): string | null {
   return env.STREAM_PROXY_SECRET ?? env.OMNIHUB_SIGNING_SECRET ?? null;
 }
 
@@ -7170,7 +7170,7 @@ function installRequestBodyGuard() {
   };
 }
 
-function addSecurityHeaders(res: Response): Response {
+export function addSecurityHeaders(res: Response): Response {
   const headers = new Headers(res.headers);
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('X-Frame-Options', 'DENY');
