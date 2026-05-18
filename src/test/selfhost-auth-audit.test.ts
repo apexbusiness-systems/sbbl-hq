@@ -111,7 +111,8 @@ describe('getAdminClient cache (A-02)', () => {
     const before = createClientSpy.mock.calls.length;
     await worker.fetch(bearerReq(), makeEnv('https://a02-cold.supabase.co', 'a02-cold-svc-key-xxxxxxxxxxxx'));
     expect(createClientSpy.mock.calls.length).toBe(before + 1);
-    expect(createClientSpy.mock.calls[before][0]).toBe('https://a02-cold.supabase.co');
+    const spyCalls = createClientSpy.mock.calls as unknown as Array<[string, string]>;
+    expect(spyCalls[before][0]).toBe('https://a02-cold.supabase.co');
   });
 
   it('rebuilds client when SUPABASE_SERVICE_ROLE_KEY changes (same URL)', async () => {
@@ -120,8 +121,9 @@ describe('getAdminClient cache (A-02)', () => {
     await worker.fetch(bearerReq(), makeEnv(url, 'a02-key-v1-xxxxxxxxxxxxxxxxxxx'));
     await worker.fetch(bearerReq(), makeEnv(url, 'a02-key-v2-xxxxxxxxxxxxxxxxxxx'));
     expect(createClientSpy.mock.calls.length).toBe(before + 2);
-    expect(createClientSpy.mock.calls[before][1]).toBe('a02-key-v1-xxxxxxxxxxxxxxxxxxx');
-    expect(createClientSpy.mock.calls[before + 1][1]).toBe('a02-key-v2-xxxxxxxxxxxxxxxxxxx');
+    const spyCalls = createClientSpy.mock.calls as unknown as Array<[string, string]>;
+    expect(spyCalls[before][1]).toBe('a02-key-v1-xxxxxxxxxxxxxxxxxxx');
+    expect(spyCalls[before + 1][1]).toBe('a02-key-v2-xxxxxxxxxxxxxxxxxxx');
   });
 
   it('returns cached client when URL and key are both unchanged', async () => {
