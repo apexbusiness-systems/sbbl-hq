@@ -222,6 +222,9 @@ const ENV = {
   STRIPE_SECRET_KEY: 'sk_test',
   STRIPE_WEBHOOK_SECRET: 'whsec_test',
   RESEND_API_KEY: 'resend_test',
+  // Required so resolveProxyTokenSecret returns a value on the proxy delivery
+  // path (HLS m3u8 mock URL → delivery class = proxy).
+  OMNIHUB_SIGNING_SECRET: 'test-omnihub-signing-secret',
 } as unknown as Parameters<typeof handlePlaybackSession>[0]['env'];
 
 /** A future timestamp used as a valid expiry. */

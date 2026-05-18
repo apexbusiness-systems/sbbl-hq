@@ -7,6 +7,10 @@ RESEND_API_KEY=__SET_IN_ENV_ONLY__
 OMNIHUB_SYNC_URL=https://omnihub.example.com/control-plane/sync
 OMNIHUB_SIGNING_SECRET=__SET_IN_ENV_ONLY__
 OMNIHUB_VERIFY_KEY=__SET_IN_ENV_ONLY__
+# Dedicated HMAC secret for HLS stream proxy authentication cookies.
+# Falls back to OMNIHUB_SIGNING_SECRET if unset, but setting this explicitly
+# is strongly recommended so proxy and OmniHub secrets are independent.
+STREAM_PROXY_SECRET=__SET_IN_ENV_ONLY__
 OPTIONAL_SOCIAL_API_KEYS=__SET_IN_ENV_ONLY__
 OPTIONAL_TURNSTILE_SECRET_KEY=__SET_IN_ENV_ONLY__
 # Optional: enables AI-generated weekly digest (otherwise deterministic fallback template)
