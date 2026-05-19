@@ -19,3 +19,6 @@
 ## 2026-05-06 - [React Rendering Loop Optimization]
 **Learning:** Found reduce calculations running inline within a React component's rendering flow, which triggers an O(N) operation on every single re-render. Since useMemo caches derived data and skips execution unless its dependencies change, it is optimal for replacing un-memoized loops.
 **Action:** Extract large or repeated O(N) functional loops (like .map or .reduce) from directly inside returned TSX elements into useMemo hooks above the render, especially when the resulting calculations don't change between re-renders.
+## 2026-05-18 - [Performance] Optimized Media Library Tab Component
+**Learning:** In React components like `MediaLibraryTab.tsx`, calling array methods such as `.find()` on every single render cycle creates unnecessary (N)$ overhead, especially when parsing state values for derived props.
+**Action:** Always wrap derived property lookups that involve array iteration with `useMemo` hooks and explicitly define the dependency arrays to ensure the lookup logic executes *only* when the parent collection or the target identifier changes.
