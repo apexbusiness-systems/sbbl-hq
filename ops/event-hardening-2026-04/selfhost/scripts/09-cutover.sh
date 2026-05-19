@@ -36,7 +36,12 @@ CF_API_TOKEN="${CF_API_TOKEN:-}"    # Required
 CF_PAGES_PROJECT="${CF_PAGES_PROJECT:-sbbl-hq}"
 CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-}" # Required for Pages API
 DOMAIN="sbbl-hq.icu"
-SELF_HOSTED_URL="https://${DOMAIN}"
+API_DOMAIN="api.sbbl-hq.icu"
+# SUPABASE_URL must point at the Supabase API subdomain, not the app domain.
+# The Worker's JWKS client and admin client both use this URL; pointing it at
+# the app domain (sbbl-hq.icu) means Kong is never reached and JWT verification
+# fails for every request issued by the self-hosted GoTrue (RC-1 / RC-2 fix).
+SELF_HOSTED_URL="https://${API_DOMAIN}"
 WORKER_NAME="sbbl-hq-worker"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -75,9 +80,16 @@ echo "  ✓ Keys fetched (${#ANON_KEY} chars ANON, ${#SERVICE_KEY} chars SERVICE
 
 # ── Step 2: Update Cloudflare Worker secrets ─────────────────────────────────
 echo "[2/6] Updating Cloudflare Worker secrets for ${WORKER_NAME}..."
-run "echo '${SELF_HOSTED_URL}' | wrangler secret put SUPABASE_URL    --name ${WORKER_NAME}"
-run "echo '${ANON_KEY}'        | wrangler secret put SUPABASE_ANON_KEY --name ${WORKER_NAME}"
-run "echo '${SERVICE_KEY}'     | wrangler secret put SUPABASE_SERVICE_KEY --name ${WORKER_NAME}"
+run "echo '${SELF_HOSTED_URL}' | wrangler secret put SUPABASE_URL           --name ${WORKER_NAME}"
+run "echo '${ANON_KEY}'        | wrangler secret put SUPABASE_ANON_KEY       --name ${WORKER_NAME}"
+# The worker Env type declares SUPABASE_SERVICE_ROLE_KEY (not SUPABASE_SERVICE_KEY).
+# Pushing to the wrong name leaves SUPABASE_SERVICE_ROLE_KEY unset → admin client
+# cannot be created → every authenticated worker route returns 500 (RC-1 fix).
+run "echo '${SERVICE_KEY}'     | wrangler secret put SUPABASE_SERVICE_ROLE_KEY --name ${WORKER_NAME}"
+# SUPABASE_PUBLISHABLE_KEY is the anon key returned by /api/public-config to
+# the browser Supabase client.  Must match the self-hosted anon key so the
+# frontend calls the correct project after cutover.
+run "echo '${ANON_KEY}'        | wrangler secret put SUPABASE_PUBLISHABLE_KEY  --name ${WORKER_NAME}"
 echo "  ✓ Worker secrets updated"
 
 # ── Step 3: Update Cloudflare Pages environment variables ────────────────────
@@ -108,36 +120,50 @@ else
   echo "  ✓ Pages env vars updated"
 fi
 
-# ── Step 4: Update Cloudflare DNS A record ────────────────────────────────────
-echo "[4/6] Updating Cloudflare DNS A record ${DOMAIN} → ${PRIMARY_HOST}..."
-# Get existing record ID
-RECORD_ID=$(curl -s -X GET \
-  "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?type=A&name=${DOMAIN}" \
-  -H "Authorization: Bearer ${CF_API_TOKEN}" \
-  -H "Content-Type: application/json" | \
-  python3 -c "import sys,json; records=json.load(sys.stdin)['result']; print(records[0]['id'] if records else '')" 2>/dev/null || true)
+# ── Step 4: Update Cloudflare DNS A records ───────────────────────────────────
+# Two A records are required:
+#   sbbl-hq.icu     → EC2 primary (app / Studio)
+#   api.sbbl-hq.icu → EC2 primary (Supabase API / Kong)
+# Without the api.* record, Caddy has no resolvable vhost for api.sbbl-hq.icu
+# and Kong is never reached (RC-0 / RC-8 fix).
 
-if [[ -z "$RECORD_ID" ]]; then
-  echo "  No existing A record found — creating new one"
-  DNS_METHOD="POST"
-  DNS_URL="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records"
-else
-  echo "  Existing record ID: ${RECORD_ID}"
-  DNS_METHOD="PUT"
-  DNS_URL="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}"
-fi
-
-DNS_PAYLOAD="{\"type\":\"A\",\"name\":\"${DOMAIN}\",\"content\":\"${PRIMARY_HOST}\",\"ttl\":60,\"proxied\":true}"
-if [[ "$DRY_RUN" == true ]]; then
-  echo "[dry-run] ${DNS_METHOD} ${DNS_URL} — ${DOMAIN} → ${PRIMARY_HOST} (proxied)"
-else
-  DNS_RESP=$(curl -s -X "${DNS_METHOD}" "${DNS_URL}" \
+upsert_dns_a() {
+  local name="$1" ip="$2"
+  echo "[4/6] Updating Cloudflare DNS A record ${name} → ${ip}..."
+  local record_id
+  record_id=$(curl -s -X GET \
+    "https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records?type=A&name=${name}" \
     -H "Authorization: Bearer ${CF_API_TOKEN}" \
-    -H "Content-Type: application/json" \
-    --data "${DNS_PAYLOAD}")
-  echo "$DNS_RESP" | grep -q '"success":true' || die "DNS update failed: $DNS_RESP"
-  echo "  ✓ DNS updated — ${DOMAIN} → ${PRIMARY_HOST} (proxied, TTL 60s)"
-fi
+    -H "Content-Type: application/json" | \
+    python3 -c "import sys,json; records=json.load(sys.stdin)['result']; print(records[0]['id'] if records else '')" 2>/dev/null || true)
+
+  local method url
+  if [[ -z "$record_id" ]]; then
+    echo "  No existing A record for ${name} — creating new one"
+    method="POST"
+    url="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records"
+  else
+    echo "  Existing record ID for ${name}: ${record_id}"
+    method="PUT"
+    url="https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records/${record_id}"
+  fi
+
+  local payload="{\"type\":\"A\",\"name\":\"${name}\",\"content\":\"${ip}\",\"ttl\":60,\"proxied\":true}"
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "[dry-run] ${method} ${url} — ${name} → ${ip} (proxied)"
+  else
+    local resp
+    resp=$(curl -s -X "${method}" "${url}" \
+      -H "Authorization: Bearer ${CF_API_TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data "${payload}")
+    echo "$resp" | grep -q '"success":true' || die "DNS update failed for ${name}: $resp"
+    echo "  ✓ DNS updated — ${name} → ${ip} (proxied, TTL 60s)"
+  fi
+}
+
+upsert_dns_a "${DOMAIN}"     "${PRIMARY_HOST}"
+upsert_dns_a "${API_DOMAIN}" "${PRIMARY_HOST}"
 
 # ── Step 5: Smoke test self-hosted endpoints ──────────────────────────────────
 echo "[5/6] Smoke testing ${SELF_HOSTED_URL}..."
@@ -168,12 +194,15 @@ fi
 # ── Step 6: Print post-cutover checklist ─────────────────────────────────────
 echo ""
 echo "[6/6] Post-Cutover Checklist:"
-echo "  [ ] Verify production login / signup at ${SELF_HOSTED_URL}"
+echo "  [ ] Verify https://api.sbbl-hq.icu/auth/v1/health returns 200"
+echo "  [ ] Verify production login / signup at https://sbbl-hq.icu"
 echo "  [ ] Verify Google OAuth callback: ${SELF_HOSTED_URL}/auth/v1/callback"
 echo "  [ ] Verify GitHub OAuth callback: ${SELF_HOSTED_URL}/auth/v1/callback"
 echo "  [ ] Verify magic link emails arrive (check Resend dashboard)"
 echo "  [ ] Verify Stripe webhooks reach self-hosted (check Stripe dashboard)"
 echo "  [ ] Update OAuth App callback URLs in Google Console + GitHub"
+echo "  [ ] Apply pending migrations via: supabase db push (or manual psql)"
+echo "  [ ] Reload PostgREST schema: NOTIFY pgrst, 'reload schema';"
 echo "  [ ] Keep Supabase Cloud alive in read-only mode for 72h rollback window"
 echo "  [ ] Run scripts/05-post-deploy-validate.sh for full health check"
 echo "  [ ] Run k6 load test: k6 run tests/load-auth.js"
