@@ -1,5 +1,5 @@
 import { ImageIcon, Save, Loader2, Upload } from 'lucide-react';
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import { MediaFilterBar } from './MediaFilterBar';
 import { MediaCard } from './MediaCard';
 import { MediaDragCard } from './MediaDragCard';
@@ -21,9 +21,18 @@ export type MediaLibraryTabProps = {
 export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
   const lib = useOpsMediaLibrary(enabled);
 
-  const previewPublication = lib.orderedMediaPublications.find((p) => p.id === lib.previewId);
-  const editPublication = lib.orderedMediaPublications.find((p) => p.id === lib.editId);
-  const archivePublication = lib.orderedMediaPublications.find((p) => p.id === lib.archiveId);
+  // ⚡ Bolt Performance Optimization: Memoize publication lookups to prevent O(N) array .find() on every render
+  const previewPublication = useMemo(() =>
+    lib.previewId ? lib.orderedMediaPublications.find((p) => p.id === lib.previewId) : undefined
+  , [lib.orderedMediaPublications, lib.previewId]);
+
+  const editPublication = useMemo(() =>
+    lib.editId ? lib.orderedMediaPublications.find((p) => p.id === lib.editId) : undefined
+  , [lib.orderedMediaPublications, lib.editId]);
+
+  const archivePublication = useMemo(() =>
+    lib.archiveId ? lib.orderedMediaPublications.find((p) => p.id === lib.archiveId) : undefined
+  , [lib.orderedMediaPublications, lib.archiveId]);
 
   // Restore handler
   const handleRestore = useCallback(async () => {
