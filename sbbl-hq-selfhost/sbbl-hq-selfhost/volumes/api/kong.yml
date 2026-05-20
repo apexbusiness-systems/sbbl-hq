@@ -269,6 +269,63 @@ services:
           max_age: 3600
           preflight_continue: false
 
+  - name: auth-v1-open-health
+    _comment: 'Auth: /auth/v1/health -> static 200 health response'
+    url: http://auth:9999/health
+    routes:
+      - name: auth-v1-open-health
+        strip_path: true
+        paths:
+          - /auth/v1/health
+    plugins:
+      - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Profile
+            - Accept-Version
+            - Authorization
+            - Cache-Control
+            - Content-Length
+            - Content-MD5
+            - Content-Profile
+            - Content-Type
+            - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
+            - apikey
+            - x-client-info
+            - x-supabase-api-version
+            - x-upsert
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
+      - name: request-termination
+        config:
+          status_code: 200
+          content_type: application/json
+          body: '{"status":"ok"}'
+
   - name: auth-v1-open-sso-acs
     url: "http://auth:9999/sso/saml/acs"
     routes:
@@ -278,6 +335,47 @@ services:
         - /sso/saml/acs
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Profile
+            - Accept-Version
+            - Authorization
+            - Cache-Control
+            - Content-Length
+            - Content-MD5
+            - Content-Profile
+            - Content-Type
+            - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
+            - apikey
+            - x-client-info
+            - x-supabase-api-version
+            - x-upsert
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
 
   - name: auth-v1-open-sso-metadata
     url: "http://auth:9999/sso/saml/metadata"
@@ -288,6 +386,47 @@ services:
         - /sso/saml/metadata
     plugins:
       - name: cors
+        config:
+          origins:
+            - https://sbbl-hq.icu
+            - https://www.sbbl-hq.icu
+            - http://localhost:5173
+          methods:
+            - GET
+            - HEAD
+            - POST
+            - PUT
+            - PATCH
+            - DELETE
+            - OPTIONS
+          headers:
+            - Accept
+            - Accept-Profile
+            - Accept-Version
+            - Authorization
+            - Cache-Control
+            - Content-Length
+            - Content-MD5
+            - Content-Profile
+            - Content-Type
+            - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
+            - apikey
+            - x-client-info
+            - x-supabase-api-version
+            - x-upsert
+          exposed_headers:
+            - Content-Length
+            - Content-Range
+            - X-Kong-Request-Id
+          credentials: true
+          max_age: 3600
+          preflight_continue: false
 
   ## Secure Auth routes
   - name: auth-v1
