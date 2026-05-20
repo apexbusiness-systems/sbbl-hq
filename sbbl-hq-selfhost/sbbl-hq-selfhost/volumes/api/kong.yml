@@ -1,6 +1,9 @@
 _format_version: '2.1'
 _transform: true
 
+###
+### Consumers / Users
+###
 consumers:
   - username: DASHBOARD
   - username: anon
@@ -12,18 +15,28 @@ consumers:
       - key: $SUPABASE_SERVICE_KEY
       - key: $SUPABASE_SECRET_KEY
 
+###
+### Access Control List
+###
 acls:
   - consumer: anon
     group: anon
   - consumer: service_role
     group: admin
 
+###
+### Dashboard credentials
+###
 basicauth_credentials:
   - consumer: DASHBOARD
     username: '$DASHBOARD_USERNAME'
     password: '$DASHBOARD_PASSWORD'
 
+###
+### API Routes
+###
 services:
+  ## Open Auth routes
   - name: auth-v1-open
     _comment: 'Auth: /auth/v1/verify* -> http://auth:9999/verify*'
     url: http://auth:9999/verify
@@ -47,16 +60,33 @@ services:
             - PATCH
             - DELETE
             - OPTIONS
+          # Comprehensive allowlist for supabase-js v2, PostgREST, GoTrue,
+          # Storage and Functions. Adding new headers here is preferred to
+          # removing the allowlist (which would mirror anything the browser
+          # sends and weaken the surface). The selfhost-auth-smoke CI
+          # workflow guards against the next supabase-js release adding a
+          # header that is missing from this list.
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -88,16 +118,33 @@ services:
             - PATCH
             - DELETE
             - OPTIONS
+          # Comprehensive allowlist for supabase-js v2, PostgREST, GoTrue,
+          # Storage and Functions. Adding new headers here is preferred to
+          # removing the allowlist (which would mirror anything the browser
+          # sends and weaken the surface). The selfhost-auth-smoke CI
+          # workflow guards against the next supabase-js release adding a
+          # header that is missing from this list.
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -129,16 +176,33 @@ services:
             - PATCH
             - DELETE
             - OPTIONS
+          # Comprehensive allowlist for supabase-js v2, PostgREST, GoTrue,
+          # Storage and Functions. Adding new headers here is preferred to
+          # removing the allowlist (which would mirror anything the browser
+          # sends and weaken the surface). The selfhost-auth-smoke CI
+          # workflow guards against the next supabase-js release adding a
+          # header that is missing from this list.
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -170,16 +234,33 @@ services:
             - PATCH
             - DELETE
             - OPTIONS
+          # Comprehensive allowlist for supabase-js v2, PostgREST, GoTrue,
+          # Storage and Functions. Adding new headers here is preferred to
+          # removing the allowlist (which would mirror anything the browser
+          # sends and weaken the surface). The selfhost-auth-smoke CI
+          # workflow guards against the next supabase-js release adding a
+          # header that is missing from this list.
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -187,52 +268,6 @@ services:
           credentials: true
           max_age: 3600
           preflight_continue: false
-
-  - name: auth-v1-open-health
-    _comment: 'Auth: /auth/v1/health -> static 200 health response'
-    url: http://auth:9999/health
-    routes:
-      - name: auth-v1-open-health
-        strip_path: true
-        paths:
-          - /auth/v1/health
-    plugins:
-      - name: cors
-        config:
-          origins:
-            - https://sbbl-hq.icu
-            - https://www.sbbl-hq.icu
-            - http://localhost:5173
-          methods:
-            - GET
-            - HEAD
-            - POST
-            - PUT
-            - PATCH
-            - DELETE
-            - OPTIONS
-          headers:
-            - Accept
-            - Accept-Version
-            - Authorization
-            - Content-Length
-            - Content-MD5
-            - Content-Type
-            - Date
-            - apikey
-            - x-client-info
-          exposed_headers:
-            - Content-Length
-            - Content-Range
-            - X-Kong-Request-Id
-          credentials: true
-          max_age: 3600
-          preflight_continue: false
-      - name: request-termination
-        config:
-          status_code: 200
-          content_type: application/json
-          body: '{"status":"ok"}'
 
   - name: auth-v1-open-sso-acs
     url: "http://auth:9999/sso/saml/acs"
@@ -240,7 +275,7 @@ services:
       - name: auth-v1-open-sso-acs
         strip_path: true
         paths:
-          - /sso/saml/acs
+        - /sso/saml/acs
     plugins:
       - name: cors
 
@@ -250,10 +285,11 @@ services:
       - name: auth-v1-open-sso-metadata
         strip_path: true
         paths:
-          - /sso/saml/metadata
+        - /sso/saml/metadata
     plugins:
       - name: cors
 
+  ## Secure Auth routes
   - name: auth-v1
     _comment: 'Auth: /auth/v1/* -> http://auth:9999/*'
     url: http://auth:9999/
@@ -277,16 +313,33 @@ services:
             - PATCH
             - DELETE
             - OPTIONS
+          # Comprehensive allowlist for supabase-js v2, PostgREST, GoTrue,
+          # Storage and Functions. Adding new headers here is preferred to
+          # removing the allowlist (which would mirror anything the browser
+          # sends and weaken the surface). The selfhost-auth-smoke CI
+          # workflow guards against the next supabase-js release adding a
+          # header that is missing from this list.
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -312,6 +365,7 @@ services:
             - admin
             - anon
 
+  ## Secure PostgREST routes
   - name: rest-v1
     _comment: 'PostgREST: /rest/v1/* -> http://rest:3000/*'
     url: http://rest:3000/
@@ -340,6 +394,7 @@ services:
             - admin
             - anon
 
+  ## Secure GraphQL routes
   - name: graphql-v1
     _comment: 'PostgREST: /graphql/v1/* -> http://rest:3000/rpc/graphql'
     url: http://rest:3000/rpc/graphql
@@ -369,6 +424,7 @@ services:
             - admin
             - anon
 
+  ## Secure Realtime routes
   - name: realtime-v1-ws
     _comment: 'Realtime: /realtime/v1/* -> ws://realtime:4000/socket/*'
     url: http://realtime-dev.supabase-realtime:4000/socket
@@ -427,6 +483,15 @@ services:
             - admin
             - anon
 
+  ## Storage API endpoint (with Authorization header transformation).
+  ## No key-auth — S3 protocol requests don't carry an apikey header.
+  ##
+  ## The request-transformer translates opaque API keys to asymmetric JWTs
+  ## and passes through existing Authorization headers (user JWTs, AWS SigV4).
+  ## When no Authorization or apikey header is present (S3 presigned URLs),
+  ## the Lua expression evaluates to nil which Kong renders as empty string.
+  ## The post-function strips this empty header so Storage's S3 signature
+  ## verification falls through to query-parameter parsing.
   - name: storage-v1
     _comment: 'Storage: /storage/v1/* -> http://storage:5000/*'
     url: http://storage:5000/
@@ -454,6 +519,7 @@ services:
                 kong.service.request.clear_header("authorization")
               end
 
+  ## Edge Functions routes
   - name: functions-v1
     _comment: 'Edge Functions: /functions/v1/* -> http://functions:9000/*'
     url: http://functions:9000/
@@ -466,6 +532,7 @@ services:
     plugins:
       - name: cors
 
+  ## OAuth 2.0 Authorization Server Metadata (RFC 8414)
   - name: well-known-oauth
     _comment: 'Auth: /.well-known/oauth-authorization-server -> http://auth:9999/.well-known/oauth-authorization-server'
     url: http://auth:9999/.well-known/oauth-authorization-server
@@ -477,6 +544,32 @@ services:
     plugins:
       - name: cors
 
+  ## Analytics routes
+  ## Not used - Studio and Vector talk directly to analytics via Docker networking.
+  ## If external access is needed, add routes with key-auth matching Logflare's x-api-key auth.
+  # - name: analytics-v1-api
+  #   _comment: 'Analytics: /analytics/v1/api/endpoints/* -> http://logflare:4000/api/endpoints/*'
+  #   url: http://analytics:4000/api/endpoints
+  #   routes:
+  #     - name: analytics-v1-api
+  #       strip_path: true
+  #       paths:
+  #         - /analytics/v1/api/endpoints/
+  # - name: analytics-v1
+  #   _comment: 'Analytics: /analytics/v1/* -> http://logflare:4000/*'
+  #   url: http://analytics:4000/
+  #   routes:
+  #     - name: dashboard-v1-all
+  #       strip_path: true
+  #       paths:
+  #         - /analytics/v1
+  #   plugins:
+  #     - name: cors
+  #     - name: basic-auth
+  #       config:
+  #         hide_credentials: true
+
+  ## Secure Database routes
   - name: meta
     _comment: 'pg-meta: /pg/* -> http://meta:8080/*'
     url: http://meta:8080/
@@ -495,6 +588,7 @@ services:
           allow:
             - admin
 
+  ## Block access to /api/mcp
   - name: mcp-blocker
     _comment: 'Block direct access to /api/mcp'
     url: http://studio:3000/api/mcp
@@ -509,8 +603,9 @@ services:
           status_code: 403
           message: "Access is forbidden."
 
+  ## MCP endpoint - local access
   - name: mcp
-    _comment: 'MCP: /mcp -> http://studio:3000/api/mcp'
+    _comment: 'MCP: /mcp -> http://studio:3000/api/mcp (local access)'
     url: http://studio:3000/api/mcp
     routes:
       - name: mcp
@@ -518,11 +613,24 @@ services:
         paths:
           - /mcp
     plugins:
+      # Block access to /mcp by default
       - name: request-termination
         config:
           status_code: 403
           message: "Access is forbidden."
+      # Enable local access (danger zone!)
+      # 1. Comment out the 'request-termination' section above
+      # 2. Uncomment the entire section below, including 'deny'
+      # 3. Add your local IPs to the 'allow' list
+      #- name: cors
+      #- name: ip-restriction
+      #  config:
+      #    allow:
+      #      - 127.0.0.1
+      #      - ::1
+      #    deny: []
 
+  ## Protected Dashboard - catch all remaining routes
   - name: dashboard
     _comment: 'Studio: /* -> http://studio:3000/*'
     url: http://studio:3000/

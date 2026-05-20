@@ -20,6 +20,7 @@ on:
   pull_request:
     paths:
       - 'sbbl-hq-selfhost/volumes/api/kong.yml'
+      - 'sbbl-hq-selfhost/sbbl-hq-selfhost/volumes/api/kong.yml'
       - '.github/workflows/selfhost-auth-smoke.yml'
 
 jobs:
@@ -44,33 +45,42 @@ jobs:
               'apikey', 'x-client-info', 'x-supabase-api-version', 'x-upsert',
           }
 
-          path = pathlib.Path('sbbl-hq-selfhost/volumes/api/kong.yml')
-          cfg = yaml.safe_load(path.read_text())
+          # Check both outer (reference) and inner (active Docker root) kong.yml.
+          # The inner path is the one actually mounted by Docker Compose; both must pass.
+          paths_to_check = [
+              pathlib.Path('sbbl-hq-selfhost/volumes/api/kong.yml'),
+              pathlib.Path('sbbl-hq-selfhost/sbbl-hq-selfhost/volumes/api/kong.yml'),
+          ]
 
-          failures = []
-          for svc in cfg.get('services', []):
-              for plugin in svc.get('plugins', []) or []:
-                  if plugin.get('name') != 'cors':
-                      continue
-                  conf = plugin.get('config') or {}
-                  headers = conf.get('headers')
-                  if not headers:
-                      # No explicit allowlist => Kong mirrors request headers.
-                      # That is acceptable; skip.
-                      continue
-                  allowed = {h.lower() for h in headers}
-                  missing = required - allowed
-                  if missing:
-                      failures.append((svc.get('name', '<unnamed>'), sorted(missing)))
+          all_failures = []
+          for path in paths_to_check:
+              if not path.exists():
+                  continue
+              cfg = yaml.safe_load(path.read_text())
+              for svc in cfg.get('services', []):
+                  for plugin in svc.get('plugins', []) or []:
+                      if plugin.get('name') != 'cors':
+                          continue
+                      conf = plugin.get('config') or {}
+                      headers = conf.get('headers')
+                      if not headers:
+                          # No explicit allowlist => Kong mirrors request headers.
+                          # That is acceptable; skip.
+                          continue
+                      allowed = {h.lower() for h in headers}
+                      missing = required - allowed
+                      if missing:
+                          all_failures.append((str(path), svc.get('name', '<unnamed>'), sorted(missing)))
 
+          failures = all_failures
           if failures:
               print('::error::kong.yml CORS allowlist is missing required headers:')
-              for name, miss in failures:
-                  print(f'  - {name}: missing {miss}')
+              for fpath, name, miss in failures:
+                  print(f'  - {fpath} / {name}: missing {miss}')
               print('::error::Add the missing headers to the cors plugin config under each affected route.')
               sys.exit(1)
 
-          print(f'OK — every explicit-allowlist auth route allows all {len(required)} required headers.')
+          print(f'OK — every explicit-allowlist auth route in both kong.yml files allows all {len(required)} required headers.')
           PY
 
   live-production-probe:
