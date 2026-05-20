@@ -8,3 +8,7 @@
 
 # SQL init scripts: keep LF
 *.sql text eol=lf
+
+# Elixir scripts (supavisor pooler config): keep LF
+*.exs text eol=lf
+*.ex  text eol=lf
