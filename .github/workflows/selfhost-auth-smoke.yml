@@ -1,0 +1,123 @@
+name: Selfhost Auth Smoke
+
+# Verifies the self-hosted Supabase production endpoint is reachable AND
+# that Kong's CORS preflight allows every header supabase-js v2 currently
+# sends. This is the safety net against a future supabase-js release
+# adding a new header that is missing from volumes/api/kong.yml.
+#
+# Hits the production endpoint with a bogus credential — never a real
+# user — so a 400 on the actual POST is the expected SUCCESS signal.
+
+on:
+  schedule:
+    # Every day at 06:00 UTC.
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'sbbl-hq-selfhost/volumes/api/kong.yml'
+      - '.github/workflows/selfhost-auth-smoke.yml'
+
+jobs:
+  cors-preflight:
+    name: CORS preflight allows supabase-js headers
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify OPTIONS preflight allows all required headers
+        env:
+          SUPABASE_URL: https://supabase.sbbl-hq.icu
+          APP_ORIGIN: https://sbbl-hq.icu
+          # Every header supabase-js v2 + PostgREST + Storage may send.
+          # Keep in sync with volumes/api/kong.yml.
+          REQUIRED_HEADERS: >-
+            accept,accept-profile,accept-version,authorization,cache-control,content-length,content-md5,content-profile,content-type,date,if-match,if-modified-since,if-none-match,prefer,range,x-requested-with,apikey,x-client-info,x-supabase-api-version,x-upsert
+        run: |
+          set -euo pipefail
+
+          echo "Probing OPTIONS $SUPABASE_URL/auth/v1/token from origin $APP_ORIGIN"
+          # Issue the same preflight a browser would for POST /auth/v1/token.
+          response_file=$(mktemp)
+          headers_file=$(mktemp)
+          http_code=$(curl -sS -o "$response_file" -D "$headers_file" -w '%{http_code}' \
+            -X OPTIONS \
+            -H "Origin: $APP_ORIGIN" \
+            -H "Access-Control-Request-Method: POST" \
+            -H "Access-Control-Request-Headers: $REQUIRED_HEADERS" \
+            "$SUPABASE_URL/auth/v1/token?grant_type=password")
+
+          echo "Preflight HTTP $http_code"
+          echo "--- response headers ---"
+          cat "$headers_file"
+          echo "------------------------"
+
+          if [ "$http_code" != "204" ] && [ "$http_code" != "200" ]; then
+            echo "::error::Preflight returned $http_code (expected 204 or 200)."
+            exit 1
+          fi
+
+          # Grab the Access-Control-Allow-Headers value (case-insensitive).
+          allow=$(grep -i '^access-control-allow-headers:' "$headers_file" | head -n 1 | cut -d ':' -f 2- | tr -d '\r' | tr 'A-Z' 'a-z' | xargs)
+          if [ -z "$allow" ]; then
+            echo "::error::No Access-Control-Allow-Headers in preflight response."
+            exit 1
+          fi
+          echo "Allowed headers (lowercased): $allow"
+
+          # Every required header MUST appear (comma-and-space-tolerant match).
+          missing=""
+          IFS=',' read -ra reqs <<< "$REQUIRED_HEADERS"
+          for h in "${reqs[@]}"; do
+            h_trim=$(echo "$h" | xargs)
+            if ! echo ",$allow," | grep -qi ",$h_trim,"; then
+              missing="$missing $h_trim"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Preflight is missing required headers:$missing"
+            echo "::error::Add them to volumes/api/kong.yml under every auth-v1* route's cors.headers."
+            exit 1
+          fi
+          echo "All required headers allowed."
+
+  auth-token-reachable:
+    name: POST /auth/v1/token returns 400 (not CORS, not 502)
+    runs-on: ubuntu-latest
+    needs: cors-preflight
+    timeout-minutes: 5
+    steps:
+      - name: Verify auth/v1/token is reachable through Kong
+        env:
+          SUPABASE_URL: https://supabase.sbbl-hq.icu
+          APP_ORIGIN: https://sbbl-hq.icu
+        run: |
+          set -euo pipefail
+
+          # Bogus credentials so we get 400 (expected) not 200. We are
+          # confirming reachability through Kong → GoTrue, NOT signing
+          # in any real user.
+          http_code=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -X POST \
+            -H "Origin: $APP_ORIGIN" \
+            -H "Content-Type: application/json" \
+            -H "apikey: nope" \
+            -H "x-supabase-api-version: 2024-01-01" \
+            -d '{"email":"smoke-test-nobody@invalid.example","password":"x"}' \
+            "$SUPABASE_URL/auth/v1/token?grant_type=password")
+
+          echo "POST /auth/v1/token => $http_code"
+          # 400 / 401 / 422 = GoTrue answered (good). 502 / 503 / 504 = ingress broken (bad).
+          # 0 / connection error = upstream unreachable (bad).
+          case "$http_code" in
+            400|401|422)
+              echo "GoTrue is answering through Kong. Healthy."
+              ;;
+            5*)
+              echo "::error::Got $http_code from Kong/GoTrue. Ingress or upstream is down."
+              exit 1
+              ;;
+            *)
+              echo "::error::Unexpected HTTP $http_code. Investigate."
+              exit 1
+              ;;
+          esac

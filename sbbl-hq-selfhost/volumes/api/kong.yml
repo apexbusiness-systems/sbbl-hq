@@ -60,19 +60,33 @@ services:
             - PATCH
             - DELETE
             - OPTIONS
+          # Comprehensive allowlist for supabase-js v2, PostgREST, GoTrue,
+          # Storage and Functions. Adding new headers here is preferred to
+          # removing the allowlist (which would mirror anything the browser
+          # sends and weaken the surface). The selfhost-auth-smoke CI
+          # workflow guards against the next supabase-js release adding a
+          # header that is missing from this list.
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
             - Prefer
             - Range
+            - X-Requested-With
             - apikey
             - x-client-info
             - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -104,19 +118,33 @@ services:
             - PATCH
             - DELETE
             - OPTIONS
+          # Comprehensive allowlist for supabase-js v2, PostgREST, GoTrue,
+          # Storage and Functions. Adding new headers here is preferred to
+          # removing the allowlist (which would mirror anything the browser
+          # sends and weaken the surface). The selfhost-auth-smoke CI
+          # workflow guards against the next supabase-js release adding a
+          # header that is missing from this list.
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
             - Prefer
             - Range
+            - X-Requested-With
             - apikey
             - x-client-info
             - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -148,19 +176,33 @@ services:
             - PATCH
             - DELETE
             - OPTIONS
+          # Comprehensive allowlist for supabase-js v2, PostgREST, GoTrue,
+          # Storage and Functions. Adding new headers here is preferred to
+          # removing the allowlist (which would mirror anything the browser
+          # sends and weaken the surface). The selfhost-auth-smoke CI
+          # workflow guards against the next supabase-js release adding a
+          # header that is missing from this list.
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
             - Prefer
             - Range
+            - X-Requested-With
             - apikey
             - x-client-info
             - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -192,19 +234,33 @@ services:
             - PATCH
             - DELETE
             - OPTIONS
+          # Comprehensive allowlist for supabase-js v2, PostgREST, GoTrue,
+          # Storage and Functions. Adding new headers here is preferred to
+          # removing the allowlist (which would mirror anything the browser
+          # sends and weaken the surface). The selfhost-auth-smoke CI
+          # workflow guards against the next supabase-js release adding a
+          # header that is missing from this list.
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
             - Prefer
             - Range
+            - X-Requested-With
             - apikey
             - x-client-info
             - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -257,19 +313,33 @@ services:
             - PATCH
             - DELETE
             - OPTIONS
+          # Comprehensive allowlist for supabase-js v2, PostgREST, GoTrue,
+          # Storage and Functions. Adding new headers here is preferred to
+          # removing the allowlist (which would mirror anything the browser
+          # sends and weaken the surface). The selfhost-auth-smoke CI
+          # workflow guards against the next supabase-js release adding a
+          # header that is missing from this list.
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
             - Prefer
             - Range
+            - X-Requested-With
             - apikey
             - x-client-info
             - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
