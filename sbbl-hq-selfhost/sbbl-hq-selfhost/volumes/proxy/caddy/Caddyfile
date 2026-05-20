@@ -1,7 +1,8 @@
 # SBBL-HQ Caddyfile — auto HTTPS via Let's Encrypt
+# Serves supabase.sbbl-hq.icu for API/Supabase services
 # Caddy docs: https://caddyserver.com/docs/
 
-sbbl-hq.icu {
+supabase.sbbl-hq.icu {
     # ── Kong (main API gateway) ───────────────────────────
     # All traffic except realtime and storage goes through Kong
     reverse_proxy /auth/*     kong:8000
@@ -26,9 +27,6 @@ sbbl-hq.icu {
         header_up X-Forwarded-Proto https
     }
 
-    # ── Dashboard (Studio) ────────────────────────────────
-    reverse_proxy /   studio:3000
-
     # ── Global security headers ───────────────────────────
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
@@ -36,7 +34,6 @@ sbbl-hq.icu {
         X-Frame-Options "SAMEORIGIN"
         X-XSS-Protection "1; mode=block"
         Referrer-Policy "strict-origin-when-cross-origin"
-        Permissions-Policy "camera=(), microphone=(), geolocation=()"
     }
 
     # ── Compression ───────────────────────────────────────
@@ -52,8 +49,7 @@ sbbl-hq.icu {
     }
 }
 
-# HTTP → HTTPS redirect (Caddy handles this automatically,
-# but explicit for clarity)
-http://sbbl-hq.icu {
-    redir https://sbbl-hq.icu{uri} permanent
+# HTTP → HTTPS redirect for supabase domain
+http://supabase.sbbl-hq.icu {
+    redir https://supabase.sbbl-hq.icu{uri} permanent
 }
