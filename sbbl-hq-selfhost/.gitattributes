@@ -1,0 +1,10 @@
+# Force LF line endings for shell scripts so Windows git checkout never
+# produces CRLF, which breaks the bash shebang inside Docker Linux containers.
+*.sh text eol=lf
+
+# Declarative configs and YAML: keep LF
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# SQL init scripts: keep LF
+*.sql text eol=lf
