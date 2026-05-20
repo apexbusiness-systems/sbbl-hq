@@ -49,14 +49,25 @@ services:
             - OPTIONS
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -90,14 +101,25 @@ services:
             - OPTIONS
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -131,14 +153,25 @@ services:
             - OPTIONS
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -172,14 +205,25 @@ services:
             - OPTIONS
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -213,14 +257,25 @@ services:
             - OPTIONS
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -279,14 +334,25 @@ services:
             - OPTIONS
           headers:
             - Accept
+            - Accept-Profile
             - Accept-Version
             - Authorization
+            - Cache-Control
             - Content-Length
             - Content-MD5
+            - Content-Profile
             - Content-Type
             - Date
+            - If-Match
+            - If-Modified-Since
+            - If-None-Match
+            - Prefer
+            - Range
+            - X-Requested-With
             - apikey
             - x-client-info
+            - x-supabase-api-version
+            - x-upsert
           exposed_headers:
             - Content-Length
             - Content-Range
