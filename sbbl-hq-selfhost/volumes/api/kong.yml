@@ -68,8 +68,11 @@ services:
             - Content-MD5
             - Content-Type
             - Date
+            - Prefer
+            - Range
             - apikey
             - x-client-info
+            - x-supabase-api-version
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -109,8 +112,11 @@ services:
             - Content-MD5
             - Content-Type
             - Date
+            - Prefer
+            - Range
             - apikey
             - x-client-info
+            - x-supabase-api-version
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -150,8 +156,11 @@ services:
             - Content-MD5
             - Content-Type
             - Date
+            - Prefer
+            - Range
             - apikey
             - x-client-info
+            - x-supabase-api-version
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -191,8 +200,11 @@ services:
             - Content-MD5
             - Content-Type
             - Date
+            - Prefer
+            - Range
             - apikey
             - x-client-info
+            - x-supabase-api-version
           exposed_headers:
             - Content-Length
             - Content-Range
@@ -253,8 +265,11 @@ services:
             - Content-MD5
             - Content-Type
             - Date
+            - Prefer
+            - Range
             - apikey
             - x-client-info
+            - x-supabase-api-version
           exposed_headers:
             - Content-Length
             - Content-Range
