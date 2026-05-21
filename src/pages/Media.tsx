@@ -89,9 +89,11 @@ const MediaPage = () => {
     });
   }, [allMedia, posterProjection, leagueFilter, typeFilter]);
 
-  const shareAsset = useMemo(() =>
-    shareModal ? [...allMedia, ...posterProjection].find(m => m.id === shareModal) : null
-  , [shareModal, allMedia, posterProjection]);
+  // ⚡ Bolt Performance Optimization: Prevent O(N) memory allocation from array spread [...a, ...b] on every render
+  const shareAsset = useMemo(() => {
+    if (!shareModal) return null;
+    return allMedia.find(m => m.id === shareModal) ?? posterProjection.find(m => m.id === shareModal) ?? null;
+  }, [shareModal, allMedia, posterProjection]);
 
   const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
 

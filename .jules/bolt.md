@@ -22,3 +22,6 @@
 ## 2026-05-18 - [Performance] Optimized Media Library Tab Component
 **Learning:** In React components like `MediaLibraryTab.tsx`, calling array methods such as `.find()` on every single render cycle creates unnecessary (N)$ overhead, especially when parsing state values for derived props.
 **Action:** Always wrap derived property lookups that involve array iteration with `useMemo` hooks and explicitly define the dependency arrays to ensure the lookup logic executes *only* when the parent collection or the target identifier changes.
+## 2026-05-21 - [React Rendering & Memory Optimization]
+**Learning:** Avoid using array spread syntax `[...a, ...b]` directly inside React render or hook dependencies when searching for elements via `.find()`, as it creates unnecessary O(N) array allocations on every render or dependency change.
+**Action:** Replace the spread and combined `.find()` with sequentially short-circuited searches (e.g., `a.find(...) ?? b.find(...)`) to save memory and CPU cycles.
