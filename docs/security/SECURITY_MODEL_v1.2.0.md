@@ -1,4 +1,4 @@
-<!-- Version: v1.3.0 | Date: 2026-05-11 | Status: Current -->
+<!-- Version: v1.3.0 | Date: 2026-05-21 | Status: Current -->
 # Security Model
 
 **Version:** v1.3.0

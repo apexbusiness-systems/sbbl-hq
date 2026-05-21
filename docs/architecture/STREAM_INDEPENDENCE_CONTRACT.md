@@ -4,6 +4,7 @@
 **Version:** 1.1.0
 **Previous version:** 1.0.0 (2026-04-17)
 **Effective:** 2026-05-06
+**Last reviewed:** 2026-05-21
 **Owner:** APEX Business Systems Ltd. — SBBL-HQ engineering
 
 **Changelog (v1.0.0 → v1.1.0):**

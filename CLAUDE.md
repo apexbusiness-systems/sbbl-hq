@@ -2,6 +2,21 @@
 
 Welcome. This document is the **single source of truth** for agents
 working in this repo. Read it in full before your first edit.
+<!-- Version: v1.6.0 | Date: 2026-05-21 | Status: Current -->
+
+## How to update this guide
+
+After any verified, merged workflow that reveals a permanent constraint,
+hard-won invariant, or new incident pattern:
+
+1. Add the rule to the numbered section it belongs to (new section needs owner approval).
+2. Add an entry to **Incident history** with date, root cause, and file refs.
+3. Update **Last verified** at the bottom to today's UTC date.
+4. Commit the CLAUDE.md change in the **same PR** as the work it documents.
+
+**Never defer CLAUDE.md updates.** Stale guides reproduce the exact incidents
+this document was written to prevent.
+
 
 ## ð¨ HARD RULES â Do not break these
 
@@ -736,6 +751,23 @@ CI runs all of these. Do not merge red.
 
 ## Incident history (relevant to this guide)
 
+- **2026-05-21** — K-01: Kong CORS browser login failure. Six stale CORS header
+  allowlists in the active nested Kong config
+  (`sbbl-hq-selfhost/sbbl-hq-selfhost/volumes/api/kong.yml`) were missing
+  `Accept-Profile`, `Cache-Control`, `Content-Profile`, `If-Match`,
+  `If-Modified-Since`, `If-None-Match`, `Prefer`, `Range`, `X-Requested-With`,
+  `x-supabase-api-version`, and `x-upsert`. Browser preflight OPTIONS requests
+  for login/signup returned 400/forbidden, blocking all auth flows. Root cause:
+  the outer `kong.yml` received CORS updates but the nested active config was
+  not synced. Fix: patched all 6 blocks in PR #535. See §9 and
+  `sbbl-hq-selfhost/sbbl-hq-selfhost/ACTIVE_SELFHOST_ROOT.md`.
+
+- **2026-05-16** — S-01: Self-hosted Supabase auth audit. Four high-severity
+  npm vulnerabilities patched; auth flow hardened against header-injection;
+  CORS preflight added explicitly to all auth routes in Kong. Secret rotation
+  runbook added at
+  `sbbl-hq-selfhost/docs/runbooks/supabase-clean-secret-rotation.md`.
+
 - **2026-05-06** — M-01: Open broadcast fan-view gap. Registered fans who
   passed the `get_active_broadcast()` oracle (which correctly returned
   `stream_url`) still saw a blank player because two worker endpoints
@@ -761,4 +793,98 @@ CI runs all of these. Do not merge red.
 
 ---
 
-Last verified: 2026-05-11
+## §9 Self-hosted Supabase & Kong — Hard Rules
+
+The production Supabase stack runs in a **nested** Docker Compose root.
+This nesting is intentional and permanent. All Docker operations **must**
+target the correct inner directory.
+
+### 9.1 — Active Docker Compose root
+
+| Path | Role |
+|---|---|
+| `sbbl-hq-selfhost/sbbl-hq-selfhost/` | **ACTIVE** — run all Docker commands here |
+| `sbbl-hq-selfhost/` | **OUTER** — retained for git history only; never run Docker here |
+
+Verify before any Docker operation:
+
+```powershell
+docker inspect supabase-kong --format '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}'
+# Expected: ...sbbl-hq-selfhost/sbbl-hq-selfhost
+```
+
+### 9.2 — Active Kong config path
+
+```
+sbbl-hq-selfhost/sbbl-hq-selfhost/volumes/api/kong.yml   ← ACTIVE (patch this)
+sbbl-hq-selfhost/volumes/api/kong.yml                     ← OUTER (do NOT copy over active)
+```
+
+The outer `kong.yml` has diverged structurally (it is missing `auth-v1-open-health`
+and other services). **Never** copy it wholesale over the active config.
+
+### 9.3 — Kong CORS header allowlist (6 auth service blocks)
+
+All six explicit `headers:` lists in the active `kong.yml` must contain the full set.
+Missing any header causes browser preflight failures on login/signup.
+
+Required headers (all six services: `auth-v1-open`, `auth-v1-open-callback`,
+`auth-v1-open-authorize`, `auth-v1-open-jwks`, `auth-v1-open-health`, `auth-v1`):
+
+```yaml
+headers:
+  - Accept
+  - Accept-Profile
+  - Accept-Version
+  - Authorization
+  - Cache-Control
+  - Content-Length
+  - Content-MD5
+  - Content-Profile
+  - Content-Type
+  - Date
+  - If-Match
+  - If-Modified-Since
+  - If-None-Match
+  - Prefer
+  - Range
+  - X-Requested-With
+  - apikey
+  - x-client-info
+  - x-supabase-api-version
+  - x-upsert
+```
+
+`x-supabase-api-version` is required — GoTrue returns 400 without it.
+`Prefer` and `Range` are required by PostgREST clients.
+
+### 9.4 — After any Kong config change, recreate Kong only
+
+```powershell
+Push-Location $ActiveRoot
+docker compose up -d --force-recreate kong
+Start-Sleep -Seconds 15
+docker compose ps kong
+docker compose logs --tail=100 kong
+Pop-Location
+```
+
+Never `docker compose down` (destroys DB data).
+Never `up` the full stack to apply a Kong-only config change.
+
+### 9.5 — Patch protocol for CORS changes
+
+1. Discover `$ActiveRoot` from Docker labels (§9.1) — never hardcode.
+2. Backup active kong.yml before mutation: `Copy-Item $KongPath "$KongPath.bak-cors-<stamp>"`.
+3. Verify exactly N stale blocks before patching; abort if count is unexpected.
+4. Verify 0 stale blocks remain after patching.
+5. Recreate Kong (§9.4).
+6. Validate preflight: OPTIONS → 200/204, `access-control-allow-origin: https://sbbl-hq.icu`.
+7. Validate POST to `/auth/v1/token` reaches GoTrue (expect 400 not 0/5xx).
+
+Enforcement: `sbbl-hq-selfhost/sbbl-hq-selfhost/ACTIVE_SELFHOST_ROOT.md`
+and `sbbl-hq-selfhost/WARNING_NOT_ACTIVE_SELFHOST_ROOT.md`.
+
+---
+
+Last verified: 2026-05-21
