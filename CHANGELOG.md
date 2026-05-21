@@ -6,6 +6,62 @@ Versioning follows [semantic versioning](https://semver.org) with UTC date stamp
 
 ---
 
+## [1.6.0] - 2026-05-21
+
+### Added — Self-hosted Supabase hardening & Kong CORS fixes
+
+- **Self-hosted Supabase Docker Compose** (`sbbl-hq-selfhost/sbbl-hq-selfhost/`):
+  Full production Docker Compose stack for self-hosted Supabase added in PR #513.
+  Nested active root pattern established (`sbbl-hq-selfhost/sbbl-hq-selfhost/`)
+  with `WARNING_NOT_ACTIVE_SELFHOST_ROOT.md` guard on the outer directory.
+
+- **Secret rotation runbook** (`sbbl-hq-selfhost/docs/runbooks/supabase-clean-secret-rotation.md`):
+  End-to-end runbook for rotating all Supabase self-hosted secrets safely without
+  downtime. Added in feat(selfhost) — commit `47f46b1`.
+
+- **Auth flow security audit** (`security: audit and harden self-hosted Supabase auth flow`):
+  Four high-severity npm vulnerabilities patched. Kong auth routes hardened against
+  header-injection. Auth flow tests added (`src/worker/tests/auth-audit.*.ts`).
+
+- **Import History regex filter**: Regex-enabled search filter added to the Import
+  History tab in the ops console (commit `ef98420`).
+
+- **Cloudflare security insights remediation** (`ops/cloudflare/SECURITY_INSIGHTS_REMEDIATION.md`):
+  Rate-limit rules and security insight remediations applied (commit `59ccea0`).
+
+### Changed — Kong CORS (multiple fixes)
+
+- **`fix(kong): add explicit CORS config to all auth routes`** (`e142674`):
+  First pass — explicit CORS plugin blocks added to all auth services in kong.yml.
+- **`fix(kong): allow x-supabase-api-version (+ Prefer, Range) in CORS preflight`** (`57d1891`):
+  Added missing PostgREST headers to CORS allowlist.
+- **`fix(kong): expand CORS allowed-headers in active nested kong.yml`** (PR #535, `8f9d76b`):
+  Definitive fix — all 6 stale CORS header blocks in the nested active kong.yml
+  expanded to full 20-header allowlist. Added `Accept-Profile`, `Cache-Control`,
+  `Content-Profile`, `If-Match`, `If-Modified-Since`, `If-None-Match`, `Prefer`,
+  `Range`, `X-Requested-With`, `x-supabase-api-version`, `x-upsert`.
+- **`chore(selfhost): zero-tech-debt hardening pass`** (`eca9074`):
+  Kong service hardened; duplicate YAML entrypoint key fixed; `.gitattributes`
+  added to enforce LF line endings on shell scripts.
+- **`fix(ci): split selfhost-auth-smoke into static + live jobs`** (`3a99987`):
+  Selfhost auth smoke test split into static (always-pass) and live (environment-gated)
+  jobs so CI does not fail in environments without a live Supabase host.
+
+### Changed — Media intelligence overhaul (PRs #508, #520)
+
+- Touch-first command center for ops media management.
+- Media Library extracted into dedicated component & hook (PR #505).
+- Publication lookups optimized (Bolt performance improvement).
+- Pin-during-archive race window closed (commit `9557e4b`).
+
+### Fixed
+- Nested selfhost root drift repaired — outer `volumes/` completed to match active
+  root (`f90b8ac`). Previously the outer directory was missing several volume dirs,
+  causing confusion when navigating the repo.
+- `.gitattributes` extended to cover Elixir scripts (`43b75d0`, `187b88c`).
+
+---
+
 ## [1.5.0] - 2026-05-11
 
 ### Added — OmniBridge Integration (APEX-OmniHub bidirectional sync)

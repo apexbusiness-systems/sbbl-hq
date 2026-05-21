@@ -1,4 +1,4 @@
-<!-- Version: v1.4.0 | Date: 2026-05-11 | Status: Current -->
+<!-- Version: v1.4.0 | Date: 2026-05-21 | Status: Current -->
 # SBBL HQ Pipeline Map (Internal)
 
 ## 1) Trust Boundary and Env Systems

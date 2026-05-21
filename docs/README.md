@@ -1,8 +1,8 @@
-<!-- Version: v2.4.0 | Date: 2026-04-16 | Status: Current -->
+<!-- Version: v2.5.0 | Date: 2026-05-21 | Status: Current -->
 # SBBL HQ — Documentation Hub
 
-**Version:** v2.4.0
-**Last Updated:** 2026-04-16
+**Version:** v2.5.0
+**Last Updated:** 2026-05-21
 **Maintainer:** APEX Business Systems Ltd. — Engineering Lead
 
 > Single source of truth for all SBBL HQ engineering, operational, and product documentation.
@@ -48,7 +48,7 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
-| [SECURITY MODEL](./security/SECURITY_MODEL_v1.2.0.md) | v1.2.0 | Auth, RLS hardening, Turnstile, Stripe webhook security, defensive patterns |
+| [SECURITY MODEL](./security/SECURITY_MODEL_v1.2.0.md) | v1.3.0 | Auth, RLS hardening, Turnstile, Stripe webhook security, OmniBridge trust boundary, defensive patterns |
 | [RLS MATRIX](./security/RLS_MATRIX_v1.2.0.md) | v1.2.0 | Row-Level Security access matrix — all table domains + helper functions |
 | [HEADSHOT POLICY](./security/HEADSHOT_POLICY_v1.1.0.md) | v1.1.0 | Image moderation outcomes and routing rules |
 
@@ -58,9 +58,14 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
-| [OPERATIONS RUNBOOK](./operations/OPERATIONS_RUNBOOK_v1.6.0.md) | v1.6.0 | Env setup, deployments, DB ops, CI/CD, emergency procedures, livestream ops, browser-native WHIP broadcast |
+| [OPERATIONS RUNBOOK](./operations/OPERATIONS_RUNBOOK_v1.6.0.md) | v1.7.0 | Env setup, deployments, DB ops, CI/CD, emergency procedures, livestream ops, WHIP broadcast, OmniBridge ops |
 | [SUPABASE MONITORING RUNBOOK](./operations/SUPABASE_MONITORING_RUNBOOK_v1.0.0.md) | v1.0.0 | Supabase cost/health metrics, escalation, emergency cost controls |
 | [EXTERNAL BINDINGS](./operations/EXTERNAL_BINDINGS_v1.0.0.md) | v1.0.0 | Third-party secrets and service configuration checklist |
+| [SELFHOST HARDENING RUNBOOK](../sbbl-hq-selfhost/docs/runbooks/selfhost-hardening.md) | v1.0.0 | Self-hosted Supabase Docker stack ops — Kong, Auth, DB, restart procedures |
+| [SECRET ROTATION RUNBOOK](../sbbl-hq-selfhost/docs/runbooks/supabase-clean-secret-rotation.md) | v1.0.0 | Safe rotation of all self-hosted Supabase secrets without downtime |
+| [OAUTH HOTFIX RUNBOOK](./ops/OAUTH_HOTFIX_RUNBOOK.md) | v1.0.0 | Google OAuth enablement and troubleshooting |
+| [REPLAY MONETIZATION RUNBOOK](./ops/REPLAY_MONETIZATION_RUNBOOK.md) | v1.0.0 | Post-event replay monetization activation |
+| [WS2–WS7 RELEASE CHECKLIST](./ops/WS_RELEASE_CHECKLIST.md) | v1.0.0 | Feature-flag activation order and rollback for workstream releases |
 
 ---
 
@@ -89,6 +94,8 @@ docs/
 
 | Document | Version | Description |
 |---|---|---|
+| [RELEASE GATE AUDIT 2026-05-16](./qa/RELEASE_GATE_AUDIT_2026-05-16.md) | — | Static gates PASS (typecheck/lint/vitest); Playwright gate PASS post-deps-install |
+| [BROADCAST PAYWALL QA AUDIT 2026-05-08](./qa/BROADCAST_PAYWALL_QA_AUDIT_2026-05-08.md) | — | Full broadcast/paywall audit — 2399 tests pass; executable evidence required for VERIFIED status |
 | [RELEASE GATE AUDIT 2026-04-11](./quality/RELEASE_GATE_AUDIT_2026-04-11_v1.4.0.md) | v1.4.0 | Comp codes + 20K chaos battery — historical gate decision: GO (superseded; re-run current gates) |
 | [RELEASE GATE AUDIT 2026-04-09](./quality/RELEASE_GATE_AUDIT_2026-04-09_v1.3.0.md) | v1.3.0 | Final RC gate run — lint/typecheck/tests/build all PASS; historical gate decision: GO (superseded; re-run current gates) |
 | [LIVESTREAM INTEGRITY AUDIT 2026-04-09](./quality/LIVESTREAM_INGEST_BROADCAST_SYSTEM_INTEGRITY_AUDIT_2026-04-09_v1.0.0.md) | v1.0.0 | 20K-oriented livestream/ingest/broadcast integrity audit (Rev B) |
@@ -148,6 +155,17 @@ docs/
 | [APEX DEBUG FRAMEWORK](./internal/APEX_DEBUG_FRAMEWORK_v1.0.0.md) | v1.0.0 | Proprietary APEX omniscient debugging intelligence |
 | [APEX POWER FRAMEWORK](./internal/APEX_POWER_FRAMEWORK_v1.0.0.md) | v1.0.0 | Proprietary APEX universal execution meta-skill |
 | [SBBL AGENT](./internal/SBBL_AGENT_v1.0.0.md) | v1.0.0 | Session skill profile for SBBL HQ execution contexts |
+
+---
+
+## Self-hosted Supabase
+
+| Document | Description |
+|---|---|
+| [ACTIVE SELFHOST ROOT](../sbbl-hq-selfhost/sbbl-hq-selfhost/ACTIVE_SELFHOST_ROOT.md) | Active Docker Compose root — run all Docker commands from here |
+| [WARNING NOT ACTIVE ROOT](../sbbl-hq-selfhost/WARNING_NOT_ACTIVE_SELFHOST_ROOT.md) | Outer directory guard — do NOT run Docker commands here |
+| [SELFHOST HARDENING RUNBOOK](../sbbl-hq-selfhost/docs/runbooks/selfhost-hardening.md) | Kong, Auth, DB, restart procedures |
+| [SECRET ROTATION RUNBOOK](../sbbl-hq-selfhost/docs/runbooks/supabase-clean-secret-rotation.md) | Safe secret rotation without downtime |
 
 ---
 
