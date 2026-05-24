@@ -2892,7 +2892,7 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   const limitParam = Number(url.searchParams.get('limit') ?? '100');
   const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 100, 1), 200);
 
-  let query = admin
+  let query = db
     .from('media_publications')
     .select(
       'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,sort_order,league_id,render_payload,' +
@@ -3423,7 +3423,7 @@ function splitProfileName(profile: Record<string, unknown> | undefined) {
 async function handleTeamsList({ req, admin }: HandlerCtx) {
   const leagueId = new URL(req.url).searchParams.get("leagueId");
 
-  let query = admin
+  let query = db
     .from("teams")
     .select(
       "id,name,league_id,record,leagues(code,name),seasons(name),divisions(name)," +
@@ -8045,7 +8045,7 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
   const beforeCursor = url.searchParams.get("before");
 
   // Single query — migration 20260404004000 is applied so all columns exist.
-  let query = admin
+  let query = db
     .from("games")
     .select(
       "id, status, created_at, home_score, away_score, " +
