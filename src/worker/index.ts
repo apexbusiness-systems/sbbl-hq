@@ -175,8 +175,8 @@ let _cachedPublicKey = "";
 
 function getPublicClient(env: Env): SupabaseClient {
   const key = env.SUPABASE_PUBLISHABLE_KEY;
-  if (!key || key.length < 20) {
-    throw new Error("SUPABASE_PUBLISHABLE_KEY is not set or invalid");
+  if (!key || key.trim().length === 0) {
+    throw new Error("SUPABASE_PUBLISHABLE_KEY is not set");
   }
   if (_cachedPublic && _cachedPublicUrl === env.SUPABASE_URL && _cachedPublicKey === key) return _cachedPublic;
   _cachedPublic = createClient(env.SUPABASE_URL, key, {
