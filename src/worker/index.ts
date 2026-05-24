@@ -168,6 +168,24 @@ async function flushHeartbeatQueue(env: Env): Promise<void> {
   }
 }
 
+
+let _cachedPublic: SupabaseClient | null = null;
+let _cachedPublicUrl = "";
+let _cachedPublicKey = "";
+
+function getPublicClient(env: Env): SupabaseClient {
+  const key = env.SUPABASE_PUBLISHABLE_KEY;
+  if (!key || key.length < 20) {
+    throw new Error("SUPABASE_PUBLISHABLE_KEY is not set or invalid");
+  }
+  if (_cachedPublic && _cachedPublicUrl === env.SUPABASE_URL && _cachedPublicKey === key) return _cachedPublic;
+  _cachedPublic = createClient(env.SUPABASE_URL, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+  _cachedPublicUrl = env.SUPABASE_URL;
+  _cachedPublicKey = key;
+  return _cachedPublic;
+}
 function getAdminClient(env: Env): SupabaseClient {
   // Invalidate on URL or key change (covers both config drift and key rotation).
   if (
@@ -2873,7 +2891,7 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   const limitParam = Number(url.searchParams.get('limit') ?? '100');
   const limit = Math.min(Math.max(Number.isFinite(limitParam) ? limitParam : 100, 1), 200);
 
-  let query = admin
+  let query = db
     .from('media_publications')
     .select(
       'id,media_asset_id,surface,title,subtitle,status,published_at,scheduled_at,sort_at,sort_order,league_id,render_payload,' +
@@ -3404,7 +3422,7 @@ function splitProfileName(profile: Record<string, unknown> | undefined) {
 async function handleTeamsList({ req, admin }: HandlerCtx) {
   const leagueId = new URL(req.url).searchParams.get("leagueId");
 
-  let query = admin
+  let query = db
     .from("teams")
     .select(
       "id,name,league_id,record,leagues(code,name),seasons(name),divisions(name)," +
@@ -6406,13 +6424,13 @@ function mapPublicMediaRows(rows: PublicMediaRow[], coercePhotoToPoster = false)
 }
 
 async function fetchPublicMediaRows(
-  admin: HandlerCtx["admin"],
+  db: SupabaseClient,
   req: Request,
   includeTypes?: string[],
 ) {
   const url = new URL(req.url);
   const leagueId = url.searchParams.get("leagueId");
-  let query = admin
+  let query = db
     .from("media_publications")
     .select(
       "id,surface,title,subtitle,status,sort_at,sort_order,render_payload,league_id," +
@@ -6489,12 +6507,13 @@ async function respondWithPublicMediaFreshness(
   return res;
 }
 
-async function handlePublicProducts({ req, admin }: HandlerCtx) {
+async function handlePublicProducts({ req, env }: HandlerCtx) {
+  const publicClient = getPublicClient(env);
   const url = new URL(req.url);
   // Optional leagueId filter - keep it in signature for backwards compat, though store_products is global.
   const leagueId = url.searchParams.get("leagueId");
 
-  const query = admin
+  const query = publicClient
     .from("store_products")
     .select("id,name,description,category,price_cents,image_url,sizes,colors,badge,is_custom")
     .eq("active", true)
@@ -6522,20 +6541,22 @@ async function handlePublicProducts({ req, admin }: HandlerCtx) {
   return json({ ok: true, data: mapped }, 200, { "Cache-Control": "public, s-maxage=300, max-age=120" });
 }
 
-async function handlePublicMedia({ req, admin }: HandlerCtx) {
+async function handlePublicMedia({ req, admin, env }: HandlerCtx) {
+  const publicClient = getPublicClient(env);
   // Canonical render still reads from media_publications (+ media_assets!inner join)
   // and keeps Cache-Control at public, s-maxage=300, max-age=120 for anonymous traffic.
   return respondWithPublicMediaFreshness(req, admin, "media", async () => {
-    const rows = await fetchPublicMediaRows(admin, req);
+    const rows = await fetchPublicMediaRows(publicClient, req);
     return mapPublicMediaRows(rows);
   });
 }
 
-async function handlePublicPosterMedia({ req, admin }: HandlerCtx) {
+async function handlePublicPosterMedia({ req, admin, env }: HandlerCtx) {
+  const publicClient = getPublicClient(env);
   return respondWithPublicMediaFreshness(req, admin, "posters", async () => {
     // Poster tab projection: include event/league-wide art and promote photo assets
     // to poster cards without mutating source records.
-    const rows = await fetchPublicMediaRows(admin, req, ["poster", "photo"]);
+    const rows = await fetchPublicMediaRows(publicClient, req, ["poster", "photo"]);
 
     // ⚡ Bolt: Replace O(N^2) deduplication with O(N) Set lookup
     const seen = new Set<string>();
@@ -8023,7 +8044,7 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
   const beforeCursor = url.searchParams.get("before");
 
   // Single query — migration 20260404004000 is applied so all columns exist.
-  let query = admin
+  let query = db
     .from("games")
     .select(
       "id, status, created_at, home_score, away_score, " +
