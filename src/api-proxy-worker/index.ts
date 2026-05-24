@@ -1,6 +1,6 @@
 /**
  * SBBL-HQ API Proxy Worker — Circuit Breaker + Active-Active Failover
- * Routes: api.sbbl-hq.icu → EC2 Self-Hosted (primary) | Supabase Cloud (fallback)
+ * Routes: api.sbbl-hq.icu → Supabase Cloud (primary) | EC2 Self-Hosted (manual fallback)
  * State:  Cloudflare KV namespace SBBL_BACKEND_STATE
  *
  * Type strategy: this file is excluded from the main app's tsconfig.app.json
@@ -48,7 +48,7 @@ interface BackendState {
 }
 
 const DEFAULT_STATE: BackendState = {
-  active: 'selfhost',
+  active: 'cloud',
   failures: 0,
   lastFailure: 0,
   lastSwitch: 0,
