@@ -174,10 +174,11 @@ let _cachedPublicUrl = "";
 let _cachedPublicKey = "";
 
 function getPublicClient(env: Env): SupabaseClient {
-  const key = env.SUPABASE_PUBLISHABLE_KEY;
-  if (!key || key.trim().length === 0) {
+  const key = env.SUPABASE_PUBLISHABLE_KEY?.trim();
+  if (!key) {
     throw new Error("SUPABASE_PUBLISHABLE_KEY is not set");
   }
+  // Normalize key with trim() so accidental whitespace in env vars doesn't bust cache or auth.
   if (_cachedPublic && _cachedPublicUrl === env.SUPABASE_URL && _cachedPublicKey === key) return _cachedPublic;
   _cachedPublic = createClient(env.SUPABASE_URL, key, {
     auth: { persistSession: false, autoRefreshToken: false },
