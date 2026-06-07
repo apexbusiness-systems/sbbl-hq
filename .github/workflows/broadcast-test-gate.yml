@@ -26,8 +26,8 @@ jobs:
     timeout-minutes: 20
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || '' }}
-      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'test-anon-key' }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://SBBL_SUPABASE_PROJECT_REF.supabase.co' }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'REPLACE_WITH_SUPABASE_ANON_KEY' }}
       VITE_DEFAULT_LEAGUE: SBBL
     steps:
       - uses: actions/checkout@v4
@@ -66,8 +66,8 @@ jobs:
     timeout-minutes: 25
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || '' }}
-      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'test-anon-key' }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://SBBL_SUPABASE_PROJECT_REF.supabase.co' }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'REPLACE_WITH_SUPABASE_ANON_KEY' }}
       VITE_DEFAULT_LEAGUE: SBBL
     steps:
       - uses: actions/checkout@v4
