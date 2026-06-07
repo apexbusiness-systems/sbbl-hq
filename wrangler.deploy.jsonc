@@ -31,6 +31,7 @@
     "SUPABASE_URL": "https://SBBL_SUPABASE_PROJECT_REF.supabase.co",
     // Supabase anon/public key — replace with value from Supabase dashboard.
     "SUPABASE_PUBLISHABLE_KEY": "REPLACE_WITH_SUPABASE_ANON_KEY",
-    "SENTRY_DSN": ""
+    "SENTRY_DSN": "",
+    "GOOGLE_OAUTH_ENABLED": "true"
   }
 }
