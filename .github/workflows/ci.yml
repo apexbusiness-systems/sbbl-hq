@@ -12,8 +12,8 @@ concurrency:
 
 env:
   # Build-time env stays optional; runtime /api/public-config is the source of truth.
-  VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || '' }}
-  VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || '' }}
+  VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://test-project-ref.supabase.co' }}
+  VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'test-anon-key' }}
   VITE_TURNSTILE_SITE_KEY: ${{ secrets.VITE_TURNSTILE_SITE_KEY || '' }}
   VITE_APP_NAME: SBBL HQ
   VITE_DEFAULT_LEAGUE: SBBL
