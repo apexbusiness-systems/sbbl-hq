@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { handleOpsValidationRuns } from '@/worker/validation-contract-wrapper';
 
 const env = {
-  SUPABASE_URL: 'https://supabase.sbbl-hq.icu',
+  // Use a valid-format cloud Supabase URL for test env. The actual value
+  // doesn't matter for unit tests — only the URL format is validated.
+  SUPABASE_URL: 'https://test-project-ref.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: 'service-role-key-123456789',
 } as unknown as Env;
 

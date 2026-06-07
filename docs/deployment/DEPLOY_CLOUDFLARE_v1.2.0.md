@@ -66,7 +66,7 @@ The offline page (`src/pages/Offline.tsx`) provides links to cached routes (Sche
 
 | Variable | Value | Where to set |
 |---|---|---|
-| `VITE_SUPABASE_URL` | `https://supabase.sbbl-hq.icu` | GitHub Secret + `.env` |
+| `VITE_SUPABASE_URL` | `https://SBBL_SUPABASE_PROJECT_REF.supabase.co` | GitHub Secret + `.env` |
 | `VITE_SUPABASE_ANON_KEY` | `eyJ...` anon JWT from Supabase dashboard | GitHub Secret + `.env` |
 | `VITE_TURNSTILE_SITE_KEY` | Turnstile site key | GitHub Secret + `.env` (optional) |
 | `VITE_SENTRY_DSN` | Sentry DSN | GitHub Secret + `.env` (optional) |

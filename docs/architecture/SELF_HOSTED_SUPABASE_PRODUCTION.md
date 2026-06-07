@@ -4,7 +4,7 @@ Production Supabase for SBBL-HQ is self-hosted. Do not use Supabase Cloud projec
 
 ## Runtime identity
 
-- Production app public Supabase URL: `SUPABASE_URL` in the Worker runtime and `VITE_SUPABASE_URL` only for explicit build/test fallback. Current production config target is `https://supabase.sbbl-hq.icu`.
+- Production app public Supabase URL: `SUPABASE_URL` in the Worker runtime and `VITE_SUPABASE_URL` only for explicit build/test fallback. Current production config target is `https://SBBL_SUPABASE_PROJECT_REF.supabase.co`.
 - `/api/public-config` exposes only the public Supabase URL and public publishable/anon key. It must never expose `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SECRET_KEY`.
 - Browser/client code may only use `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_ANON_KEY`, `VITE_SUPABASE_PUBLISHABLE_KEY`, or `VITE_SUPABASE_ANON_KEY`.
 - Secret/service-role key is server-only and only allowed after existing privileged auth checks. `/ops/validation-runs` requires existing `super_admin` auth before its validation-run service-role client is created.

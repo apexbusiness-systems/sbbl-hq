@@ -13,15 +13,10 @@ name: Selfhost Auth Smoke
 #   reaches GoTrue. Catches drift between this repo and production.
 
 on:
-  schedule:
-    # Every day at 06:00 UTC.
-    - cron: '0 6 * * *'
+  # Self-hosted Supabase has been decommissioned. This workflow is disabled.
+  # It can be re-enabled manually if self-hosted is restored.
+  # Removed: schedule (nightly cron), pull_request path triggers.
   workflow_dispatch:
-  pull_request:
-    paths:
-      - 'sbbl-hq-selfhost/volumes/api/kong.yml'
-      - 'sbbl-hq-selfhost/sbbl-hq-selfhost/volumes/api/kong.yml'
-      - '.github/workflows/selfhost-auth-smoke.yml'
 
 jobs:
   cors-static-check:
@@ -95,7 +90,7 @@ jobs:
     steps:
       - name: Verify OPTIONS preflight allows all required headers
         env:
-          SUPABASE_URL: https://supabase.sbbl-hq.icu
+          SUPABASE_URL: https://test-project-ref.supabase.co
           APP_ORIGIN: https://sbbl-hq.icu
           REQUIRED_HEADERS: >-
             accept,accept-profile,accept-version,authorization,cache-control,content-length,content-md5,content-profile,content-type,date,if-match,if-modified-since,if-none-match,prefer,range,x-requested-with,apikey,x-client-info,x-supabase-api-version,x-upsert
@@ -146,7 +141,7 @@ jobs:
 
       - name: Verify POST /auth/v1/token reaches GoTrue (no 5xx)
         env:
-          SUPABASE_URL: https://supabase.sbbl-hq.icu
+          SUPABASE_URL: https://test-project-ref.supabase.co
           APP_ORIGIN: https://sbbl-hq.icu
         run: |
           set -euo pipefail
