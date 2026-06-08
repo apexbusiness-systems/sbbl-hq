@@ -33,7 +33,7 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium webkit
+        run: npx playwright install --with-deps chrome webkit
 
       - name: Run Playwright tests
         run: npx playwright test

@@ -238,7 +238,7 @@ jobs:
         run: npm ci
 
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium webkit
+        run: npx playwright install --with-deps chrome webkit
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
@@ -280,9 +280,9 @@ jobs:
         run: npm ci
 
       - name: Install Playwright Linux dependencies
-        run: npx playwright install-deps chromium
-      - name: Install Chromium
-        run: npx playwright install chromium
+        run: npx playwright install-deps chrome
+      - name: Install Chrome
+        run: npx playwright install chrome
 
       - name: Download build artifacts
         uses: actions/download-artifact@v4
