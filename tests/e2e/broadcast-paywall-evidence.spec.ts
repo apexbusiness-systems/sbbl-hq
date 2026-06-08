@@ -292,13 +292,20 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
 
   await page.route('**/api/broadcast/session/heartbeat', (route) => fulfillJson(route, 200, { ok: true }));
   await page.route('**/api/broadcast/session/end', (route) => fulfillJson(route, 200, { ok: true }));
+
+  // Abort Supabase Realtime WebSocket so networkidle resolves immediately.
+  // Without this the TCP handshake to an unreachable host stalls ~75 s per
+  // persona, causing the 25-minute job timeout to be hit.
+  await page.route('**/realtime/v1/**', (route) => route.abort());
 }
 
 async function openLive(page: Page, persona: Persona, network: NetworkEntry[]) {
   await installPersona(page, persona);
   await mockBroadcastNetwork(page, persona, network);
   await page.goto('/live');
-  await page.waitForLoadState('networkidle');
+  // Use 'load' (DOMContentLoaded + resources) instead of 'networkidle' to
+  // avoid waiting indefinitely for polling intervals or SSE keep-alives.
+  await page.waitForLoadState('load');
 }
 
 test.use({ screenshot: 'only-on-failure', serviceWorkers: 'block', trace: 'on' });

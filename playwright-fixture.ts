@@ -158,6 +158,12 @@ export async function seedSuperAdminSession(page: Page) {
       }),
     }),
   );
+
+  // Abort Supabase Realtime WebSocket upgrade requests so networkidle is
+  // reachable immediately. page.route() handles the HTTP upgrade; without
+  // this the TCP handshake to a dead/unreachable host stalls for ~75 s and
+  // blocks waitForLoadState('networkidle') for the full test timeout.
+  await page.route('**/realtime/v1/**', (route) => route.abort());
 }
 
 export { expect };

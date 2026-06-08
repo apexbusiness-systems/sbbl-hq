@@ -13,6 +13,7 @@ export default defineConfig({
   use: {
     baseURL,
     trace: 'on-first-retry',
+    navigationTimeout: 10_000,
   },
   webServer: {
     command: `VITE_E2E_BYPASS_ADMIN=true npm run dev -- --host 127.0.0.1 --port ${port}`,
