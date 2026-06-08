@@ -53,8 +53,8 @@ jobs:
       - name: Auth/Ops unit guardrails
         run: npx vitest run src/test/runtime-config.test.ts src/test/apifetch-401-retry.test.ts src/test/ops-auth-gating.test.tsx
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chrome
+      - name: Install Playwright browser system dependencies
+        run: npx playwright install-deps chromium
 
       - name: Ops harmony e2e
         run: npx playwright test --project=chromium e2e/ops-auth-ingest-harmony.spec.ts e2e/critical-paths.spec.ts
