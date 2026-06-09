@@ -184,10 +184,6 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
     return fulfillJson(route, 200, { id: userId, aud: 'authenticated', role: 'authenticated', email: `${persona}@example.com` });
   });
 
-  // Abort Realtime WebSocket — it keeps a persistent WS connection that prevents
-  // networkidle from ever resolving and makes waitForResponse hang indefinitely.
-  await page.route('**/realtime/v1/**', (route) => route.abort());
-
   const broadcastBase = {
     is_live: true, title: 'Evidence Broadcast', active_game_id: null,
     live_started_at: NOW_ISO, requires_payment: true, is_subscribed: false,
