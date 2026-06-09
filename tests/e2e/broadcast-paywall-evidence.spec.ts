@@ -186,19 +186,6 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
 
   await page.route(SUPABASE_REST, async (route) => {
     const url = route.request().url();
-    if (url.includes('/rpc/get_active_broadcast')) {
-      const base = {
-        is_live: true,
-        title: 'Evidence Broadcast',
-        active_game_id: null,
-        live_started_at: NOW_ISO,
-        requires_payment: true,
-        is_subscribed: false,
-        has_entitlement: entitled,
-        user_registered: Boolean(userId),
-      };
-      return fulfillJson(route, 200, entitled || admin ? { ...base, stream_url: BROADCAST_SOURCE_URL } : base);
-    }
     if (url.includes('/rpc/redeem_ppv_invite')) return fulfillJson(route, 200, { ok: true });
     if (url.includes('/profiles')) {
       return fulfillJson(route, 200, userId ? [{
@@ -228,6 +215,29 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
     }
     return fulfillJson(route, 200, []);
   });
+
+  // Dedicated synchronous routes registered AFTER the general SUPABASE_REST handler
+  // so Playwright's LIFO matching picks these up first — mirrors broadcast-live-e2e.spec.ts
+  // which also separates get_active_broadcast from the general REST catch-all.
+  const broadcastBase = {
+    is_live: true,
+    title: 'Evidence Broadcast',
+    active_game_id: null,
+    live_started_at: NOW_ISO,
+    requires_payment: true,
+    is_subscribed: false,
+    has_entitlement: entitled,
+    user_registered: Boolean(userId),
+  };
+  await page.route('**/rpc/get_active_broadcast**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(
+        entitled || admin ? { ...broadcastBase, stream_url: BROADCAST_SOURCE_URL } : broadcastBase,
+      ),
+    }),
+  );
 
   await page.route('**/api/public/home**', (route) => fulfillJson(route, 200, {
     ok: true,
@@ -302,14 +312,15 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
 async function openLive(page: Page, persona: Persona, network: NetworkEntry[]) {
   await installPersona(page, persona);
   await mockBroadcastNetwork(page, persona, network);
-  // Set up the ready signal BEFORE goto so the response is captured even if
-  // it fires during navigation. Admin waits for ops/streams/config (only
-  // fetched after isSuperAdmin=true is confirmed); all other personas wait
-  // for get_active_broadcast (the first RPC that resolves authLoading +
-  // initialPollDone, unblocking the Live page skeleton).
+  // Set up ready signal BEFORE goto — captures the response even if it fires
+  // during or immediately after navigation. Explicit 12 s timeout ensures the
+  // .catch(() => null) fires well before the 30 s test budget is exhausted,
+  // so any remaining assertions can run and produce useful failure messages.
+  // Admin waits for /ops/streams/config (fetched once isSuperAdmin resolves);
+  // all other personas wait for get_active_broadcast RPC.
   const readySignal = persona === 'admin'
-    ? page.waitForResponse('**/ops/streams/config**').catch(() => null)
-    : page.waitForResponse('**/rest/v1/rpc/get_active_broadcast**').catch(() => null);
+    ? page.waitForResponse('**/ops/streams/config**', { timeout: 12_000 }).catch(() => null)
+    : page.waitForResponse('**/rpc/get_active_broadcast**', { timeout: 12_000 }).catch(() => null);
   await page.goto('/live');
   await readySignal;
 }
