@@ -95,7 +95,7 @@ jobs:
     steps:
       - name: Verify OPTIONS preflight allows all required headers
         env:
-          SUPABASE_URL: https://supabase.sbbl-hq.icu
+          SUPABASE_URL: https://ezanilxygnpucwkwpsoc.supabase.co
           APP_ORIGIN: https://sbbl-hq.icu
           REQUIRED_HEADERS: >-
             accept,accept-profile,accept-version,authorization,cache-control,content-length,content-md5,content-profile,content-type,date,if-match,if-modified-since,if-none-match,prefer,range,x-requested-with,apikey,x-client-info,x-supabase-api-version,x-upsert
@@ -146,7 +146,7 @@ jobs:
 
       - name: Verify POST /auth/v1/token reaches GoTrue (no 5xx)
         env:
-          SUPABASE_URL: https://supabase.sbbl-hq.icu
+          SUPABASE_URL: https://ezanilxygnpucwkwpsoc.supabase.co
           APP_ORIGIN: https://sbbl-hq.icu
         run: |
           set -euo pipefail

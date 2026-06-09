@@ -23,9 +23,10 @@ describe("wrangler.jsonc guardrails", () => {
     expect(raw).toMatch(/"name":\s*"sbbl-hq-worker"/);
   });
 
-  it("must define self-hosted SUPABASE_URL in vars", () => {
-    expect(raw).toContain('"SUPABASE_URL": "https://supabase.sbbl-hq.icu"');
-    expect(raw).not.toMatch(/supabase\.co/);
+  it("must define cloud Supabase URL in vars", () => {
+    // Must point to the cloud Supabase project — not the retired self-hosted instance.
+    expect(raw).toContain('"SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co"');
+    expect(raw).not.toContain('supabase.sbbl-hq.icu');
   });
 
   it("must define SUPABASE_PUBLISHABLE_KEY in vars", () => {
@@ -63,9 +64,11 @@ describe("deploy.yml guardrails", () => {
     expect(deployYml).toContain("VITE_DEFAULT_LEAGUE");
   });
 
-  it("must read VITE_SUPABASE_URL from explicit self-hosted secrets only", () => {
+  it("must read VITE_SUPABASE_URL from secrets (supports cloud and self-hosted)", () => {
+    // Supports both cloud (*.supabase.co) and future self-hosted via the same secret.
     expect(deployYml).toContain('secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL');
-    expect(deployYml).not.toMatch(/supabase\.co/);
+    // Must not hardcode the retired self-hosted endpoint.
+    expect(deployYml).not.toContain('supabase.sbbl-hq.icu');
   });
 
   it("must support legacy SUPABASE_URL secret fallback", () => {
