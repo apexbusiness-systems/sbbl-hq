@@ -302,10 +302,16 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
 async function openLive(page: Page, persona: Persona, network: NetworkEntry[]) {
   await installPersona(page, persona);
   await mockBroadcastNetwork(page, persona, network);
+  // Set up the ready signal BEFORE goto so the response is captured even if
+  // it fires during navigation. Admin waits for ops/streams/config (only
+  // fetched after isSuperAdmin=true is confirmed); all other personas wait
+  // for get_active_broadcast (the first RPC that resolves authLoading +
+  // initialPollDone, unblocking the Live page skeleton).
+  const readySignal = persona === 'admin'
+    ? page.waitForResponse('**/ops/streams/config**').catch(() => null)
+    : page.waitForResponse('**/rest/v1/rpc/get_active_broadcast**').catch(() => null);
   await page.goto('/live');
-  // Use 'load' (DOMContentLoaded + resources) instead of 'networkidle' to
-  // avoid waiting indefinitely for polling intervals or SSE keep-alives.
-  await page.waitForLoadState('load');
+  await readySignal;
 }
 
 test.use({ screenshot: 'only-on-failure', serviceWorkers: 'block', trace: 'on' });
