@@ -1,3 +1,4 @@
+const SUPABASE_REF = process.env.VITE_SUPABASE_URL ? new URL(process.env.VITE_SUPABASE_URL).hostname.split('.')[0] : 'ezanilxygnpucwkwpsoc';
 import { readFileSync } from 'node:fs';
 import { test, expect, type Page } from '@playwright/test';
 
@@ -30,8 +31,8 @@ test.beforeEach(async ({ page }, testInfo) => {
 });
 
 async function installPersona(page: Page, persona: Persona) {
-  await page.addInitScript(({ personaName }) => {
-    const ref = 'ezanilxygnpucwkwpsoc';
+  await page.addInitScript(({ personaName, SUPABASE_REF }) => {
+    const ref = SUPABASE_REF;
     // Keep this spec isolated when the full E2E suite runs before/after other auth scenarios.
     window.localStorage.clear();
     window.sessionStorage.clear();
@@ -50,7 +51,7 @@ async function installPersona(page: Page, persona: Persona) {
       user: { id: userId, aud: 'authenticated', role: 'authenticated', email: `${personaName}@example.com` },
     };
     window.localStorage.setItem(`sb-${ref}-auth-token`, JSON.stringify(session));
-  }, { personaName: persona });
+  }, { personaName: persona, SUPABASE_REF });
 }
 
 async function mockNetwork(page: Page, persona: Persona, mode: BroadcastMode = 'open-player') {
@@ -59,7 +60,7 @@ async function mockNetwork(page: Page, persona: Persona, mode: BroadcastMode = '
   const streamUrl = mode === 'open-paywall' || mode === 'ppv-unpaid' ? null : 'https://www.youtube.com/watch?v=BjcQrDA9koY';
   const activeGameId = mode.startsWith('ppv') ? GAME_ID : null;
 
-  await page.route('**/api/public-config', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, appName: 'SBBL HQ', defaultLeague: 'SBBL', supabaseUrl: 'https://ezanilxygnpucwkwpsoc.supabase.co', supabasePublishableKey: 'anon-key' }) }));
+  await page.route('**/api/public-config', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ ok: true, appName: 'SBBL HQ', defaultLeague: 'SBBL', supabaseUrl: `https://${SUPABASE_REF}.supabase.co`, supabasePublishableKey: 'anon-key' }) }));
   await page.route('**/auth/v1/token**', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ access_token: `${persona}-token`, refresh_token: `${persona}-refresh`, expires_at: Math.floor(Date.now() / 1000) + 3600, user: { id: userId } }) }));
   await page.route('**/auth/v1/user**', (route) => {
     if (!userId) return route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ message: 'JWT missing' }) });

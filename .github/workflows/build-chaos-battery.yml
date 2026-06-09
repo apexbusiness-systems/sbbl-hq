@@ -29,8 +29,8 @@ jobs:
     timeout-minutes: 45
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
-      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || '' }}
-      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImV6YW5pbHh5Z25wdWN3a3dwc29jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQ2MjI5OTIsImV4cCI6MjA5MDE5ODk5Mn0.kLbwopHDqf33H9flwIbO5XqfPYdi0wMqjeVJC76-Ceo' }}
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL || 'https://test-project-ref.supabase.co' }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY || 'test-anon-key' }}
       VITE_APP_NAME: SBBL HQ
       VITE_DEFAULT_LEAGUE: SBBL
 
@@ -51,8 +51,8 @@ jobs:
       - name: Unit chaos battery
         run: npx vitest run src/test/apifetch-401-retry.test.ts src/test/stream-chaos-battery.test.ts src/test/ops-chaos-battery.test.ts src/test/runtime-config.test.ts src/test/ops-auth-gating.test.tsx
 
-      - name: Install Playwright browser system dependencies
-        run: npx playwright install-deps chromium
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium webkit
 
       - name: E2E chaos battery
         run: npx playwright test --project=chromium e2e/build-chaos-battery.spec.ts e2e/ops-auth-ingest-harmony.spec.ts e2e/critical-paths.spec.ts

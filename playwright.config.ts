@@ -13,7 +13,6 @@ export default defineConfig({
   use: {
     baseURL,
     trace: 'on-first-retry',
-    navigationTimeout: 10_000,
   },
   webServer: {
     command: `VITE_E2E_BYPASS_ADMIN=true npm run dev -- --host 127.0.0.1 --port ${port}`,
@@ -24,11 +23,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      // channel:'chrome' uses Chrome for Testing (single binary download) instead
-      // of Playwright's Chromium bundle which also downloads chromium-headless-shell.
-      // In Playwright 1.47+ the headless-shell CDN endpoint hangs indefinitely on
-      // GitHub Actions runners, consuming the full job timeout before tests start.
-      use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+      use: { ...devices['Desktop Chrome'] },
     },
     // WebKit + mobile-safari run ONLY csp-invariant.spec.ts. They exist as a
     // cross-browser regression shield for the /live CSP fix (e3cce5c) and the
