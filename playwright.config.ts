@@ -23,7 +23,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'] },
+      use: { ...devices['Desktop Chrome'], channel: 'chrome' },
     },
     // WebKit + mobile-safari run ONLY csp-invariant.spec.ts. They exist as a
     // cross-browser regression shield for the /live CSP fix (e3cce5c) and the
