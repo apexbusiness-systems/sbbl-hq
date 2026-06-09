@@ -184,21 +184,12 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
     return fulfillJson(route, 200, { id: userId, aud: 'authenticated', role: 'authenticated', email: `${persona}@example.com` });
   });
 
+  // Abort Realtime WebSocket — it keeps a persistent WS connection that prevents
+  // networkidle from ever resolving and makes waitForResponse hang indefinitely.
+  await page.route('**/realtime/v1/**', (route) => route.abort());
+
   await page.route(SUPABASE_REST, async (route) => {
     const url = route.request().url();
-    if (url.includes('/rpc/get_active_broadcast')) {
-      const base = {
-        is_live: true,
-        title: 'Evidence Broadcast',
-        active_game_id: null,
-        live_started_at: NOW_ISO,
-        requires_payment: true,
-        is_subscribed: false,
-        has_entitlement: entitled,
-        user_registered: Boolean(userId),
-      };
-      return fulfillJson(route, 200, entitled || admin ? { ...base, stream_url: BROADCAST_SOURCE_URL } : base);
-    }
     if (url.includes('/rpc/redeem_ppv_invite')) return fulfillJson(route, 200, { ok: true });
     if (url.includes('/profiles')) {
       return fulfillJson(route, 200, userId ? [{
@@ -228,6 +219,24 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
     }
     return fulfillJson(route, 200, []);
   });
+
+  // Dedicated sync route for get_active_broadcast — registered after the SUPABASE_REST
+  // catch-all so Playwright's LIFO ordering picks this one first, ensuring the response
+  // is synchronous and waitForResponse resolves promptly.
+  const broadcastBase = {
+    is_live: true, title: 'Evidence Broadcast', active_game_id: null,
+    live_started_at: NOW_ISO, requires_payment: true, is_subscribed: false,
+    has_entitlement: entitled, user_registered: Boolean(userId),
+  };
+  await page.route('**/rpc/get_active_broadcast**', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(
+        entitled || admin ? { ...broadcastBase, stream_url: BROADCAST_SOURCE_URL } : broadcastBase,
+      ),
+    }),
+  );
 
   await page.route('**/api/public/home**', (route) => fulfillJson(route, 200, {
     ok: true,
@@ -297,8 +306,14 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
 async function openLive(page: Page, persona: Persona, network: NetworkEntry[]) {
   await installPersona(page, persona);
   await mockBroadcastNetwork(page, persona, network);
+  // Register the response waiter BEFORE goto so we don't miss the request.
+  // Admin doesn't call get_active_broadcast (isSuperAdmin gates it); wait for
+  // the ops/streams/config fetch instead.
+  const readySignal = persona === 'admin'
+    ? page.waitForResponse('**/ops/streams/config**', { timeout: 12_000 }).catch(() => null)
+    : page.waitForResponse('**/rpc/get_active_broadcast**', { timeout: 12_000 }).catch(() => null);
   await page.goto('/live');
-  await page.waitForLoadState('networkidle');
+  await readySignal;
 }
 
 test.use({ screenshot: 'only-on-failure', serviceWorkers: 'block', trace: 'on' });
