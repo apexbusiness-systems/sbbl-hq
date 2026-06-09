@@ -188,8 +188,17 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
   // networkidle from ever resolving and makes waitForResponse hang indefinitely.
   await page.route('**/realtime/v1/**', (route) => route.abort());
 
+  const broadcastBase = {
+    is_live: true, title: 'Evidence Broadcast', active_game_id: null,
+    live_started_at: NOW_ISO, requires_payment: true, is_subscribed: false,
+    has_entitlement: entitled, user_registered: Boolean(userId),
+  };
+
   await page.route(SUPABASE_REST, async (route) => {
     const url = route.request().url();
+    if (url.includes('/rpc/get_active_broadcast')) {
+      return fulfillJson(route, 200, entitled || admin ? { ...broadcastBase, stream_url: BROADCAST_SOURCE_URL } : broadcastBase);
+    }
     if (url.includes('/rpc/redeem_ppv_invite')) return fulfillJson(route, 200, { ok: true });
     if (url.includes('/profiles')) {
       return fulfillJson(route, 200, userId ? [{
@@ -223,12 +232,7 @@ async function mockBroadcastNetwork(page: Page, persona: Persona, network: Netwo
   // Dedicated sync route for get_active_broadcast — registered after the SUPABASE_REST
   // catch-all so Playwright's LIFO ordering picks this one first, ensuring the response
   // is synchronous and waitForResponse resolves promptly.
-  const broadcastBase = {
-    is_live: true, title: 'Evidence Broadcast', active_game_id: null,
-    live_started_at: NOW_ISO, requires_payment: true, is_subscribed: false,
-    has_entitlement: entitled, user_registered: Boolean(userId),
-  };
-  await page.route('**/rpc/get_active_broadcast**', (route) =>
+  await page.route('**/rpc/get_active_broadcast', (route) =>
     route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -310,8 +314,8 @@ async function openLive(page: Page, persona: Persona, network: NetworkEntry[]) {
   // Admin doesn't call get_active_broadcast (isSuperAdmin gates it); wait for
   // the ops/streams/config fetch instead.
   const readySignal = persona === 'admin'
-    ? page.waitForResponse('**/ops/streams/config**', { timeout: 12_000 }).catch(() => null)
-    : page.waitForResponse('**/rpc/get_active_broadcast**', { timeout: 12_000 }).catch(() => null);
+    ? page.waitForResponse('**/ops/streams/config').catch(() => null)
+    : page.waitForResponse('**/rest/v1/rpc/get_active_broadcast**').catch(() => null);
   await page.goto('/live');
   await readySignal;
 }
