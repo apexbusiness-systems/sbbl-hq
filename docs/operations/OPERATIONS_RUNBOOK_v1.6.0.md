@@ -21,6 +21,10 @@ for the capability matrix.
 
 This document is the canonical reference for all operational tasks, deployment procedures, emergency recovery steps, and script/tooling inventory for the SBBL HQ platform.
 
+> [!IMPORTANT]
+> **Durable Operating Knowledge & Agent Continuity:**  
+> All agents working on SBBL-HQ operations, troubleshooting, or development must ingest and respect the APEX **Omni-Recall** memory structure located at [/omni-recall/start-here.md](file:///c:/Users/sinyo/sbbl-hq/sbbl-hq/omni-recall/start-here.md). Never ignore the directives, behavioral profiles, or correction ledgers stored there.
+
 ## Entitlement Windows (canonical)
 
 These values are defined in `src/lib/constants/ENTITLEMENT_CONSTANTS.ts`
