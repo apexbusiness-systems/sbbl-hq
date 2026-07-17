@@ -23,13 +23,18 @@ describe("wrangler.jsonc guardrails", () => {
     expect(raw).toMatch(/"name":\s*"sbbl-hq-worker"/);
   });
 
-  it("must define self-hosted SUPABASE_URL in vars", () => {
-    expect(raw).toContain('"SUPABASE_URL": "https://supabase.sbbl-hq.icu"');
-    expect(raw).not.toMatch(/supabase\.co/);
+  it("SUPABASE_URL must be set to a valid https Supabase URL in vars", () => {
+    // Must be an https URL — either cloud (supabase.co) or self-hosted.
+    // Must not be an unfilled placeholder, an empty string, or the old self-hosted endpoint.
+    expect(raw).toMatch(/"SUPABASE_URL":\s*"https:\/\//);
+    expect(raw).not.toContain('"SUPABASE_URL": ""');
+    expect(raw).not.toContain('supabase.sbbl-hq.icu');
   });
 
-  it("must define SUPABASE_PUBLISHABLE_KEY in vars", () => {
+  it("SUPABASE_PUBLISHABLE_KEY must be defined in vars and not be a legacy placeholder", () => {
     expect(raw).toMatch(/"SUPABASE_PUBLISHABLE_KEY":\s*"[^"]+"/);
+    expect(raw).not.toMatch(/replace-with-self-hosted/);
+    expect(raw).not.toMatch(/replace-with-staging-self-hosted/);
   });
 
   it("must not use legacy sb_publishable placeholder keys", () => {
@@ -63,9 +68,11 @@ describe("deploy.yml guardrails", () => {
     expect(deployYml).toContain("VITE_DEFAULT_LEAGUE");
   });
 
-  it("must read VITE_SUPABASE_URL from explicit self-hosted secrets only", () => {
+  it("must read VITE_SUPABASE_URL from GitHub secrets (supports cloud and self-hosted)", () => {
+    // Supports both cloud (*.supabase.co) and future self-hosted via the same secret.
     expect(deployYml).toContain('secrets.VITE_SUPABASE_URL || secrets.SUPABASE_URL');
-    expect(deployYml).not.toMatch(/supabase\.co/);
+    // Must not hardcode the old self-hosted endpoint.
+    expect(deployYml).not.toContain('supabase.sbbl-hq.icu');
   });
 
   it("must support legacy SUPABASE_URL secret fallback", () => {
