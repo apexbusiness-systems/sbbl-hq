@@ -27,7 +27,7 @@ function mkCtx(options: {
     req: new Request(options.url, init),
     admin: options.admin,
     params: options.params ?? {},
-    env: {} as Record<string, string>,
+    env: {} as unknown as Env,
   };
 }
 
