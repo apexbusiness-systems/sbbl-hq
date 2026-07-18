@@ -31,7 +31,7 @@ describe('Docs Drift Guard (CI Only)', () => {
       }
 
       expect(true).toBe(true);
-    } catch (e) {
+    } catch (e: unknown) {
       // If git fails (e.g., no HEAD~1), assume this is an initial commit or detached head and skip cleanly.
       if (e instanceof Error && e.message.includes('fatal:')) {
         console.warn('Could not read git history for drift guard; skipping.', e.message);
