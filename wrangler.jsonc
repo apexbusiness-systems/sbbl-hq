@@ -55,8 +55,15 @@
     }
   ],
   "vars": {
-    "SUPABASE_URL": "https://supabase.sbbl-hq.icu",
-    "SUPABASE_PUBLISHABLE_KEY": "replace-with-self-hosted-anon-key",
+    // Cloud Supabase project URL.
+    // Replace SBBL_SUPABASE_PROJECT_REF with your actual project ref from
+    // https://app.supabase.com → Project Settings → API → Project URL.
+    // This value is also read from the VITE_SUPABASE_URL GitHub secret at build time.
+    "SUPABASE_URL": "https://ezanilxygnpucwkwpsoc.supabase.co",
+    // Supabase anon/public key (safe to expose — this is the publishable key).
+    // Replace with the "anon public" key from Supabase dashboard → Project Settings → API.
+    // This value is also read from the VITE_SUPABASE_ANON_KEY GitHub secret at build time.
+    "SUPABASE_PUBLISHABLE_KEY": "replace-with-supabase-anon-key",
     // SENTRY_DSN is a secret — set via: npx wrangler secret put SENTRY_DSN --env=""
     // Do NOT add it here as a var; secrets and vars cannot share the same binding name.
     "ENABLE_STREAM_VALIDATION": "false",
@@ -70,8 +77,8 @@
     "staging": {
       "name": "sbbl-hq-staging",
       "vars": {
-        "SUPABASE_URL": "https://staging-supabase.sbbl-hq.icu",
-        "SUPABASE_PUBLISHABLE_KEY": "replace-with-staging-self-hosted-anon-key",
+        "SUPABASE_URL": "https://SBBL_SUPABASE_STAGING_REF.supabase.co",
+        "SUPABASE_PUBLISHABLE_KEY": "REPLACE_WITH_STAGING_SUPABASE_ANON_KEY",
         "GOOGLE_OAUTH_ENABLED": "true"
         // SENTRY_DSN for staging: npx wrangler secret put SENTRY_DSN --env staging
       }
