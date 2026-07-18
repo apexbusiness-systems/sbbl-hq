@@ -30,7 +30,7 @@
 
 -- Index 1: PPV game sessions (game_id IS NOT NULL)
 -- Ensures at most one active session per user per game.
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS
+CREATE UNIQUE INDEX IF NOT EXISTS
   uq_stream_access_sessions_one_active_device
   ON public.stream_access_sessions (user_id, game_id)
   WHERE status = 'active'
@@ -40,7 +40,7 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS
 -- Ensures at most one active broadcast session per user.
 -- Separate index required because NULL != NULL in standard btree equality,
 -- so (user_id, game_id) WHERE game_id IS NULL requires a (user_id)-only key.
-CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS
+CREATE UNIQUE INDEX IF NOT EXISTS
   uq_stream_access_sessions_one_active_broadcast
   ON public.stream_access_sessions (user_id)
   WHERE status = 'active'
