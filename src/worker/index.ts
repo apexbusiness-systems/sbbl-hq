@@ -88,10 +88,15 @@ import {
   handleUpdateHighlight,
   handleReactionAggregate,
 } from "./routes/highlights";
+import {
+  handleScoresCsvUpload,
+  handleImportRoute as _handleImportRoute,
+  handleScoresCsvImport as _handleScoresCsvImport
+} from "./routes/ops-upload";
 import { parseStripeSignature, constantTimeEqualHex } from "./stripe-utils";
 export { parseStripeSignature, constantTimeEqualHex };
 
-type HandlerCtx = {
+export type HandlerCtx = {
   req: Request;
   env: Env;
   params: Record<string, string>;
@@ -192,7 +197,7 @@ export function resolveProxyTokenSecret(env: Env): string | null {
   return env.STREAM_PROXY_SECRET ?? env.OMNIHUB_SIGNING_SECRET ?? null;
 }
 
-function json(data: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
+export function json(data: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "content-type": "application/json; charset=utf-8", ...extraHeaders },
@@ -576,7 +581,7 @@ export async function getSession(req: Request, env: Env) {
   return null;
 }
 
-function requireAuth(req: Request) {
+export function requireAuth(req: Request) {
   const userId = req.headers.get("x-sbbl-user-id-verified");
   if (!userId) {
     throw new Error("unauthorized");
@@ -593,7 +598,7 @@ function optionalAuth(req: Request): string | null {
   return req.headers.get("x-sbbl-user-id-verified") || null;
 }
 
-async function ensureMutation(req: Request, ctx: HandlerCtx) {
+export async function ensureMutation(req: Request, ctx: HandlerCtx) {
   if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) return;
   const key = readIdempotencyKey(req.headers);
   const userId = requireAuth(req);
@@ -884,7 +889,7 @@ function isSuperAdmin(roles: string[]) {
   return roles.includes("super_admin");
 }
 
-async function requireSuperAdminSession(req: Request, admin: SupabaseClient) {
+export async function requireSuperAdminSession(req: Request, admin: SupabaseClient) {
   const session = await requireAdminSession(req, admin);
   if (!isSuperAdmin(session.roles)) throw new Error("forbidden");
   return session;
@@ -1526,7 +1531,7 @@ async function handleResolveCoachRequest(ctx: HandlerCtx) {
   return json({ ok: true, id, status: newStatus });
 }
 
-async function writeIngressFailure(
+export async function writeIngressFailure(
   admin: SupabaseClient,
   reason: string,
   rawInput: unknown,
@@ -2251,7 +2256,7 @@ async function handleStripeWebhook(ctx: HandlerCtx) {
   });
 }
 
-async function requireAdminSession(req: Request, admin: SupabaseClient) {
+export async function requireAdminSession(req: Request, admin: SupabaseClient) {
   const userId = requireAuth(req);
   const { data, error } = await admin
     .from("user_role_assignments")
@@ -2272,7 +2277,7 @@ async function requireAdminSession(req: Request, admin: SupabaseClient) {
   return { userId, roles };
 }
 
-async function writeImportJob(
+export async function writeImportJob(
   admin: SupabaseClient,
   job: {
     job_type: string;
@@ -6916,22 +6921,27 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   {
     method: "POST",
     path: "/ops/imports/teams",
-    handler: (ctx) => handleImportRoute(ctx, "teams"),
+    handler: (ctx) => _handleImportRoute(ctx, "teams"),
   },
   {
     method: "POST",
     path: "/ops/imports/players",
-    handler: (ctx) => handleImportRoute(ctx, "players"),
+    handler: (ctx) => _handleImportRoute(ctx, "players"),
   },
   {
     method: "POST",
     path: "/ops/imports/schedules",
-    handler: (ctx) => handleImportRoute(ctx, "schedules"),
+    handler: (ctx) => _handleImportRoute(ctx, "schedules"),
   },
   {
     method: "POST",
     path: "/ops/imports/events",
-    handler: (ctx) => handleImportRoute(ctx, "events"),
+    handler: (ctx) => _handleImportRoute(ctx, "events"),
+  },
+  {
+    method: "POST",
+    path: "/api/ops/upload/csv",
+    handler: handleScoresCsvUpload,
   },
   { method: "GET", path: "/ops/imports/history", handler: handleImportHistory },
   { method: "POST", path: "/ops/store/media", handler: handleStoreMedia },
@@ -8310,7 +8320,7 @@ async function handleScoreboardImageParse(ctx: HandlerCtx) {
 routes.push(
   { method: "GET",  path: "/api/scores",          handler: handleScoresList },
   { method: "POST", path: "/ops/scores/game",      handler: handleScoreGameUpsert },
-  { method: "POST", path: "/ops/scores/import",    handler: handleScoresCsvImport },
+  { method: "POST", path: "/ops/scores/import",    handler: _handleScoresCsvImport },
   { method: "POST", path: "/ops/scores/parse-image", handler: handleScoreboardImageParse },
 );
 

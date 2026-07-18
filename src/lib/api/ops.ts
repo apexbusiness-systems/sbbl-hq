@@ -34,6 +34,26 @@ export async function submitCsvImport(kind: 'teams' | 'players' | 'schedules' | 
   });
 }
 
+export async function uploadCsv(params: {
+  kind: 'teams' | 'players' | 'schedules' | 'events' | 'scores';
+  csvText?: string;
+  rows?: Array<Record<string, string>>;
+  format?: string;
+  idempotencyKey?: string;
+}) {
+  const idKey = params.idempotencyKey ?? createIdempotencyKey(`upload-csv-${params.kind}`);
+  return apiFetch<{
+    ok: boolean;
+    inserted: number;
+    failed: number;
+    errors?: Array<{ row: number; field?: string; code: string; message: string }>;
+  }>('/api/ops/upload/csv', {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: idKey },
+    body: JSON.stringify(params),
+  });
+}
+
 export async function parseEventImage(imageBase64: string, mimeType: string) {
   return apiFetch<{
     ok: boolean;

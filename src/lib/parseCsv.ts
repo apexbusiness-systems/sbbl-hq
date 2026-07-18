@@ -3,6 +3,10 @@
  * Handles: quoted fields, escaped quotes (""), CRLF/LF line endings, UTF-8 BOM.
  */
 
+export type ParseResult<T> =
+  | { ok: true; data: T[]; warnings: string[] }
+  | { ok: false; errors: { row?: number; field?: string; code: string; message: string }[] };
+
 type ParseState = {
   rows: string[][];
   currentRow: string[];

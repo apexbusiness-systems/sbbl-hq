@@ -19,6 +19,12 @@ accepts any Twitch/YouTube/Vimeo/HLS/DASH/MP4/m4v/mov/webm/WHEP/`blob:`
 source with zero friction — see `docs/features/STREAM_GATING_v1.7.0.md`
 for the capability matrix.
 
+## ⚠️ OMNI-RECALL PROTOCOL (AI AGENTS)
+
+All AI agents operating in this repository MUST read and adhere to the [Omni-Recall Protocol](../../omni-recall/start-here.md) before executing operational tasks or making code changes. Start at: 👉 **[`../../omni-recall/start-here.md`](../../omni-recall/start-here.md)**
+
+---
+
 This document is the canonical reference for all operational tasks, deployment procedures, emergency recovery steps, and script/tooling inventory for the SBBL HQ platform.
 
 > [!IMPORTANT]

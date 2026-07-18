@@ -1,6 +1,7 @@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { parseCsv } from '@/lib/parseCsv';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useOpsCsvUpload } from '@/hooks/useOpsCsvUpload';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Shield, Upload, Loader2, CheckCircle2, AlertCircle, Trophy, Image as ImageIcon, Save, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
@@ -55,11 +56,169 @@ export const isSessionFresh = (
   return session.expires_at * 1000 > nowMs;
 };
 
+type OpsCsvImportSectionProps = {
+  kind: 'teams' | 'players' | 'schedules' | 'events' | 'scores';
+  csvUpload: ReturnType<typeof useOpsCsvUpload>;
+  csvLeagueId: string;
+  setCsvLeagueId: (id: string) => void;
+  isSuperAdmin: boolean;
+};
+
+function OpsCsvImportSection({ kind, csvUpload, csvLeagueId, setCsvLeagueId, isSuperAdmin }: OpsCsvImportSectionProps) {
+  const [localRows, setLocalRows] = useState<Record<string, string>[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const raw = await file.text();
+    setLocalRows(parseCsv(raw));
+  };
+
+  const handleUpload = async () => {
+    const format = 'v1';
+    const rowsWithLeague = kind === 'scores' 
+      ? localRows 
+      : localRows.map(r => ({ ...r, league_id: r.league_id ?? csvLeagueId }));
+
+    const res = await csvUpload.performUpload(kind, { rows: rowsWithLeague, format });
+    if (res.ok) {
+      setLocalRows([]);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  return (
+    <div className="panel p-4 space-y-3 max-w-2xl">
+      <div>
+        <h2 className="font-display text-xl uppercase tracking-wide">
+          {kind} CSV Bulk Import
+        </h2>
+        {kind === 'scores' ? (
+          <p className="text-xs text-muted-foreground mt-1">
+            Required columns: <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">category, home_label, away_label, status</code>.
+            Optional: <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">league_id, home_score, away_score, game_date, event_name, notes</code>
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground mt-1">
+            All imported rows will be validated against the {kind} schema (format=v1).
+          </p>
+        )}
+      </div>
+
+      {kind !== 'scores' && (
+        <div>
+          <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Target League</label>
+          <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
+            {LEAGUE_REGISTRY.map(l => (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => setCsvLeagueId(l.id)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${csvLeagueId === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                <img src={l.logo} alt="" width={12} height={12} className="flex-shrink-0 opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
+                {l.shortName}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={handleFileChange} />
+      <p className="text-xs text-muted-foreground">Rows loaded: {localRows.length}</p>
+
+      {localRows.length > 0 && (
+        <div className="max-h-44 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">
+          {localRows.slice(0, 6).map((row, i) => <pre key={i} className="truncate">{JSON.stringify(row)}</pre>)}
+          {localRows.length > 6 && <p className="text-muted-foreground mt-1">…and {localRows.length - 6} more</p>}
+        </div>
+      )}
+
+      <button
+        disabled={(!isSuperAdmin && kind === 'scores') || localRows.length === 0 || csvUpload.isUploading}
+        className="gold-bg px-4 py-2 rounded-sm text-sm font-semibold disabled:opacity-60"
+        onClick={handleUpload}
+      >
+        {csvUpload.isUploading ? 'Importing…' : `Import ${localRows.length} Row${localRows.length !== 1 ? 's' : ''}`}
+      </button>
+
+      {csvUpload.uploadError && <p className="text-xs text-destructive">{csvUpload.uploadError.message}</p>}
+      {csvUpload.uploadResult && (
+        <p className="text-xs text-success">
+          Success! Inserted: {csvUpload.uploadResult.inserted} · Failed: {csvUpload.uploadResult.failed}
+        </p>
+      )}
+
+      {csvUpload.validationErrors.length > 0 && (
+        <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 text-xs text-destructive rounded-sm max-h-40 overflow-auto">
+          <p className="font-semibold mb-1">Validation Errors:</p>
+          {csvUpload.validationErrors.map((err, i) => (
+            <div key={i}>
+              Row {err.row}{err.field ? ` [${err.field}]` : ''}: {err.message}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Offline Ingest Queue */}
+      {csvUpload.queue.filter(q => q.type === kind).length > 0 && (
+        <div className="mt-4 p-3 bg-secondary rounded-sm border border-border">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+              <Shield className="w-3.5 h-3.5" />
+              Offline Ingest Queue ({csvUpload.queue.filter(q => q.type === kind).length})
+            </h3>
+            <button
+              onClick={() => csvUpload.flushQueue()}
+              disabled={csvUpload.isUploading}
+              className="text-2xs font-semibold px-2 py-1 bg-primary text-primary-foreground rounded-sm hover:opacity-90 disabled:opacity-50"
+            >
+              Flush Queue
+            </button>
+          </div>
+          <div className="space-y-1.5 max-h-48 overflow-auto">
+            {csvUpload.queue.filter(q => q.type === kind).map((item) => (
+              <div key={item.id} className="flex items-center justify-between text-2xs bg-card p-2 rounded-sm border border-border/50">
+                <div className="flex-1 min-w-0 pr-2">
+                  <div className="font-semibold text-foreground truncate uppercase">{item.type} Upload</div>
+                  <div className="text-muted-foreground truncate">
+                    {item.payload.rows?.length || 0} rows · attempts: {item.attempts}
+                  </div>
+                  {item.error_message && (
+                    <div className="text-destructive truncate mt-0.5 font-mono">{item.error_message}</div>
+                  )}
+                </div>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => csvUpload.retryQueueItem(item.id)}
+                    disabled={csvUpload.isUploading}
+                    className="px-2 py-0.5 bg-secondary text-secondary-foreground hover:bg-muted rounded-sm border border-border"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    onClick={() => csvUpload.deleteQueueItem(item.id)}
+                    disabled={csvUpload.isUploading}
+                    className="p-1 text-destructive hover:bg-destructive/10 rounded-sm"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const OpsPage = () => {
   const queryClient = useQueryClient();
   const { loading, session, user, roles } = useAuth();
   const [activeTab, setActiveTab] = useState<Tab>('overview');
-  const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
+  const csvUpload = useOpsCsvUpload();
   const [storeForm, setStoreForm] = useState({ title: '', price: '0', category: 'apparel', publishStatus: 'draft' as 'draft' | 'published', imageFile: null as File | null, sale: false });
   const [csvLeagueId, setCsvLeagueId] = useState<string>('wbl');
   const potgFileRef = useRef<HTMLInputElement>(null);
@@ -113,8 +272,6 @@ const OpsPage = () => {
     leagueId: 'sbbl',
   });
   const scoreboardFileRef = useRef<HTMLInputElement>(null);
-  const scoresCsvFileRef = useRef<HTMLInputElement>(null);
-  const [scoresCsvRows, setScoresCsvRows] = useState<Record<string, string>[]>([]);
   const [scoreboardImageFile, setScoreboardImageFile] = useState<File | null>(null);
   const [scoreboardParseState, setScoreboardParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
   const [scoreboardParseError, setScoreboardParseError] = useState<string | null>(null);
@@ -183,16 +340,7 @@ const OpsPage = () => {
     retry: shouldRetryOpsQuery,
   });
 
-  const importMutation = useMutation({
-    mutationFn: ({ kind, rows }: { kind: 'teams' | 'players' | 'schedules' | 'events'; rows: Record<string, string>[] }) =>
-      submitCsvImport(kind, rows.map(r => ({ ...r, league_id: csvLeagueId }))),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] }),
-        queryClient.invalidateQueries({ queryKey: ['ops-import-history'] }),
-      ]);
-    },
-  });
+
 
   const potgMutation = useMutation({
     mutationFn: async () => {
@@ -449,15 +597,7 @@ const OpsPage = () => {
     },
   });
 
-  const scoresCsvMutation = useMutation({
-    mutationFn: () => submitScoresCsvImport(scoresCsvRows),
-    onSuccess: async () => {
-      setScoresCsvRows([]);
-      if (scoresCsvFileRef.current) scoresCsvFileRef.current.value = '';
-      await queryClient.invalidateQueries({ queryKey: ['ops-scores-list'] });
-      await queryClient.invalidateQueries({ queryKey: ['scores'] });
-    },
-  });
+
 
 
   const handleEventImageUpload = async (file: File) => {
@@ -763,44 +903,13 @@ const OpsPage = () => {
           </div>
 
           {/* ── CSV bulk import ───────────────────────────────────── */}
-          <div className="panel p-4 space-y-3 max-w-2xl">
-            <div>
-              <h2 className="font-display text-xl">CSV Bulk Import</h2>
-              <p className="text-xs text-muted-foreground mt-1">
-                Required columns: <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">category, home_label, away_label, status</code>.
-                Optional: <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">league_id, home_score, away_score, game_date, event_name, notes</code>
-              </p>
-            </div>
-            <input ref={scoresCsvFileRef} type="file" accept=".csv,text/csv" onChange={async e => {
-              const file = e.target.files?.[0];
-              if (!file) return;
-              const raw = await file.text();
-              setScoresCsvRows(parseCsv(raw));
-            }} />
-            <p className="text-xs text-muted-foreground">Rows loaded: {scoresCsvRows.length}</p>
-            {scoresCsvRows.length > 0 && (
-              <div className="max-h-44 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">
-                {scoresCsvRows.slice(0, 6).map((row, i) => <pre key={i} className="truncate">{JSON.stringify(row)}</pre>)}
-                {scoresCsvRows.length > 6 && <p className="text-muted-foreground mt-1">…and {scoresCsvRows.length - 6} more</p>}
-              </div>
-            )}
-            <button
-              disabled={!isSuperAdmin || scoresCsvRows.length === 0 || scoresCsvMutation.isPending}
-              className="gold-bg px-4 py-2 rounded-sm text-sm font-semibold disabled:opacity-60"
-              onClick={() => scoresCsvMutation.mutate()}
-            >
-              {scoresCsvMutation.isPending ? 'Importing…' : `Import ${scoresCsvRows.length} Row${scoresCsvRows.length !== 1 ? 's' : ''}`}
-            </button>
-            {scoresCsvMutation.error && <p className="text-xs text-destructive">{(scoresCsvMutation.error as Error).message}</p>}
-            {scoresCsvMutation.data && (
-              <p className="text-xs text-success">
-                Imported: {scoresCsvMutation.data.inserted} · Failed: {scoresCsvMutation.data.failed}
-                {scoresCsvMutation.data.errors?.length > 0 && (
-                  <span className="text-warning"> · {scoresCsvMutation.data.errors[0]}</span>
-                )}
-              </p>
-            )}
-          </div>
+          <OpsCsvImportSection
+            kind="scores"
+            csvUpload={csvUpload}
+            csvLeagueId={csvLeagueId}
+            setCsvLeagueId={setCsvLeagueId}
+            isSuperAdmin={isSuperAdmin}
+          />
 
           {/* ── Recent scores list ────────────────────────────────── */}
           <div className="panel p-4 max-w-4xl">
@@ -831,45 +940,13 @@ const OpsPage = () => {
       </TabsContent>
 
       <TabsContent value="teams">
-<div className="panel p-4 space-y-3">
-
-          <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
-          {/* League tag — every imported row gets this league_id */}
-          <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Target League</label>
-            <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
-              {LEAGUE_REGISTRY.map(l => (
-                <button
-                  key={l.id}
-                  type="button"
-                  onClick={() => setCsvLeagueId(l.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${csvLeagueId === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  <img src={l.logo} alt="" width={12} height={12} className="flex-shrink-0 opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  {l.shortName}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1">All imported rows will be tagged with this league.</p>
-          </div>
-          <input type="file" accept=".csv,text/csv" onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            const raw = await file.text();
-            setCsvRows(parseCsv(raw));
-          }} />
-          <p className="text-xs text-muted-foreground">Preview rows: {csvRows.length}</p>
-          <div className="max-h-52 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">{csvRows.slice(0, 8).map((row, i) => <pre key={i}>{JSON.stringify(row)}</pre>)}</div>
-          <button
-            disabled={csvRows.length === 0 || importMutation.isPending}
-            className="gold-bg px-4 py-2 rounded-sm disabled:opacity-70"
-            onClick={() => importMutation.mutate({ kind: activeTab as 'teams' | 'players' | 'schedules' | 'events', rows: csvRows })}
-          >
-            {importMutation.isPending ? 'Importing…' : 'Submit Import'}
-          </button>
-          {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
-          {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
-        </div>
+          <OpsCsvImportSection
+            kind="teams"
+            csvUpload={csvUpload}
+            csvLeagueId={csvLeagueId}
+            setCsvLeagueId={setCsvLeagueId}
+            isSuperAdmin={isSuperAdmin}
+          />
 <div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Teams Manual Ops</h2>
           {!isSuperAdmin ? (
@@ -903,45 +980,13 @@ const OpsPage = () => {
       </TabsContent>
 
       <TabsContent value="players">
-<div className="panel p-4 space-y-3">
-
-          <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
-          {/* League tag — every imported row gets this league_id */}
-          <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Target League</label>
-            <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
-              {LEAGUE_REGISTRY.map(l => (
-                <button
-                  key={l.id}
-                  type="button"
-                  onClick={() => setCsvLeagueId(l.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${csvLeagueId === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  <img src={l.logo} alt="" width={12} height={12} className="flex-shrink-0 opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  {l.shortName}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1">All imported rows will be tagged with this league.</p>
-          </div>
-          <input type="file" accept=".csv,text/csv" onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            const raw = await file.text();
-            setCsvRows(parseCsv(raw));
-          }} />
-          <p className="text-xs text-muted-foreground">Preview rows: {csvRows.length}</p>
-          <div className="max-h-52 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">{csvRows.slice(0, 8).map((row, i) => <pre key={i}>{JSON.stringify(row)}</pre>)}</div>
-          <button
-            disabled={csvRows.length === 0 || importMutation.isPending}
-            className="gold-bg px-4 py-2 rounded-sm disabled:opacity-70"
-            onClick={() => importMutation.mutate({ kind: activeTab as 'teams' | 'players' | 'schedules' | 'events', rows: csvRows })}
-          >
-            {importMutation.isPending ? 'Importing…' : 'Submit Import'}
-          </button>
-          {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
-          {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
-        </div>
+          <OpsCsvImportSection
+            kind="players"
+            csvUpload={csvUpload}
+            csvLeagueId={csvLeagueId}
+            setCsvLeagueId={setCsvLeagueId}
+            isSuperAdmin={isSuperAdmin}
+          />
 <div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Players Manual Ops</h2>
           {!isSuperAdmin ? (
@@ -991,45 +1036,13 @@ const OpsPage = () => {
 
 
       <TabsContent value="schedules">
-<div className="panel p-4 space-y-3">
-
-          <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
-          {/* League tag — every imported row gets this league_id */}
-          <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Target League</label>
-            <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
-              {LEAGUE_REGISTRY.map(l => (
-                <button
-                  key={l.id}
-                  type="button"
-                  onClick={() => setCsvLeagueId(l.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${csvLeagueId === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  <img src={l.logo} alt="" width={12} height={12} className="flex-shrink-0 opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  {l.shortName}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1">All imported rows will be tagged with this league.</p>
-          </div>
-          <input type="file" accept=".csv,text/csv" onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            const raw = await file.text();
-            setCsvRows(parseCsv(raw));
-          }} />
-          <p className="text-xs text-muted-foreground">Preview rows: {csvRows.length}</p>
-          <div className="max-h-52 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">{csvRows.slice(0, 8).map((row, i) => <pre key={i}>{JSON.stringify(row)}</pre>)}</div>
-          <button
-            disabled={csvRows.length === 0 || importMutation.isPending}
-            className="gold-bg px-4 py-2 rounded-sm disabled:opacity-70"
-            onClick={() => importMutation.mutate({ kind: activeTab as 'teams' | 'players' | 'schedules' | 'events', rows: csvRows })}
-          >
-            {importMutation.isPending ? 'Importing…' : 'Submit Import'}
-          </button>
-          {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
-          {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
-        </div>
+          <OpsCsvImportSection
+            kind="schedules"
+            csvUpload={csvUpload}
+            csvLeagueId={csvLeagueId}
+            setCsvLeagueId={setCsvLeagueId}
+            isSuperAdmin={isSuperAdmin}
+          />
 <div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Schedules Manual Ops</h2>
           {!isSuperAdmin ? (
@@ -1071,45 +1084,13 @@ const OpsPage = () => {
       </TabsContent>
 
       <TabsContent value="events">
-<div className="panel p-4 space-y-3">
-
-          <h2 className="font-display text-xl">{activeTab} CSV Import</h2>
-          {/* League tag — every imported row gets this league_id */}
-          <div>
-            <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Target League</label>
-            <div className="flex gap-1 p-1 bg-secondary rounded-sm w-fit">
-              {LEAGUE_REGISTRY.map(l => (
-                <button
-                  key={l.id}
-                  type="button"
-                  onClick={() => setCsvLeagueId(l.id)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider rounded-sm transition-colors ${csvLeagueId === l.id ? `bg-card ${l.accentClass} border border-current/20` : 'text-muted-foreground hover:text-foreground'}`}
-                >
-                  <img src={l.logo} alt="" width={12} height={12} className="flex-shrink-0 opacity-80" onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }} />
-                  {l.shortName}
-                </button>
-              ))}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1">All imported rows will be tagged with this league.</p>
-          </div>
-          <input type="file" accept=".csv,text/csv" onChange={async (e) => {
-            const file = e.target.files?.[0];
-            if (!file) return;
-            const raw = await file.text();
-            setCsvRows(parseCsv(raw));
-          }} />
-          <p className="text-xs text-muted-foreground">Preview rows: {csvRows.length}</p>
-          <div className="max-h-52 overflow-auto text-xs bg-secondary p-2 rounded-sm border border-border">{csvRows.slice(0, 8).map((row, i) => <pre key={i}>{JSON.stringify(row)}</pre>)}</div>
-          <button
-            disabled={csvRows.length === 0 || importMutation.isPending}
-            className="gold-bg px-4 py-2 rounded-sm disabled:opacity-70"
-            onClick={() => importMutation.mutate({ kind: activeTab as 'teams' | 'players' | 'schedules' | 'events', rows: csvRows })}
-          >
-            {importMutation.isPending ? 'Importing…' : 'Submit Import'}
-          </button>
-          {importMutation.error && <p className="text-xs text-destructive">{(importMutation.error as Error).message}</p>}
-          {importMutation.data?.summary && <p className="text-xs text-success">Completed: {importMutation.data.summary.inserted_rows}/{importMutation.data.summary.total_rows}</p>}
-        </div>
+          <OpsCsvImportSection
+            kind="events"
+            csvUpload={csvUpload}
+            csvLeagueId={csvLeagueId}
+            setCsvLeagueId={setCsvLeagueId}
+            isSuperAdmin={isSuperAdmin}
+          />
 <div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Events Manual Ops</h2>
           {!isSuperAdmin ? (
