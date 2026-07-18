@@ -1,0 +1,25 @@
+{
+  "name": "sbbl-agent",
+  "version": "2.0.0",
+  "description": "Omnipotent SBBL HQ domain intelligence — vendor-agnostic universal edition",
+  "author": "APEX Business Systems Ltd.",
+  "license": "Proprietary",
+  "format": "universal-prompt-only",
+  "llm_agnostic": true,
+  "compatible_with": ["GPT-4", "Gemini", "Claude", "Llama", "Mistral", "DeepSeek", "any LLM"],
+  "activation": "paste SKILL.md into system prompt or prepend to context window",
+  "repo_hash_date": "2026-05-20",
+  "stack_snapshot": {
+    "frontend": "Vite + React 18 + TypeScript",
+    "backend": "Cloudflare Workers (sbbl-hq-worker)",
+    "database": "Supabase PostgreSQL self-hosted (AWS EC2)",
+    "deploy": "npm run cf:deploy",
+    "domain": "sbbl-hq.icu"
+  },
+  "usage": {
+    "system_prompt": "Paste SKILL.md content into system prompt",
+    "context_injection": "Prepend SKILL.md to every conversation",
+    "reference_loading": "Include relevant references/ files when working in that domain",
+    "template_usage": "Copy-paste from templates/quick-start.md directly"
+  }
+}

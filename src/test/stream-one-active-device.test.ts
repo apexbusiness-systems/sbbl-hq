@@ -368,3 +368,124 @@ describe('OAD-5: Task 2 revoke does not break service-role cleanup paths', () =>
     expect(sessions.find((s) => s.id === 'sess-past')?.expires_at).toBe(pastTime);
   });
 });
+
+// ── REAL Concurrency Integration Test ────────────────────────────────────────
+// This tests the worker HTTP handler handlePlaybackSession directly via
+// Promise.all to ensure the async race condition actually triggers the
+// 23505 unique_violation and the handler correctly catches it to return a 409.
+
+import { handlePlaybackSession } from '@/worker/index';
+
+describe('REAL Concurrency (Promise.all race condition)', () => {
+  it('Promise.all acquires: exactly one succeeds, one gets 409 device_conflict', async () => {
+    // We simulate the DB unique constraint by delaying the upsert so that
+    // the concurrent updates interleave.
+    const tableRows: Record<string, unknown>[] = [];
+    
+    const mockAdmin = {
+      from: (table: string) => {
+        if (table !== 'stream_access_sessions') {
+          return {
+            select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }),
+            insert: () => ({ select: () => ({ single: async () => ({ data: { id: true, title: 'Live', is_live: true, collection_id: 'http://test' }, error: null }) }) }),
+          };
+        }
+        
+        const updateFilters: Array<(r: Record<string, unknown>) => boolean> = [];
+        const selectChain: Record<string, unknown> = {
+          eq: () => selectChain,
+          is: () => selectChain,
+          maybeSingle: async () => ({ data: null, error: null })
+        };
+        return {
+          select: () => selectChain,
+          update: (patch: Record<string, unknown>) => {
+            const builder: Record<string, unknown> = {
+              eq: (col: string, val: unknown) => { updateFilters.push((r: Record<string, unknown>) => r[col] === val); return builder; },
+              is: (col: string, val: unknown) => { updateFilters.push((r: Record<string, unknown>) => r[col] === val); return builder; },
+              neq: (col: string, val: unknown) => {
+                updateFilters.push((r: Record<string, unknown>) => r[col] !== val);
+                // execute update synchronously
+                tableRows.forEach(r => {
+                  if (updateFilters.every(f => f(r))) Object.assign(r, patch);
+                });
+                return { error: null };
+              }
+            };
+            return builder;
+          },
+          upsert: (row: Record<string, unknown>, _opts?: unknown) => {
+            return {
+              select: () => ({
+                single: async () => {
+                  // Wait to allow the other concurrent Promise to run its displace logic
+                  await new Promise(resolve => setTimeout(resolve, 20));
+                  
+                  // Enforcement of unique index (user_id, game_id) where status='active'
+                  const conflict = tableRows.find(r => r.user_id === row.user_id && r.game_id === row.game_id && r.status === 'active');
+                  if (conflict) {
+                    return { data: null, error: { code: '23505', message: 'duplicate key value violates unique constraint' } };
+                  }
+                  
+                  const normalized = { ...row, id: crypto.randomUUID() };
+                  tableRows.push(normalized);
+                  return { data: normalized, error: null };
+                }
+              })
+            };
+          }
+        };
+      },
+      rpc: async (name: string, _payload?: unknown) => {
+        if (name === 'can_user_view_stream') return { data: true, error: null };
+        return { data: null, error: null };
+      }
+    };
+
+    const envOverrides = {
+      SUPABASE_URL: 'http://local',
+      SUPABASE_SERVICE_ROLE_KEY: 'srk',
+    };
+
+    const req1 = new Request('https://local/api/streams/game-concurrency/session', {
+      method: 'POST',
+      headers: { 
+        'x-sbbl-user-id-verified': 'user-1',
+        'x-idempotency-key': 'idempotency-key-A123'
+      },
+      body: JSON.stringify({ sessionKey: 'client-A' })
+    });
+    const req2 = new Request('https://local/api/streams/game-concurrency/session', {
+      method: 'POST',
+      headers: { 
+        'x-sbbl-user-id-verified': 'user-1',
+        'x-idempotency-key': 'idempotency-key-B456'
+      },
+      body: JSON.stringify({ sessionKey: 'client-B' })
+    });
+
+    const ctx1 = { req: req1, admin: mockAdmin as unknown, params: { gameId: 'game-concurrency' }, env: envOverrides as unknown } as unknown as Parameters<typeof handlePlaybackSession>[0];
+    const ctx2 = { req: req2, admin: mockAdmin as unknown, params: { gameId: 'game-concurrency' }, env: envOverrides as unknown } as unknown as Parameters<typeof handlePlaybackSession>[0];
+
+    // Fire both concurrently!
+    const [res1, res2] = await Promise.all([
+      handlePlaybackSession(ctx1),
+      handlePlaybackSession(ctx2)
+    ]);
+
+    // One must succeed (200), one must fail (409)
+    const statuses = [res1.status, res2.status].sort();
+    expect(statuses).toEqual([200, 409]);
+
+    const failedRes = res1.status === 409 ? res1 : res2;
+    const failedBody = await failedRes.json() as Record<string, unknown>;
+    expect(failedBody.error).toBe('device_conflict');
+
+    const actives = tableRows.filter(r => r.status === 'active');
+    expect(actives).toHaveLength(1);
+    
+    // Both were fresh inserts; no prior session was displaced. 
+    // The conflict happened squarely on the atomic index boundary.
+  });
+});
+
