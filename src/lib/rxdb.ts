@@ -24,11 +24,15 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 addRxPlugin(RxDBLeaderElectionPlugin);
 addRxPlugin(RxDBQueryBuilderPlugin);
 
+let dbPromise: Promise<any> | null = null;
+
 export async function initDB() {
-  const db = await createRxDatabase({
-    name: 'sbblhqdb',
-    storage: getRxStorageDexie()
-  });
+  if (dbPromise) return dbPromise;
+  dbPromise = (async () => {
+    const db = await createRxDatabase({
+      name: 'sbblhqdb',
+      storage: getRxStorageDexie()
+    });
 
   await db.addCollections({
     leagues: {
@@ -78,6 +82,24 @@ export async function initDB() {
         },
         required: ['id']
       }
+    },
+    ops_queue: {
+      schema: {
+        title: 'ops queue schema',
+        version: 0,
+        primaryKey: 'id',
+        type: 'object',
+        properties: {
+          id: { type: 'string', maxLength: 100 },
+          type: { type: 'string' },
+          payload: { type: 'object' },
+          status: { type: 'string' },
+          attempts: { type: 'number' },
+          created_at: { type: 'string' },
+          error_message: { type: 'string' }
+        },
+        required: ['id', 'type', 'payload', 'status', 'attempts']
+      }
     }
   });
 
@@ -109,4 +131,6 @@ export async function initDB() {
   });
 
   return db;
+  })();
+  return dbPromise;
 }
