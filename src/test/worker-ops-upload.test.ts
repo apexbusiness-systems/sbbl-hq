@@ -10,7 +10,7 @@ function mkCtx(options: {
   body?: unknown;
   params?: Record<string, string>;
   headers?: Record<string, string>;
-  admin: any;
+  admin: ReturnType<typeof createAdmin>;
 }) {
   const init: RequestInit = { method: options.method ?? 'GET' };
   const headers = {
@@ -27,8 +27,8 @@ function mkCtx(options: {
     req: new Request(options.url, init),
     admin: options.admin,
     params: options.params ?? {},
-    env: {} as any,
-  } as any;
+    env: {} as Record<string, string>,
+  };
 }
 
 describe('handleScoresCsvUpload — functional unit tests', () => {
@@ -77,7 +77,7 @@ describe('handleScoresCsvUpload — functional unit tests', () => {
 
     const res = await handleScoresCsvUpload(ctx);
     expect(res.status).toBe(403);
-    const body = await res.json() as any;
+    const body = await res.json() as { ok: boolean; error: string };
     expect(body.ok).toBe(false);
     expect(body.error).toBe('blocked_class_payload');
   });
@@ -100,7 +100,7 @@ describe('handleScoresCsvUpload — functional unit tests', () => {
 
     const res = await handleScoresCsvUpload(ctx);
     expect(res.status).toBe(400);
-    const body = await res.json() as any;
+    const body = await res.json() as { ok: boolean; error: string };
     expect(body.ok).toBe(false);
     expect(body.error).toBe('unsupported_schema_version');
   });

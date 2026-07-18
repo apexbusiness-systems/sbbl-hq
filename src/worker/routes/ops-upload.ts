@@ -100,7 +100,7 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
   }
 
   const validationErrors: Array<{ row: number; field?: string; code: string; message: string }> = [];
-  const validatedRows: any[] = [];
+  const validatedRows: Array<Record<string, string>> = [];
 
   const rowSchemaMap = {
     teams: teamRowSchema,

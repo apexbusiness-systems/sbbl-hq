@@ -33,7 +33,7 @@ export function useOpsCsvUpload() {
     try {
       const db = await getInitDB();
       const items = await db.ops_queue.find().exec();
-      setQueue(items.map((i: any) => i.toJSON() as QueueItem));
+      setQueue(items.map((i: { toJSON(): QueueItem }) => i.toJSON()));
       setIsDbReady(true);
     } catch (err) {
       console.error('[useOpsCsvUpload] Failed to load RxDB queue:', err);

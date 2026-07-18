@@ -1,4 +1,4 @@
-import { createRxDatabase, addRxPlugin } from 'rxdb';
+import { createRxDatabase, addRxPlugin, type RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { replicateSupabase } from 'rxdb/plugins/replication-supabase';
 import { RxDBLeaderElectionPlugin } from 'rxdb/plugins/leader-election';
@@ -24,7 +24,7 @@ const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 addRxPlugin(RxDBLeaderElectionPlugin);
 addRxPlugin(RxDBQueryBuilderPlugin);
 
-let dbPromise: Promise<any> | null = null;
+let dbPromise: Promise<RxDatabase> | null = null;
 
 export async function initDB() {
   if (dbPromise) return dbPromise;
