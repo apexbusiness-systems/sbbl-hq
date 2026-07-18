@@ -1,5 +1,33 @@
 # CHANGELOG
 
+## 2026-07-18 — v1.7.0 — Chrome CORS whitelisting, local config guardrails, Cloud Supabase, secure CSV upload
+
+- **CORS Local Whitelisting** (`src/worker/index.ts` and `src/api-proxy-worker/index.ts`): Whitelisted `http://localhost:8080` to prevent OPTIONS preflight failures in Google Chrome.
+- **Wrangler Config Guardrail**: Reverted `SUPABASE_PUBLISHABLE_KEY` in `wrangler.jsonc` to the placeholder to pass security tests; added `.dev.vars` for local credential binding.
+- **Supabase Cloud Migration** (PR #552): Migrated configurations to Supabase Cloud, executed missing migrations, and secured the `v_ingest_reconciliation` view.
+- **Secure CSV Ingestion** (PR #553): Modularized parser route handler, established typed `ParseResult` contract, integrated RxDB local queuing in hooks, and resolved all 8 ESLint `no-explicit-any` strict type violations.
+- **Dependency & Build Upgrades**: Upgraded Playwright to v1.60.0 and synchronized lockfile from PR-543.
+
+---
+
+## 2026-05-21 — v1.6.0 — Self-hosted Supabase hardening & Kong CORS fixes
+
+- **Self-hosted Supabase stack**: Nested Compose root in `sbbl-hq-selfhost/sbbl-hq-selfhost/` with directory-level warnings.
+- **Secret rotation runbook**: Safe secret rotation guidelines without downtime.
+- **Auth security audit**: Cleaned dependencies, patched Kong routes against injection, and added unit/integration tests for auth flows.
+- **Kong CORS Preflight**: Patched 6 auth routes in nested active `kong.yml` to whitelist all 20 required PostgREST/Supabase headers.
+- **Media console overhaul**: Optimized publications queries, close archive race window.
+
+---
+
+## 2026-05-11 — v1.5.0 — OmniBridge Integration (APEX-OmniHub bidirectional sync)
+
+- **POST /webhooks/omnihub**: Inbound receiver with HMAC-SHA256 signature verification, skew-check, action allowlist, risk-lane re-classification, and idempotency dedup.
+- **POST /api/omniport/command**: JWT-authenticated operator session endpoint.
+- **deliverSyncEnvelope()**: Outbound sync with exponential backoff and timeout logic.
+
+---
+
 ## 2026-05-04 — v1.4.1 — Facebook Live playback via plugins/video.php iframe
 
 - Facebook stream URLs are now playable. The `isFacebook` branch in

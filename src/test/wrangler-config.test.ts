@@ -97,3 +97,19 @@ describe('wrangler.deploy.jsonc configuration contract (CI production deploy)', 
     expect(config.assets?.run_worker_first).toBe(true);
   });
 });
+
+describe('Vite port and Worker CORS alignment (Foresight Guardrail)', () => {
+  const viteConfigRaw = readFileSync(resolve(__dirname, '../../vite.config.ts'), 'utf8');
+  const portMatch = viteConfigRaw.match(/port:\s*(\d+)/);
+  const vitePort = portMatch ? portMatch[1] : '5173';
+
+  it('verifies src/worker/index.ts whitelists the current Vite port', () => {
+    const workerRaw = readFileSync(resolve(__dirname, '../worker/index.ts'), 'utf8');
+    expect(workerRaw).toContain(`http://localhost:${vitePort}`);
+  });
+
+  it('verifies src/api-proxy-worker/index.ts whitelists the current Vite port', () => {
+    const proxyRaw = readFileSync(resolve(__dirname, '../api-proxy-worker/index.ts'), 'utf8');
+    expect(proxyRaw).toContain(`http://localhost:${vitePort}`);
+  });
+});

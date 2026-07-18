@@ -37,7 +37,11 @@
     "simulate:broadcast": "tsx scripts/simulate-broadcast.ts",
     "test:selfhost:owner": "playwright test e2e/selfhost-owner-auth-ingest.spec.ts --project=chromium",
     "cf:security:plan": "node ops/cloudflare/apply-security-insights.mjs",
-    "cf:security:apply": "node ops/cloudflare/apply-security-insights.mjs --apply"
+    "cf:security:apply": "node ops/cloudflare/apply-security-insights.mjs --apply",
+    "config:contracts": "vitest run src/test/wrangler-config.test.ts",
+    "secrets:contracts": "vitest run src/test/wrangler-config-guard.test.ts",
+    "docs:drift": "vitest run src/test/docs-drift-guard.test.ts",
+    "preflight:dev": "node scripts/check-dev-vars.mjs"
   },
   "dependencies": {
     "@capacitor/android": "^8.3.0",

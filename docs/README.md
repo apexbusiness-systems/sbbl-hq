@@ -1,8 +1,8 @@
-<!-- Version: v2.5.0 | Date: 2026-05-21 | Status: Current -->
+<!-- Version: v2.6.0 | Date: 2026-07-18 | Status: Current -->
 # SBBL HQ — Documentation Hub
 
-**Version:** v2.5.0
-**Last Updated:** 2026-05-21
+**Version:** v2.6.0
+**Last Updated:** 2026-07-18
 **Maintainer:** APEX Business Systems Ltd. — Engineering Lead
 
 > Single source of truth for all SBBL HQ engineering, operational, and product documentation.

@@ -751,6 +751,12 @@ CI runs all of these. Do not merge red.
 
 ## Incident history (relevant to this guide)
 
+- **2026-07-18** — CORS-01: Google Chrome login CORS block. Vite dev server port was configured to 8080, but workers whitelisted only 5173. Chrome blocked preflight OPTIONS requests, preventing login. Fix: whitelisted localhost:8080 in both main worker and api-proxy-worker.
+
+- **2026-07-17** — K-03: ESLint strict errors block CI in CSV upload. CSV upload pipeline had multiple strict typescript-strict rule violations. Fix: resolved all 8 lint errors, modularized CSV route handler, and established ParseResult type safety.
+
+- **2026-07-17** — K-02: Broken login due to config placeholder. Reverting the publishable key in wrangler.jsonc to pass CI security guardrails broke local development because the client fetched the placeholder. Fix: reverted key in wrangler.jsonc to pass CI, and separated credentials into local git-ignored .dev.vars.
+
 - **2026-05-21** — K-01: Kong CORS browser login failure. Six stale CORS header
   allowlists in the active nested Kong config
   (`sbbl-hq-selfhost/sbbl-hq-selfhost/volumes/api/kong.yml`) were missing
@@ -887,4 +893,4 @@ and `sbbl-hq-selfhost/WARNING_NOT_ACTIVE_SELFHOST_ROOT.md`.
 
 ---
 
-Last verified: 2026-05-21
+Last verified: 2026-07-18

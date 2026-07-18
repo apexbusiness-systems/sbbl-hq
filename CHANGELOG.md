@@ -1,10 +1,30 @@
-<!-- Version: v1.5.0 | Date: 2026-05-11 | Status: Current -->
+<!-- Version: v1.7.0 | Date: 2026-07-18 | Status: Current -->
 # CHANGELOG
 
 All notable changes to SBBL HQ are documented in this file.
 Versioning follows [semantic versioning](https://semver.org) with UTC date stamps.
 
 ---
+
+## [1.7.0] - 2026-07-18
+
+### Fixed — Chrome login block, CORS whitelisting, and CI guardrails
+
+- **CORS Local Whitelisting** (`src/worker/index.ts` and `src/api-proxy-worker/index.ts`):
+  Added `http://localhost:8080` to `ALLOWED_ORIGINS` to fix Google Chrome blocking OPTIONS preflight requests for local development.
+- **Wrangler Configuration Guardrail**:
+  Reverted `SUPABASE_PUBLISHABLE_KEY` in `wrangler.jsonc` to the placeholder to pass build-time security tests. Introduced a local `.dev.vars` file for secure local development credentials.
+
+### Added — Supabase Cloud migration & Secure CSV Ingestion
+
+- **Supabase Cloud Migration** (PR #552):
+  Worker configuration migrated to Supabase Cloud, missing database migrations executed, and `v_ingest_reconciliation` view secured.
+- **Secure CSV Upload Pipeline** (PR #553):
+  Introduced typed ParseResult contract, modularized CSV route handlers, integrated RxDB local queueing in hooks, and resolved all 8 ESLint `no-explicit-any` typescript-strict violations.
+- **Playwright Upgrade**:
+  Upgraded Playwright to v1.60.0 to fix install hangs on Node 24.
+- **Bun lock synchronization**:
+  Synchronized `bun.lock` to fix Cloudflare frozen lockfile build errors.
 
 ## [1.6.0] - 2026-05-21
 

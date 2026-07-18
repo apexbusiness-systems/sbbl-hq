@@ -36,16 +36,32 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          echo "::group::npm ci"
+          npm ci
+          echo "::endgroup::"
 
-      - name: Lint (zero-warning policy)
-        run: npx eslint . --max-warnings 0
+      - name: Contract Gates
+        run: |
+          echo "::group::Config Integrity"
+          npm run config:contracts
+          echo "::endgroup::"
 
-      - name: Typecheck (app)
-        run: npx tsc --noEmit -p tsconfig.app.json
+          echo "::group::Secrets Placeholder Validation"
+          npm run secrets:contracts
+          echo "::endgroup::"
 
-      - name: Typecheck (node/vite config)
-        run: npx tsc --noEmit -p tsconfig.node.json
+          echo "::group::Docs Drift Validation"
+          npm run docs:drift
+          echo "::endgroup::"
+
+          echo "::group::ESLint (zero-warning policy)"
+          npm run lint
+          echo "::endgroup::"
+
+          echo "::group::Typecheck (tsc --noEmit)"
+          npm run typecheck
+          echo "::endgroup::"
 
       # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
   test:
