@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { parseCsv } from '@/lib/parseCsv';
 import { classifyRiskLane } from '@/lib/omniport';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   json,
   requireSuperAdminSession,
@@ -11,7 +10,9 @@ import {
   writeIngressFailure,
   type HandlerCtx
 } from '../index';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
+// ── ZOD SCHEMAS ──────────────────────────────────────────────────────────────
 const teamRowSchema = z.object({
   name: z.string().min(1, "Team name is required"),
   league_id: z.string().min(1, "League ID/Code is required"),
@@ -63,6 +64,119 @@ const scoreRowSchema = z.object({
   notes: z.string().optional().nullable(),
 });
 
+// ── CONFIGURATION MAP ────────────────────────────────────────────────────────
+interface IngestConfig {
+  schema: z.ZodSchema;
+  table: string;
+  onConflict?: string;
+  resolvePayload: (row: any, leagueMap: Map<string, string>) => any;
+  resolveFallbackPayload?: (row: any, leagueMap: Map<string, string>) => any;
+}
+
+const INGEST_CONFIGS: Record<string, IngestConfig> = {
+  teams: {
+    schema: teamRowSchema,
+    table: "teams",
+    onConflict: "season_id,name",
+    resolvePayload: (row, leagueMap) => ({
+      league_id: leagueMap.get(row.league_id.toLowerCase()) || row.league_id,
+      season_id: row.season_id || null,
+      division_id: row.division_id || null,
+      name: row.name,
+      status: "published",
+      record: row.wins != null ? {
+        wins: Number(row.wins),
+        losses: Number(row.losses ?? 0),
+        ptsFor: Number(row.pts_for ?? 0),
+        ptsAgainst: Number(row.pts_against ?? 0),
+      } : undefined,
+    }),
+    resolveFallbackPayload: (row, leagueMap) => ({
+      league_id: leagueMap.get(row.league_id.toLowerCase()) || row.league_id,
+      season_id: row.season_id || null,
+      division_id: row.division_id || null,
+      name: row.name,
+      status: "published",
+      record: row.wins != null ? {
+        wins: Number(row.wins),
+        losses: Number(row.losses ?? 0),
+        ptsFor: Number(row.pts_for ?? 0),
+        ptsAgainst: Number(row.pts_against ?? 0),
+      } : undefined,
+    })
+  },
+  players: {
+    schema: playerRowSchema,
+    table: "players",
+    onConflict: "user_id",
+    resolvePayload: (row) => ({
+      user_id: row.user_id,
+      team_id: row.team_id || null,
+      league_id: row.league_id || null,
+      jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
+      position: row.position || null,
+    })
+  },
+  schedules: {
+    schema: scheduleRowSchema,
+    table: "schedule_slots",
+    resolvePayload: (row) => ({
+      league_id: row.league_id,
+      season_id: row.season_id,
+      venue_id: row.venue_id || null,
+      court_id: row.court_id || null,
+      starts_at: row.starts_at,
+      ends_at: row.ends_at || null,
+      status: row.status || "upcoming",
+    })
+  },
+  events: {
+    schema: eventRowSchema,
+    table: "league_events",
+    resolvePayload: (row) => ({
+      league_id: row.league_id || null,
+      season_id: row.season_id || null,
+      venue_id: row.venue_id || null,
+      title: row.title,
+      starts_at: row.starts_at || null,
+      metadata: row,
+    })
+  },
+  scores: {
+    schema: scoreRowSchema,
+    table: "games",
+    resolvePayload: (row, leagueMap) => {
+      const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
+      return {
+        category: row.category || "league",
+        league_id: leagueUuid,
+        participant1_label: row.home_label || null,
+        participant2_label: row.away_label || null,
+        home_score: row.home_score !== "" && row.home_score != null ? Number(row.home_score) : null,
+        away_score: row.away_score !== "" && row.away_score != null ? Number(row.away_score) : null,
+        status: row.status || "final",
+        game_date: row.game_date || null,
+        event_name: row.event_name || null,
+        notes: row.notes || null,
+      };
+    }
+  }
+};
+
+// ── HELPERS ──────────────────────────────────────────────────────────────────
+async function fetchLeagueMap(supabase: SupabaseClient, rows: any[]): Promise<Map<string, string>> {
+  const leagueMap = new Map<string, string>();
+  const uniqueCodes = Array.from(new Set(rows.map((r) => r.league_id).filter(Boolean) as string[]));
+  if (uniqueCodes.length > 0) {
+    const { data: leagues } = await supabase.from("leagues").select("id, code").in("code", uniqueCodes);
+    leagues?.forEach((l) => {
+      if (l.code) leagueMap.set(l.code.toLowerCase(), l.id);
+    });
+  }
+  return leagueMap;
+}
+
+// ── HANDLERS ─────────────────────────────────────────────────────────────────
 export async function handleScoresCsvUpload(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireSuperAdminSession(ctx.req, ctx.admin);
@@ -99,23 +213,15 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
     return json({ ok: false, error: "blocked_class_payload" }, 403);
   }
 
+  const config = INGEST_CONFIGS[kind];
+  if (!config) return json({ ok: false, error: "invalid_kind" }, 400);
+
   const validationErrors: Array<{ row: number; field?: string; code: string; message: string }> = [];
-  const validatedRows: Array<Record<string, string>> = [];
-
-  const rowSchemaMap = {
-    teams: teamRowSchema,
-    players: playerRowSchema,
-    schedules: scheduleRowSchema,
-    events: eventRowSchema,
-    scores: scoreRowSchema,
-  };
-
-  const schema = rowSchemaMap[kind];
-  if (!schema) return json({ ok: false, error: "invalid_kind" }, 400);
+  const validatedRows: any[] = [];
 
   rows.forEach((row, index) => {
     if (row.schema_version || row.format) return;
-    const parsed = schema.safeParse(row);
+    const parsed = config.schema.safeParse(row);
     if (!parsed.success) {
       parsed.error.errors.forEach(err => {
         validationErrors.push({
@@ -138,177 +244,47 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
   let failed = 0;
   const errors: string[] = [];
 
-  if (kind === "scores") {
-    const leagueMap = new Map<string, string>();
-    const uniqueCodes = Array.from(new Set(validatedRows.map((r) => r.league_id).filter(Boolean) as string[]));
-    if (uniqueCodes.length > 0) {
-      const { data: leagues } = await ctx.admin.from("leagues").select("id, code").in("code", uniqueCodes);
-      leagues?.forEach((l) => {
-        if (l.code) leagueMap.set(l.code.toLowerCase(), l.id);
-      });
+  const leagueMap = await fetchLeagueMap(ctx.admin, validatedRows);
+
+  try {
+    const payload = validatedRows.map(row => config.resolvePayload(row, leagueMap));
+    const query = ctx.admin.from(config.table);
+    
+    let res;
+    if (config.onConflict) {
+      res = await query.upsert(payload, { onConflict: config.onConflict });
+    } else {
+      res = await query.insert(payload);
     }
+    
+    if (res.error) throw res.error;
+    inserted = validatedRows.length;
+  } catch (bulkErr) {
+    // Fallback row-by-row
+    for (const row of validatedRows) {
+      try {
+        const resolveFn = config.resolveFallbackPayload || config.resolvePayload;
+        const payload = resolveFn(row, leagueMap);
+        const query = ctx.admin.from(config.table);
+        
+        let res;
+        if (config.onConflict) {
+          res = await query.upsert(payload, { onConflict: config.onConflict });
+        } else {
+          res = await query.insert(payload);
+        }
 
-    try {
-      const payload = validatedRows.map((row) => {
-        const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
-        return {
-          category: row.category || "league",
-          league_id: leagueUuid,
-          participant1_label: row.home_label || null,
-          participant2_label: row.away_label || null,
-          home_score: row.home_score != null ? Number(row.home_score) : null,
-          away_score: row.away_score != null ? Number(row.away_score) : null,
-          status: row.status || "final",
-          game_date: row.game_date || null,
-          event_name: row.event_name || null,
-          notes: row.notes || null,
-        };
-      });
-
-      const { error } = await ctx.admin.from("games").insert(payload);
-      if (error) throw error;
-      inserted = validatedRows.length;
-    } catch (bulkErr) {
-      for (const row of validatedRows) {
-        try {
-          const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
-          const { error } = await ctx.admin.from("games").insert({
-            category: row.category || "league",
-            league_id: leagueUuid,
-            participant1_label: row.home_label || null,
-            participant2_label: row.away_label || null,
-            home_score: row.home_score != null ? Number(row.home_score) : null,
-            away_score: row.away_score != null ? Number(row.away_score) : null,
-            status: row.status || "final",
-            game_date: row.game_date || null,
-            event_name: row.event_name || null,
-            notes: row.notes || null,
-          });
-          if (error) {
-            failed++;
-            errors.push(`${row.home_label || "Unknown"} vs ${row.away_label || "Unknown"}: ${error.message}`);
+        if (res.error) {
+          if (config.table === "teams" && String(res.error.message).includes("duplicate key")) {
+            // Treat team duplicate as ignore/success
           } else {
-            inserted++;
+            throw res.error;
           }
-        } catch (e) {
-          failed++;
-          errors.push(e instanceof Error ? e.message : "unknown");
         }
-      }
-    }
-  } else {
-    const leagueMap = new Map<string, string>();
-    const uniqueCodes = Array.from(new Set(validatedRows.map((r) => r.league_id).filter(Boolean) as string[]));
-    if (uniqueCodes.length > 0) {
-      const { data: leagues } = await ctx.admin.from("leagues").select("id, code").in("code", uniqueCodes);
-      leagues?.forEach((l) => {
-        if (l.code) leagueMap.set(l.code.toLowerCase(), l.id);
-      });
-    }
-
-    try {
-      if (kind === "teams") {
-        const payload = validatedRows.map((row) => ({
-          league_id: leagueMap.get(row.league_id.toLowerCase()) || row.league_id,
-          season_id: row.season_id || null,
-          division_id: row.division_id || null,
-          name: row.name,
-          status: "published",
-          record: row.wins != null ? {
-            wins: Number(row.wins),
-            losses: Number(row.losses ?? 0),
-            ptsFor: Number(row.pts_for ?? 0),
-            ptsAgainst: Number(row.pts_against ?? 0),
-          } : undefined,
-        }));
-        const { error } = await ctx.admin.from("teams").upsert(payload, { onConflict: "season_id,name" });
-        if (error) throw error;
-        inserted = validatedRows.length;
-      } else if (kind === "players") {
-        const payload = validatedRows.map((row) => ({
-          user_id: row.user_id,
-          team_id: row.team_id || null,
-          league_id: row.league_id || null,
-          jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
-          position: row.position || null,
-        }));
-        const { error } = await ctx.admin.from("players").upsert(payload, { onConflict: "user_id" });
-        if (error) throw error;
-        inserted = validatedRows.length;
-      } else if (kind === "schedules") {
-        const payload = validatedRows.map((row) => ({
-          league_id: row.league_id,
-          season_id: row.season_id,
-          venue_id: row.venue_id || null,
-          court_id: row.court_id || null,
-          starts_at: row.starts_at,
-          ends_at: row.ends_at || null,
-          status: row.status || "upcoming",
-        }));
-        const { error } = await ctx.admin.from("schedule_slots").insert(payload);
-        if (error) throw error;
-        inserted = validatedRows.length;
-      } else if (kind === "events") {
-        const payload = validatedRows.map((row) => ({
-          league_id: row.league_id || null,
-          season_id: row.season_id || null,
-          venue_id: row.venue_id || null,
-          title: row.title,
-          starts_at: row.starts_at || null,
-          metadata: row,
-        }));
-        const { error } = await ctx.admin.from("league_events").insert(payload);
-        if (error) throw error;
-        inserted = validatedRows.length;
-      }
-    } catch (bulkErr) {
-      for (const row of validatedRows) {
-        try {
-          if (kind === "teams") {
-            const { error } = await ctx.admin.from("teams").insert({
-              league_id: leagueMap.get(row.league_id.toLowerCase()) || row.league_id,
-              season_id: row.season_id || null,
-              division_id: row.division_id || null,
-              name: row.name,
-              status: "published",
-            });
-            if (error && !String(error.message).includes("duplicate key")) throw error;
-          } else if (kind === "players") {
-            const { error } = await ctx.admin.from("players").upsert({
-              user_id: row.user_id,
-              team_id: row.team_id || null,
-              league_id: row.league_id || null,
-              jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
-              position: row.position || null,
-            }, { onConflict: "user_id" });
-            if (error) throw error;
-          } else if (kind === "schedules") {
-            const { error } = await ctx.admin.from("schedule_slots").insert({
-              league_id: row.league_id,
-              season_id: row.season_id,
-              venue_id: row.venue_id || null,
-              court_id: row.court_id || null,
-              starts_at: row.starts_at,
-              ends_at: row.ends_at || null,
-              status: row.status || "upcoming",
-            });
-            if (error) throw error;
-          } else if (kind === "events") {
-            const { error } = await ctx.admin.from("league_events").insert({
-              league_id: row.league_id || null,
-              season_id: row.season_id || null,
-              venue_id: row.venue_id || null,
-              title: row.title,
-              starts_at: row.starts_at || null,
-              metadata: row,
-            });
-            if (error) throw error;
-          }
-          inserted++;
-        } catch (e) {
-          failed++;
-          errors.push(e instanceof Error ? e.message : "unknown");
-        }
+        inserted++;
+      } catch (e: any) {
+        failed++;
+        errors.push(e instanceof Error ? e.message : "unknown");
       }
     }
   }
@@ -364,68 +340,27 @@ export async function handleImportRoute(
     court_id: r.court_id ?? r.courtId,
   }));
 
+  const config = INGEST_CONFIGS[kind];
+  if (!config) return json({ ok: false, error: "invalid_kind" }, 400);
+
   let insertedRows = 0;
   let failedRows = 0;
   const errors: string[] = [];
-
   let bulkSuccess = false;
 
-  try {
-    if (kind === "teams") {
-      const payload = rows.map((row) => ({
-        league_id: row.league_id,
-        season_id: row.season_id,
-        division_id: row.division_id || null,
-        name: row.name,
-        status: row.status || "published",
-        record: row.wins != null ? {
-          wins: Number(row.wins),
-          losses: Number(row.losses ?? 0),
-          ptsFor: Number(row.pts_for ?? 0),
-          ptsAgainst: Number(row.pts_against ?? 0),
-        } : undefined,
-      }));
-      const { error } = await ctx.admin
-        .from("teams")
-        .upsert(payload, { onConflict: "season_id,name" });
-      if (error) throw error;
-    } else if (kind === "players") {
-      const payload = rows.map((row) => ({
-        user_id: row.user_id,
-        team_id: row.team_id || null,
-        league_id: row.league_id || null,
-        jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
-        position: row.position || null,
-      }));
-      const { error } = await ctx.admin
-        .from("players")
-        .upsert(payload, { onConflict: "user_id" });
-      if (error) throw error;
-    } else if (kind === "schedules") {
-      const payload = rows.map((row) => ({
-        league_id: row.league_id,
-        season_id: row.season_id,
-        venue_id: row.venue_id || null,
-        court_id: row.court_id || null,
-        starts_at: row.starts_at,
-        ends_at: row.ends_at || null,
-        status: row.status || "upcoming",
-      }));
-      const { error } = await ctx.admin.from("schedule_slots").insert(payload);
-      if (error) throw error;
-    } else if (kind === "events") {
-      const payload = rows.map((row) => ({
-        league_id: row.league_id || null,
-        season_id: row.season_id || null,
-        venue_id: row.venue_id || null,
-        title: row.title,
-        starts_at: row.starts_at || null,
-        metadata: row,
-      }));
-      const { error } = await ctx.admin.from("league_events").insert(payload);
-      if (error) throw error;
-    }
+  const leagueMap = await fetchLeagueMap(ctx.admin, rows);
 
+  try {
+    const payload = rows.map(row => config.resolvePayload(row, leagueMap));
+    const query = ctx.admin.from(config.table);
+
+    let res;
+    if (config.onConflict) {
+      res = await query.upsert(payload, { onConflict: config.onConflict });
+    } else {
+      res = await query.insert(payload);
+    }
+    if (res.error) throw res.error;
     bulkSuccess = true;
   } catch (bulkError) {
     // Fallback
@@ -455,58 +390,16 @@ export async function handleImportRoute(
     for (let i = 0; i < rows.length; i += BATCH_SIZE) {
       const batch = rows.slice(i, i + BATCH_SIZE);
       try {
-        if (kind === "teams") {
-          const payload = batch.map((row) => ({
-            league_id: row.league_id,
-            season_id: row.season_id,
-            division_id: row.division_id || null,
-            name: row.name,
-            status: "published",
-          }));
-          const { error } = await ctx.admin.from("teams").upsert(payload, {
-            onConflict: "season_id,name",
-          });
-          if (error) throw error;
-        } else if (kind === "players") {
-          const payload = batch.map((row) => ({
-            user_id: row.user_id,
-            team_id: row.team_id || null,
-            league_id: row.league_id || null,
-            jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
-            position: row.position || null,
-          }));
-          const { error } = await ctx.admin
-            .from("players")
-            .upsert(payload, { onConflict: "user_id" });
-          if (error) throw error;
-        } else if (kind === "schedules") {
-          const payload = batch.map((row) => ({
-            league_id: row.league_id,
-            season_id: row.season_id,
-            venue_id: row.venue_id || null,
-            court_id: row.court_id || null,
-            starts_at: row.starts_at,
-            ends_at: row.ends_at || null,
-            status: row.status || "upcoming",
-          }));
-          const { error } = await ctx.admin
-            .from("schedule_slots")
-            .insert(payload);
-          if (error) throw error;
-        } else if (kind === "events") {
-          const payload = batch.map((row) => ({
-            league_id: row.league_id || null,
-            season_id: row.season_id || null,
-            venue_id: row.venue_id || null,
-            title: row.title,
-            starts_at: row.starts_at || null,
-            metadata: row,
-          }));
-          const { error } = await ctx.admin
-            .from("league_events")
-            .insert(payload);
-          if (error) throw error;
+        const payload = batch.map(row => config.resolvePayload(row, leagueMap));
+        const query = ctx.admin.from(config.table);
+        
+        let res;
+        if (config.onConflict) {
+          res = await query.upsert(payload, { onConflict: config.onConflict });
+        } else {
+          res = await query.insert(payload);
         }
+        if (res.error) throw res.error;
 
         await Promise.all(
           batch.map((row) =>
@@ -525,51 +418,23 @@ export async function handleImportRoute(
       } catch (batchError) {
         for (const row of batch) {
           try {
-            if (kind === "teams") {
-              const { error } = await ctx.admin.from("teams").insert({
-                league_id: row.league_id,
-                season_id: row.season_id,
-                division_id: row.division_id || null,
-                name: row.name,
-                status: "published",
-              });
-              if (error && !String(error.message).includes("duplicate key"))
-                throw error;
-            } else if (kind === "players") {
-              const { error } = await ctx.admin.from("players").upsert(
-                {
-                  user_id: row.user_id,
-                  team_id: row.team_id || null,
-                  league_id: row.league_id || null,
-                  jersey_number: row.jersey_number
-                    ? Number(row.jersey_number)
-                    : null,
-                  position: row.position || null,
-                },
-                { onConflict: "user_id" },
-              );
-              if (error) throw error;
-            } else if (kind === "schedules") {
-              const { error } = await ctx.admin.from("schedule_slots").insert({
-                league_id: row.league_id,
-                season_id: row.season_id,
-                venue_id: row.venue_id || null,
-                court_id: row.court_id || null,
-                starts_at: row.starts_at,
-                ends_at: row.ends_at || null,
-                status: row.status || "upcoming",
-              });
-              if (error) throw error;
-            } else if (kind === "events") {
-              const { error } = await ctx.admin.from("league_events").insert({
-                league_id: row.league_id || null,
-                season_id: row.season_id || null,
-                venue_id: row.venue_id || null,
-                title: row.title,
-                starts_at: row.starts_at || null,
-                metadata: row,
-              });
-              if (error) throw error;
+            const resolveFn = config.resolveFallbackPayload || config.resolvePayload;
+            const payload = resolveFn(row, leagueMap);
+            const query = ctx.admin.from(config.table);
+
+            let res;
+            if (config.onConflict) {
+              res = await query.upsert(payload, { onConflict: config.onConflict });
+            } else {
+              res = await query.insert(payload);
+            }
+
+            if (res.error) {
+              if (config.table === "teams" && String(res.error.message).includes("duplicate key")) {
+                // Ignore team duplicate keys
+              } else {
+                throw res.error;
+              }
             }
 
             await ctx.admin.rpc("enqueue_local_domain_event", {
@@ -582,11 +447,9 @@ export async function handleImportRoute(
               p_available_at: new Date().toISOString(),
             });
             insertedRows += 1;
-          } catch (error) {
+          } catch (error: any) {
             failedRows += 1;
-            errors.push(
-              error instanceof Error ? error.message : "import_failed",
-            );
+            errors.push(error instanceof Error ? error.message : "import_failed");
             await writeIngressFailure(
               ctx.admin,
               `${kind}_import_failed`,
@@ -637,34 +500,13 @@ export async function handleScoresCsvImport(ctx: HandlerCtx) {
   let failed = 0;
   const errors: string[] = [];
 
-  const leagueMap = new Map<string, string>();
-  const uniqueCodes = Array.from(new Set(rows.map((r) => r.league_id).filter(Boolean) as string[]));
-  if (uniqueCodes.length > 0) {
-    const { data: leagues } = await ctx.admin.from("leagues").select("id, code").in("code", uniqueCodes);
-    leagues?.forEach((l) => {
-      if (l.code) leagueMap.set(l.code.toLowerCase(), l.id);
-    });
-  }
+  const leagueMap = await fetchLeagueMap(ctx.admin, rows);
+  const config = INGEST_CONFIGS.scores;
 
   let bulkSuccess = false;
   try {
-    const payload = rows.map((row) => {
-      const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
-      return {
-        category: row.category || "league",
-        league_id: leagueUuid,
-        participant1_label: row.home_label || null,
-        participant2_label: row.away_label || null,
-        home_score: row.home_score !== "" && row.home_score != null ? Number(row.home_score) : null,
-        away_score: row.away_score !== "" && row.away_score != null ? Number(row.away_score) : null,
-        status: row.status || "final",
-        game_date: row.game_date || null,
-        event_name: row.event_name || null,
-        notes: row.notes || null,
-      };
-    });
-
-    const { error } = await ctx.admin.from("games").insert(payload);
+    const payload = rows.map(row => config.resolvePayload(row, leagueMap));
+    const { error } = await ctx.admin.from(config.table).insert(payload);
     if (error) throw error;
     bulkSuccess = true;
     inserted = rows.length;
@@ -675,26 +517,15 @@ export async function handleScoresCsvImport(ctx: HandlerCtx) {
   if (!bulkSuccess) {
     for (const row of rows) {
       try {
-        const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
-        const { error } = await ctx.admin.from("games").insert({
-          category: row.category || "league",
-          league_id: leagueUuid,
-          participant1_label: row.home_label || null,
-          participant2_label: row.away_label || null,
-          home_score: row.home_score !== "" && row.home_score != null ? Number(row.home_score) : null,
-          away_score: row.away_score !== "" && row.away_score != null ? Number(row.away_score) : null,
-          status: row.status || "final",
-          game_date: row.game_date || null,
-          event_name: row.event_name || null,
-          notes: row.notes || null,
-        });
+        const payload = config.resolvePayload(row, leagueMap);
+        const { error } = await ctx.admin.from(config.table).insert(payload);
         if (error) {
           failed++;
           errors.push(`${row.home_label || "Unknown"} vs ${row.away_label || "Unknown"}: ${error.message}`);
         } else {
           inserted++;
         }
-      } catch (e) {
+      } catch (e: any) {
         failed++;
         errors.push(e instanceof Error ? e.message : "unknown");
       }

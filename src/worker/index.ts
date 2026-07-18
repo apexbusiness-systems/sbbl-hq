@@ -115,6 +115,7 @@ const ALLOWED_ORIGINS = [
   "https://sbbl-hq.icu",
   "https://www.sbbl-hq.icu",
   "http://localhost:5173",
+  "http://localhost:8080",
   "capacitor://localhost",
   "http://localhost",
 ];
