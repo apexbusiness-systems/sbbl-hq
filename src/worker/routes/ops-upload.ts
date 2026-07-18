@@ -217,7 +217,7 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
   if (!config) return json({ ok: false, error: "invalid_kind" }, 400);
 
   const validationErrors: Array<{ row: number; field?: string; code: string; message: string }> = [];
-  const validatedRows: Record<string, unknown>[] = [];
+  const validatedRows: Record<string, string>[] = [];
 
   rows.forEach((row, index) => {
     if (row.schema_version || row.format) return;
@@ -232,7 +232,7 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
         });
       });
     } else {
-      validatedRows.push(parsed.data);
+      validatedRows.push(parsed.data as Record<string, string>);
     }
   });
 
