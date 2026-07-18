@@ -4752,7 +4752,10 @@ async function createOrRefreshPlaybackSession(
     )
     .select("id,expires_at,max_expires_at")
     .single();
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.code === '23505') throw new Error("device_conflict");
+    throw new Error(error.message);
+  }
   return {
     id: String(data.id),
     expiresAt: String(data.expires_at),
@@ -4924,12 +4927,20 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
       hint: "Set a stream URL in Broadcast Controls before going live.",
     }, 409);
   }
-  const session = await createOrRefreshPlaybackSession(
-    ctx,
-    gameId,
-    userId,
-    body.sessionKey,
-  );
+  let session;
+  try {
+    session = await createOrRefreshPlaybackSession(
+      ctx,
+      gameId,
+      userId,
+      body.sessionKey,
+    );
+  } catch (err: unknown) {
+    if (err instanceof Error && err.message === "device_conflict") {
+      return json({ ok: false, error: "device_conflict", message: "Another device is currently active." }, 409);
+    }
+    throw err;
+  }
   const deliveryClass = getStreamDeliveryClass(playbackUrl);
   const cookieHeaders: Record<string, string> = {};
   let clientPlaybackUrl = playbackUrl;
