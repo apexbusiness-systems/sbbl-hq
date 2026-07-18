@@ -76,7 +76,7 @@ async function registerFacebookMocks(page: import('@playwright/test').Page, isLi
     });
   });
 
-  let activeSessionId = 'sess-validation-1';
+  const activeSessionId = 'sess-validation-1';
   await page.route(`**/api/broadcast/session`, async (route) => {
     await route.fulfill({
       status: 200,
