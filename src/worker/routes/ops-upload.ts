@@ -69,8 +69,8 @@ interface IngestConfig {
   schema: z.ZodSchema;
   table: string;
   onConflict?: string;
-  resolvePayload: (row: any, leagueMap: Map<string, string>) => any;
-  resolveFallbackPayload?: (row: any, leagueMap: Map<string, string>) => any;
+  resolvePayload: (row: Record<string, string>, leagueMap: Map<string, string>) => Record<string, unknown>;
+  resolveFallbackPayload?: (row: Record<string, string>, leagueMap: Map<string, string>) => Record<string, unknown>;
 }
 
 const INGEST_CONFIGS: Record<string, IngestConfig> = {
@@ -164,7 +164,7 @@ const INGEST_CONFIGS: Record<string, IngestConfig> = {
 };
 
 // ── HELPERS ──────────────────────────────────────────────────────────────────
-async function fetchLeagueMap(supabase: SupabaseClient, rows: any[]): Promise<Map<string, string>> {
+async function fetchLeagueMap(supabase: SupabaseClient, rows: Record<string, string>[]): Promise<Map<string, string>> {
   const leagueMap = new Map<string, string>();
   const uniqueCodes = Array.from(new Set(rows.map((r) => r.league_id).filter(Boolean) as string[]));
   if (uniqueCodes.length > 0) {
@@ -217,7 +217,7 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
   if (!config) return json({ ok: false, error: "invalid_kind" }, 400);
 
   const validationErrors: Array<{ row: number; field?: string; code: string; message: string }> = [];
-  const validatedRows: any[] = [];
+  const validatedRows: Record<string, unknown>[] = [];
 
   rows.forEach((row, index) => {
     if (row.schema_version || row.format) return;
@@ -282,7 +282,7 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
           }
         }
         inserted++;
-      } catch (e: any) {
+      } catch (e) {
         failed++;
         errors.push(e instanceof Error ? e.message : "unknown");
       }
@@ -447,7 +447,7 @@ export async function handleImportRoute(
               p_available_at: new Date().toISOString(),
             });
             insertedRows += 1;
-          } catch (error: any) {
+          } catch (error) {
             failedRows += 1;
             errors.push(error instanceof Error ? error.message : "import_failed");
             await writeIngressFailure(
@@ -525,7 +525,7 @@ export async function handleScoresCsvImport(ctx: HandlerCtx) {
         } else {
           inserted++;
         }
-      } catch (e: any) {
+      } catch (e) {
         failed++;
         errors.push(e instanceof Error ? e.message : "unknown");
       }
