@@ -1,0 +1,74 @@
+-- =============================================================================
+-- MIGRATION: 20260718000400_drop_orphaned_cleanup_timestamptz_overload.sql
+-- CONTRACT:  Stream Access Hardening — Decision 2 (JR, 2026-07-18)
+-- PURPOSE:   Drop the orphaned cleanup_expired_stream_sessions(timestamptz) overload.
+--
+-- BACKGROUND:
+--   Two overloads of cleanup_expired_stream_sessions exist:
+--
+--   Overload A — no-arg: cleanup_expired_stream_sessions()
+--     Defined in: 20260418120000_playback_provider_abstraction.sql
+--     Behavior:   Sets status = 'expired' (correct canonical column) +
+--                 hard-deletes rows older than 24h with ended/expired/displaced status.
+--     Scheduled:  pg_cron job 'cleanup-stream-sessions' runs this every 5 minutes.
+--     Status:     LIVE, CORRECT, KEEP.
+--
+--   Overload B — timestamptz: cleanup_expired_stream_sessions(p_now timestamptz)
+--     Defined in: 20260410120000_stream_validation_system.sql
+--     Behavior:   Sets session_status = 'expired' ONLY — never touches status.
+--                 Diverges from the canonical write path (batch_heartbeat_upsert
+--                 uses status, not session_status). Would create a landmine if the
+--                 cron job were ever repointed to this overload.
+--     Scheduled:  NOT present in cron.job or anywhere in pg_cron config.
+--     Call sites: 0 — grep of entire repo (src/, supabase/, scripts/, ops/, docs/)
+--                 returned zero results. Only references are in comments.
+--     Status:     ORPHANED. Drop it.
+--
+-- CALL SITE AUDIT (evidence — 2026-07-18):
+--   grep result: 0 hits for cleanup_expired_stream_sessions in:
+--     src/worker/index.ts     — confirmed absent
+--     src/test/**             — absent (OAD test file only has comments)
+--     scripts/**              — absent
+--     ops/**                  — absent
+--     supabase/migrations/**  — only defined in 20260410120000, referenced in
+--                               20260718000200 (our Task 2 ALTER/REVOKE).
+--   Conclusion: safe to DROP with no call-site migration.
+--
+-- WHAT TASK 2 (20260718000200) ALREADY DID:
+--   The ALTER FUNCTION ... SET search_path = '' and REVOKE EXECUTE on this overload
+--   were already applied in 20260718000200. This migration adds the DROP.
+--   PostgreSQL DROP FUNCTION is safe after an ALTER — order does not matter here
+--   since we are applying both in the same push.
+--
+-- IRON LAW #9 COMPLIANCE:
+--   This is a new dated migration file. No existing migration is edited.
+-- =============================================================================
+
+-- Drop the orphaned (timestamptz) overload.
+-- The no-arg overload (the live, scheduled one) is NOT touched.
+DROP FUNCTION IF EXISTS public.cleanup_expired_stream_sessions(timestamptz);
+
+-- =============================================================================
+-- VERIFICATION QUERIES (run post-migration):
+--
+-- 1. Confirm only one overload remains (the no-arg one):
+--   SELECT proname, pg_get_function_identity_arguments(oid) as args
+--   FROM pg_proc
+--   WHERE proname = 'cleanup_expired_stream_sessions'
+--     AND pronamespace = 'public'::regnamespace;
+--   -- Expected: exactly 1 row, args = '' (empty — the no-arg scheduled overload).
+--
+-- 2. Confirm the surviving function still has search_path = '' (from Task 2):
+--   SELECT proname, proconfig
+--   FROM pg_proc
+--   WHERE proname = 'cleanup_expired_stream_sessions'
+--     AND pronamespace = 'public'::regnamespace;
+--   -- Expected: proconfig contains 'search_path='.
+--
+-- 3. Confirm pg_cron schedule is unchanged:
+--   SELECT jobname, schedule, command
+--   FROM cron.job
+--   WHERE jobname = 'cleanup-stream-sessions';
+--   -- Expected: 1 row, schedule = '*/5 * * * *',
+--   --           command = 'SELECT cleanup_expired_stream_sessions()'.
+-- =============================================================================
