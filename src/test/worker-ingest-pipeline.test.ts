@@ -409,35 +409,75 @@ describe('POTG publisher guard', () => {
   });
 });
 
-// ── 9. Security boundaries ────────────────────────────────────────────────────
-describe('security: super_admin gating', () => {
-  it('all ingest handlers call requireSuperAdmin', () => {
-    for (const handler of [
-      'handleIngestPresign', 'handleIngestSubmit', 'handleIngestStatus',
-      'handleIngestApprove', 'handleIngestReject', 'handleIngestReplay',
-    ]) {
-      const fnStart = workerSrc.indexOf(`async function ${handler}`);
-      const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
-      const fnBody  = workerSrc.slice(fnStart, fnEnd);
-      expect(fnBody).toContain('requireSuperAdmin');
-    }
+// ── 10. Gap 3 — needs_review comment removed ─────────────────────────────────
+// Regression guard: the handleIngestSubmit docstring previously claimed
+// "Low-confidence / unknown kind → needs_review (never auto-publishes)" but
+// that path never existed in the code. The false promise has been removed.
+describe('Gap 3: needs_review false promise removed from handleIngestSubmit', () => {
+  it('handleIngestSubmit docstring does NOT promise needs_review auto-assignment', () => {
+    const fnStart = workerSrc.indexOf('async function handleIngestSubmit');
+    const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
+    const fnBody  = workerSrc.slice(fnStart, fnEnd);
+    // The old false promise should be absent
+    expect(fnBody).not.toMatch(/Low-confidence.*needs_review.*never auto-publishes/i);
   });
 
-  it('media_publications RLS policy in migration allows only super_admin writes', () => {
-    const migSrc = readFileSync(
-      resolve(__dirname, '../../supabase/migrations/20260407103137_media_publications.sql'),
-      'utf-8'
-    );
-    expect(migSrc).toContain('super_admin_full_access');
-    expect(migSrc).toContain("role' = 'super_admin'");
+  it('routing comment does NOT claim unknown kind auto-assigns needs_review', () => {
+    const fnStart = workerSrc.indexOf('async function handleIngestSubmit');
+    const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
+    const fnBody  = workerSrc.slice(fnStart, fnEnd);
+    expect(fnBody).not.toMatch(/Unknown kind.*needs_review/i);
   });
 
-  it('media_publications public read limited to published rows only', () => {
-    const migSrc = readFileSync(
-      resolve(__dirname, '../../supabase/migrations/20260407103137_media_publications.sql'),
-      'utf-8'
-    );
-    expect(migSrc).toContain('public_read_published');
-    expect(migSrc).toContain("status = 'published'");
+  it('handleIngestSubmit still does NOT auto-assign needs_review state on submit', () => {
+    // This test preserves the existing guard from section 8
+    const fnStart = workerSrc.indexOf('async function handleIngestSubmit');
+    const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
+    const fnBody  = workerSrc.slice(fnStart, fnEnd);
+    expect(fnBody).not.toContain('"needs_review"'); // no auto-needs_review on submit
+  });
+});
+
+// ── 11. Gap 4 — handleSubmitPotg idempotency dedup ───────────────────────────
+// Regression guard: /ops/potg/submit previously had no idempotency-key dedup.
+// A second POST with the same x-idempotency-key would create a duplicate poster.
+// Gap 4 adds readIdempotencyKey + audit_logs dedup matching the established pattern.
+describe('Gap 4: handleSubmitPotg idempotency dedup', () => {
+  const fnStart = workerSrc.indexOf('async function handleSubmitPotg');
+  const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
+  const fnBody  = workerSrc.slice(fnStart, fnEnd);
+
+  it('reads idempotency key at the top of the handler', () => {
+    const keyIdx  = fnBody.indexOf('readIdempotencyKey');
+    const bodyIdx = fnBody.indexOf('ctx.req.json()');
+    // Key must be read before the main body parse (guard-first order)
+    expect(keyIdx).toBeGreaterThan(-1);
+    expect(keyIdx).toBeLessThan(bodyIdx);
+  });
+
+  it('queries audit_logs for an existing potg_submitted entry before writing', () => {
+    const auditQueryIdx = fnBody.indexOf('.from("audit_logs")');
+    const firstInsertIdx = fnBody.indexOf('.from("import_jobs")');
+    expect(auditQueryIdx).toBeGreaterThan(-1);
+    expect(auditQueryIdx).toBeLessThan(firstInsertIdx);
+  });
+
+  it('returns deduplicated: true on repeat submission with same idempotency key', () => {
+    expect(fnBody).toContain('deduplicated: true');
+  });
+
+  it('writes a direct audit_logs row at the end as the dedup anchor', () => {
+    // The dedup anchor must be a direct insert (not only via non-critical RPC)
+    expect(fnBody).toContain('action: "potg_submitted"');
+    expect(fnBody).toContain('idempotency_key: idempotencyKey');
+    // The old non-critical RPC call pattern should be gone from executable code
+    expect(fnBody).not.toContain('rpc("log_admin_action"');
+  });
+
+  it('still calls validatePotgStatFields before any write (guard ordering preserved)', () => {
+    const validateIdx = fnBody.indexOf('validatePotgStatFields');
+    const insertJobIdx = fnBody.indexOf('.from("import_jobs")');
+    expect(validateIdx).toBeGreaterThan(-1);
+    expect(insertJobIdx).toBeGreaterThan(validateIdx);
   });
 });

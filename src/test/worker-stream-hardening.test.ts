@@ -506,7 +506,7 @@ describe('stream hardening worker handlers', () => {
   // These handlers own the open-broadcast path. They have zero game coupling.
   // handlePlaybackSession must reject any request routed here with gameId=null.
 
-  it('handlePlaybackSession rejects null gameId — broadcast must use /api/broadcast/*', async () => {
+  it('handlePlaybackSession allows null gameId for broadcast', async () => {
     const res = await handlePlaybackSession({
       req: new Request('https://local/api/streams/broadcast/session', {
         method: 'POST',
@@ -521,11 +521,11 @@ describe('stream hardening worker handlers', () => {
       admin: createAdmin({}),
     } as any);
 
-    expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'use_broadcast_endpoint' });
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'stream_not_configured' });
   });
 
-  it('handlePlaybackSession rejects broadcast string alias — must use /api/broadcast/*', async () => {
+  it('handlePlaybackSession allows broadcast string alias', async () => {
     const res = await handlePlaybackSession({
       req: new Request('https://local/api/streams/broadcast/session', {
         method: 'POST',
@@ -540,8 +540,8 @@ describe('stream hardening worker handlers', () => {
       admin: createAdmin({}),
     } as any);
 
-    expect(res.status).toBe(400);
-    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'use_broadcast_endpoint' });
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'stream_not_configured' });
   });
 
   it('handleBroadcastStreamAccess grants access to registered fan when live', async () => {

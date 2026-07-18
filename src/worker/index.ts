@@ -2370,303 +2370,6 @@ async function handleOpsBootstrap({ req, admin }: HandlerCtx) {
   });
 }
 
-async function handleImportRoute(
-  ctx: HandlerCtx,
-  kind: "teams" | "players" | "schedules" | "events",
-) {
-  await ensureMutation(ctx.req, ctx);
-  const session = await requireAdminSession(ctx.req, ctx.admin);
-  const body = (await ctx.req.json().catch(() => null)) as {
-    rows?: Array<Record<string, string>>;
-  } | null;
-  const rawRows = body?.rows ?? [];
-  if (!Array.isArray(rawRows) || rawRows.length === 0) {
-    return json({ ok: false, error: "rows_required" }, 400);
-  }
-
-  // Normalize camelCase keys (from manual Ops creates) to snake_case (DB columns).
-  // CSV bulk imports already use snake_case, so the fallback is harmless.
-  const rows = rawRows.map((r): Record<string, string> => ({
-    ...r,
-    league_id: r.league_id ?? r.leagueId,
-    season_id: r.season_id ?? r.seasonId,
-    division_id: r.division_id ?? r.divisionId ?? r.division,
-    user_id: r.user_id ?? r.userId,
-    team_id: r.team_id ?? r.teamId,
-    jersey_number: r.jersey_number ?? r.jerseyNumber,
-    starts_at: r.starts_at ?? r.startsAt,
-    ends_at: r.ends_at ?? r.endsAt,
-    venue_id: r.venue_id ?? r.venueId,
-    court_id: r.court_id ?? r.courtId,
-  }));
-
-  let insertedRows = 0;
-  let failedRows = 0;
-  const errors: string[] = [];
-
-  let bulkSuccess = false;
-
-  try {
-    if (kind === "teams") {
-      const payload = rows.map((row) => ({
-        league_id: row.league_id,
-        season_id: row.season_id,
-        division_id: row.division_id || null,
-        name: row.name,
-        status: row.status || "published",
-        record: row.wins != null ? {
-          wins: Number(row.wins),
-          losses: Number(row.losses ?? 0),
-          ptsFor: Number(row.pts_for ?? 0),
-          ptsAgainst: Number(row.pts_against ?? 0),
-        } : undefined,
-      }));
-      const { error } = await ctx.admin
-        .from("teams")
-        .upsert(payload, { onConflict: "season_id,name" });
-      if (error) throw error;
-    } else if (kind === "players") {
-      const payload = rows.map((row) => ({
-        user_id: row.user_id,
-        team_id: row.team_id || null,
-        league_id: row.league_id || null,
-        jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
-        position: row.position || null,
-      }));
-      const { error } = await ctx.admin
-        .from("players")
-        .upsert(payload, { onConflict: "user_id" });
-      if (error) throw error;
-    } else if (kind === "schedules") {
-      const payload = rows.map((row) => ({
-        league_id: row.league_id,
-        season_id: row.season_id,
-        venue_id: row.venue_id || null,
-        court_id: row.court_id || null,
-        starts_at: row.starts_at,
-        ends_at: row.ends_at || null,
-        status: row.status || "upcoming",
-      }));
-      const { error } = await ctx.admin.from("schedule_slots").insert(payload);
-      if (error) throw error;
-    } else if (kind === "events") {
-      const payload = rows.map((row) => ({
-        league_id: row.league_id || null,
-        season_id: row.season_id || null,
-        venue_id: row.venue_id || null,
-        title: row.title,
-        starts_at: row.starts_at || null,
-        metadata: row,
-      }));
-      const { error } = await ctx.admin.from("league_events").insert(payload);
-      if (error) throw error;
-    }
-
-    bulkSuccess = true;
-  } catch (bulkError) {
-    // Fallback to iterative process so we handle partial successes and exact error logging
-  }
-
-  if (bulkSuccess) {
-    // DB insert committed all rows atomically. Count them all as inserted.
-    insertedRows = rows.length;
-
-    // Enqueue domain events best-effort: a failure here must NOT mark rows as failed
-    // because the data is already persisted in the database.
-    await Promise.allSettled(
-      rows.map((row) =>
-        ctx.admin.rpc("enqueue_local_domain_event", {
-          p_event_type: `${kind}_imported`,
-          p_entity_type: kind,
-          p_entity_id: null,
-          p_league_id: row.league_id || null,
-          p_payload: row,
-          p_trace_id: crypto.randomUUID(),
-          p_available_at: new Date().toISOString(),
-        }).then(({ error }) => {
-          if (error) {
-            console.warn(`[import] enqueue_local_domain_event warning (${kind}):`, error.message);
-          }
-        }),
-      ),
-    );
-  } else {
-    // Iterative fallback if bulk db operation fails
-    const BATCH_SIZE = 50;
-    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-      const batch = rows.slice(i, i + BATCH_SIZE);
-      try {
-        if (kind === "teams") {
-          const payload = batch.map((row) => ({
-            league_id: row.league_id,
-            season_id: row.season_id,
-            division_id: row.division_id || null,
-            name: row.name,
-            status: "published",
-          }));
-          const { error } = await ctx.admin.from("teams").upsert(payload, {
-            onConflict: "season_id,name",
-          });
-          if (error) throw error;
-        } else if (kind === "players") {
-          const payload = batch.map((row) => ({
-            user_id: row.user_id,
-            team_id: row.team_id || null,
-            league_id: row.league_id || null,
-            jersey_number: row.jersey_number ? Number(row.jersey_number) : null,
-            position: row.position || null,
-          }));
-          const { error } = await ctx.admin
-            .from("players")
-            .upsert(payload, { onConflict: "user_id" });
-          if (error) throw error;
-        } else if (kind === "schedules") {
-          const payload = batch.map((row) => ({
-            league_id: row.league_id,
-            season_id: row.season_id,
-            venue_id: row.venue_id || null,
-            court_id: row.court_id || null,
-            starts_at: row.starts_at,
-            ends_at: row.ends_at || null,
-            status: row.status || "upcoming",
-          }));
-          const { error } = await ctx.admin
-            .from("schedule_slots")
-            .insert(payload);
-          if (error) throw error;
-        } else if (kind === "events") {
-          const payload = batch.map((row) => ({
-            league_id: row.league_id || null,
-            season_id: row.season_id || null,
-            venue_id: row.venue_id || null,
-            title: row.title,
-            starts_at: row.starts_at || null,
-            metadata: row,
-          }));
-          const { error } = await ctx.admin
-            .from("league_events")
-            .insert(payload);
-          if (error) throw error;
-        }
-
-        await Promise.all(
-          batch.map((row) =>
-            ctx.admin.rpc("enqueue_local_domain_event", {
-              p_event_type: `${kind}_imported`,
-              p_entity_type: kind,
-              p_entity_id: null,
-              p_league_id: row.league_id || null,
-              p_payload: row,
-              p_trace_id: crypto.randomUUID(),
-              p_available_at: new Date().toISOString(),
-            }),
-          ),
-        );
-        insertedRows += batch.length;
-      } catch (batchError) {
-        // If a batch fails, fall back to individual rows for this batch to ensure granular error reporting
-        for (const row of batch) {
-          try {
-            if (kind === "teams") {
-              const { error } = await ctx.admin.from("teams").insert({
-                league_id: row.league_id,
-                season_id: row.season_id,
-                division_id: row.division_id || null,
-                name: row.name,
-                status: "published",
-              });
-              if (error && !String(error.message).includes("duplicate key"))
-                throw error;
-            } else if (kind === "players") {
-              const { error } = await ctx.admin.from("players").upsert(
-                {
-                  user_id: row.user_id,
-                  team_id: row.team_id || null,
-                  league_id: row.league_id || null,
-                  jersey_number: row.jersey_number
-                    ? Number(row.jersey_number)
-                    : null,
-                  position: row.position || null,
-                },
-                { onConflict: "user_id" },
-              );
-              if (error) throw error;
-            } else if (kind === "schedules") {
-              const { error } = await ctx.admin.from("schedule_slots").insert({
-                league_id: row.league_id,
-                season_id: row.season_id,
-                venue_id: row.venue_id || null,
-                court_id: row.court_id || null,
-                starts_at: row.starts_at,
-                ends_at: row.ends_at || null,
-                status: row.status || "upcoming",
-              });
-              if (error) throw error;
-            } else if (kind === "events") {
-              const { error } = await ctx.admin.from("league_events").insert({
-                league_id: row.league_id || null,
-                season_id: row.season_id || null,
-                venue_id: row.venue_id || null,
-                title: row.title,
-                starts_at: row.starts_at || null,
-                metadata: row,
-              });
-              if (error) throw error;
-            }
-
-            await ctx.admin.rpc("enqueue_local_domain_event", {
-              p_event_type: `${kind}_imported`,
-              p_entity_type: kind,
-              p_entity_id: null,
-              p_league_id: row.league_id || null,
-              p_payload: row,
-              p_trace_id: crypto.randomUUID(),
-              p_available_at: new Date().toISOString(),
-            });
-            insertedRows += 1;
-          } catch (error) {
-            failedRows += 1;
-            errors.push(
-              error instanceof Error ? error.message : "import_failed",
-            );
-            await writeIngressFailure(
-              ctx.admin,
-              `${kind}_import_failed`,
-              row,
-              "admin_mutation",
-              session.userId,
-            );
-          }
-        }
-      }
-    }
-  }
-
-  const job = await writeImportJob(ctx.admin, {
-    job_type: kind,
-    submitted_by: session.userId,
-    total_rows: rows.length,
-    inserted_rows: insertedRows,
-    failed_rows: failedRows,
-    payload_summary: { sample: rows[0] ?? null },
-    error_summary: errors.slice(0, 5).join("; ") || null,
-  });
-
-  await ctx.admin.from("audit_logs").insert({
-    actor_id: session.userId,
-    action: `ops_import_${kind}`,
-    ref_type: "import_job",
-    ref_id: job.id,
-    payload: {
-      total_rows: rows.length,
-      inserted_rows: insertedRows,
-      failed_rows: failedRows,
-    },
-    idempotency_key: readIdempotencyKey(ctx.req.headers),
-  });
-
-  return json({ ok: true, summary: job });
-}
 
 async function handleImportHistory({ req, admin }: HandlerCtx) {
   await requireAdminSession(req, admin);
@@ -3926,6 +3629,24 @@ async function resolvePotgPlayer(
 async function handleSubmitPotg(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireAdminSession(ctx.req, ctx.admin);
+
+  // ── Gap 4: Idempotency dedup ─────────────────────────────────────────────────
+  // Retry-safe: if the same x-idempotency-key header was already processed,
+  // return the existing job ID without re-executing the full write path.
+  // The dedup anchor is a direct audit_logs insert at the end of this handler.
+  const idempotencyKey = readIdempotencyKey(ctx.req.headers) ?? null;
+  if (idempotencyKey) {
+    const { data: existingAudit } = await ctx.admin
+      .from("audit_logs")
+      .select("ref_id")
+      .eq("idempotency_key", idempotencyKey)
+      .eq("action", "potg_submitted")
+      .maybeSingle();
+    if (existingAudit?.ref_id) {
+      return json({ ok: true, jobId: existingAudit.ref_id, deduplicated: true });
+    }
+  }
+
   const body = (await ctx.req.json().catch(() => null)) as {
     playerName: string;
     team: string;
@@ -4122,17 +3843,19 @@ async function handleSubmitPotg(ctx: HandlerCtx) {
     // exists for this asset+surface pair, keep the existing publication.
   }
 
-  try {
-    await ctx.admin.rpc("log_admin_action", {
-      p_action: "potg_submitted",
-      p_ref_type: "import_job",
-      p_ref_id: jobData.id,
-      p_payload: body,
-      p_idempotency_key: readIdempotencyKey(ctx.req.headers),
-    });
-  } catch {
-    /* non-critical audit log — suppress */
-  }
+  // Gap 4: Canonical audit_logs insert — this is the dedup anchor (queried at the
+  // top of this handler). Using a direct insert (not log_admin_action RPC) so the
+  // row is guaranteed to be written before the response is returned.
+  await ctx.admin.from("audit_logs").insert({
+    actor_id: session.userId,
+    action: "potg_submitted",
+    ref_type: "import_job",
+    ref_id: jobData.id,
+    payload: { playerName: body.playerName, leagueId: effectiveLeagueCode, date: potgDate },
+    idempotency_key: idempotencyKey ?? crypto.randomUUID(),
+  }).then(({ error }) => {
+    if (error) console.warn("[potg] audit_log write failed (non-critical):", error.message);
+  });
 
   return json({ ok: true, jobId: jobData.id, matched: true });
 }
@@ -7444,7 +7167,7 @@ export default Sentry.withSentry(
 /**
  * POST /ops/ingest/presign
  * Body: { kind: 'potg'|'store'|'event'|'generic', filename: string }
- * Returns a Supabase Storage signed upload URL for the private media bucket.
+ * Returns a Supabase Storage signed upload URL for the media bucket.
  * Frontend uploads the binary directly; then calls /ops/ingest/submit.
  */
 async function handleIngestPresign(ctx: HandlerCtx) {
@@ -7469,7 +7192,7 @@ async function handleIngestPresign(ctx: HandlerCtx) {
   const objectPath = `${kind}/${crypto.randomUUID()}.${ext}`;
 
   // Generate signed upload URL via Supabase Storage REST API.
-  // The media bucket is private — the signed URL is the only write path.
+  // The media bucket is public for reads; writes are gated by the signed URL.
   const supabaseUrl = ctx.env.SUPABASE_URL;
   const serviceKey = ctx.env.SUPABASE_SERVICE_ROLE_KEY;
   const res = await fetch(
@@ -7509,7 +7232,6 @@ async function handleIngestPresign(ctx: HandlerCtx) {
  * }
  *
  * State machine: uploaded → classified → validated → written → projected
- * Low-confidence / unknown kind → needs_review (never auto-publishes)
  */
 async function handleIngestSubmit(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
@@ -7620,7 +7342,7 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
   const jobId = job.id;
 
   // ── Step 2: Classify + validate (state=classified → validated) ──────────
-  // Deterministic routing matrix by kind. Unknown kind → needs_review.
+  // Deterministic routing matrix by kind (unknown kind rejected with 400 above).
   const surface: string = body.kind === "potg" ? "potg"
     : body.kind === "store" ? "store"
     : body.kind === "event" ? "event"
@@ -8205,88 +7927,6 @@ async function handleScoreGameUpsert(ctx: HandlerCtx) {
   return json({ ok: true, gameId });
 }
 
-/** POST /ops/scores/import — bulk CSV import (super_admin only) */
-async function handleScoresCsvImport(ctx: HandlerCtx) {
-  await ensureMutation(ctx.req, ctx);
-  await requireSuperAdminSession(ctx.req, ctx.admin);
-
-  const body = (await ctx.req.json().catch(() => null)) as { rows?: Array<Record<string, string>> } | null;
-  const rows = body?.rows ?? [];
-  if (!Array.isArray(rows) || rows.length === 0) {
-    return json({ ok: false, error: "rows_required" }, 400);
-  }
-
-  let inserted = 0;
-  let failed = 0;
-  const errors: string[] = [];
-
-  // Resolve league UUIDs in bulk to avoid N+1 query pattern
-  const leagueMap = new Map<string, string>();
-  const uniqueCodes = Array.from(new Set(rows.map((r) => r.league_id).filter(Boolean) as string[]));
-  if (uniqueCodes.length > 0) {
-    const { data: leagues } = await ctx.admin.from("leagues").select("id, code").in("code", uniqueCodes);
-    leagues?.forEach((l) => {
-      if (l.code) leagueMap.set(l.code.toLowerCase(), l.id);
-    });
-  }
-
-  let bulkSuccess = false;
-  try {
-    const payload = rows.map((row) => {
-      const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
-      return {
-        category: row.category || "league",
-        league_id: leagueUuid,
-        participant1_label: row.home_label || null,
-        participant2_label: row.away_label || null,
-        home_score: row.home_score !== "" && row.home_score != null ? Number(row.home_score) : null,
-        away_score: row.away_score !== "" && row.away_score != null ? Number(row.away_score) : null,
-        status: row.status || "final",
-        game_date: row.game_date || null,
-        event_name: row.event_name || null,
-        notes: row.notes || null,
-      };
-    });
-
-    const { error } = await ctx.admin.from("games").insert(payload);
-    if (error) throw error;
-    bulkSuccess = true;
-    inserted = rows.length;
-  } catch (bulkErr) {
-    // Fallback to iterative on failure to capture individual row errors
-  }
-
-  if (!bulkSuccess) {
-    for (const row of rows) {
-      try {
-        const leagueUuid = row.league_id ? leagueMap.get(row.league_id.toLowerCase()) || null : null;
-        const { error } = await ctx.admin.from("games").insert({
-          category: row.category || "league",
-          league_id: leagueUuid,
-          participant1_label: row.home_label || null,
-          participant2_label: row.away_label || null,
-          home_score: row.home_score !== "" && row.home_score != null ? Number(row.home_score) : null,
-          away_score: row.away_score !== "" && row.away_score != null ? Number(row.away_score) : null,
-          status: row.status || "final",
-          game_date: row.game_date || null,
-          event_name: row.event_name || null,
-          notes: row.notes || null,
-        });
-        if (error) {
-          failed++;
-          errors.push(`${row.home_label || "Unknown"} vs ${row.away_label || "Unknown"}: ${error.message}`);
-        } else {
-          inserted++;
-        }
-      } catch (e) {
-        failed++;
-        errors.push(e instanceof Error ? e.message : "unknown");
-      }
-    }
-  }
-
-  return json({ ok: true, inserted, failed, errors });
-}
 
 /** POST /ops/scores/parse-image — scoreboard OCR via Groq vision (super_admin only) */
 async function handleScoreboardImageParse(ctx: HandlerCtx) {

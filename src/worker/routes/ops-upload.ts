@@ -317,7 +317,8 @@ export async function handleImportRoute(
   kind: "teams" | "players" | "schedules" | "events",
 ) {
   await ensureMutation(ctx.req, ctx);
-  const session = await requireAdminSession(ctx.req, ctx.admin);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+
   const body = (await ctx.req.json().catch(() => null)) as {
     rows?: Array<Record<string, string>>;
   } | null;
@@ -343,15 +344,42 @@ export async function handleImportRoute(
   const config = INGEST_CONFIGS[kind];
   if (!config) return json({ ok: false, error: "invalid_kind" }, 400);
 
+  const riskLane = classifyRiskLane(`import_route.${kind}`, { rows });
+  if (riskLane === "BLOCKED") {
+    await writeIngressFailure(ctx.admin, `${kind}_import_blocked_sql_injection`, rows, "admin_mutation", session.userId);
+    return json({ ok: false, error: "blocked_class_payload" }, 403);
+  }
+
+  const validationErrors: Array<{ row: number; field?: string; code: string; message: string }> = [];
+  const validatedRows: Record<string, string>[] = [];
+  rows.forEach((row, index) => {
+    const parsed = config.schema.safeParse(row);
+    if (!parsed.success) {
+      parsed.error.errors.forEach(err => {
+        validationErrors.push({
+          row: index + 1,
+          field: String(err.path[0] ?? ""),
+          code: err.code,
+          message: err.message,
+        });
+      });
+    } else {
+      validatedRows.push(parsed.data as Record<string, string>);
+    }
+  });
+  if (validationErrors.length > 0) {
+    return json({ ok: false, errors: validationErrors }, 422);
+  }
+
   let insertedRows = 0;
   let failedRows = 0;
   const errors: string[] = [];
   let bulkSuccess = false;
 
-  const leagueMap = await fetchLeagueMap(ctx.admin, rows);
+  const leagueMap = await fetchLeagueMap(ctx.admin, validatedRows);
 
   try {
-    const payload = rows.map(row => config.resolvePayload(row, leagueMap));
+    const payload = validatedRows.map(row => config.resolvePayload(row, leagueMap));
     const query = ctx.admin.from(config.table);
 
     let res;
@@ -367,9 +395,9 @@ export async function handleImportRoute(
   }
 
   if (bulkSuccess) {
-    insertedRows = rows.length;
+    insertedRows = validatedRows.length;
     await Promise.allSettled(
-      rows.map((row) =>
+      validatedRows.map((row) =>
         ctx.admin.rpc("enqueue_local_domain_event", {
           p_event_type: `${kind}_imported`,
           p_entity_type: kind,
@@ -387,8 +415,8 @@ export async function handleImportRoute(
     );
   } else {
     const BATCH_SIZE = 50;
-    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
-      const batch = rows.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < validatedRows.length; i += BATCH_SIZE) {
+      const batch = validatedRows.slice(i, i + BATCH_SIZE);
       try {
         const payload = batch.map(row => config.resolvePayload(row, leagueMap));
         const query = ctx.admin.from(config.table);
@@ -466,10 +494,10 @@ export async function handleImportRoute(
   const job = await writeImportJob(ctx.admin, {
     job_type: kind,
     submitted_by: session.userId,
-    total_rows: rows.length,
+    total_rows: validatedRows.length,
     inserted_rows: insertedRows,
     failed_rows: failedRows,
-    payload_summary: { sample: rows[0] ?? null },
+    payload_summary: { sample: validatedRows[0] ?? null },
     error_summary: errors.slice(0, 5).join("; ") || null,
   });
 
@@ -479,7 +507,7 @@ export async function handleImportRoute(
     action: `import_${kind}`,
     ref_type: "import_jobs",
     ref_id: job.id,
-    payload: { total_rows: rows.length, inserted_rows: insertedRows, failed_rows: failedRows },
+    payload: { total_rows: validatedRows.length, inserted_rows: insertedRows, failed_rows: failedRows },
     idempotency_key: idempotencyKey,
   });
 
@@ -488,7 +516,7 @@ export async function handleImportRoute(
 
 export async function handleScoresCsvImport(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  await requireSuperAdminSession(ctx.req, ctx.admin);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
 
   const body = (await ctx.req.json().catch(() => null)) as { rows?: Array<Record<string, string>> } | null;
   const rows = body?.rows ?? [];
@@ -496,26 +524,53 @@ export async function handleScoresCsvImport(ctx: HandlerCtx) {
     return json({ ok: false, error: "rows_required" }, 400);
   }
 
+  const riskLane = classifyRiskLane("import_route.scores", { rows });
+  if (riskLane === "BLOCKED") {
+    await writeIngressFailure(ctx.admin, "scores_import_blocked_sql_injection", rows, "admin_mutation", session.userId);
+    return json({ ok: false, error: "blocked_class_payload" }, 403);
+  }
+
+  const config = INGEST_CONFIGS.scores;
+  const validationErrors: Array<{ row: number; field?: string; code: string; message: string }> = [];
+  const validatedRows: Record<string, string>[] = [];
+  rows.forEach((row, index) => {
+    const parsed = config.schema.safeParse(row);
+    if (!parsed.success) {
+      parsed.error.errors.forEach(err => {
+        validationErrors.push({
+          row: index + 1,
+          field: String(err.path[0] ?? ""),
+          code: err.code,
+          message: err.message,
+        });
+      });
+    } else {
+      validatedRows.push(parsed.data as Record<string, string>);
+    }
+  });
+  if (validationErrors.length > 0) {
+    return json({ ok: false, errors: validationErrors }, 422);
+  }
+
   let inserted = 0;
   let failed = 0;
   const errors: string[] = [];
 
-  const leagueMap = await fetchLeagueMap(ctx.admin, rows);
-  const config = INGEST_CONFIGS.scores;
+  const leagueMap = await fetchLeagueMap(ctx.admin, validatedRows);
 
   let bulkSuccess = false;
   try {
-    const payload = rows.map(row => config.resolvePayload(row, leagueMap));
+    const payload = validatedRows.map(row => config.resolvePayload(row, leagueMap));
     const { error } = await ctx.admin.from(config.table).insert(payload);
     if (error) throw error;
     bulkSuccess = true;
-    inserted = rows.length;
+    inserted = validatedRows.length;
   } catch (bulkErr) {
     // Fallback
   }
 
   if (!bulkSuccess) {
-    for (const row of rows) {
+    for (const row of validatedRows) {
       try {
         const payload = config.resolvePayload(row, leagueMap);
         const { error } = await ctx.admin.from(config.table).insert(payload);

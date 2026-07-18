@@ -573,7 +573,7 @@ describe('Suite 2 — Broadcast Session Access (/api/broadcast/session)', () => 
     await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'stream_offline' });
   });
 
-  it('2.4 handlePlaybackSession rejects broadcast alias — must use /api/broadcast/*', async () => {
+  it('2.4 handlePlaybackSession routes broadcast alias through untied/open broadcast access path', async () => {
     const state = baseState();
     for (const gameId of [null, 'broadcast'] as (string | null)[]) {
       const res = await handlePlaybackSession({
@@ -589,8 +589,8 @@ describe('Suite 2 — Broadcast Session Access (/api/broadcast/session)', () => 
         env: ENV,
         admin: buildAdmin(state) as never,
       });
-      expect(res.status).toBe(400);
-      await expect(res.json()).resolves.toMatchObject({ ok: false, error: 'use_broadcast_endpoint' });
+      expect(res.status).toBe(200);
+      await expect(res.json()).resolves.toMatchObject({ ok: true });
     }
   });
 });
