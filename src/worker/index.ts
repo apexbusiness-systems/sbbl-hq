@@ -4770,7 +4770,8 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   // to null so all downstream code treats it as a null gameId consistently.
   // Without this, 'broadcast' would be passed as a gameId string to Supabase
   // queries that expect a UUID, causing 500 errors from invalid UUID format.
-  const gameId: string | null = ctx.params.gameId ?? null;
+  const rawGameId = ctx.params.gameId;
+  const gameId: string | null = (rawGameId === "broadcast" || !rawGameId) ? null : rawGameId;
   const body = (await ctx.req.json().catch(() => null)) as {
     sessionKey?: string;
     playbackMode?: 'live' | 'replay';
@@ -4841,17 +4842,18 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     const maxExpiresAt = new Date(Date.now() + SESSION_MAX_DURATION_MS).toISOString();
     const cookieHeaders: Record<string, string> = {};
     let clientPlaybackUrl = playbackUrl;
-    if (deliveryClass === "proxy" && gameId) {
+    if (deliveryClass === "proxy") {
       const exp = Math.floor(Date.now() / 1000) + 70;
       const secret = resolveProxyTokenSecret(ctx.env);
       if (!secret) return json({ ok: false, error: "stream_proxy_not_configured" }, 500);
+      const proxyGameId = rawGameId || "broadcast";
       const token = await signProxyToken(
-        { gameId, userId, sessionId: fakeSessionId, exp },
+        { gameId: proxyGameId, userId, sessionId: fakeSessionId, exp },
         secret,
       );
       cookieHeaders["Set-Cookie"] =
         `${PROXY_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=70`;
-      clientPlaybackUrl = `/api/streams/${gameId}/proxy/master.m3u8`;
+      clientPlaybackUrl = `/api/streams/${proxyGameId}/proxy/master.m3u8`;
     }
     return json({
       ok: true,
@@ -4871,19 +4873,14 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
     }, 200, cookieHeaders);
   }
 
-  // Broadcast (no game) must use /api/broadcast/session — not this handler.
-  // Covers both null (missing gameId) and the 'broadcast' alias string that
-  // legacy clients may still send. Prevents them from being routed through
-  // the PPV/entitlement path for open broadcasts.
-  if (gameId === null || gameId === "broadcast") {
-    return json({ ok: false, error: "use_broadcast_endpoint" }, 400);
-  }
-
   const hasPrivilegedRole = roles.some(
     (role) => role === "player" || role === "paid_fan",
   );
   let hasAccess = hasPrivilegedRole;
-  if (!hasAccess) {
+  if (gameId === null) {
+    // Untied broadcasts are freely accessible (not PPV gated)
+    hasAccess = true;
+  } else if (!hasAccess) {
     // PPV game: check entitlement or invite redemption.
     const accessRpc = await ctx.admin.rpc("can_user_view_stream", {
       p_game_id: gameId,
@@ -4944,17 +4941,18 @@ export async function handlePlaybackSession(ctx: HandlerCtx) {
   const deliveryClass = getStreamDeliveryClass(playbackUrl);
   const cookieHeaders: Record<string, string> = {};
   let clientPlaybackUrl = playbackUrl;
-  if (deliveryClass === "proxy" && gameId) {
+  if (deliveryClass === "proxy") {
     const exp = Math.floor(Date.now() / 1000) + 70;
     const secret = resolveProxyTokenSecret(ctx.env);
     if (!secret) return json({ ok: false, error: "stream_proxy_not_configured" }, 500);
+    const proxyGameId = rawGameId || "broadcast";
     const token = await signProxyToken(
-      { gameId, userId, sessionId: session.id, exp },
+      { gameId: proxyGameId, userId, sessionId: session.id, exp },
       secret,
     );
     cookieHeaders["Set-Cookie"] =
       `${PROXY_AUTH_COOKIE}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=70`;
-    clientPlaybackUrl = `/api/streams/${gameId}/proxy/master.m3u8`;
+    clientPlaybackUrl = `/api/streams/${proxyGameId}/proxy/master.m3u8`;
   }
 
   // ── Playback provider override (signed playback) ──────────────────────
