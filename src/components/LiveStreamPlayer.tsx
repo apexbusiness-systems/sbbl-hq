@@ -342,25 +342,7 @@ function StreamPlayer({
           allowFullScreen
           title="Facebook Live Stream"
         />
-        {/*
-          Restored 2026-07-18 — this exact pattern shipped 2026-04-12 (commit
-          ab5a5765) and was lost in the Switcher Studio refactor the same week.
-          Some Facebook Live URLs (personal profiles vs Pages, or Pages with
-          third-party embedding restricted) return the iframe successfully
-          from the browser's perspective but Facebook renders its own
-          "Video Unavailable" / permission error *inside* the sandboxed
-          cross-origin frame. We cannot detect that failure from the parent
-          page (no onError signal crosses the origin boundary), so the CTA is
-          always-visible rather than conditional — matching the original fix.
-        */}
-        <a
-          href={url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 inline-flex items-center gap-2 rounded-full bg-amber-500 px-4 py-2 text-sm font-semibold text-black shadow-lg hover:bg-amber-400 transition-colors"
-        >
-          Watch Live on Facebook
-        </a>
+
       </div>
     );
   }
