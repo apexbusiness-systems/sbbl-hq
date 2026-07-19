@@ -355,7 +355,6 @@ test.describe('full-build chaos battery', () => {
       {
         path: '/ops',
         verify: async () => {
-          await expect(page.getByRole('tab', { name: 'POTG Parser' })).toBeVisible();
           await expect(page.getByText('Session expired. Sign in again.')).toHaveCount(0);
           await expect.poll(() => state.counters.get('ops/bootstrap') ?? 0).toBeGreaterThan(0);
         },

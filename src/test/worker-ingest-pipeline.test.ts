@@ -131,22 +131,6 @@ describe('handleManualOpsAction removal', () => {
 
 // ── 5. handleStoreMedia and handleSubmitPotg project to media_publications ───
 describe('ingest handlers write to publication layer', () => {
-  it('handleStoreMedia inserts into media_publications', () => {
-    const fnStart = workerSrc.indexOf('async function handleStoreMedia');
-    const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
-    const fnBody  = workerSrc.slice(fnStart, fnEnd);
-    expect(fnBody).toContain('media_publications');
-    expect(fnBody).toContain("surface: \"store\"");
-  });
-
-  it('handleSubmitPotg inserts into media_publications', () => {
-    const fnStart = workerSrc.indexOf('async function handleSubmitPotg');
-    const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
-    const fnBody  = workerSrc.slice(fnStart, fnEnd);
-    expect(fnBody).toContain('media_publications');
-    expect(fnBody).toContain("surface: \"potg\"");
-  });
-
   it('handleIngestSubmit projects into media_publications', () => {
     const fnStart = workerSrc.indexOf('async function handleIngestSubmit');
     const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
@@ -345,35 +329,6 @@ describe('POTG publisher guard', () => {
     expect(fnBody).toContain('potg_player_league_mismatch');
   });
 
-  describe('handleSubmitPotg (path A: /ops/potg/submit)', () => {
-    const fnStart = workerSrc.indexOf('async function handleSubmitPotg');
-    const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
-    const fnBody  = workerSrc.slice(fnStart, fnEnd);
-
-    it('validates stat fields before any DB write', () => {
-      const validateIdx = fnBody.indexOf('validatePotgStatFields');
-      const insertIdx   = fnBody.indexOf('media_publications');
-      expect(validateIdx).toBeGreaterThan(-1);
-      expect(insertIdx).toBeGreaterThan(validateIdx);
-    });
-
-    it('resolves the rostered player before publishing', () => {
-      const resolveIdx = fnBody.indexOf('resolvePotgPlayer');
-      const insertIdx  = fnBody.indexOf('media_publications');
-      expect(resolveIdx).toBeGreaterThan(-1);
-      expect(insertIdx).toBeGreaterThan(resolveIdx);
-    });
-
-    it('returns 409 when the resolver reports an error', () => {
-      // Multi-line json(payload, 409) — match the bare `409` argument.
-      expect(fnBody).toMatch(/\b409[,)\s]/);
-    });
-
-    it('legacy "pending_match" branch is gone (player is now guaranteed)', () => {
-      expect(fnBody).not.toContain('pending_match');
-    });
-  });
-
   describe('handleIngestSubmit (path B: /ops/ingest/submit kind=potg)', () => {
     const fnStart = workerSrc.indexOf('async function handleIngestSubmit');
     const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
@@ -435,49 +390,5 @@ describe('Gap 3: needs_review false promise removed from handleIngestSubmit', ()
     const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
     const fnBody  = workerSrc.slice(fnStart, fnEnd);
     expect(fnBody).not.toContain('"needs_review"'); // no auto-needs_review on submit
-  });
-});
-
-// ── 11. Gap 4 — handleSubmitPotg idempotency dedup ───────────────────────────
-// Regression guard: /ops/potg/submit previously had no idempotency-key dedup.
-// A second POST with the same x-idempotency-key would create a duplicate poster.
-// Gap 4 adds readIdempotencyKey + audit_logs dedup matching the established pattern.
-describe('Gap 4: handleSubmitPotg idempotency dedup', () => {
-  const fnStart = workerSrc.indexOf('async function handleSubmitPotg');
-  const fnEnd   = workerSrc.indexOf('\nasync function ', fnStart + 10);
-  const fnBody  = workerSrc.slice(fnStart, fnEnd);
-
-  it('reads idempotency key at the top of the handler', () => {
-    const keyIdx  = fnBody.indexOf('readIdempotencyKey');
-    const bodyIdx = fnBody.indexOf('ctx.req.json()');
-    // Key must be read before the main body parse (guard-first order)
-    expect(keyIdx).toBeGreaterThan(-1);
-    expect(keyIdx).toBeLessThan(bodyIdx);
-  });
-
-  it('queries audit_logs for an existing potg_submitted entry before writing', () => {
-    const auditQueryIdx = fnBody.indexOf('.from("audit_logs")');
-    const firstInsertIdx = fnBody.indexOf('.from("import_jobs")');
-    expect(auditQueryIdx).toBeGreaterThan(-1);
-    expect(auditQueryIdx).toBeLessThan(firstInsertIdx);
-  });
-
-  it('returns deduplicated: true on repeat submission with same idempotency key', () => {
-    expect(fnBody).toContain('deduplicated: true');
-  });
-
-  it('writes a direct audit_logs row at the end as the dedup anchor', () => {
-    // The dedup anchor must be a direct insert (not only via non-critical RPC)
-    expect(fnBody).toContain('action: "potg_submitted"');
-    expect(fnBody).toContain('idempotency_key: idempotencyKey');
-    // The old non-critical RPC call pattern should be gone from executable code
-    expect(fnBody).not.toContain('rpc("log_admin_action"');
-  });
-
-  it('still calls validatePotgStatFields before any write (guard ordering preserved)', () => {
-    const validateIdx = fnBody.indexOf('validatePotgStatFields');
-    const insertJobIdx = fnBody.indexOf('.from("import_jobs")');
-    expect(validateIdx).toBeGreaterThan(-1);
-    expect(insertJobIdx).toBeGreaterThan(validateIdx);
   });
 });

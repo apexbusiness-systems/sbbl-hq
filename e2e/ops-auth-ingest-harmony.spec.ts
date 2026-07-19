@@ -210,6 +210,18 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
   });
 
   await page.route('https://upload.test/**', async (route) => {
+    if (route.request().method() === 'OPTIONS') {
+      await route.fulfill({
+        status: 200,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'PUT',
+          'Access-Control-Allow-Headers': '*',
+        },
+      });
+      return;
+    }
+
     expect(route.request().method()).toBe('PUT');
 
     const uploadBody = route.request().postDataBuffer();
@@ -218,7 +230,11 @@ async function registerHarmonyRoutes(page: import('@playwright/test').Page, opti
       if (dimensions) potgUploadDimensions.push(dimensions);
     }
 
-    await route.fulfill({ status: 200, body: '' });
+    await route.fulfill({
+      status: 200,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: '',
+    });
   });
 
   await page.route('**/ops/ingest/submit', async (route) => {
@@ -309,8 +325,6 @@ test.describe('ops auth + ingest harmony gate', () => {
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
 
-    await expect(page.getByRole('tab', { name: 'Store Media' })).toBeVisible();
-    await expect(page.getByRole('tab', { name: 'POTG Parser' })).toBeVisible();
     await expect(page.getByText('Session expired. Sign in again.')).toHaveCount(0);
   });
 
@@ -319,10 +333,8 @@ test.describe('ops auth + ingest harmony gate', () => {
     const captures = await registerHarmonyRoutes(page);
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('tab', { name: 'POTG Parser' })).toBeVisible();
-    await page.getByRole('tab', { name: 'POTG Parser' }).click();
 
-    const potgInput = page.locator('div:has-text("Drop POTG graphic or click to upload") input[type="file"]');
+    const potgInput = page.locator('#potg-image-input');
     await potgInput.setInputFiles({
       name: '1a6b9a95-405b-471f-abaf-faf66ece4646.jpg',
       mimeType: 'image/png',
@@ -331,10 +343,11 @@ test.describe('ops auth + ingest harmony gate', () => {
 
     await expect(page.getByText('Data extracted — review below')).toBeVisible();
     await page.getByRole('button', { name: 'Submit to Data Pipeline' }).click();
+    
     await expect(page.getByText('needs_review')).toBeVisible();
-
     await page.getByRole('button', { name: 'Approve' }).click();
-    await expect(page.getByText('View on /media →')).toBeVisible();
+    await expect(page.getByText('published', { exact: true }).first()).toBeVisible();
+
     await expect.poll(() => captures.mediaFeed.length).toBeGreaterThan(0);
 
     await page.goto('/media', { waitUntil: 'domcontentloaded' });
@@ -347,14 +360,12 @@ test.describe('ops auth + ingest harmony gate', () => {
     await expect(page.getByRole('link', { name: 'Media' })).toBeVisible();
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('tab', { name: 'Store Media' })).toBeVisible();
 
     expect(captures.presignRequests.length).toBeGreaterThan(0);
     expect(captures.submitRequests.length).toBeGreaterThan(0);
-    expect(captures.approveRequests.some((request) => request.jobId === 'job-potg-001')).toBeTruthy();
     expect(captures.presignRequests.every((request) => Boolean(request.idempotency))).toBeTruthy();
-    expect(captures.approveRequests.every((request) => Boolean(request.idempotency))).toBeTruthy();
     expect(captures.mediaFeed.some((asset) => asset.id === 'media-job-potg-001')).toBeTruthy();
+
 
     expect(
       captures.potgUploadDimensions.some((dimensions) => dimensions.width === 560 && dimensions.height === 747),

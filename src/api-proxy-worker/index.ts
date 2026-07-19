@@ -297,6 +297,34 @@ const handler = {
       return handleFailoverOverride(request, env);
     }
 
+    // ── MediaMTX WebRTC Proxy (Bypass broken stream.sbbl-hq.icu DNS) ──
+    if (url.pathname.startsWith('/whip/') || url.pathname.startsWith('/whep/')) {
+      const upstreamUrl = `http://52.21.231.157:8889${url.pathname}${url.search}`;
+      
+      const reqInit = {
+        method: request.method,
+        headers: new Headers(request.headers),
+        body: ['GET', 'HEAD', 'OPTIONS'].includes(request.method) ? undefined : request.body,
+        duplex: 'half'
+      } as RequestInit;
+      
+      // Strip host header so MediaMTX doesn't reject it
+      const headers = reqInit.headers as Headers;
+      headers.delete('host');
+      headers.set('x-forwarded-host', 'sbbl-hq.icu');
+
+      try {
+        const upstreamResp = await fetch(upstreamUrl, reqInit);
+        return addCorsHeaders(upstreamResp, request);
+      } catch (err) {
+        console.error('[SBBL-PROXY] MediaMTX upstream failed:', err);
+        return new Response(JSON.stringify({ error: 'Stream server unreachable' }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json', ...getSafeCorsHeaders(request) }
+        });
+      }
+    }
+
     const state = await getState(env.SBBL_BACKEND_STATE);
     const timeoutMs = parseInt(env.UPSTREAM_TIMEOUT_MS, 10);
 
