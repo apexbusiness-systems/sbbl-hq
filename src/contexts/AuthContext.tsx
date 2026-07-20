@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import * as Sentry from '@sentry/react';
 import { initSupabaseClient, getSupabaseClient } from '@/lib/supabase/client';
 import { canAccessOps, type AppRole } from '@/lib/auth/roles';
@@ -27,6 +27,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<AuthProfile | null>(null);
   const [roles, setRoles] = useState<AppRole[]>([]);
   const [configAvailable, setConfigAvailable] = useState(true);
+  const lastUserIdRef = useRef<string | null>(null);
 
   const clearAuthState = useCallback(() => {
     setSession(null);
@@ -62,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(data.session?.user ?? null);
 
     if (data.session?.user?.id) {
+      lastUserIdRef.current = data.session.user.id;
       const details = await fetchProfileAndRoles(data.session.user.id);
       setProfile(details.profile);
       setRoles(details.roles);
@@ -110,8 +112,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           // On SIGNED_IN, gate the loading state so Login.tsx waits for
           // profile/roles before navigating (prevents wrong onboarding redirect
           // when profile is still null).
-          const gateLoading = event === 'SIGNED_IN';
+          const isUserRefresh = lastUserIdRef.current === nextSession.user.id;
+          const gateLoading = event === 'SIGNED_IN' && !isUserRefresh;
           if (gateLoading) setLoading(true);
+          lastUserIdRef.current = nextSession.user.id;
 
           void fetchProfileAndRoles(nextSession.user.id).then(({ profile: p, roles: r }) => {
             setProfile(p);
@@ -128,6 +132,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (gateLoading) setLoading(false);
           });
         } else {
+          lastUserIdRef.current = null;
           setProfile(null);
           setRoles([]);
           Sentry.setUser(null);

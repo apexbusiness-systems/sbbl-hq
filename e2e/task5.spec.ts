@@ -50,7 +50,7 @@ test('Task 5 live stream verification', async ({ page }) => {
   });
 
   console.log('Navigating to /live...');
-  await page.goto('https://sbbl-hq.icu/live', { waitUntil: 'networkidle' });
+  await page.goto('https://sbbl-hq.icu/live', { waitUntil: 'domcontentloaded' });
   
   await page.waitForTimeout(5000); // Give the player time to mount
   

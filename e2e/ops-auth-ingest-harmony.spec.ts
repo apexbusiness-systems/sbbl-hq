@@ -331,11 +331,12 @@ test.describe('ops auth + ingest harmony gate', () => {
   test('potg ingest approves into /media and core routes still render', async ({ page }) => {
     await seedSuperAdminSession(page);
     const captures = await registerHarmonyRoutes(page);
-
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
-
-    const potgInput = page.locator('#potg-image-input');
-    await potgInput.setInputFiles({
+    await expect(page.getByRole('heading', { name: 'POTG Image Parser' })).toBeVisible();
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await page.getByText('Drop POTG graphic or click to upload').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({
       name: '1a6b9a95-405b-471f-abaf-faf66ece4646.jpg',
       mimeType: 'image/png',
       buffer: PNG_1X1,

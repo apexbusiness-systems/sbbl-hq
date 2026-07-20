@@ -126,6 +126,14 @@ async function registerOpsMediaRoutes(page: import('@playwright/test').Page) {
     });
   });
 
+  await page.route('**/api/public/media', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ ok: true, data: [] }),
+    });
+  });
+
   return { presignRequests, submitRequests, approveRequests, rejectRequests };
 }
 
@@ -162,9 +170,12 @@ test.describe('ops media ingest tabs', () => {
     const captures = await registerOpsMediaRoutes(page);
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'POTG Image Parser' })).toBeVisible();
 
-    const potgInput = page.locator('#potg-image-input');
-    await potgInput.setInputFiles({ name: 'potg.png', mimeType: 'image/png', buffer: PNG_1X1 });
+    const fileChooserPromise = page.waitForEvent('filechooser');
+    await page.getByText('Drop POTG graphic or click to upload').click();
+    const fileChooser = await fileChooserPromise;
+    await fileChooser.setFiles({ name: 'potg.png', mimeType: 'image/png', buffer: PNG_1X1 });
 
     const panelText = await page.locator('.panel').nth(0).innerText();
     console.log('PANEL TEXT:', panelText);
