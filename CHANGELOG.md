@@ -1,10 +1,23 @@
-<!-- Version: v1.7.0 | Date: 2026-07-18 | Status: Current -->
+<!-- Version: v1.8.0 | Date: 2026-07-20 | Status: Current -->
 # CHANGELOG
 
 All notable changes to SBBL HQ are documented in this file.
 Versioning follows [semantic versioning](https://semver.org) with UTC date stamps.
 
 ---
+
+## [1.8.0] - 2026-07-20
+
+### Fixed — Vision Model Upgrade and E2E Stabilization
+
+- **Vision Model Upgrade** (`src/worker/index.ts`):
+  Upgraded the hardcoded broken model `meta-llama/llama-4-scout-17b-16e-instruct` to `llama-3.2-90b-vision-preview` to prevent 502 Bad Gateway errors for live operations users.
+- **E2E Auth State Reset Resolution** (`src/contexts/AuthContext.tsx`):
+  Introduced `lastUserIdRef` to detect same-user background token refreshes and bypass redundant `loading` state updates, preventing active page unmounting and transient state resets during test runs.
+- **E2E Ingestion Stability** (`e2e/ops-media-tabs.spec.ts` and `e2e/ops-auth-ingest-harmony.spec.ts`):
+  Switched file upload triggers to Playwright's native `filechooser` event listeners to prevent failures under parallel load.
+- **Playwright CI Exclusions** (`playwright.config.ts`):
+  Configured `testIgnore` to ignore live-production diagnostic tests (`potg-vision-test.spec.ts` and `check_iframe.spec.ts`) from CI execution to ensure a deterministic build gate.
 
 ## [1.7.0] - 2026-07-18
 

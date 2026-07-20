@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-07-20 — v1.8.0 — Vision Model Upgrade & E2E State Reset Stabilization
+
+- **Vision Model Upgrade** (`src/worker/index.ts`): Upgraded from `meta-llama/llama-4-scout-17b-16e-instruct` to `llama-3.2-90b-vision-preview` to resolve 502 Bad Gateway errors in the Operations scoreboard parser.
+- **E2E Auth State Reset Resolution** (`src/contexts/AuthContext.tsx`): Introduced `lastUserIdRef` to skip setting `loading = true` on background Supabase token refreshes, preventing route guards from unmounting the active component.
+- **E2E Ingestion Stability** (`e2e/ops-media-tabs.spec.ts` & `e2e/ops-auth-ingest-harmony.spec.ts`): Replaced direct hidden input `.setInputFiles()` calls with Playwright's native `'filechooser'` event triggers.
+- **Playwright CI Exclusions** (`playwright.config.ts`): Excluded live-production diagnostic tests (`potg-vision-test.spec.ts` & `check_iframe.spec.ts`) from CI checks to ensure deterministic build gates.
+
+---
+
 ## 2026-07-18 — v1.7.0 — Chrome CORS whitelisting, local config guardrails, Cloud Supabase, secure CSV upload
 
 - **CORS Local Whitelisting** (`src/worker/index.ts` and `src/api-proxy-worker/index.ts`): Whitelisted `http://localhost:8080` to prevent OPTIONS preflight failures in Google Chrome.
