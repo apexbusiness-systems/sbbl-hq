@@ -3263,7 +3263,7 @@ async function handleParseEventImage(ctx: HandlerCtx) {
     },
     body: JSON.stringify({
       model: ctx.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b", // env-overridable (2026-07-20): next Groq model retirement is a config change, not a redeploy. qwen3.6-27b runtime-verified on this account.
-      reasoning_format: "hidden",
+      reasoning_effort: "none", // no thinking tokens: raw JSON only; also keeps requests inside free-tier TPM
       max_tokens: 1024,
       messages: [
         {
@@ -3301,7 +3301,7 @@ async function handleParseEventImage(ctx: HandlerCtx) {
   }
 }
 
-async function handleParsePotgImage(ctx: HandlerCtx) {
+export async function handleParsePotgImage(ctx: HandlerCtx) {
   await requireAdminSession(ctx.req, ctx.admin);
   const apiKey = ctx.env.GROQ_API_KEY;
   if (!apiKey) return json({ ok: false, error: "groq_api_key_missing" }, 503);
@@ -3321,7 +3321,7 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
     },
     body: JSON.stringify({
       model: ctx.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b", // env-overridable (2026-07-20): next Groq model retirement is a config change, not a redeploy. qwen3.6-27b runtime-verified on this account.
-      reasoning_format: "hidden",
+      reasoning_effort: "none", // no thinking tokens: raw JSON only; also keeps requests inside free-tier TPM
       max_tokens: 1024,
       messages: [
         {
@@ -7714,7 +7714,7 @@ async function handleScoreboardImageParse(ctx: HandlerCtx) {
     headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({
       model: ctx.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b", // env-overridable (2026-07-20): next Groq model retirement is a config change, not a redeploy. qwen3.6-27b runtime-verified on this account.
-      reasoning_format: "hidden",
+      reasoning_effort: "none", // no thinking tokens: raw JSON only; also keeps requests inside free-tier TPM
       max_tokens: 1024,
       messages: [{
         role: "user",
