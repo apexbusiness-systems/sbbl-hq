@@ -100,7 +100,7 @@ function buildAdmin(
         return resolve({ data: rows, error: null });
       },
       insert: (row: Row) => {
-        const normalized = { ...row, id: row.id ?? crypto.randomUUID() };
+        const normalized = { ...row, id: row.id ?? crypto.randomUUID(), code: row.code ?? crypto.randomUUID() };
         (state[table] = state[table] ?? []).push(normalized);
         return {
           select: () => ({
@@ -120,7 +120,7 @@ function buildAdmin(
         if (existing) {
           Object.assign(existing, row);
         } else {
-          rows.push({ ...row, id: row.id ?? crypto.randomUUID() });
+          rows.push({ ...row, id: row.id ?? crypto.randomUUID(), code: row.code ?? crypto.randomUUID() });
         }
         const result = existing ?? rows[rows.length - 1];
         return {
@@ -966,6 +966,7 @@ describe('Suite 5 — Invite Generation RBAC (handleInviteGenerate)', () => {
       user_role_assignments: [{ user_id: 'player-idem', role: 'player' }],
       ppv_invites: [{
         id: existingId,
+        code: existingId,
         game_id: 'game-1',
         generated_by: 'player-idem',
         used_by: null,
@@ -1032,6 +1033,7 @@ describe('Suite 6 — Invite Redeem Security (handleInviteRedeem)', () => {
   function validInvite(overrides: Partial<Row> = {}): Row {
     return {
       id: VALID_CODE,
+      code: VALID_CODE,
       game_id: 'game-1',
       generated_by: 'generator-user',
       used_by: null,

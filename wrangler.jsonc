@@ -63,7 +63,7 @@
     // Supabase anon/public key (safe to expose — this is the publishable key).
     // Replace with the "anon public" key from Supabase dashboard → Project Settings → API.
     // This value is also read from the VITE_SUPABASE_ANON_KEY GitHub secret at build time.
-    "SUPABASE_PUBLISHABLE_KEY": "replace-with-supabase-anon-key",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_5uIVxDWuaI916HXVN9Mb8A_jhrYLPYz",
     // SENTRY_DSN is a secret — set via: npx wrangler secret put SENTRY_DSN --env=""
     // Do NOT add it here as a var; secrets and vars cannot share the same binding name.
     "ENABLE_STREAM_VALIDATION": "false",

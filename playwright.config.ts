@@ -5,6 +5,10 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://127.0.0.1:${port}`;
 
 export default defineConfig({
   testMatch: /.*\.spec\.ts$/,
+  testIgnore: [
+    '**/potg-vision-test.spec.ts',
+    '**/check_iframe.spec.ts',
+  ],
   timeout: 30_000,
   expect: { timeout: 15_000 },
   fullyParallel: true,

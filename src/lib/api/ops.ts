@@ -74,33 +74,6 @@ export async function parsePotgImage(imageBase64: string, mimeType: string) {
   });
 }
 
-export async function submitPotgRecord(payload: {
-  playerName: string; team: string; pts: number; rebs: number; assts: number;
-  gameResult: string; leagueId: string; date: string; imageUrl?: string;
-}) {
-  return apiFetch<{ ok: boolean; jobId: string; matched: boolean }>('/ops/potg/submit', {
-    method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-potg') },
-    body: JSON.stringify(payload),
-  });
-}
-
-export async function uploadStoreMedia(payload: {
-  title: string;
-  price: number;
-  category: string;
-  publishStatus: 'draft' | 'published';
-  sale?: boolean;
-  imageUrl: string;
-  leagueId?: string | null;
-}) {
-  return apiFetch<{ ok: boolean; productId: string; mediaAssetId: string }>('/ops/store/media', {
-    method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-store-media') },
-    body: JSON.stringify(payload),
-  });
-}
-
 export async function fetchOpsList(entity: 'teams' | 'players' | 'products' | 'events') {
   return apiFetch<{ ok: boolean; data: unknown[] }>(`/ops/list/${entity}`);
 }

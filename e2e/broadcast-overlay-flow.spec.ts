@@ -13,7 +13,7 @@
  * which is where the integration risk lives.
  */
 
-import { expect, test } from '../playwright-fixture';
+import { expect, seedSuperAdminSession, test } from '../playwright-fixture';
 
 const GAME_ID = 'aaaaaaaa-1111-4111-8111-111111111111';
 
@@ -64,23 +64,7 @@ const OVERLAY_PAYLOAD = {
 };
 
 async function stubBroadcastApis(page: import('@playwright/test').Page) {
-  // Mock /api/public-config so the bundle boots with a working Supabase client.
-  // vite.config.ts no longer ships hardcoded prod fallbacks, so the chromeless
-  // overlay shell still mounts AuthProvider and would otherwise see configAvailable=false.
-  await page.route('**/api/public-config', (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        ok: true,
-        appName: 'SBBL HQ',
-        defaultLeague: 'SBBL',
-        supabaseUrl: 'https://ezanilxygnpucwkwpsoc.supabase.co',
-        supabasePublishableKey: 'playwright-publishable-key',
-        googleOAuthEnabled: false,
-      }),
-    }),
-  );
+  await seedSuperAdminSession(page);
 
   await page.route('**/api/public/overlay/**', (route) =>
     route.fulfill({
@@ -151,6 +135,7 @@ test.describe('broadcast overlay flow', () => {
   test('/overlay/:gameId returns a useful message when payload missing', async ({
     page,
   }) => {
+    await seedSuperAdminSession(page);
     await page.route('**/api/public/overlay/**', (route) =>
       route.fulfill({
         status: 404,

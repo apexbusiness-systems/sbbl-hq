@@ -1,4 +1,3 @@
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { parseCsv } from '@/lib/parseCsv';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOpsCsvUpload } from '@/hooks/useOpsCsvUpload';
@@ -217,7 +216,6 @@ function OpsCsvImportSection({ kind, csvUpload, csvLeagueId, setCsvLeagueId, isS
 const OpsPage = () => {
   const queryClient = useQueryClient();
   const { loading, session, user, roles } = useAuth();
-  const [activeTab, setActiveTab] = useState<Tab>('overview');
   const csvUpload = useOpsCsvUpload();
   const [storeForm, setStoreForm] = useState({ title: '', price: '0', category: 'apparel', publishStatus: 'draft' as 'draft' | 'published', imageFile: null as File | null, sale: false });
   const [csvLeagueId, setCsvLeagueId] = useState<string>('wbl');
@@ -300,27 +298,32 @@ const OpsPage = () => {
     setPotgParseError(null);
     setPotgImageFile(file);
     try {
-      const buffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(buffer);
-      let binary = '';
-      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-      const imageBase64 = btoa(binary);
-      const result = await parsePotgImage(imageBase64, file.type as string);
-      if (result.ok && result.data) {
-        setPotgForm(f => ({
-          ...f,
-          playerName: result.data.playerName ?? '',
-          team: result.data.team ?? '',
-          pts: String(result.data.pts ?? ''),
-          rebs: String(result.data.rebs ?? ''),
-          assts: String(result.data.assts ?? ''),
-          gameResult: result.data.gameResult ?? '',
-        }));
-        setPotgParseState('parsed');
-      } else {
-        setPotgParseError('Parse failed — fill in manually');
-        setPotgParseState('error');
-      }
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const imageBase64 = event.target?.result as string;
+        try {
+          const result = await parsePotgImage(imageBase64, file.type as string);
+          if (result.ok && result.data) {
+            setPotgForm(f => ({
+              ...f,
+              playerName: result.data.playerName ?? '',
+              team: result.data.team ?? '',
+              pts: String(result.data.pts ?? ''),
+              rebs: String(result.data.rebs ?? ''),
+              assts: String(result.data.assts ?? ''),
+              gameResult: result.data.gameResult ?? '',
+            }));
+            setPotgParseState('parsed');
+          } else {
+            setPotgParseError('Parse failed — fill in manually');
+            setPotgParseState('error');
+          }
+        } catch (e) {
+          setPotgParseError(e instanceof Error ? e.message : 'Unknown error');
+          setPotgParseState('error');
+        }
+      };
+      reader.readAsDataURL(file);
     } catch (e) {
       setPotgParseError(e instanceof Error ? e.message : 'Unknown error');
       setPotgParseState('error');
@@ -371,7 +374,7 @@ const OpsPage = () => {
       });
     },
     onSuccess: async (data) => {
-      setIngestJob(data);
+      setIngestJob(data as { jobId: string; state: string });
       await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
       await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
     },
@@ -573,7 +576,7 @@ const OpsPage = () => {
   const scoresQuery = useQuery({
     queryKey: ['ops-scores-list'],
     queryFn: () => fetchScores(),
-    enabled: activeTab === 'scores',
+    enabled: true,
     staleTime: 30_000,
   });
 
@@ -751,20 +754,17 @@ const OpsPage = () => {
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={(val) => setActiveTab(val as Tab)} className="space-y-6">
-      <TabsList className="flex flex-wrap h-auto w-full justify-start gap-2 bg-transparent p-0">
-        {tabs.map((tab) => (
-          <TabsTrigger
-            key={tab.id}
-            value={tab.id}
-            className="data-[state=active]:bg-primary/10 data-[state=active]:text-primary data-[state=active]:border-primary border border-border bg-card"
-          >
-            {tab.label}
-          </TabsTrigger>
-        ))}
-      </TabsList>
+      <div className="space-y-16">
+      <div className="bg-primary/5 border border-primary/20 rounded-md p-4 mb-8">
+        <h2 className="text-sm font-bold text-primary flex items-center gap-2">
+          <Shield className="w-4 h-4" /> Operations Dashboard
+        </h2>
+        <p className="text-xs text-muted-foreground mt-1">
+          All operation pipelines have been unified into a single dashboard. 
+        </p>
+      </div>
 
-      <TabsContent value="overview"><div className="grid md:grid-cols-3 gap-4">
+      <section id="overview" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">System Health</h2><div className="space-y-4"><div className="grid md:grid-cols-3 gap-4">
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Import jobs</p><p className="stat-numeral text-3xl">{jobs.length}</p></div>
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Recent successful rows</p><p className="stat-numeral text-3xl">{successfulRows}</p></div>
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Failed rows</p><p className="stat-numeral text-3xl text-destructive">{failedRows}</p></div>
@@ -773,9 +773,9 @@ const OpsPage = () => {
             {latestSummary.length === 0 ? <p className="text-sm text-muted-foreground">No imports yet.</p> : latestSummary.map((job) => <p key={job.id} className="text-sm">{job.job_type} · {job.status} · {job.inserted_rows}/{job.total_rows}</p>)}
           </div>
         </div>
-      </TabsContent>
+      </div></section>
 
-      <TabsContent value="scores"><div className="space-y-6">
+      <section id="scores" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Scores</h2><div className="space-y-4"><div className="space-y-6">
           {!isSuperAdmin && <p className="text-sm text-destructive font-semibold panel p-4">Super Admin role required for score management.</p>}
 
           {/* ── Scoreboard image OCR ──────────────────────────────── */}
@@ -937,9 +937,9 @@ const OpsPage = () => {
             </div>
           </div>
         </div>
-      </TabsContent>
+      </div></section>
 
-      <TabsContent value="teams">
+      <section id="teams" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Teams</h2><div className="space-y-4">
           <OpsCsvImportSection
             kind="teams"
             csvUpload={csvUpload}
@@ -977,9 +977,9 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </TabsContent>
+      </div></section>
 
-      <TabsContent value="players">
+      <section id="players" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Players</h2><div className="space-y-4">
           <OpsCsvImportSection
             kind="players"
             csvUpload={csvUpload}
@@ -1032,10 +1032,10 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </TabsContent>
+      </div></section>
 
 
-      <TabsContent value="schedules">
+      <section id="schedules" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Schedules</h2><div className="space-y-4">
           <OpsCsvImportSection
             kind="schedules"
             csvUpload={csvUpload}
@@ -1081,9 +1081,9 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </TabsContent>
+      </div></section>
 
-      <TabsContent value="events">
+      <section id="events" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Events</h2><div className="space-y-4">
           <OpsCsvImportSection
             kind="events"
             csvUpload={csvUpload}
@@ -1191,9 +1191,9 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </TabsContent>
+      </div></section>
 
-      <TabsContent value="store"><div className="panel p-4 max-w-xl space-y-8">
+      <section id="store" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Store Catalog</h2><div className="space-y-4"><div className="panel p-4 max-w-xl space-y-8">
           <div>
             <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Store Media & Product Ops</h2>
             {!isSuperAdmin ? (
@@ -1326,8 +1326,8 @@ const OpsPage = () => {
             )}
           </div>
         </div>
-      </TabsContent>
-      <TabsContent value="potg"><div className="panel p-4 space-y-5 max-w-xl">
+      </div></section>
+      <section id="potg" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">POTG Parser</h2><div className="space-y-4"><div className="panel p-4 space-y-5 max-w-xl">
           <div>
             <h2 className="font-display text-xl">POTG Image Parser</h2>
             <p className="text-xs text-muted-foreground mt-1">Upload a Player of the Game graphic — Claude Vision extracts the data automatically, then you confirm before it writes to the pipeline.</p>
@@ -1340,7 +1340,7 @@ const OpsPage = () => {
             onDragOver={e => e.preventDefault()}
             onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handlePotgImageUpload(f); }}
           >
-            <input ref={potgFileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handlePotgImageUpload(f); }} />
+            <input ref={potgFileRef} id="potg-image-input" type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handlePotgImageUpload(f); }} />
             {potgParseState === 'parsing' ? (
               <div className="flex flex-col items-center gap-2">
                 <Loader2 className="w-6 h-6 text-primary animate-spin" />
@@ -1478,13 +1478,13 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </TabsContent>
+      </div></section>
 
-      <TabsContent value="media">
+      <section id="media" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Media Library</h2><div className="space-y-4">
         <MediaLibraryTab enabled={canRunOps} />
-      </TabsContent>
+      </div></section>
 
-      <TabsContent value="history"><div className="panel p-4">
+      <section id="history" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">History</h2><div className="space-y-4"><div className="panel p-4">
           <div className="flex items-center justify-between mb-3 gap-3">
             <h2 className="font-display text-xl shrink-0">Import History</h2>
             <div className="relative flex-1 max-w-sm">
@@ -1524,8 +1524,8 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </TabsContent>
-      </Tabs>
+      </div></section>
+      </div>
     </div>
   );
 };

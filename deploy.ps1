@@ -45,6 +45,18 @@ Then re-run: .\deploy.ps1
     exit 1
 }
 
+if (-not (Test-Path "$ProjectRoot\.env")) {
+    Write-Error @"
+BLOCKED: .env file is missing.
+
+Running a build without a .env file will cause VITE_ variables to evaluate to undefined,
+breaking the frontend application in production.
+
+To fix: Create a .env file with VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY.
+"@
+    exit 1
+}
+
 # ── Step 1: Build ──────────────────────────────────────────────────────────────
 Write-Host ''
 Write-Host '[1/3] Building project...' -ForegroundColor Cyan

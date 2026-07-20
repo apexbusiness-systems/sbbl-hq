@@ -342,6 +342,7 @@ function StreamPlayer({
           allowFullScreen
           title="Facebook Live Stream"
         />
+
       </div>
     );
   }
@@ -365,23 +366,7 @@ function StreamPlayer({
     );
   }
 
-  // WHEP — WebRTC low-latency player
-  if (isWhep) {
-    return (
-      <div ref={containerRef} className="absolute inset-0 bg-black" data-testid="stream-player">
-        <WhepPlayer
-          whepUrl={url}
-          retryIntervalMs={10_000}
-          maxRetries={5}
-          onStatusChange={(status) => {
-            if (status === 'live') { onReady(); onPlay(); }
-            if (status === 'error') onError('WebRTC connection failed — the stream may not have started yet.');
-          }}
-        />
-      </div>
-    );
-  }
-
+  // If isWhep, we'll render WhepPlayer in the main block so it receives custom controls
   // HLS / DASH / YouTube / Twitch / Vimeo / direct / unknown — use ReactPlayer
   const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'sbbl-hq.icu';
   // Twitch rejects embeds whose `parent` list does not include the actual
@@ -468,7 +453,24 @@ function StreamPlayer({
       data-testid="stream-player"
       data-container-ready={containerReady ? 'true' : 'false'}
     >
-      {shouldRenderPlayer && (
+      {shouldRenderPlayer && isWhep && (
+        <div className="absolute inset-0 z-0">
+          <WhepPlayer
+            whepUrl={url}
+            muted={muted}
+            volume={volume}
+            playing={playing}
+            retryIntervalMs={10_000}
+            maxRetries={5}
+            onStatusChange={(status) => {
+              if (status === 'live') { setHasStartedPlaying(true); setPlaying(true); onReady(); onPlay(); }
+              if (status === 'offline' || status === 'error') { setPlaying(false); }
+              if (status === 'error') onError('WebRTC connection failed — the stream may not have started yet.');
+            }}
+          />
+        </div>
+      )}
+      {shouldRenderPlayer && !isWhep && (
         <ReactPlayer
           ref={(instance) => { reactPlayerRef.current = instance; }}
           url={url}

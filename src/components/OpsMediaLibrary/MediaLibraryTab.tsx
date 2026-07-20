@@ -50,7 +50,7 @@ export function MediaLibraryTab({ enabled }: MediaLibraryTabProps) {
         <div className="flex items-center gap-2">
           <ImageIcon className="w-5 h-5 text-primary" />
           <div>
-            <h2 className="font-display text-xl">Media Library</h2>
+
             <p className="text-xs text-muted-foreground">
               Manage all media publications — Store, POTG, Events, and more. Public{' '}
               <code className="text-[10px] bg-secondary px-1 py-0.5 rounded">/media</code> shows
