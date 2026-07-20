@@ -3254,8 +3254,9 @@ async function handleParseEventImage(ctx: HandlerCtx) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.2-90b-vision-preview",
-      max_tokens: 256,
+      model: "qwen/qwen3.6-27b", // 2026-07-20: llama-3.2-90b-vision-preview decommissioned by Groq (400s in prod); qwen3.6-27b is the runtime-verified vision model on this account
+      reasoning_format: "hidden",
+      max_tokens: 1024,
       messages: [
         {
           role: "user",
@@ -3311,8 +3312,9 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.2-90b-vision-preview",
-      max_tokens: 256,
+      model: "qwen/qwen3.6-27b", // 2026-07-20: llama-3.2-90b-vision-preview decommissioned by Groq (400s in prod); qwen3.6-27b is the runtime-verified vision model on this account
+      reasoning_format: "hidden",
+      max_tokens: 1024,
       messages: [
         {
           role: "user",
@@ -7703,8 +7705,9 @@ async function handleScoreboardImageParse(ctx: HandlerCtx) {
     method: "POST",
     headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: "llama-3.2-90b-vision-preview",
-      max_tokens: 256,
+      model: "qwen/qwen3.6-27b", // 2026-07-20: llama-3.2-90b-vision-preview decommissioned by Groq (400s in prod); qwen3.6-27b is the runtime-verified vision model on this account
+      reasoning_format: "hidden",
+      max_tokens: 1024,
       messages: [{
         role: "user",
         content: [
