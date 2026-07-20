@@ -26,14 +26,6 @@ export async function fetchImportHistory() {
   return apiFetch<{ ok: boolean; jobs: ImportJob[] }>('/ops/imports/history');
 }
 
-export async function submitCsvImport(kind: 'teams' | 'players' | 'schedules' | 'events', rows: Record<string, string>[]) {
-  return apiFetch<{ ok: boolean; summary: ImportJob }>(`/ops/imports/${kind}`, {
-    method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-${kind}`) },
-    body: JSON.stringify({ rows }),
-  });
-}
-
 export async function uploadCsv(params: {
   kind: 'teams' | 'players' | 'schedules' | 'events' | 'scores';
   csvText?: string;
@@ -274,14 +266,6 @@ export async function deleteOpsEntity(entity: 'teams' | 'players' | 'products' |
   return apiFetch<{ ok: boolean; data: unknown }>(`/ops/${entity}/${id}`, {
     method: 'DELETE',
     headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-delete-${entity}-${id}`) },
-  });
-}
-
-export async function submitScoresImport(rows: Record<string, string>[]) {
-  return apiFetch<{ ok: boolean; inserted: number; failed: number; errors: string[] }>('/ops/scores/import', {
-    method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-scores-csv') },
-    body: JSON.stringify({ rows }),
   });
 }
 

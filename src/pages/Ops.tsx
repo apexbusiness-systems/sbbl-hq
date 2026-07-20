@@ -7,14 +7,14 @@ import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
 import { MediaLibraryTab } from '@/components/OpsMediaLibrary';
 import {
-  fetchOpsBootstrap, fetchImportHistory, submitCsvImport,
+  fetchOpsBootstrap, fetchImportHistory,
   parseEventImage, parsePotgImage, manualOpsAction,
   ingestPresign, ingestSubmit, ingestApprove, ingestReject,
   type MediaPublicationStatus, type OpsMediaPublication,
 } from '@/lib/api/ops';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
-import { fetchScores, submitScoreManual, submitScoresCsvImport, parseScoreboardImage } from '@/lib/api/scores';
+import { fetchScores, submitScoreManual, parseScoreboardImage } from '@/lib/api/scores';
 import type { ScoreCategory } from '@/types';
 
 type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'media' | 'history';
@@ -576,7 +576,7 @@ const OpsPage = () => {
   const scoresQuery = useQuery({
     queryKey: ['ops-scores-list'],
     queryFn: () => fetchScores(),
-    enabled: true,
+    enabled: canRunOps,
     staleTime: 30_000,
   });
 
