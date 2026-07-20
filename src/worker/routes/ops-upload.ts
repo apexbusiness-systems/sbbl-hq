@@ -176,6 +176,17 @@ async function fetchLeagueMap(supabase: SupabaseClient, rows: Record<string, str
   return leagueMap;
 }
 
+// Uniform duplicate-key tolerance (2026-07-20 A+ pass): re-running the same
+// import is idempotent for EVERY entity, not just teams. Duplicate rows are
+// counted as `skipped` and surfaced in the response — never failed, never silent.
+export function isDuplicateKeyError(err: unknown): boolean {
+  const msg = err instanceof Error
+    ? err.message
+    : String((err as { message?: string; code?: string })?.message ?? "");
+  const code = String((err as { code?: string })?.code ?? "");
+  return msg.includes("duplicate key") || code === "23505";
+}
+
 // ── HANDLERS ─────────────────────────────────────────────────────────────────
 export async function handleScoresCsvUpload(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
@@ -220,8 +231,16 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
   const validatedRows: Record<string, string>[] = [];
 
   rows.forEach((row, index) => {
-    if (row.schema_version || row.format) return;
-    const parsed = config.schema.safeParse(row);
+    // v1 marker handling: skip ONLY pure marker rows (marker fields + no data).
+    // Data rows that also carry a schema_version/format column are validated
+    // with the marker fields stripped — never silently dropped (fix 2026-07-20).
+    const { schema_version: _sv, format: _fmt, ...dataFields } = row;
+    const hasMarker = Boolean(_sv || _fmt);
+    const isMarkerOnly =
+      hasMarker &&
+      Object.values(dataFields).every((v) => v == null || String(v).trim() === "");
+    if (isMarkerOnly) return;
+    const parsed = config.schema.safeParse(hasMarker ? dataFields : row);
     if (!parsed.success) {
       parsed.error.errors.forEach(err => {
         validationErrors.push({
@@ -241,6 +260,7 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
   }
 
   let inserted = 0;
+  let skipped = 0;
   let failed = 0;
   const errors: string[] = [];
 
@@ -275,11 +295,11 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
         }
 
         if (res.error) {
-          if (config.table === "teams" && String(res.error.message).includes("duplicate key")) {
-            // Treat team duplicate as ignore/success
-          } else {
-            throw res.error;
+          if (isDuplicateKeyError(res.error)) {
+            skipped++;
+            continue;
           }
+          throw res.error;
         }
         inserted++;
       } catch (e) {
@@ -289,6 +309,27 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
     }
   }
 
+  // Domain-event parity with /ops/imports/* (2026-07-20 A+ pass): the CSV path
+  // now emits the same `${kind}_imported` events so downstream projections and
+  // OmniHub sync see bulk uploads too. Fire-and-forget; failures logged only.
+  if (inserted > 0) {
+    await Promise.allSettled(
+      validatedRows.map((row) =>
+        ctx.admin.rpc("enqueue_local_domain_event", {
+          p_event_type: `${kind}_imported`,
+          p_entity_type: kind,
+          p_entity_id: null,
+          p_league_id: row.league_id || null,
+          p_payload: row,
+          p_trace_id: crypto.randomUUID(),
+          p_available_at: new Date().toISOString(),
+        }).then(({ error }) => {
+          if (error) console.warn(`[csv-upload] enqueue_local_domain_event warning (${kind}):`, error.message);
+        }),
+      ),
+    );
+  }
+
   const idempotencyKey = ctx.req.headers.get("x-idempotency-key") ?? crypto.randomUUID();
   await writeImportJob(ctx.admin, {
     job_type: kind,
@@ -296,7 +337,7 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
     total_rows: rows.length,
     inserted_rows: inserted,
     failed_rows: failed,
-    payload_summary: { sample: rows[0] ?? null },
+    payload_summary: { sample: rows[0] ?? null, skipped_rows: skipped, row_errors: errors.slice(0, 20) },
     error_summary: errors.slice(0, 5).join("; ") || null,
   });
 
@@ -305,11 +346,11 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
     action: `csv_upload_${kind}`,
     ref_type: kind,
     ref_id: crypto.randomUUID(),
-    payload: { count: rows.length, inserted, failed },
+    payload: { count: rows.length, inserted, skipped, failed },
     idempotency_key: idempotencyKey,
   });
 
-  return json({ ok: true, inserted, failed, errors });
+  return json({ ok: true, inserted, skipped, failed, errors });
 }
 
 export async function handleImportRoute(
@@ -372,6 +413,7 @@ export async function handleImportRoute(
   }
 
   let insertedRows = 0;
+  let skippedRows = 0;
   let failedRows = 0;
   const errors: string[] = [];
   let bulkSuccess = false;
@@ -458,11 +500,11 @@ export async function handleImportRoute(
             }
 
             if (res.error) {
-              if (config.table === "teams" && String(res.error.message).includes("duplicate key")) {
-                // Ignore team duplicate keys
-              } else {
-                throw res.error;
+              if (isDuplicateKeyError(res.error)) {
+                skippedRows += 1;
+                continue;
               }
+              throw res.error;
             }
 
             await ctx.admin.rpc("enqueue_local_domain_event", {
@@ -497,7 +539,7 @@ export async function handleImportRoute(
     total_rows: validatedRows.length,
     inserted_rows: insertedRows,
     failed_rows: failedRows,
-    payload_summary: { sample: validatedRows[0] ?? null },
+    payload_summary: { sample: validatedRows[0] ?? null, skipped_rows: skippedRows, row_errors: errors.slice(0, 20) },
     error_summary: errors.slice(0, 5).join("; ") || null,
   });
 
@@ -514,6 +556,11 @@ export async function handleImportRoute(
   return json({ ok: true, summary: job });
 }
 
+// RETAINED COMPAT ROUTE (2026-07-20 audit): /ops/scores/import stays live for
+// API compatibility (tests + potential external callers), but shares
+// INGEST_CONFIGS.scores schema + classifyRiskLane with /api/ops/upload/csv,
+// guaranteeing behavioral validation parity. New UI work must use
+// /api/ops/upload/csv (kind="scores") via useOpsCsvUpload (offline queue).
 export async function handleScoresCsvImport(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireSuperAdminSession(ctx.req, ctx.admin);
@@ -553,6 +600,7 @@ export async function handleScoresCsvImport(ctx: HandlerCtx) {
   }
 
   let inserted = 0;
+  let skipped = 0;
   let failed = 0;
   const errors: string[] = [];
 
@@ -575,8 +623,12 @@ export async function handleScoresCsvImport(ctx: HandlerCtx) {
         const payload = config.resolvePayload(row, leagueMap);
         const { error } = await ctx.admin.from(config.table).insert(payload);
         if (error) {
-          failed++;
-          errors.push(`${row.home_label || "Unknown"} vs ${row.away_label || "Unknown"}: ${error.message}`);
+          if (isDuplicateKeyError(error)) {
+            skipped++;
+          } else {
+            failed++;
+            errors.push(`${row.home_label || "Unknown"} vs ${row.away_label || "Unknown"}: ${error.message}`);
+          }
         } else {
           inserted++;
         }
@@ -587,5 +639,5 @@ export async function handleScoresCsvImport(ctx: HandlerCtx) {
     }
   }
 
-  return json({ ok: true, inserted, failed, errors });
+  return json({ ok: true, inserted, skipped, failed, errors });
 }

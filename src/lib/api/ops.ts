@@ -22,16 +22,16 @@ export async function fetchOpsBootstrap() {
   }>('/ops/bootstrap');
 }
 
-export async function fetchImportHistory() {
-  return apiFetch<{ ok: boolean; jobs: ImportJob[] }>('/ops/imports/history');
-}
+export type IngressFailure = {
+  correlation_id: string;
+  error_reason: string;
+  source_type: string;
+  status: string;
+  created_at: string;
+};
 
-export async function submitCsvImport(kind: 'teams' | 'players' | 'schedules' | 'events', rows: Record<string, string>[]) {
-  return apiFetch<{ ok: boolean; summary: ImportJob }>(`/ops/imports/${kind}`, {
-    method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-${kind}`) },
-    body: JSON.stringify({ rows }),
-  });
+export async function fetchImportHistory() {
+  return apiFetch<{ ok: boolean; jobs: ImportJob[]; ingress_failures?: IngressFailure[] }>('/ops/imports/history');
 }
 
 export async function uploadCsv(params: {
@@ -274,14 +274,6 @@ export async function deleteOpsEntity(entity: 'teams' | 'players' | 'products' |
   return apiFetch<{ ok: boolean; data: unknown }>(`/ops/${entity}/${id}`, {
     method: 'DELETE',
     headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`ops-delete-${entity}-${id}`) },
-  });
-}
-
-export async function submitScoresImport(rows: Record<string, string>[]) {
-  return apiFetch<{ ok: boolean; inserted: number; failed: number; errors: string[] }>('/ops/scores/import', {
-    method: 'POST',
-    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey('ops-scores-csv') },
-    body: JSON.stringify({ rows }),
   });
 }
 

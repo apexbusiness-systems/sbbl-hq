@@ -12,6 +12,10 @@ interface Env {
   OPTIONAL_SOCIAL_API_KEYS?: string;
   OPTIONAL_TURNSTILE_SECRET_KEY?: string;
   GROQ_API_KEY?: string;
+  // Optional override for the Groq vision model used by the /ops image-parse
+  // routes. Next Groq model retirement becomes a wrangler var change instead
+  // of a code deploy. Code default: "qwen/qwen3.6-27b".
+  GROQ_VISION_MODEL?: string;
   ENABLE_STREAM_VALIDATION?: string;
   VITE_STREAM_URL?: string;
   OBS_AGENT_TOKEN?: string;
