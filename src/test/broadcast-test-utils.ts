@@ -66,7 +66,7 @@ export function createAdmin(
       then: async (resolve) => resolve({ data: (state[table] ?? []).filter((row) => rowMatches(row, filters)), error: null }),
       insert(row) {
         if (table === 'api_idempotency_keys') return { error: null };
-        const normalized = { ...row, id: row.id ?? crypto.randomUUID() };
+        const normalized = { ...row, id: row.id ?? crypto.randomUUID(), code: row.code ?? crypto.randomUUID() };
         state[table] = [...(state[table] ?? []), normalized];
         return { select: () => ({ single: async () => ({ data: normalized, error: null }) }), error: null };
       },
@@ -104,7 +104,7 @@ export function createAdmin(
         const existing = table === 'stream_access_sessions'
           ? rows.find((r) => r.user_id === row.user_id && (r.game_id ?? null) === (row.game_id ?? null) && r.idempotency_key === row.idempotency_key)
           : rows.find((r) => r.id === row.id);
-        const target = existing ?? { ...row, id: row.id ?? crypto.randomUUID() };
+        const target = existing ?? { ...row, id: row.id ?? crypto.randomUUID(), code: row.code ?? crypto.randomUUID() };
         Object.assign(target, row);
         if (!existing) rows.push(target);
         return { select: () => ({ single: async () => ({ data: target, error: null }) }) };

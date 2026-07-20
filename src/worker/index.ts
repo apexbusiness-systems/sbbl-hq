@@ -2270,7 +2270,8 @@ export async function requireAdminSession(req: Request, admin: SupabaseClient) {
       (role) =>
         role === "league_admin" ||
         role === "super_admin" ||
-        role === "team_manager",
+        role === "team_manager" ||
+        role === "APEX_ADMIN",
     )
   ) {
     throw new Error("forbidden");
@@ -2382,96 +2383,6 @@ async function handleImportHistory({ req, admin }: HandlerCtx) {
   return json({ ok: true, jobs: data ?? [] });
 }
 
-async function handleStoreMedia(ctx: HandlerCtx) {
-  await ensureMutation(ctx.req, ctx);
-  const session = await requireAdminSession(ctx.req, ctx.admin);
-  const payload = (await ctx.req.json().catch(() => null)) as Record<
-    string,
-    unknown
-  > | null;
-  if (
-    !payload ||
-    typeof payload.title !== "string" ||
-    typeof payload.price !== "number" ||
-    typeof payload.imageUrl !== "string"
-  ) {
-    // sale flag is optional boolean
-    return json({ ok: false, error: "invalid_store_payload" }, 400);
-  }
-
-  const product = await ctx.admin
-    .from("products")
-    .insert({
-      league_id: typeof payload.leagueId === "string" ? payload.leagueId : null,
-      name: payload.title,
-      price: payload.price,
-      status: payload.publishStatus === "published" ? "published" : "draft",
-    })
-    .select("id")
-    .single();
-  if (product.error) throw new Error(product.error.message);
-
-  const leagueUuid = typeof payload.leagueId === "string" ? payload.leagueId : null;
-  const pubStatus = payload.publishStatus === "published" ? "published" : "draft";
-
-  const media = await ctx.admin
-    .from("media_assets")
-    .insert({
-      league_id: leagueUuid,
-      title: String(payload.title),
-      status: pubStatus,
-      metadata: {
-        type: "poster",
-        thumbnail: payload.imageUrl,
-        image_url: payload.imageUrl,
-        category: payload.category,
-        product_id: product.data.id,
-        sale: payload.sale === true,
-      },
-    })
-    .select("id")
-    .single();
-  if (media.error) throw new Error(media.error.message);
-
-  // Project into publication layer — public surface reads only this table.
-  const pub = await ctx.admin
-    .from("media_publications")
-    .insert({
-      media_asset_id: media.data.id,
-      surface: "store",
-      league_id: leagueUuid,
-      title: String(payload.title),
-      status: pubStatus,
-      published_at: pubStatus === "published" ? new Date().toISOString() : null,
-      render_payload: {
-        type: "poster",
-        thumbnail: String(payload.imageUrl),
-        image_url: String(payload.imageUrl),
-        category: payload.category ?? null,
-        sale: payload.sale === true,
-        product_id: product.data.id,
-      },
-    })
-    .select("id")
-    .single();
-  if (pub.error) throw new Error(pub.error.message);
-
-  await ctx.admin.from("audit_logs").insert({
-    actor_id: session.userId,
-    action: "ops_store_media_upsert",
-    ref_type: "product",
-    ref_id: product.data.id,
-    payload: { media_asset_id: media.data.id, publication_id: pub.data.id },
-    idempotency_key: readIdempotencyKey(ctx.req.headers),
-  });
-
-  return json({
-    ok: true,
-    productId: product.data.id,
-    mediaAssetId: media.data.id,
-    publicationId: pub.data.id,
-  });
-}
 
 // handlePublicSchedule, handlePublicPotg — extracted to src/worker/routes/public.ts
 const handlePublicSchedule = _handlePublicSchedule;
@@ -3400,7 +3311,7 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "meta-llama/llama-4-scout-17b-16e-instruct",
+      model: "llama-3.2-90b-vision-preview",
       max_tokens: 256,
       messages: [
         {
@@ -3626,239 +3537,6 @@ async function resolvePotgPlayer(
   return { ok: true, playerId: String(player.id), userId: String(profile.user_id) };
 }
 
-async function handleSubmitPotg(ctx: HandlerCtx) {
-  await ensureMutation(ctx.req, ctx);
-  const session = await requireAdminSession(ctx.req, ctx.admin);
-
-  // ── Gap 4: Idempotency dedup ─────────────────────────────────────────────────
-  // Retry-safe: if the same x-idempotency-key header was already processed,
-  // return the existing job ID without re-executing the full write path.
-  // The dedup anchor is a direct audit_logs insert at the end of this handler.
-  const idempotencyKey = readIdempotencyKey(ctx.req.headers) ?? null;
-  if (idempotencyKey) {
-    const { data: existingAudit } = await ctx.admin
-      .from("audit_logs")
-      .select("ref_id")
-      .eq("idempotency_key", idempotencyKey)
-      .eq("action", "potg_submitted")
-      .maybeSingle();
-    if (existingAudit?.ref_id) {
-      return json({ ok: true, jobId: existingAudit.ref_id, deduplicated: true });
-    }
-  }
-
-  const body = (await ctx.req.json().catch(() => null)) as {
-    playerName: string;
-    team: string;
-    pts: number;
-    rebs: number;
-    assts: number;
-    gameResult: string;
-    leagueId: string;
-    date?: string;
-    imageUrl?: string;
-  } | null;
-
-  if (!body?.playerName || !body?.team || !body?.leagueId) {
-    return json({ ok: false, error: "missing_required_fields" }, 400);
-  }
-
-  const statErr = validatePotgStatFields(body);
-  if (statErr) {
-    return json({ ok: false, error: statErr }, 400);
-  }
-
-  const requestedLeagueCode = String(body.leagueId).toLowerCase();
-  const inferredLeagueCode = await inferPotgLeagueCode(ctx, body.team, body.gameResult);
-  const effectiveLeagueCode = inferredLeagueCode ?? requestedLeagueCode;
-  const potgDate = body.date ?? new Date().toISOString().split("T")[0];
-  const parsedResult = parsePotgGameResult(body.gameResult ?? "");
-
-  // Resolve league code (e.g. 'wbl') to UUID for FK references
-  let leagueUuid: string | null = null;
-  const { data: leagueLookup } = await ctx.admin
-    .from("leagues")
-    .select("id")
-    .ilike("code", effectiveLeagueCode)
-    .maybeSingle();
-  leagueUuid = leagueLookup?.id ?? null;
-
-  if (!leagueUuid) {
-    return json(
-      { ok: false, error: "potg_unknown_league", leagueId: effectiveLeagueCode },
-      400,
-    );
-  }
-
-  // Refuse to publish a POTG for a player who isn't rostered to this league.
-  // Without a matching `players` row the leaderboard has nothing to surface
-  // and the poster becomes an orphan (see incident 2026-04-18).
-  const playerResolution = await resolvePotgPlayer(ctx.admin, body.playerName, leagueUuid);
-  if (playerResolution.ok === false) {
-    return json(
-      { ok: false, error: playerResolution.error, details: playerResolution.details },
-      409,
-    );
-  }
-  const playerUserId = playerResolution.userId;
-  const playerId = playerResolution.playerId;
-  const profileData = { user_id: playerUserId };
-
-  // Link POTG to an existing score row when possible; otherwise create
-  // a minimal league game row so Scores and stats tabs can tabulate it.
-  let gameId: string | null = null;
-  if (leagueUuid && parsedResult) {
-    const { data: candidateGames } = await ctx.admin
-      .from("games")
-      .select("id,participant1_label,participant2_label")
-      .eq("league_id", leagueUuid)
-      .eq("category", "league")
-      .eq("game_date", potgDate)
-      .limit(25);
-
-    const targetA = normalizeTeamToken(normalizeTeamLabel(parsedResult.homeLabel));
-    const targetB = normalizeTeamToken(normalizeTeamLabel(parsedResult.awayLabel));
-    const matched = (candidateGames ?? []).find((g) => {
-      const rowA = normalizeTeamToken(
-        normalizeTeamLabel(String(g.participant1_label ?? ""))
-      );
-      const rowB = normalizeTeamToken(
-        normalizeTeamLabel(String(g.participant2_label ?? ""))
-      );
-      return (rowA === targetA && rowB === targetB) || (rowA === targetB && rowB === targetA);
-    });
-
-    if (matched?.id) {
-      gameId = String(matched.id);
-      await ctx.admin.from("games").update({
-        status: "final",
-        participant1_label: parsedResult.homeLabel,
-        participant2_label: parsedResult.awayLabel,
-        home_score: parsedResult.homeScore,
-        away_score: parsedResult.awayScore,
-      }).eq("id", gameId);
-    } else {
-      const { data: newGame } = await ctx.admin.from("games").insert({
-        league_id: leagueUuid,
-        category: "league",
-        status: "final",
-        game_date: potgDate,
-        participant1_label: parsedResult.homeLabel,
-        participant2_label: parsedResult.awayLabel,
-        home_score: parsedResult.homeScore,
-        away_score: parsedResult.awayScore,
-        notes: "Auto-created from POTG submission",
-      }).select("id").single();
-      gameId = newGame?.id ? String(newGame.id) : null;
-    }
-  }
-
-  // Audit row in import_jobs. The player is guaranteed rostered at this point
-  // (resolvePotgPlayer above), so the legacy unmatched-fallback branch is gone.
-  const { data: jobData, error: jobError } = await ctx.admin
-    .from("import_jobs")
-    .insert({
-      job_type: "potg_award",
-      submitted_by: session.userId,
-      payload_summary: {
-        playerName: body.playerName,
-        team: body.team,
-        pts: body.pts,
-        rebs: body.rebs,
-        assts: body.assts,
-        gameResult: body.gameResult,
-        leagueId: effectiveLeagueCode,
-        date: potgDate,
-        imageUrl: body.imageUrl ?? null,
-        matched_profile_id: profileData.user_id,
-        game_id: gameId,
-        source: "potg_image_parser",
-        requestedLeagueId: requestedLeagueCode,
-        inferredLeagueId: inferredLeagueCode,
-      },
-      status: "completed",
-      total_rows: 1,
-      inserted_rows: 1,
-      failed_rows: 0,
-      error_summary: null,
-    })
-    .select("id")
-    .single();
-
-  if (jobError) throw new Error(jobError.message);
-
-  // Persist player stat row when both player and game are resolvable.
-  if (playerId && gameId) {
-    await ctx.admin.from("player_game_stats").upsert({
-      game_id: gameId,
-      player_id: playerId,
-      pts: Number(body.pts ?? 0),
-      reb: Number(body.rebs ?? 0),
-      ast: Number(body.assts ?? 0),
-    }, { onConflict: "game_id,player_id" });
-  }
-
-  // Write media_assets + media_publications so the POTG card renders
-  // via the canonical publication layer. Only when an image is present.
-  if (body.imageUrl) {
-    const potgTitle = `POTG — ${body.playerName} (${body.team})`;
-    const potgMeta = {
-      type: "poster",
-      thumbnail: body.imageUrl,
-      date: potgDate,
-      potg: true,
-      leagueId: effectiveLeagueCode,
-      playerName: body.playerName,
-      team: body.team,
-      pts: body.pts,
-      rebs: body.rebs,
-      assts: body.assts,
-      gameResult: body.gameResult,
-    };
-
-    const { data: assetData, error: assetErr } = await ctx.admin
-      .from("media_assets")
-      .insert({
-        league_id: leagueUuid,
-        title: potgTitle,
-        status: "published",
-        metadata: potgMeta,
-      })
-      .select("id")
-      .single();
-    if (assetErr) throw new Error(assetErr.message);
-
-    // Project into publication layer. The guards above ensure both stat fields
-    // and a rostered player exist, so this is always a fully-formed publication.
-    await ctx.admin.from("media_publications").insert({
-      media_asset_id: assetData.id,
-      surface: "potg",
-      league_id: leagueUuid,
-      title: potgTitle,
-      status: "published",
-      published_at: new Date().toISOString(),
-      render_payload: potgMeta,
-    }).select("id").single();
-    // Ignore conflict on duplicate (upsert idempotency) — if the row already
-    // exists for this asset+surface pair, keep the existing publication.
-  }
-
-  // Gap 4: Canonical audit_logs insert — this is the dedup anchor (queried at the
-  // top of this handler). Using a direct insert (not log_admin_action RPC) so the
-  // row is guaranteed to be written before the response is returned.
-  await ctx.admin.from("audit_logs").insert({
-    actor_id: session.userId,
-    action: "potg_submitted",
-    ref_type: "import_job",
-    ref_id: jobData.id,
-    payload: { playerName: body.playerName, leagueId: effectiveLeagueCode, date: potgDate },
-    idempotency_key: idempotencyKey ?? crypto.randomUUID(),
-  }).then(({ error }) => {
-    if (error) console.warn("[potg] audit_log write failed (non-critical):", error.message);
-  });
-
-  return json({ ok: true, jobId: jobData.id, matched: true });
-}
 
 // ── PPV INVITE SYSTEM ────────────────────────────────────────────────────────
 //
@@ -3915,7 +3593,7 @@ export async function handleInviteGenerate(ctx: HandlerCtx) {
   // Check for an existing invite (idempotent — return same code on re-request)
   const { data: existing } = await ctx.admin
     .from("ppv_invites")
-    .select("id")
+    .select("code")
     .eq("generated_by", userId)
     .eq("game_id", gameId)
     .maybeSingle();
@@ -3923,7 +3601,7 @@ export async function handleInviteGenerate(ctx: HandlerCtx) {
   if (existing) {
     return json({
       ok: true,
-      code: (existing as { id: string }).id,
+      code: (existing as { code: string }).code,
       reused: true,
     });
   }
@@ -3932,7 +3610,7 @@ export async function handleInviteGenerate(ctx: HandlerCtx) {
   const { data: invite, error: insertErr } = await ctx.admin
     .from("ppv_invites")
     .insert({ game_id: gameId, generated_by: userId })
-    .select("id")
+    .select("code")
     .single();
 
   if (insertErr) {
@@ -3940,21 +3618,21 @@ export async function handleInviteGenerate(ctx: HandlerCtx) {
     if (insertErr.code === "23505" || insertErr.message.includes("duplicate")) {
       const { data: raceRow } = await ctx.admin
         .from("ppv_invites")
-        .select("id")
+        .select("code")
         .eq("generated_by", userId)
         .eq("game_id", gameId)
         .maybeSingle();
       if (raceRow)
         return json({
           ok: true,
-          code: (raceRow as { id: string }).id,
+          code: (raceRow as { code: string }).code,
           reused: true,
         });
     }
     throw new Error(insertErr.message);
   }
 
-  return json({ ok: true, code: (invite as { id: string }).id, reused: false });
+  return json({ ok: true, code: (invite as { code: string }).code, reused: false });
 }
 
 /**
@@ -4009,14 +3687,14 @@ async function handleSuperAdminCompCode(ctx: HandlerCtx) {
       expires_at: expiresAt,
       note,
     })
-    .select("id,game_id,expires_at,note,created_at")
+    .select("id,code,game_id,expires_at,note,created_at")
     .single();
 
   if (insertErr) throw new Error(insertErr.message);
 
   return json({
     ok: true,
-    code: (invite as { id: string }).id,
+    code: (invite as { code: string }).code,
     gameId: (invite as { game_id: string }).game_id,
     expiresAt: (invite as { expires_at: string }).expires_at,
     note: (invite as { note: string | null }).note,
@@ -4034,7 +3712,7 @@ async function handleSuperAdminCompCodeList(ctx: HandlerCtx) {
   await requireSuperAdminSession(ctx.req, ctx.admin);
   const { data, error } = await ctx.admin
     .from("ppv_invites")
-    .select("id,game_id,used_by,used_at,expires_at,note,created_at")
+    .select("id,code,game_id,used_by,used_at,expires_at,note,created_at")
     .eq("is_comp", true)
     .order("created_at", { ascending: false })
     .limit(50);
@@ -4042,7 +3720,7 @@ async function handleSuperAdminCompCodeList(ctx: HandlerCtx) {
   return json({
     ok: true,
     codes: (data ?? []).map((row: Record<string, unknown>) => ({
-      code: String(row.id),
+      code: String(row.code),
       gameId: String(row.game_id),
       usedBy: row.used_by ? String(row.used_by) : null,
       usedAt: row.used_at ? String(row.used_at) : null,
@@ -4090,7 +3768,7 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
     .select(
       "id, game_id, generated_by, used_by, ip_address, used_at, expires_at, is_comp",
     )
-    .eq("id", code)
+    .eq("code", code)
     .maybeSingle();
 
   if (fetchErr || !row)
@@ -4161,7 +3839,7 @@ export async function handleInviteRedeem(ctx: HandlerCtx) {
     const { data: recheck } = await ctx.admin
       .from("ppv_invites")
       .select("used_by, ip_address")
-      .eq("id", code)
+      .eq("code", code)
       .single();
     const r = recheck as {
       used_by: string | null;
@@ -6677,10 +6355,10 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     handler: handleScoresCsvUpload,
   },
   { method: "GET", path: "/ops/imports/history", handler: handleImportHistory },
-  { method: "POST", path: "/ops/store/media", handler: handleStoreMedia },
+
   { method: "POST", path: "/ops/event/parse", handler: handleParseEventImage },
   { method: "POST", path: "/ops/potg/parse", handler: handleParsePotgImage },
-  { method: "POST", path: "/ops/potg/submit", handler: handleSubmitPotg },
+
   { method: "GET", path: "/api/public-config", handler: handlePublicConfig },
   { method: "GET", path: "/api/public/home", handler: handlePublicHome },
   { method: "GET", path: "/api/public/schedule", handler: handlePublicSchedule },
@@ -7255,6 +6933,10 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     return json({ ok: false, error: "invalid_kind" }, 400);
   }
 
+  let potgPlayerId: string | null = null;
+  let potgUserId: string | null = null;
+  let potgParsedResult: ReturnType<typeof parsePotgGameResult> = null;
+
   // POTG-specific guards. Block before opening an ingest_jobs row so we don't
   // leave half-finished rows behind on rejection. See incident 2026-04-18.
   if (body.kind === "potg") {
@@ -7282,6 +6964,9 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
         409,
       );
     }
+    potgPlayerId = playerResolution.playerId;
+    potgUserId = playerResolution.userId;
+    potgParsedResult = parsePotgGameResult(String(meta.gameResult ?? ""));
   }
 
   const idempotencyKey = body.idempotencyKey ?? readIdempotencyKey(ctx.req.headers) ?? null;
@@ -7373,6 +7058,22 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     assetMeta.team = String(meta.team ?? "");
   }
 
+  if (body.kind === "store") {
+    const { data: product } = await ctx.admin
+      .from("products")
+      .insert({
+        league_id: leagueUuid,
+        name: body.title ?? "Store Item",
+        price: Number(meta.price ?? 0),
+        status: pubStatus,
+      })
+      .select("id")
+      .single();
+    if (product?.id) {
+      assetMeta.product_id = product.id;
+    }
+  }
+
   const { data: asset, error: assetErr } = await ctx.admin
     .from("media_assets")
     .insert({
@@ -7424,6 +7125,67 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     payload: { kind: body.kind, surface, media_asset_id: asset.id, publication_id: pub.id },
     idempotency_key: idempotencyKey ?? crypto.randomUUID(),
   });
+
+  if (body.kind === "potg" && potgPlayerId && leagueUuid && potgParsedResult) {
+    const potgDate = (meta.date as string | undefined) ?? new Date().toISOString().split("T")[0];
+    
+    // Link or create game
+    const { data: candidateGames } = await ctx.admin
+      .from("games")
+      .select("id,participant1_label,participant2_label")
+      .eq("league_id", leagueUuid)
+      .eq("category", "league")
+      .eq("game_date", potgDate)
+      .limit(25);
+
+    const targetA = normalizeTeamToken(normalizeTeamLabel(potgParsedResult.homeLabel));
+    const targetB = normalizeTeamToken(normalizeTeamLabel(potgParsedResult.awayLabel));
+    const matched = (candidateGames ?? []).find((g) => {
+      const rowA = normalizeTeamToken(normalizeTeamLabel(String(g.participant1_label ?? "")));
+      const rowB = normalizeTeamToken(normalizeTeamLabel(String(g.participant2_label ?? "")));
+      return (rowA === targetA && rowB === targetB) || (rowA === targetB && rowB === targetA);
+    });
+
+    let gameId: string | null = null;
+    if (matched?.id) {
+      gameId = String(matched.id);
+      await ctx.admin.from("games").update({
+        status: "final",
+        participant1_label: potgParsedResult.homeLabel,
+        participant2_label: potgParsedResult.awayLabel,
+        home_score: potgParsedResult.homeScore,
+        away_score: potgParsedResult.awayScore,
+      }).eq("id", gameId);
+    } else {
+      const { data: newGame } = await ctx.admin.from("games").insert({
+        league_id: leagueUuid,
+        category: "league",
+        status: "final",
+        game_date: potgDate,
+        participant1_label: potgParsedResult.homeLabel,
+        participant2_label: potgParsedResult.awayLabel,
+        home_score: potgParsedResult.homeScore,
+        away_score: potgParsedResult.awayScore,
+        notes: "Auto-created from POTG submission",
+      }).select("id").single();
+      gameId = newGame?.id ? String(newGame.id) : null;
+    }
+
+    if (gameId) {
+      await ctx.admin.from("player_game_stats").upsert({
+        game_id: gameId,
+        player_id: potgPlayerId,
+        pts: Number(meta.pts ?? 0),
+        reb: Number(meta.rebs ?? 0),
+        ast: Number(meta.assts ?? 0),
+      }, { onConflict: "game_id,player_id" });
+      
+      // Update ingest_job payload with matched game_id for traceability
+      await ctx.admin.from("ingest_jobs").update({
+        payload: { ...baseJobInsert.payload, matched_game_id: gameId, matched_player_id: potgPlayerId }
+      }).eq("id", jobId);
+    }
+  }
 
   return json({
     ok: true,

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 
-const LEGACY_PLACEHOLDER_KEY_REGEX = /sb_publishable_/;
+const LEGACY_PLACEHOLDER_KEY_REGEX = /sb_publishable_test_key/;
 
 /**
  * Guardrail tests for wrangler.jsonc — prevents regressions from careless

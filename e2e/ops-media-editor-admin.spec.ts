@@ -204,18 +204,15 @@ test.describe('ops media editor admin', () => {
       await route.fulfill({ status: 405, body: 'method_not_allowed' });
     });
 
-    // ── Navigate to Ops console and open the Media Library tab ───────────
+    // ── Navigate to Ops console ───────────
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
-    const mediaTab = page.getByRole('tab', { name: 'Media Library' });
-    await expect(mediaTab).toBeVisible();
-    await mediaTab.click();
 
     await expect(page.getByRole('heading', { name: 'Media Library' })).toBeVisible();
 
     // Scope: the Media Library tab panel (TabsContent for value="media").
     // Radix sets role="tabpanel" on the active tab content, so we scope all
     // further locators there to avoid clashing with other tabs' markup.
-    const panel = page.locator('[role="tabpanel"]').filter({ hasText: 'Media Library' });
+    const panel = page.locator('section#media');
     await expect(panel).toBeVisible();
 
     // Filter bar holds the status/surface filter buttons. We click the chip

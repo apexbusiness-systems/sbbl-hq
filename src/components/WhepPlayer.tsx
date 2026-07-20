@@ -34,6 +34,12 @@ interface WhepPlayerProps {
   retryIntervalMs?: number;
   /** Max retry attempts. 0 = infinite. Default: 5 */
   maxRetries?: number;
+  /** Whether the video is muted */
+  muted?: boolean;
+  /** Volume level 0.0 to 1.0 */
+  volume?: number;
+  /** Whether the video is playing */
+  playing?: boolean;
   /** Called when status changes */
   onStatusChange?: (status: WhepPlayerStatus) => void;
 }
@@ -48,6 +54,9 @@ export function WhepPlayer({
   whepUrl,
   retryIntervalMs = 10_000,
   maxRetries = 5,
+  muted = true,
+  volume = 1,
+  playing = true,
   onStatusChange,
 }: WhepPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -263,6 +272,29 @@ export function WhepPlayer({
     return destroy;
   }, [whepUrl, connect, destroy]);
 
+  // Apply volume changes imperatively since React video[volume] attribute is unreliable
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
+    }
+  }, [volume]);
+
+  // Apply play/pause changes imperatively
+  useEffect(() => {
+    if (videoRef.current) {
+      if (playing) {
+        const playPromise = videoRef.current.play();
+        if (playPromise && typeof playPromise.catch === 'function') {
+          playPromise.catch(() => {
+            // Ignore play errors (e.g. autoplay blocked)
+          });
+        }
+      } else {
+        videoRef.current.pause();
+      }
+    }
+  }, [playing]);
+
   /**
    * FIX #3 — manualRetry callback.
    * Extracted from inline JSX onClick to eliminate stale closure over connect.
@@ -282,7 +314,7 @@ export function WhepPlayer({
         ref={videoRef}
         autoPlay
         playsInline
-        muted
+        muted={muted}
         className="w-full h-full object-contain"
       />
 
