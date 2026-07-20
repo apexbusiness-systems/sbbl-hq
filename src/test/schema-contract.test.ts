@@ -46,13 +46,14 @@ function buildSchemaMap(): Map<string, Set<string>> {
 // auto-provisioning, import history, audit trail, ingress capture).
 const TABLE_COLUMN_CONTRACT: Record<string, string[]> = {
   profiles: ['user_id', 'display_name', 'full_name', 'created_by'],
-  players: ['user_id', 'league_id', 'team_id', 'created_by'],
+  players: ['user_id', 'league_id', 'team_id', 'created_by', 'merged_into', 'merged_at'],
   teams: ['name', 'league_id', 'season_id'],
   leagues: ['code'],
   player_game_stats: ['game_id', 'player_id'],
   import_jobs: ['job_type', 'submitted_by', 'total_rows', 'inserted_rows', 'failed_rows', 'payload_summary', 'error_summary', 'status', 'created_at'],
   ingress_buffer: ['correlation_id', 'raw_input', 'error_reason', 'status', 'risk_score', 'source_type', 'user_id', 'created_at'],
   audit_logs: ['actor_id', 'action', 'ref_type', 'ref_id', 'payload', 'idempotency_key'],
+  event_outbox: ['event_type', 'status', 'retries', 'created_at', 'available_at', 'dead_lettered_at'],
 };
 
 describe('schema contract — code column references exist in migrations', () => {

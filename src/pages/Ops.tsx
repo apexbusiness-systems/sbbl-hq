@@ -7,7 +7,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { PotgCard } from '@/components/ui/PotgCard';
 import { MediaLibraryTab } from '@/components/OpsMediaLibrary';
 import {
-  fetchOpsBootstrap, fetchImportHistory,
+  fetchOpsBootstrap, fetchImportHistory, fetchPipelineHealth, mergePlayerIdentities,
   parseEventImage, parsePotgImage, manualOpsAction,
   ingestPresign, ingestSubmit, ingestApprove, ingestReject,
   type MediaPublicationStatus, type OpsMediaPublication,
@@ -346,6 +346,22 @@ const OpsPage = () => {
     queryFn: fetchImportHistory,
     enabled: canRunOps,
     retry: shouldRetryOpsQuery,
+  });
+  const pipelineHealthQuery = useQuery({
+    queryKey: ['ops-pipeline-health'],
+    queryFn: fetchPipelineHealth,
+    enabled: canRunOps,
+    refetchInterval: 60_000,
+    retry: shouldRetryOpsQuery,
+  });
+  const [mergeSourceId, setMergeSourceId] = useState('');
+  const [mergeTargetId, setMergeTargetId] = useState('');
+  const mergeMutation = useMutation({
+    mutationFn: () => mergePlayerIdentities(mergeSourceId.trim(), mergeTargetId.trim()),
+    onSuccess: async () => {
+      setMergeSourceId(''); setMergeTargetId('');
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
   });
 
 
@@ -784,6 +800,19 @@ const OpsPage = () => {
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Import jobs</p><p className="stat-numeral text-3xl">{jobs.length}</p></div>
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Recent successful rows</p><p className="stat-numeral text-3xl">{successfulRows}</p></div>
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Failed rows</p><p className="stat-numeral text-3xl text-destructive">{failedRows}</p></div>
+          {pipelineHealthQuery.data && Object.entries(pipelineHealthQuery.data.metrics).map(([name, m]) => (
+            <div key={name} className={`panel p-4 border ${m.status === 'critical' ? 'border-destructive/60' : m.status === 'warn' ? 'border-warning/50' : 'border-border'}`}>
+              <p className="text-xs text-muted-foreground">{name.replace(/_/g, ' ')}</p>
+              <p className={`stat-numeral text-3xl ${m.status === 'critical' ? 'text-destructive' : m.status === 'warn' ? 'text-warning' : 'text-success'}`}>{m.value}</p>
+              <p className="text-[10px] text-muted-foreground">warn ≥{m.warn} · critical ≥{m.critical}</p>
+            </div>
+          ))}
+          {pipelineHealthQuery.data && pipelineHealthQuery.data.alerts.length > 0 && (
+            <div className="panel p-4 md:col-span-3 border border-destructive/40">
+              <p className="text-xs font-bold text-destructive mb-1">Pipeline alerts</p>
+              {pipelineHealthQuery.data.alerts.map((a) => <p key={a} className="text-xs font-mono text-destructive">{a}</p>)}
+            </div>
+          )}
           <div className="panel p-4 md:col-span-3">
             <h2 className="font-display text-xl mb-2">Recent Actions</h2>
             {latestSummary.length === 0 ? <p className="text-sm text-muted-foreground">No imports yet.</p> : latestSummary.map((job) => <p key={job.id} className="text-sm">{job.job_type} · {job.status} · {job.inserted_rows}/{job.total_rows}</p>)}
@@ -1034,6 +1063,17 @@ const OpsPage = () => {
                   <input placeholder="Reason (optional)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={suspendPlayerReason} onChange={e => setSuspendPlayerReason(e.target.value)} />
                   {suspendPlayerMutation.error && <p className="text-xs text-destructive">{(suspendPlayerMutation.error as Error).message}</p>}
                   {suspendPlayerMutation.isSuccess && <p className="text-xs text-success">Player suspended.</p>}
+                </div>
+              </div>
+              <div className="border border-primary/20 p-3 rounded-sm bg-primary/5">
+                <h3 className="text-sm font-semibold text-primary mb-2">Merge Player Identities</h3>
+                <p className="text-xs text-muted-foreground mb-2">Point a duplicate (e.g. auto-registered from a POTG upload) at the real player. Stats move to the target; nothing is deleted.</p>
+                <div className="space-y-2">
+                  <input placeholder="Duplicate Player ID (source)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={mergeSourceId} onChange={e => setMergeSourceId(e.target.value)} />
+                  <input placeholder="Canonical Player ID (target)" className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={mergeTargetId} onChange={e => setMergeTargetId(e.target.value)} />
+                  <button disabled={!mergeSourceId.trim() || !mergeTargetId.trim() || mergeMutation.isPending} className="gold-bg px-4 py-2 rounded-sm text-xs w-full disabled:opacity-60" onClick={() => mergeMutation.mutate()}>{mergeMutation.isPending ? 'Merging…' : 'Merge Identities'}</button>
+                  {mergeMutation.error && <p className="text-xs text-destructive">{(mergeMutation.error as Error).message}</p>}
+                  {mergeMutation.isSuccess && <p className="text-xs text-success">{mergeMutation.data?.message}</p>}
                 </div>
               </div>
               <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
