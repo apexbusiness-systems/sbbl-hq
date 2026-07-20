@@ -16,12 +16,12 @@ export function priceWithTax(baseCAD: number): number {
 }
 
 /**
- * PPV single-stream access: $4.99 CAD.
+ * PPV single-stream access: $3.99 CAD.
  * Entitlement is valid for 48 hours from purchase (tolerates game delays,
  * avoids chargebacks when tipoff slips). Once the buyer actually starts
  * watching, the session is independently hard-capped at 6 hours.
  */
-export const PPV_PRICE_CAD = 4.99;
+export const PPV_PRICE_CAD = 3.99;
 export const PPV_ACCESS_HOURS = ENTITLEMENT.ENTITLEMENT_VALIDITY_HOURS;
 export const PPV_SESSION_CAP_HOURS = ENTITLEMENT.VIEWING_SESSION_MAX_SECONDS / 3600;
 

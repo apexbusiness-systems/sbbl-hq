@@ -100,8 +100,8 @@ test('viewer preflight renders when enabled', async ({ page }) => {
           title: 'Home vs Away',
           state: 'upcoming',
           tipoffAt: new Date().toISOString(),
-          ppvPriceCad: 4.99,
-          replay: { embargoEndsAt: null, entitled: false, priceCad: 4.99, qualityTier: 'raw' }
+          ppvPriceCad: 3.99,
+          replay: { embargoEndsAt: null, entitled: false, priceCad: 3.99, qualityTier: 'raw' }
         },
         userId: undefined,
         entitlement: { status: 'none' },

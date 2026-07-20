@@ -207,7 +207,7 @@ What is verified in-repo today:
 - Worker should remain a thin control plane: authorization + metadata + small JSON responses.
 - Keep heavy transforms/parsing out of hot viewer paths; only ingest/admin paths may perform heavier writes.
 
-## PPV paywall integrity at scale ($4.99 CAD path)
+## PPV paywall integrity at scale ($3.99 CAD path)
 
 - Purchase path and entitlement creation are server-side, preserving gate integrity under client tampering attempts.
 - Playback session creation checks access before returning playback URL; unauthorized viewers should not obtain valid session payloads.
@@ -228,4 +228,4 @@ What is verified in-repo today:
 
 - **Will this definitely never overload or crash?** No absolute guarantee can be made without current-run load evidence.
 - **Is compute placement cost-efficient and mostly client-side?** Yes — by architecture, media rendering/decoding is client-side and backend remains control-plane focused.
-- **Will valid $4.99 PPV users avoid wrongful kicks?** Mostly yes with current design intent, but P0 heartbeat acknowledgment hardening is the key correction to make this robust under peak concurrency.
+- **Will valid $3.99 PPV users avoid wrongful kicks?** Mostly yes with current design intent, but P0 heartbeat acknowledgment hardening is the key correction to make this robust under peak concurrency.

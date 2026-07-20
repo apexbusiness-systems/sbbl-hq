@@ -15,8 +15,8 @@ describe('player subscription access', () => {
     expect(PLAYER_REGISTRATION_PRICE_CAD).toBe(6.99);
   });
 
-  it('PPV is $4.99 CAD with 48-hour entitlement window and 6-hour session cap', () => {
-    expect(PPV_PRICE_CAD).toBe(4.99);
+  it('PPV is $3.99 CAD with 48-hour entitlement window and 6-hour session cap', () => {
+    expect(PPV_PRICE_CAD).toBe(3.99);
     expect(PPV_ACCESS_HOURS).toBe(48);
     expect(PPV_SESSION_CAP_HOURS).toBe(6);
   });

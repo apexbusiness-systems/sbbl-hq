@@ -81,7 +81,7 @@ function mapHomeGameToUi(row: Record<string, unknown>): Game {
     time: String(row.scheduled_at ?? ''),
     status: String(row.status ?? 'upcoming') as Game['status'],
     score: { home: Number(row.home_score ?? 0), away: Number(row.away_score ?? 0) },
-    ppvPrice: 4.99,
+    ppvPrice: 3.99,
   };
 }
 

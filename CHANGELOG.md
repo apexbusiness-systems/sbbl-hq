@@ -19,6 +19,13 @@ Versioning follows [semantic versioning](https://semver.org) with UTC date stamp
 - **Playwright CI Exclusions** (`playwright.config.ts`):
   Configured `testIgnore` to ignore live-production diagnostic tests (`potg-vision-test.spec.ts` and `check_iframe.spec.ts`) from CI execution to ensure a deterministic build gate.
 
+### Changed — Universal PPV Pricing Update
+
+- **Universal Live Stream Pricing** (`src/worker/index.ts`, `src/lib/auth/subscription.ts`, `src/components/LiveStreamPlayer.tsx`, etc.):
+  Updated live stream pricing universally to $3.99 CAD ($3.99 per view).
+- **Stripe & Preflight Alignment**:
+  Updated the Stripe payment gateway `unitAmount` to 399 cents, preflight price `ppvPriceCad` config properties, pricing displays on all paywall pages, and corrected the unit test assertions to reflect $3.99 base price + 5% Alberta GST = $4.19 total.
+
 ## [1.7.0] - 2026-07-18
 
 ### Fixed — Chrome login block, CORS whitelisting, and CI guardrails
