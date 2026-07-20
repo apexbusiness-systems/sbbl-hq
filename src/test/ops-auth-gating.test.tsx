@@ -33,6 +33,8 @@ vi.mock('@/lib/api/ops', () => ({
   fetchOpsBootstrap,
   fetchImportHistory,
   submitCsvImport: vi.fn(),
+  fetchPipelineHealth: vi.fn(async () => ({ ok: true, overall: 'ok', metrics: {}, alerts: [], checked_at: '' })),
+  mergePlayerIdentities: vi.fn(),
   parseEventImage: vi.fn(),
   parsePotgImage: vi.fn(),
   manualOpsAction: vi.fn(),

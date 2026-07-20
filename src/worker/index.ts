@@ -2392,6 +2392,144 @@ export async function handleImportHistory({ req, admin }: HandlerCtx) {
 }
 
 
+// ── Pipeline health telemetry (2026-07-20) ──────────────────────────────────
+// The "annotated good/bad ranges" discipline from proven production pipelines
+// (GameChanger): every metric carries its thresholds, so nobody has to decide
+// mid-incident whether a number is bad. Critical breaches are pushed to Sentry.
+const PIPELINE_THRESHOLDS = {
+  outbox_pending: { warn: 25, critical: 100 },
+  outbox_oldest_minutes: { warn: 10, critical: 60 },
+  outbox_dead_letters: { warn: 1, critical: 5 },
+  ingress_failed_24h: { warn: 5, critical: 25 },
+  import_failed_rows_24h: { warn: 10, critical: 50 },
+} as const;
+
+function gradeMetric(value: number, t: { warn: number; critical: number }): "ok" | "warn" | "critical" {
+  if (value >= t.critical) return "critical";
+  if (value >= t.warn) return "warn";
+  return "ok";
+}
+
+export async function handlePipelineHealth({ req, admin }: HandlerCtx) {
+  await requireAdminSession(req, admin);
+  const sinceIso = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+  const { data: pendingEvents } = await admin
+    .from("event_outbox")
+    .select("id, created_at")
+    .eq("status", "pending");
+  const pending = pendingEvents ?? [];
+  const oldestMs = pending.length
+    ? Math.max(...pending.map((e) => Date.now() - new Date(String(e.created_at)).getTime()))
+    : 0;
+  const oldestMinutes = Math.floor(oldestMs / 60_000);
+
+  const { data: deadLetters } = await admin
+    .from("event_outbox")
+    .select("id")
+    .eq("status", "dead_lettered");
+
+  const { data: ingressFailed } = await admin
+    .from("ingress_buffer")
+    .select("correlation_id")
+    .eq("status", "failed")
+    .gt("created_at", sinceIso);
+
+  const { data: recentJobs } = await admin
+    .from("import_jobs")
+    .select("failed_rows")
+    .gt("created_at", sinceIso);
+  const importFailedRows = (recentJobs ?? []).reduce((sum, j) => sum + Number(j.failed_rows ?? 0), 0);
+
+  const metrics = {
+    outbox_pending: { value: pending.length, ...PIPELINE_THRESHOLDS.outbox_pending, status: gradeMetric(pending.length, PIPELINE_THRESHOLDS.outbox_pending) },
+    outbox_oldest_minutes: { value: oldestMinutes, ...PIPELINE_THRESHOLDS.outbox_oldest_minutes, status: gradeMetric(oldestMinutes, PIPELINE_THRESHOLDS.outbox_oldest_minutes) },
+    outbox_dead_letters: { value: (deadLetters ?? []).length, ...PIPELINE_THRESHOLDS.outbox_dead_letters, status: gradeMetric((deadLetters ?? []).length, PIPELINE_THRESHOLDS.outbox_dead_letters) },
+    ingress_failed_24h: { value: (ingressFailed ?? []).length, ...PIPELINE_THRESHOLDS.ingress_failed_24h, status: gradeMetric((ingressFailed ?? []).length, PIPELINE_THRESHOLDS.ingress_failed_24h) },
+    import_failed_rows_24h: { value: importFailedRows, ...PIPELINE_THRESHOLDS.import_failed_rows_24h, status: gradeMetric(importFailedRows, PIPELINE_THRESHOLDS.import_failed_rows_24h) },
+  };
+  const statuses = Object.values(metrics).map((m) => m.status);
+  const overall = statuses.includes("critical") ? "critical" : statuses.includes("warn") ? "warn" : "ok";
+  const alerts = Object.entries(metrics)
+    .filter(([, m]) => m.status !== "ok")
+    .map(([name, m]) => `${name}=${m.value} (warn>=${m.warn}, critical>=${m.critical})`);
+
+  if (overall === "critical") {
+    try {
+      Sentry.captureMessage(`pipeline_health_critical: ${alerts.join("; ")}`, "error");
+    } catch { /* Sentry unavailable must never break the health check */ }
+  }
+
+  return json({ ok: true, overall, metrics, alerts, checked_at: new Date().toISOString() });
+}
+
+// ── Player identity merge (2026-07-20) ──────────────────────────────────────
+// Companion to parser-first auto-provisioning: when a provisioned identity
+// turns out to be an existing (or later self-registered) player, merge it.
+// Soft merge: stats re-pointed row by row, conflicts (both identities have a
+// stat for the same game) are left on the source and reported, the source row
+// gets a merged_into pointer that resolvePotgPlayer follows. Nothing deleted.
+export async function handlePlayerIdentityMerge(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const { userId: actorId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const body = (await ctx.req.json().catch(() => null)) as { sourcePlayerId?: string; targetPlayerId?: string } | null;
+  const sourceId = body?.sourcePlayerId?.trim();
+  const targetId = body?.targetPlayerId?.trim();
+  if (!sourceId || !targetId) {
+    return json({ ok: false, error: "player_ids_required", message: "Provide both the duplicate (source) and canonical (target) player IDs." }, 400);
+  }
+  if (sourceId === targetId) {
+    return json({ ok: false, error: "cannot_merge_into_self", message: "Source and target must be different players." }, 400);
+  }
+
+  const { data: source } = await ctx.admin.from("players").select("id, user_id, merged_into").eq("id", sourceId).maybeSingle();
+  if (!source?.id) return json({ ok: false, error: "source_player_not_found", message: `No player with id ${sourceId}.` }, 404);
+  if (source.merged_into) return json({ ok: false, error: "source_already_merged", message: "This player was already merged." }, 409);
+  const { data: target } = await ctx.admin.from("players").select("id, merged_into").eq("id", targetId).maybeSingle();
+  if (!target?.id) return json({ ok: false, error: "target_player_not_found", message: `No player with id ${targetId}.` }, 404);
+  if (target.merged_into) return json({ ok: false, error: "target_already_merged", message: "Target was itself merged — merge into its canonical player instead." }, 409);
+
+  const { data: targetStats } = await ctx.admin.from("player_game_stats").select("game_id").eq("player_id", targetId);
+  const targetGames = new Set((targetStats ?? []).map((s) => String(s.game_id)));
+  const { data: sourceStats } = await ctx.admin.from("player_game_stats").select("game_id").eq("player_id", sourceId);
+
+  let reassigned = 0;
+  const conflicts: string[] = [];
+  for (const stat of sourceStats ?? []) {
+    const gameId = String(stat.game_id);
+    if (targetGames.has(gameId)) {
+      conflicts.push(gameId); // target's record wins; source row kept for manual review
+      continue;
+    }
+    await ctx.admin
+      .from("player_game_stats")
+      .update({ player_id: targetId })
+      .eq("player_id", sourceId)
+      .eq("game_id", gameId)
+      .select()
+      .maybeSingle();
+    reassigned += 1;
+  }
+
+  await ctx.admin
+    .from("players")
+    .update({ merged_into: targetId, merged_at: new Date().toISOString() })
+    .eq("id", sourceId)
+    .select()
+    .maybeSingle();
+
+  await ctx.admin.from("audit_logs").insert({
+    actor_id: actorId,
+    action: "player_identity_merged",
+    ref_type: "players",
+    ref_id: sourceId,
+    payload: { sourcePlayerId: sourceId, targetPlayerId: targetId, statsReassigned: reassigned, conflictGames: conflicts },
+    idempotency_key: readIdempotencyKey(ctx.req.headers) ?? crypto.randomUUID(),
+  });
+
+  return json({ ok: true, statsReassigned: reassigned, conflictsSkipped: conflicts.length, conflictGames: conflicts, message: conflicts.length ? `Merged. ${conflicts.length} game(s) had stats on both identities — target's records kept, source rows left for review.` : "Merged cleanly." });
+}
+
 // handlePublicSchedule, handlePublicPotg — extracted to src/worker/routes/public.ts
 const handlePublicSchedule = _handlePublicSchedule;
 const handlePublicPotg = _handlePublicPotg;
@@ -3562,13 +3700,27 @@ export async function resolvePotgPlayer(
   //    parsed name when it resolves; otherwise left null for later assignment).
   const { data: player } = await admin
     .from("players")
-    .select("id, league_id")
+    .select("id, league_id, merged_into")
     .eq("user_id", userId)
     .maybeSingle();
   let playerId: string;
   if (player?.id) {
     playerId = String(player.id);
-    if (player.league_id && player.league_id !== leagueUuid) {
+    let effectiveLeague = player.league_id as string | null;
+    // Identity merges are soft pointers — always attribute to the canonical row.
+    if (player.merged_into) {
+      const { data: canonical } = await admin
+        .from("players")
+        .select("id, league_id")
+        .eq("id", player.merged_into)
+        .maybeSingle();
+      if (canonical?.id) {
+        playerId = String(canonical.id);
+        effectiveLeague = (canonical.league_id as string | null) ?? null;
+        warnings.push("potg_followed_identity_merge");
+      }
+    }
+    if (effectiveLeague && effectiveLeague !== leagueUuid) {
       // Multi-league reality: publish proceeds; flagged for operator review.
       warnings.push("potg_player_league_mismatch");
     }
@@ -6423,6 +6575,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
     handler: handleScoresCsvUpload,
   },
   { method: "GET", path: "/ops/imports/history", handler: handleImportHistory },
+  { method: "GET", path: "/ops/pipeline/health", handler: handlePipelineHealth },
+  { method: "POST", path: "/ops/players/merge", handler: handlePlayerIdentityMerge },
 
   { method: "POST", path: "/ops/event/parse", handler: handleParseEventImage },
   { method: "POST", path: "/ops/potg/parse", handler: handleParsePotgImage },

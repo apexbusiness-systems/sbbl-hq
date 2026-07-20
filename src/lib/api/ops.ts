@@ -30,6 +30,27 @@ export type IngressFailure = {
   created_at: string;
 };
 
+export type PipelineMetric = { value: number; warn: number; critical: number; status: 'ok' | 'warn' | 'critical' };
+export type PipelineHealth = {
+  ok: boolean;
+  overall: 'ok' | 'warn' | 'critical';
+  metrics: Record<string, PipelineMetric>;
+  alerts: string[];
+  checked_at: string;
+};
+
+export async function fetchPipelineHealth() {
+  return apiFetch<PipelineHealth>('/ops/pipeline/health');
+}
+
+export async function mergePlayerIdentities(sourcePlayerId: string, targetPlayerId: string) {
+  return apiFetch<{ ok: boolean; statsReassigned: number; conflictsSkipped: number; message: string }>('/ops/players/merge', {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`merge-${sourcePlayerId}-${targetPlayerId}`) },
+    body: JSON.stringify({ sourcePlayerId, targetPlayerId }),
+  });
+}
+
 export async function fetchImportHistory() {
   return apiFetch<{ ok: boolean; jobs: ImportJob[]; ingress_failures?: IngressFailure[] }>('/ops/imports/history');
 }
