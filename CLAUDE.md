@@ -2,7 +2,7 @@
 
 Welcome. This document is the **single source of truth** for agents
 working in this repo. Read it in full before your first edit.
-<!-- Version: v1.6.0 | Date: 2026-05-21 | Status: Current -->
+<!-- Version: v1.8.0 | Date: 2026-07-20 | Status: Current -->
 
 ## How to update this guide
 
@@ -751,6 +751,8 @@ CI runs all of these. Do not merge red.
 
 ## Incident history (relevant to this guide)
 
+- **2026-07-20** — Transient loading/reset in E2E: Background Supabase token refreshes triggered `onAuthStateChange` with `SIGNED_IN`, setting `loading = true` unconditionally and unmounting route guards. This destroyed E2E inputs and caused flaky failures under load. Fix: introduced `lastUserIdRef` in `AuthContext.tsx` to detect same-user token refreshes and bypass the loading state trigger. Also, updated file upload specs to wait for native `filechooser` events, and ignored diagnostic production tests in `playwright.config.ts`.
+
 - **2026-07-18** — CORS-01: Google Chrome login CORS block. Vite dev server port was configured to 8080, but workers whitelisted only 5173. Chrome blocked preflight OPTIONS requests, preventing login. Fix: whitelisted localhost:8080 in both main worker and api-proxy-worker.
 
 - **2026-07-17** — K-03: ESLint strict errors block CI in CSV upload. CSV upload pipeline had multiple strict typescript-strict rule violations. Fix: resolved all 8 lint errors, modularized CSV route handler, and established ParseResult type safety.
@@ -893,4 +895,4 @@ and `sbbl-hq-selfhost/WARNING_NOT_ACTIVE_SELFHOST_ROOT.md`.
 
 ---
 
-Last verified: 2026-07-18
+Last verified: 2026-07-20

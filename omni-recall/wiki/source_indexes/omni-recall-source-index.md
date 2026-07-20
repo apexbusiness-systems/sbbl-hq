@@ -20,3 +20,13 @@ Track canonical source records that materially define Omni-Recall.
    - Type: governing rule file
    - Status: active
    - Role: short-form constitutional control file
+
+4. `wiki/corrections/2026-07-18-cors-and-credentials-resolution.md`
+   - Type: correction record
+   - Status: active
+   - Role: CORS ports & credential separation rules
+
+5. `wiki/corrections/2026-07-20-auth-loading-state-stabilization.md`
+   - Type: correction record
+   - Status: active
+   - Role: React auth loading gate, Playwright selector updates, and CI testIgnore rules
