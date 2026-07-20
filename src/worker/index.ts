@@ -3424,7 +3424,12 @@ async function handleParseEventImage(ctx: HandlerCtx) {
   });
 
   if (!resp.ok)
-    return json({ ok: false, error: "groq_error", status: resp.status }, 502);
+    return json(
+      resp.status === 429
+        ? { ok: false, error: "groq_rate_limited", status: 429, message: "AI parser hit the Groq free-tier rate limit (8k tokens/min). Wait ~60 seconds and retry — smaller images use fewer tokens." }
+        : { ok: false, error: "groq_error", status: resp.status, message: `AI parser upstream error (HTTP ${resp.status}). Try again; if it persists, check the Groq console.` },
+      resp.status === 429 ? 429 : 502,
+    );
   const ai = (await resp.json()) as {
     choices: Array<{ message: { content: string } }>;
   };
@@ -3482,7 +3487,12 @@ export async function handleParsePotgImage(ctx: HandlerCtx) {
   });
 
   if (!resp.ok)
-    return json({ ok: false, error: "groq_error", status: resp.status }, 502);
+    return json(
+      resp.status === 429
+        ? { ok: false, error: "groq_rate_limited", status: 429, message: "AI parser hit the Groq free-tier rate limit (8k tokens/min). Wait ~60 seconds and retry — smaller images use fewer tokens." }
+        : { ok: false, error: "groq_error", status: resp.status, message: `AI parser upstream error (HTTP ${resp.status}). Try again; if it persists, check the Groq console.` },
+      resp.status === 429 ? 429 : 502,
+    );
   const ai = (await resp.json()) as {
     choices: Array<{ message: { content: string } }>;
   };
@@ -7970,7 +7980,12 @@ async function handleScoreboardImageParse(ctx: HandlerCtx) {
     }),
   });
 
-  if (!resp.ok) return json({ ok: false, error: "groq_error", status: resp.status }, 502);
+  if (!resp.ok) return json(
+      resp.status === 429
+        ? { ok: false, error: "groq_rate_limited", status: 429, message: "AI parser hit the Groq free-tier rate limit (8k tokens/min). Wait ~60 seconds and retry — smaller images use fewer tokens." }
+        : { ok: false, error: "groq_error", status: resp.status, message: `AI parser upstream error (HTTP ${resp.status}). Try again; if it persists, check the Groq console.` },
+      resp.status === 429 ? 429 : 502,
+    );
   const ai = (await resp.json()) as { choices: Array<{ message: { content: string } }> };
   const raw = ai.choices[0]?.message?.content ?? "";
   const match = raw.match(/\{[\s\S]*\}/);

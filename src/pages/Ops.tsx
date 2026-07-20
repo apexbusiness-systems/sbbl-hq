@@ -298,11 +298,19 @@ const OpsPage = () => {
     setPotgParseError(null);
     setPotgImageFile(file);
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const imageBase64 = event.target?.result as string;
+      // Rate-limit fix (2026-07-20, prod-verified 429s): full-size graphics
+      // burn ~4-5k Groq tokens each against an 8k/min free-tier cap — one
+      // upload+retry = guaranteed rate limit. Parse from a 1024px downscale
+      // (~6x fewer tokens); the ORIGINAL file still uploads to storage.
+      const parseFile = await resizeImageToFit(file, 1024, 1024, 'contain', 0.85);
+      const parseBuffer = await parseFile.arrayBuffer();
+      const parseBytes = new Uint8Array(parseBuffer);
+      let parseBinary = '';
+      for (let i = 0; i < parseBytes.byteLength; i++) parseBinary += String.fromCharCode(parseBytes[i]);
+      const parseBase64 = btoa(parseBinary);
+      {
         try {
-          const result = await parsePotgImage(imageBase64, file.type as string);
+          const result = await parsePotgImage(parseBase64, parseFile.type);
           if (result.ok && result.data) {
             setPotgForm(f => ({
               ...f,
@@ -322,8 +330,7 @@ const OpsPage = () => {
           setPotgParseError(e instanceof Error ? e.message : 'Unknown error');
           setPotgParseState('error');
         }
-      };
-      reader.readAsDataURL(file);
+      }
     } catch (e) {
       setPotgParseError(e instanceof Error ? e.message : 'Unknown error');
       setPotgParseState('error');
@@ -666,12 +673,13 @@ const OpsPage = () => {
     setScoreboardParseError(null);
     setScoreboardImageFile(file);
     try {
-      const buffer = await file.arrayBuffer();
+      const parseFile = await resizeImageToFit(file, 1024, 1024, 'contain', 0.85);
+      const buffer = await parseFile.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       let binary = '';
       for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
       const imageBase64 = btoa(binary);
-      const result = await parseScoreboardImage(imageBase64, file.type);
+      const result = await parseScoreboardImage(imageBase64, parseFile.type);
       if (result.ok && result.data) {
         const d = result.data;
         setScoresForm(f => ({

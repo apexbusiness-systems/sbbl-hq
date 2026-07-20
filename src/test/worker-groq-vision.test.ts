@@ -59,6 +59,26 @@ describe('Groq vision request contract', () => {
   });
 });
 
+describe('Groq rate limiting surfaces as actionable 429, not opaque 502', () => {
+  it('maps upstream 429 to groq_rate_limited with a human message', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('rate limited', { status: 429 })));
+    const res = await handleParsePotgImage(mkCtx({ GROQ_API_KEY: 'test-key' }));
+    expect(res.status).toBe(429);
+    const body = await res.json() as { error: string; message: string };
+    expect(body.error).toBe('groq_rate_limited');
+    expect(body.message).toMatch(/rate limit/i);
+  });
+
+  it('maps other upstream failures to 502 with a message', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('boom', { status: 500 })));
+    const res = await handleParsePotgImage(mkCtx({ GROQ_API_KEY: 'test-key' }));
+    expect(res.status).toBe(502);
+    const body = await res.json() as { error: string; message: string };
+    expect(body.error).toBe('groq_error');
+    expect(body.message.length).toBeGreaterThan(10);
+  });
+});
+
 describe('rxdb module is env-independent', () => {
   it('imports without VITE_SUPABASE_* env and exposes initDB (no replication)', async () => {
     const mod = await import('@/lib/rxdb');

@@ -37,7 +37,8 @@ describe('explicit ingress endpoint checklist', () => {
 
 describe('explicit parser checklist', () => {
   it('ops page uses POTG parser client call', () => {
-    expect(opsPageSrc).toContain('parsePotgImage(imageBase64');
+    // 2026-07-20: parse payload is a 1024px downscale (Groq free-tier TPM fix)
+    expect(opsPageSrc).toContain('parsePotgImage(parseBase64');
   });
 
   it('ops page uses scoreboard parser client call', () => {
