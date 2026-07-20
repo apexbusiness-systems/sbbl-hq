@@ -51,7 +51,7 @@ export function MediaMetadataSheet({
 }: MediaMetadataSheetProps) {
   const [title, setTitle] = useState<string>('');
   const [status, setStatus] = useState<MediaPublicationStatus>('draft');
-  const [leagueId, setLeagueId] = useState<string>('');
+  const [leagueCode, setLeagueCode] = useState<string>('');
   const [debugOpen, setDebugOpen] = useState<boolean>(false);
 
   // Sync local state when the publication or open state changes.
@@ -59,7 +59,7 @@ export function MediaMetadataSheet({
     if (publication && isOpen) {
       setTitle(publication.title || '');
       setStatus(publication.status);
-      setLeagueId(publication.leagueId || '');
+      setLeagueCode(publication.leagueCode?.toLowerCase() || '');
       setDebugOpen(false);
     }
   }, [publication, isOpen]);
@@ -67,7 +67,7 @@ export function MediaMetadataSheet({
   const hasChanges: boolean = publication
     ? title !== publication.title ||
       status !== publication.status ||
-      leagueId !== (publication.leagueId || '')
+      leagueCode !== (publication.leagueCode?.toLowerCase() || '')
     : false;
 
   const isPinned: boolean = publication?.pinnedAt != null;
@@ -173,11 +173,11 @@ export function MediaMetadataSheet({
                 <button
                   type="button"
                   role="radio"
-                  aria-checked={leagueId === ''}
+                  aria-checked={leagueCode === ''}
                   disabled={isLoading}
-                  onClick={() => setLeagueId('')}
+                  onClick={() => setLeagueCode('')}
                   className={`${CHIP_BASE} ${
-                    leagueId === ''
+                    leagueCode === ''
                       ? 'bg-secondary text-foreground border-border'
                       : 'bg-transparent text-muted-foreground border-border/50 hover:bg-secondary'
                   } disabled:opacity-50`}
@@ -187,7 +187,7 @@ export function MediaMetadataSheet({
 
                 {/* League chips with logos */}
                 {LEAGUE_REGISTRY.map((league) => {
-                  const isSelected = leagueId === league.id;
+                  const isSelected = leagueCode === league.id;
                   return (
                     <button
                       key={league.id}
@@ -195,7 +195,7 @@ export function MediaMetadataSheet({
                       role="radio"
                       aria-checked={isSelected}
                       disabled={isLoading}
-                      onClick={() => setLeagueId(league.id)}
+                      onClick={() => setLeagueCode(league.id)}
                       className={`${CHIP_BASE} gap-1.5 ${
                         isSelected
                           ? 'bg-secondary text-foreground border-border'
@@ -313,7 +313,7 @@ export function MediaMetadataSheet({
           </button>
           <button
             type="button"
-            onClick={() => onConfirm(title, status, leagueId || null)}
+            onClick={() => onConfirm(title, status, leagueCode || null)}
             disabled={isLoading || !hasChanges}
             className="flex-1 px-4 text-sm font-semibold bg-primary text-primary-foreground rounded-sm hover:bg-primary/90 disabled:opacity-50 transition-colors flex items-center justify-center gap-2 min-h-[44px]"
           >
