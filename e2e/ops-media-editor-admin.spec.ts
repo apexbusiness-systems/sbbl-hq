@@ -206,6 +206,8 @@ test.describe('ops media editor admin', () => {
 
     // ── Navigate to Ops console ───────────
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
+    // Tab navigation (2026-07-20): mount the Media Library section first.
+    await page.getByRole('navigation', { name: 'Ops sections' }).getByRole('button', { name: 'Media Library', exact: true }).click();
 
     await expect(page.getByRole('heading', { name: 'Media Library' })).toBeVisible();
 

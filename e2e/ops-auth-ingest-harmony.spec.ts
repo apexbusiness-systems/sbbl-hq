@@ -332,6 +332,8 @@ test.describe('ops auth + ingest harmony gate', () => {
     await seedSuperAdminSession(page);
     const captures = await registerHarmonyRoutes(page);
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
+    // Tab navigation (2026-07-20): mount the POTG Parser section first.
+    await page.getByRole('navigation', { name: 'Ops sections' }).getByRole('button', { name: 'POTG Parser', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'POTG Image Parser' })).toBeVisible();
     const fileChooserPromise = page.waitForEvent('filechooser');
     await page.getByText('Drop POTG graphic or click to upload').click();

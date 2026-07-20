@@ -157,10 +157,16 @@ test.describe('ops media ingest tabs', () => {
     await registerOpsMediaRoutes(page);
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
+  // Tab navigation (2026-07-20): the Ops Console now mounts one section at a
+  // time — select the target tab chip before asserting on its content.
+  const openOpsTab = async (name: string) =>
+    page.getByRole('navigation', { name: 'Ops sections' }).getByRole('button', { name, exact: true }).click();
 
+    await openOpsTab('Store Media');
     await expect(page.getByRole('heading', { name: 'Store Media & Product Ops' })).toBeVisible();
     await expect(page.getByText('Super Admin required to manually manage store operations.')).toHaveCount(0);
 
+    await openOpsTab('Events');
     await expect(page.getByRole('heading', { name: 'Events Manual Ops' })).toBeVisible();
     await expect(page.getByText('Super Admin required to manually manage events.')).toHaveCount(0);
   });
@@ -170,6 +176,12 @@ test.describe('ops media ingest tabs', () => {
     const captures = await registerOpsMediaRoutes(page);
 
     await page.goto('/ops', { waitUntil: 'domcontentloaded' });
+  // Tab navigation (2026-07-20): the Ops Console now mounts one section at a
+  // time — select the target tab chip before asserting on its content.
+  const openOpsTab = async (name: string) =>
+    page.getByRole('navigation', { name: 'Ops sections' }).getByRole('button', { name, exact: true }).click();
+
+    await openOpsTab('POTG Parser');
     await expect(page.getByRole('heading', { name: 'POTG Image Parser' })).toBeVisible();
 
     const fileChooserPromise = page.waitForEvent('filechooser');

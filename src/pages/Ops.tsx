@@ -330,6 +330,11 @@ const OpsPage = () => {
     }
   };
 
+  // Layout fix (2026-07-20): `tabs` was declared but never rendered — every
+  // section stacked into one endless scroll. True tab navigation restored;
+  // exactly one section mounts at a time.
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
+
   const bootstrapQuery = useQuery({
     queryKey: ['ops-bootstrap'],
     queryFn: fetchOpsBootstrap,
@@ -673,6 +678,7 @@ const OpsPage = () => {
   };
 
   const jobs = useMemo(() => historyQuery.data?.jobs ?? bootstrapQuery.data?.importHistory ?? [], [historyQuery.data?.jobs, bootstrapQuery.data?.importHistory]);
+  const ingressFailures = historyQuery.data?.ingress_failures ?? [];
   const latestSummary = useMemo(() => jobs.slice(0, 5), [jobs]);
 
   const filteredJobs = useMemo(() => {
@@ -754,17 +760,27 @@ const OpsPage = () => {
         </div>
       </div>
 
-      <div className="space-y-16">
-      <div className="bg-primary/5 border border-primary/20 rounded-md p-4 mb-8">
-        <h2 className="text-sm font-bold text-primary flex items-center gap-2">
-          <Shield className="w-4 h-4" /> Operations Dashboard
-        </h2>
-        <p className="text-xs text-muted-foreground mt-1">
-          All operation pipelines have been unified into a single dashboard. 
-        </p>
-      </div>
+      <nav aria-label="Ops sections" className="sticky top-0 z-20 -mx-2 px-2 py-2 bg-background/95 backdrop-blur border-b border-border flex flex-wrap gap-2">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setActiveTab(t.id)}
+            aria-current={activeTab === t.id ? 'page' : undefined}
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold border transition-colors ${
+              activeTab === t.id
+                ? 'bg-primary text-primary-foreground border-primary'
+                : 'bg-card text-muted-foreground border-border hover:text-foreground'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
 
-      <section id="overview" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">System Health</h2><div className="space-y-4"><div className="grid md:grid-cols-3 gap-4">
+      <div className="space-y-6">
+
+      {activeTab === 'overview' && (<section id="overview" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">System Health</h2><div className="space-y-4"><div className="grid md:grid-cols-3 gap-4">
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Import jobs</p><p className="stat-numeral text-3xl">{jobs.length}</p></div>
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Recent successful rows</p><p className="stat-numeral text-3xl">{successfulRows}</p></div>
           <div className="panel p-4"><p className="text-xs text-muted-foreground">Failed rows</p><p className="stat-numeral text-3xl text-destructive">{failedRows}</p></div>
@@ -773,9 +789,9 @@ const OpsPage = () => {
             {latestSummary.length === 0 ? <p className="text-sm text-muted-foreground">No imports yet.</p> : latestSummary.map((job) => <p key={job.id} className="text-sm">{job.job_type} · {job.status} · {job.inserted_rows}/{job.total_rows}</p>)}
           </div>
         </div>
-      </div></section>
+      </div></section>)}
 
-      <section id="scores" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Scores</h2><div className="space-y-4"><div className="space-y-6">
+      {activeTab === 'scores' && (<section id="scores" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Scores</h2><div className="space-y-4"><div className="space-y-6">
           {!isSuperAdmin && <p className="text-sm text-destructive font-semibold panel p-4">Super Admin role required for score management.</p>}
 
           {/* ── Scoreboard image OCR ──────────────────────────────── */}
@@ -937,9 +953,9 @@ const OpsPage = () => {
             </div>
           </div>
         </div>
-      </div></section>
+      </div></section>)}
 
-      <section id="teams" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Teams</h2><div className="space-y-4">
+      {activeTab === 'teams' && (<section id="teams" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Teams</h2><div className="space-y-4">
           <OpsCsvImportSection
             kind="teams"
             csvUpload={csvUpload}
@@ -977,9 +993,9 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </div></section>
+      </div></section>)}
 
-      <section id="players" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Players</h2><div className="space-y-4">
+      {activeTab === 'players' && (<section id="players" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Players</h2><div className="space-y-4">
           <OpsCsvImportSection
             kind="players"
             csvUpload={csvUpload}
@@ -1032,10 +1048,10 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </div></section>
+      </div></section>)}
 
 
-      <section id="schedules" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Schedules</h2><div className="space-y-4">
+      {activeTab === 'schedules' && (<section id="schedules" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Schedules</h2><div className="space-y-4">
           <OpsCsvImportSection
             kind="schedules"
             csvUpload={csvUpload}
@@ -1081,9 +1097,9 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </div></section>
+      </div></section>)}
 
-      <section id="events" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Events</h2><div className="space-y-4">
+      {activeTab === 'events' && (<section id="events" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Events</h2><div className="space-y-4">
           <OpsCsvImportSection
             kind="events"
             csvUpload={csvUpload}
@@ -1191,9 +1207,9 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </div></section>
+      </div></section>)}
 
-      <section id="store" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Store Catalog</h2><div className="space-y-4"><div className="panel p-4 max-w-xl space-y-8">
+      {activeTab === 'store' && (<section id="store" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Store Catalog</h2><div className="space-y-4"><div className="panel p-4 max-w-xl space-y-8">
           <div>
             <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Store Media & Product Ops</h2>
             {!isSuperAdmin ? (
@@ -1326,8 +1342,8 @@ const OpsPage = () => {
             )}
           </div>
         </div>
-      </div></section>
-      <section id="potg" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">POTG Parser</h2><div className="space-y-4"><div className="panel p-4 space-y-5 max-w-xl">
+      </div></section>)}
+      {activeTab === 'potg' && (<section id="potg" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">POTG Parser</h2><div className="space-y-4"><div className="panel p-4 space-y-5 max-w-xl">
           <div>
             <h2 className="font-display text-xl">POTG Image Parser</h2>
             <p className="text-xs text-muted-foreground mt-1">Upload a Player of the Game graphic — Claude Vision extracts the data automatically, then you confirm before it writes to the pipeline.</p>
@@ -1478,13 +1494,29 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </div></section>
+      </div></section>)}
 
-      <section id="media" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Media Library</h2><div className="space-y-4">
+      {activeTab === 'media' && (<section id="media" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Media Library</h2><div className="space-y-4">
         <MediaLibraryTab enabled={canRunOps} />
-      </div></section>
+      </div></section>)}
 
-      <section id="history" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">History</h2><div className="space-y-4"><div className="panel p-4">
+      {activeTab === 'history' && (<section id="history" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">History</h2><div className="space-y-4">
+        <div className="panel p-4">
+          <h3 className="text-sm font-bold text-destructive mb-2">Ingress Failures (last 20)</h3>
+          {ingressFailures.length === 0 ? (
+            <p className="text-xs text-muted-foreground">None recorded — all recent ingest attempts were accepted.</p>
+          ) : (
+            <ul className="space-y-1 text-xs">
+              {ingressFailures.map((f) => (
+                <li key={f.correlation_id} className="flex justify-between gap-3 border-b border-border/50 pb-1">
+                  <span className="text-destructive font-mono truncate">{f.error_reason}</span>
+                  <span className="text-muted-foreground shrink-0">{f.source_type} · {new Date(f.created_at).toLocaleString()}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="panel p-4">
           <div className="flex items-center justify-between mb-3 gap-3">
             <h2 className="font-display text-xl shrink-0">Import History</h2>
             <div className="relative flex-1 max-w-sm">
@@ -1524,7 +1556,7 @@ const OpsPage = () => {
             </div>
           )}
         </div>
-      </div></section>
+      </div></section>)}
       </div>
     </div>
   );
