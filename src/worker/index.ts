@@ -2372,7 +2372,7 @@ async function handleOpsBootstrap({ req, admin }: HandlerCtx) {
 }
 
 
-async function handleImportHistory({ req, admin }: HandlerCtx) {
+export async function handleImportHistory({ req, admin }: HandlerCtx) {
   await requireAdminSession(req, admin);
   const { data, error } = await admin
     .from("import_jobs")
@@ -2380,7 +2380,15 @@ async function handleImportHistory({ req, admin }: HandlerCtx) {
     .order("created_at", { ascending: false })
     .limit(100);
   if (error) throw new Error(error.message);
-  return json({ ok: true, jobs: data ?? [] });
+  // Operator visibility (2026-07-20 A+ pass): failures captured in
+  // ingress_buffer are surfaced in the Ops Console instead of rotting silently.
+  const { data: ingressFailures } = await admin
+    .from("ingress_buffer")
+    .select("correlation_id,error_reason,source_type,status,created_at")
+    .eq("status", "failed")
+    .order("created_at", { ascending: false })
+    .limit(20);
+  return json({ ok: true, jobs: data ?? [], ingress_failures: ingressFailures ?? [] });
 }
 
 
@@ -3254,7 +3262,7 @@ async function handleParseEventImage(ctx: HandlerCtx) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "qwen/qwen3.6-27b", // 2026-07-20: llama-3.2-90b-vision-preview decommissioned by Groq (400s in prod); qwen3.6-27b is the runtime-verified vision model on this account
+      model: ctx.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b", // env-overridable (2026-07-20): next Groq model retirement is a config change, not a redeploy. qwen3.6-27b runtime-verified on this account.
       reasoning_format: "hidden",
       max_tokens: 1024,
       messages: [
@@ -3312,7 +3320,7 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "qwen/qwen3.6-27b", // 2026-07-20: llama-3.2-90b-vision-preview decommissioned by Groq (400s in prod); qwen3.6-27b is the runtime-verified vision model on this account
+      model: ctx.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b", // env-overridable (2026-07-20): next Groq model retirement is a config change, not a redeploy. qwen3.6-27b runtime-verified on this account.
       reasoning_format: "hidden",
       max_tokens: 1024,
       messages: [
@@ -7705,7 +7713,7 @@ async function handleScoreboardImageParse(ctx: HandlerCtx) {
     method: "POST",
     headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
     body: JSON.stringify({
-      model: "qwen/qwen3.6-27b", // 2026-07-20: llama-3.2-90b-vision-preview decommissioned by Groq (400s in prod); qwen3.6-27b is the runtime-verified vision model on this account
+      model: ctx.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b", // env-overridable (2026-07-20): next Groq model retirement is a config change, not a redeploy. qwen3.6-27b runtime-verified on this account.
       reasoning_format: "hidden",
       max_tokens: 1024,
       messages: [{

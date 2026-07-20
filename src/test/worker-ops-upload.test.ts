@@ -177,3 +177,89 @@ describe('handleScoresCsvUpload — v1 marker rows never cause silent data loss'
     expect(res.status).toBe(422); // pre-fix: row vanished silently with 200
   });
 });
+
+// ── Regression shields: A+ hardening pass (2026-07-20) ──────────────────────
+import { isDuplicateKeyError } from '@/worker/routes/ops-upload';
+import { handleImportHistory } from '@/worker/index';
+
+describe('uniform duplicate-key tolerance — idempotent re-runs for every entity', () => {
+  it('classifies Postgres duplicate errors for any table, not just teams', () => {
+    expect(isDuplicateKeyError(new Error('duplicate key value violates unique constraint "players_pkey"'))).toBe(true);
+    expect(isDuplicateKeyError({ message: 'insert failed', code: '23505' })).toBe(true);
+    expect(isDuplicateKeyError(new Error('permission denied for table teams'))).toBe(false);
+    expect(isDuplicateKeyError(null)).toBe(false);
+  });
+
+  it('csv upload response always carries the skipped counter (shape contract)', async () => {
+    const state = {
+      user_role_assignments: [{ user_id: ADMIN_ID, role: 'super_admin' }],
+      leagues: [{ id: 'L1', code: 'WBL' }],
+      teams: [],
+    };
+    const ctx = mkCtx({
+      url: 'https://local/api/ops/upload/csv',
+      method: 'POST',
+      body: { kind: 'teams', format: 'v1', rows: [{ name: 'Delta', league_id: 'WBL' }] },
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin(state),
+    });
+    const res = await handleScoresCsvUpload(ctx);
+    const body = await res.json() as { ok: boolean; inserted: number; skipped: number; failed: number };
+    expect(body.ok).toBe(true);
+    expect(body.skipped).toBe(0);
+    expect(body.inserted).toBe(1);
+  });
+});
+
+describe('csv upload emits domain events — parity with /ops/imports/*', () => {
+  it('enqueues one <kind>_imported event per inserted row', async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    const state = {
+      user_role_assignments: [{ user_id: ADMIN_ID, role: 'super_admin' }],
+      leagues: [{ id: 'L1', code: 'WBL' }],
+      teams: [],
+    };
+    const admin = createAdmin(state, {
+      rpc: {
+        enqueue_local_domain_event: (payload) => { calls.push(payload); return { data: null, error: null }; },
+      },
+    });
+    const ctx = mkCtx({
+      url: 'https://local/api/ops/upload/csv',
+      method: 'POST',
+      body: {
+        kind: 'teams', format: 'v1',
+        rows: [{ name: 'Echo', league_id: 'WBL' }, { name: 'Foxtrot', league_id: 'WBL' }],
+      },
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin,
+    });
+    const res = await handleScoresCsvUpload(ctx);
+    expect(res.status).toBe(200);
+    expect(calls.filter((c) => c.p_event_type === 'teams_imported')).toHaveLength(2);
+  });
+});
+
+describe('import history — operator visibility of ingress failures', () => {
+  it('returns ingress_failures alongside jobs (additive, non-breaking shape)', async () => {
+    const state = {
+      user_role_assignments: [{ user_id: ADMIN_ID, role: 'super_admin' }],
+      import_jobs: [],
+      ingress_buffer: [
+        { correlation_id: 'c-1', error_reason: 'invalid_json', source_type: 'upload', status: 'failed', created_at: '2026-07-20T00:00:00Z' },
+        { correlation_id: 'c-2', error_reason: 'ok_row', source_type: 'upload', status: 'accepted', created_at: '2026-07-20T00:00:01Z' },
+      ],
+    };
+    const ctx = mkCtx({
+      url: 'https://local/ops/imports/history',
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin(state),
+    });
+    const res = await handleImportHistory(ctx);
+    const body = await res.json() as { ok: boolean; jobs: unknown[]; ingress_failures: Array<{ correlation_id: string }> };
+    expect(body.ok).toBe(true);
+    expect(Array.isArray(body.jobs)).toBe(true);
+    expect(body.ingress_failures).toHaveLength(1);
+    expect(body.ingress_failures[0].correlation_id).toBe('c-1');
+  });
+});

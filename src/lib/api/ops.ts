@@ -22,8 +22,16 @@ export async function fetchOpsBootstrap() {
   }>('/ops/bootstrap');
 }
 
+export type IngressFailure = {
+  correlation_id: string;
+  error_reason: string;
+  source_type: string;
+  status: string;
+  created_at: string;
+};
+
 export async function fetchImportHistory() {
-  return apiFetch<{ ok: boolean; jobs: ImportJob[] }>('/ops/imports/history');
+  return apiFetch<{ ok: boolean; jobs: ImportJob[]; ingress_failures?: IngressFailure[] }>('/ops/imports/history');
 }
 
 export async function uploadCsv(params: {
