@@ -21,6 +21,7 @@ type QueryApi = {
   neq: (col: string, value: unknown) => QueryApi;
   gt: (col: string, value: unknown) => QueryApi;
   in: (col: string, values: unknown[]) => QueryApi;
+  ilike: (col: string, pattern: string) => QueryApi;
   order: () => QueryApi;
   limit: () => QueryApi;
   select: () => QueryApi;
@@ -55,6 +56,11 @@ export function createAdmin(
       neq(col, value) { filters.push((row) => row[col] !== value); return api; },
       gt(col, value) { filters.push((row) => String(row[col]) > String(value)); return api; },
       in(col, values) { filters.push((row) => values.includes(row[col])); return api; },
+      ilike(col, pattern) {
+        const rx = new RegExp('^' + String(pattern).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i');
+        filters.push((row) => rx.test(String(row[col] ?? '')));
+        return api;
+      },
       order() { return api; },
       limit() { return api; },
       select() { return api; },

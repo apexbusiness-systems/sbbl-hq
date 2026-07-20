@@ -3504,47 +3504,98 @@ function validatePotgStatFields(meta: PotgStatPayload): string | null {
 }
 
 type PotgPlayerResolution =
-  | { ok: true; playerId: string; userId: string }
+  | { ok: true; playerId: string; userId: string; provisioned: boolean; warnings: string[] }
   | { ok: false; error: string; details: Record<string, unknown> };
 
-async function resolvePotgPlayer(
+// 2026-07-20 parser-first restoration (owner directive): the POTG pipeline
+// auto-registers unknown players again instead of fail-closing with 409.
+// The 2026-04-18 incident this guard addressed (half-written ingest rows) is
+// prevented differently now: provisioning happens BEFORE the ingest_jobs row
+// opens, every step checks its own error, and every auto-created row is
+// audit-logged with created_by + a potg_auto_provisioned marker so operators
+// can review/merge later. Games were already auto-created by this pipeline —
+// players/profiles now behave consistently with that design.
+export async function resolvePotgPlayer(
   admin: SupabaseClient,
   playerName: string,
   leagueUuid: string,
+  opts: { teamName?: string | null; actorId?: string | null } = {},
 ): Promise<PotgPlayerResolution> {
   const trimmed = playerName.trim();
+  if (!trimmed) {
+    return { ok: false, error: "potg_player_name_required", details: {} };
+  }
+  const warnings: string[] = [];
+  let provisioned = false;
+
+  // 1) Profile — find by display name, or auto-provision.
+  let userId: string;
   const { data: profile } = await admin
     .from("profiles")
     .select("user_id")
     .ilike("display_name", trimmed)
     .maybeSingle();
-  if (!profile?.user_id) {
-    return { ok: false, error: "potg_player_not_in_profiles", details: { playerName: trimmed } };
+  if (profile?.user_id) {
+    userId = String(profile.user_id);
+  } else {
+    userId = crypto.randomUUID();
+    const { error: profErr } = await admin.from("profiles").insert({
+      user_id: userId,
+      display_name: trimmed,
+      full_name: trimmed,
+      created_by: opts.actorId ?? null,
+    });
+    if (profErr) {
+      return { ok: false, error: "potg_profile_provision_failed", details: { playerName: trimmed, message: profErr.message } };
+    }
+    provisioned = true;
   }
+
+  // 2) Player — find by user, or auto-provision onto this league (and team by
+  //    parsed name when it resolves; otherwise left null for later assignment).
   const { data: player } = await admin
     .from("players")
     .select("id, league_id")
-    .eq("user_id", profile.user_id)
+    .eq("user_id", userId)
     .maybeSingle();
-  if (!player?.id) {
-    return {
-      ok: false,
-      error: "potg_player_not_rostered",
-      details: { playerName: trimmed, profileUserId: profile.user_id },
-    };
+  let playerId: string;
+  if (player?.id) {
+    playerId = String(player.id);
+    if (player.league_id && player.league_id !== leagueUuid) {
+      // Multi-league reality: publish proceeds; flagged for operator review.
+      warnings.push("potg_player_league_mismatch");
+    }
+  } else {
+    let teamId: string | null = null;
+    const teamName = String(opts.teamName ?? "").trim();
+    if (teamName) {
+      const { data: team } = await admin
+        .from("teams")
+        .select("id")
+        .eq("league_id", leagueUuid)
+        .ilike("name", teamName)
+        .maybeSingle();
+      teamId = team?.id ? String(team.id) : null;
+      if (!teamId) warnings.push("potg_team_not_resolved");
+    }
+    const { data: newPlayer, error: playerErr } = await admin
+      .from("players")
+      .insert({
+        user_id: userId,
+        league_id: leagueUuid,
+        team_id: teamId,
+        created_by: opts.actorId ?? null,
+      })
+      .select()
+      .single();
+    if (playerErr || !newPlayer?.id) {
+      return { ok: false, error: "potg_player_provision_failed", details: { playerName: trimmed, message: playerErr?.message ?? "no_row" } };
+    }
+    playerId = String(newPlayer.id);
+    provisioned = true;
   }
-  if (player.league_id !== leagueUuid) {
-    return {
-      ok: false,
-      error: "potg_player_league_mismatch",
-      details: {
-        playerName: trimmed,
-        expectedLeague: leagueUuid,
-        rosteredLeague: player.league_id,
-      },
-    };
-  }
-  return { ok: true, playerId: String(player.id), userId: String(profile.user_id) };
+
+  return { ok: true, playerId, userId, provisioned, warnings };
 }
 
 
@@ -6961,18 +7012,50 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     const { data: lg } = await ctx.admin
       .from("leagues").select("id").ilike("code", body.leagueId).maybeSingle();
     if (!lg?.id) {
-      return json({ ok: false, error: "potg_unknown_league", leagueId: body.leagueId }, 400);
+      return json({
+        ok: false,
+        error: "potg_unknown_league",
+        message: `League "${body.leagueId}" was not found — pick a league from the selector and resubmit.`,
+        leagueId: body.leagueId,
+      }, 400);
     }
     const playerResolution = await resolvePotgPlayer(
       ctx.admin,
       String(meta.playerName ?? ""),
       String(lg.id),
+      { teamName: String(meta.team ?? meta.teamName ?? ""), actorId: userId },
     );
     if (playerResolution.ok === false) {
+      const friendly: Record<string, string> = {
+        potg_player_name_required: "No player name was detected — fill in the Player Name field and resubmit.",
+        potg_profile_provision_failed: "Could not auto-create the player profile — see details for the database error.",
+        potg_player_provision_failed: "Could not auto-register the player — see details for the database error.",
+      };
       return json(
-        { ok: false, error: playerResolution.error, details: playerResolution.details },
+        {
+          ok: false,
+          error: playerResolution.error,
+          message: friendly[playerResolution.error] ?? "Player resolution failed — see details.",
+          details: playerResolution.details,
+        },
         409,
       );
+    }
+    if (playerResolution.provisioned || playerResolution.warnings.length > 0) {
+      await ctx.admin.from("audit_logs").insert({
+        actor_id: userId,
+        action: "potg_auto_provisioned_player",
+        ref_type: "players",
+        ref_id: playerResolution.playerId,
+        payload: {
+          playerName: String(meta.playerName ?? ""),
+          team: String(meta.team ?? meta.teamName ?? ""),
+          leagueId: body.leagueId ?? null,
+          provisioned: playerResolution.provisioned,
+          warnings: playerResolution.warnings,
+        },
+        idempotency_key: crypto.randomUUID(),
+      });
     }
     potgPlayerId = playerResolution.playerId;
     potgUserId = playerResolution.userId;
