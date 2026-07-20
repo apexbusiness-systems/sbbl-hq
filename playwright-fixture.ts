@@ -144,6 +144,29 @@ export async function seedSuperAdminSession(page: Page) {
     },
   );
 
+  // Ops pipeline-health probe (2026-07-20): the Overview tab polls this on a
+  // 60s interval. Left unmocked, the dev server's response churns the page and
+  // destabilizes locators — every seeded session gets a healthy default.
+  await page.route('**/ops/pipeline/health', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        ok: true,
+        overall: 'ok',
+        metrics: {
+          outbox_pending: { value: 0, warn: 25, critical: 100, status: 'ok' },
+          outbox_oldest_minutes: { value: 0, warn: 10, critical: 60, status: 'ok' },
+          outbox_dead_letters: { value: 0, warn: 1, critical: 5, status: 'ok' },
+          ingress_failed_24h: { value: 0, warn: 5, critical: 25, status: 'ok' },
+          import_failed_rows_24h: { value: 0, warn: 10, critical: 50, status: 'ok' },
+        },
+        alerts: [],
+        checked_at: new Date().toISOString(),
+      }),
+    }),
+  );
+
   // Also intercept /api/public-config via page.route (local dev server, no CDP issue)
   await page.route('**/api/public-config', (route) =>
     route.fulfill({

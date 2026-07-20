@@ -352,7 +352,9 @@ const OpsPage = () => {
     queryFn: fetchPipelineHealth,
     enabled: canRunOps,
     refetchInterval: 60_000,
-    retry: shouldRetryOpsQuery,
+    // A health probe must never hammer or churn the page: no retries — the
+    // next 60s tick is the retry. Failures just leave the cards blank.
+    retry: false,
   });
   const [mergeSourceId, setMergeSourceId] = useState('');
   const [mergeTargetId, setMergeTargetId] = useState('');
