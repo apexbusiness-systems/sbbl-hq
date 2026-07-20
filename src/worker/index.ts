@@ -3324,7 +3324,7 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: "llama-3.2-90b-vision-preview",
+      model: "qwen/qwen3.6-27b",
       max_tokens: 256,
       messages: [
         {
