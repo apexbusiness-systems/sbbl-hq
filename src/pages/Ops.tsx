@@ -798,7 +798,7 @@ const OpsPage = () => {
           <div className="panel p-4 space-y-4 max-w-2xl">
             <div>
               <h2 className="font-display text-xl flex items-center gap-2"><Upload className="w-5 h-5 text-primary" /> Scoreboard Image Parser</h2>
-              <p className="text-xs text-muted-foreground mt-1">Upload a scoreboard photo — Claude Vision auto-extracts team names and scores.</p>
+              <p className="text-xs text-muted-foreground mt-1">Upload a scoreboard photo — AI vision auto-extracts team names and scores.</p>
             </div>
             <div
               className="border-2 border-dashed border-border rounded-sm p-6 text-center cursor-pointer hover:border-primary/40 transition-colors"
@@ -808,7 +808,7 @@ const OpsPage = () => {
             >
               <input ref={scoreboardFileRef} type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) void handleScoreboardImage(f); }} />
               {scoreboardParseState === 'parsing' ? (
-                <div className="flex flex-col items-center gap-2"><Loader2 className="w-6 h-6 text-primary animate-spin" /><p className="text-sm text-muted-foreground">Parsing with Claude Vision…</p></div>
+                <div className="flex flex-col items-center gap-2"><Loader2 className="w-6 h-6 text-primary animate-spin" /><p className="text-sm text-muted-foreground">Parsing with AI vision…</p></div>
               ) : scoreboardParseState === 'parsed' ? (
                 <div className="flex flex-col items-center gap-1"><CheckCircle2 className="w-5 h-5 text-success" /><p className="text-xs text-success font-medium">Data extracted — review below</p><p className="text-[10px] text-muted-foreground">Click to parse another image</p></div>
               ) : scoreboardParseState === 'error' ? (
@@ -1346,7 +1346,7 @@ const OpsPage = () => {
       {activeTab === 'potg' && (<section id="potg" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">POTG Parser</h2><div className="space-y-4"><div className="panel p-4 space-y-5 max-w-xl">
           <div>
             <h2 className="font-display text-xl">POTG Image Parser</h2>
-            <p className="text-xs text-muted-foreground mt-1">Upload a Player of the Game graphic — Claude Vision extracts the data automatically, then you confirm before it writes to the pipeline.</p>
+            <p className="text-xs text-muted-foreground mt-1">Upload a Player of the Game graphic — AI vision extracts the data automatically, then you confirm before it writes to the pipeline.</p>
           </div>
 
           {/* Image drop zone */}
@@ -1360,7 +1360,7 @@ const OpsPage = () => {
             {potgParseState === 'parsing' ? (
               <div className="flex flex-col items-center gap-2">
                 <Loader2 className="w-6 h-6 text-primary animate-spin" />
-                <p className="text-sm text-muted-foreground">Parsing with Claude Vision…</p>
+                <p className="text-sm text-muted-foreground">Parsing with AI vision…</p>
               </div>
             ) : potgParseState === 'parsed' ? (
               <div className="flex flex-col items-center gap-1">
