@@ -81,7 +81,7 @@ export function CASLNudge({ roles }: CASLNudgeProps) {
       </p>
 
       <p className="text-sm font-semibold leading-snug pr-5">
-        Get full game access + send a friend an invite — $4.99 per game.
+        Get full game access + send a friend an invite — $3.99 per game.
       </p>
 
       <p className="text-[10px] text-muted-foreground mt-2 leading-relaxed">

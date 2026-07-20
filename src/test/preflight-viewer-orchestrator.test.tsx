@@ -21,7 +21,7 @@ function snap(overrides: Partial<PreflightSnapshot> = {}): PreflightSnapshot {
       id: 'g-1',
       state: 'live',
       tipoffAt: null,
-      ppvPriceCad: 4.99,
+      ppvPriceCad: 3.99,
       replay: { embargoEndsAt: null, qualityTier: null, priceCad: null, entitled: false },
     },
     ...overrides,

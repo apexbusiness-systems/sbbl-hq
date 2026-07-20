@@ -751,6 +751,8 @@ CI runs all of these. Do not merge red.
 
 ## Incident history (relevant to this guide)
 
+- **2026-07-20** — PPV Pricing Update: Stream purchase and preflight pricing changed from $4.99 CAD to $3.99 CAD universally. Changed stripe unit amount, constant values, JSX rendering, and updated test suite assertions (handling $3.99 + 5% GST = $4.19 total).
+
 - **2026-07-20** — Transient loading/reset in E2E: Background Supabase token refreshes triggered `onAuthStateChange` with `SIGNED_IN`, setting `loading = true` unconditionally and unmounting route guards. This destroyed E2E inputs and caused flaky failures under load. Fix: introduced `lastUserIdRef` in `AuthContext.tsx` to detect same-user token refreshes and bypass the loading state trigger. Also, updated file upload specs to wait for native `filechooser` events, and ignored diagnostic production tests in `playwright.config.ts`.
 
 - **2026-07-18** — CORS-01: Google Chrome login CORS block. Vite dev server port was configured to 8080, but workers whitelisted only 5173. Chrome blocked preflight OPTIONS requests, preventing login. Fix: whitelisted localhost:8080 in both main worker and api-proxy-worker.

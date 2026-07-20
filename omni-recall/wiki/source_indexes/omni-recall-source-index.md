@@ -30,3 +30,9 @@ Track canonical source records that materially define Omni-Recall.
    - Type: correction record
    - Status: active
    - Role: React auth loading gate, Playwright selector updates, and CI testIgnore rules
+
+6. `wiki/corrections/2026-07-20-universal-ppv-pricing-update.md`
+   - Type: correction record
+   - Status: active
+   - Role: Universal livestream PPV pricing updates ($3.99 CAD base, $4.19 CAD with Alberta GST)
+

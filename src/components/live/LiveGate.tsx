@@ -116,7 +116,7 @@ export function LiveGate({ access, config, checkoutEndpoint }: LiveGateProps) {
             <p className={S.sub}>
               Create a free account to access live games.
             </p>
-            <div className={S.price}>$4.99</div>
+            <div className={S.price}>$3.99</div>
             <button className={S.btn} onClick={handleSignUpClick}>
               Sign Up to Watch →
             </button>
@@ -134,7 +134,7 @@ export function LiveGate({ access, config, checkoutEndpoint }: LiveGateProps) {
             <p className={S.sub}>
               Pay once per game day. Watch on this device.
             </p>
-            <div className={S.price}>$4.99</div>
+            <div className={S.price}>$3.99</div>
             {checkoutError && (
               <p className="text-[#E63946] text-xs text-center">{checkoutError}</p>
             )}

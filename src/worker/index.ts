@@ -4659,7 +4659,7 @@ export async function handlePlaybackPreflight(ctx: HandlerCtx) {
         id: game.id,
         state,
         tipoffAt: game.starts_at,
-        ppvPriceCad: 4.99, // matches handleStreamPurchase hardcoded price
+        ppvPriceCad: 3.99, // matches handleStreamPurchase hardcoded price
         replay: {
           embargoEndsAt: game.replay_monetization_enabled_at ?? null,
           qualityTier: game.replay_quality_tier ?? null,
@@ -5255,9 +5255,9 @@ export async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
   if (!(await verifyTurnstileToken(env, body?.captchaToken, ip))) {
     return json({ ok: false, error: "captcha_failed" }, 403);
   }
-  // SECURITY: PPV price is hardcoded to $4.99 CAD (499 cents).
+  // SECURITY: PPV price is hardcoded to $3.99 CAD (399 cents).
   // Do NOT trust pricing from the client payload.
-  const unitAmount = 499;
+  const unitAmount = 399;
   const reqUrlStr = req.url;
   const successUrl = getSafeRedirectUrl(
     body?.successUrl,
@@ -5280,7 +5280,7 @@ export async function handleStreamPurchase({ req, env, admin }: HandlerCtx) {
       "payment_method_types[]": "card",
       "line_items[0][price_data][currency]": "cad",
       "line_items[0][price_data][product_data][name]": "SBBL HQ PPV Access",
-      "line_items[0][price_data][unit_amount]": String(unitAmount), // $4.99 CAD in cents
+      "line_items[0][price_data][unit_amount]": String(unitAmount), // $3.99 CAD in cents
       "line_items[0][price_data][tax_behavior]": "exclusive", // GST added on top at checkout
       "line_items[0][quantity]": "1",
       // Automatic tax: Stripe calculates Alberta GST (5%) based on billing address.

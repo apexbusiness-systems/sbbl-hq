@@ -385,7 +385,7 @@ Media Library — Media publication management with drag ordering
 Import History — CSV import audit log
 Pricing Model
 Item	Price	Notes
-PPV single-game	$4.99 CAD	48-hour entitlement validity, 6-hour session cap, IP-locked, one-device
+PPV single-game	$3.99 CAD	48-hour entitlement validity, 6-hour session cap, IP-locked, one-device
 Player subscription	$6.99 CAD/month	Recurring via Stripe
 Alberta GST	5%	Federal only, no PST
 Player store discount	10%	Active subscribers only

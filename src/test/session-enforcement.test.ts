@@ -20,8 +20,8 @@ describe('Alberta GST pricing', () => {
     expect(ALBERTA_GST_RATE).toBe(0.05);
   });
 
-  it('priceWithTax: PPV $4.99 + 5% GST = $5.24', () => {
-    expect(priceWithTax(PPV_PRICE_CAD)).toBe(5.24);
+  it('priceWithTax: PPV $3.99 + 5% GST = $4.19', () => {
+    expect(priceWithTax(PPV_PRICE_CAD)).toBe(4.19);
   });
 
   it('priceWithTax: Player $6.99 + 5% GST = $7.34', () => {
@@ -36,7 +36,7 @@ describe('Alberta GST pricing', () => {
   });
 
   it('base prices are unchanged (tax is NOT baked in)', () => {
-    expect(PPV_PRICE_CAD).toBe(4.99);
+    expect(PPV_PRICE_CAD).toBe(3.99);
     expect(PLAYER_REGISTRATION_PRICE_CAD).toBe(6.99);
   });
 });

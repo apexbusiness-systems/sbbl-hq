@@ -7,7 +7,7 @@
  *   paid_fan | super_admin                → free access + invite generator → player
  *   fan with PPV entitlement (Stripe)     → access → player
  *   fan with redeemed invite              → access → player
- *   fan with no access                    → preview gate → PPV buy ($4.99) + invite redeem
+ *   fan with no access                    → preview gate → PPV buy ($3.99) + invite redeem
  *
  * IP locking and single-use enforcement happen server-side in /api/invite/redeem.
  * No role/entitlement data is trusted from the client.
@@ -593,7 +593,7 @@ function StreamPlayer({
   );
 }
 
-const PPV_PRICE_CAD = 4.99;
+const PPV_PRICE_CAD = 3.99;
 const ALBERTA_GST = 0.05;
 /** Tax-inclusive price shown to Alberta viewers */
 const PPV_PRICE_TOTAL = Math.round(PPV_PRICE_CAD * (1 + ALBERTA_GST) * 100) / 100;

@@ -6,6 +6,7 @@
 - **E2E Auth State Reset Resolution** (`src/contexts/AuthContext.tsx`): Introduced `lastUserIdRef` to skip setting `loading = true` on background Supabase token refreshes, preventing route guards from unmounting the active component.
 - **E2E Ingestion Stability** (`e2e/ops-media-tabs.spec.ts` & `e2e/ops-auth-ingest-harmony.spec.ts`): Replaced direct hidden input `.setInputFiles()` calls with Playwright's native `'filechooser'` event triggers.
 - **Playwright CI Exclusions** (`playwright.config.ts`): Excluded live-production diagnostic tests (`potg-vision-test.spec.ts` & `check_iframe.spec.ts`) from CI checks to ensure deterministic build gates.
+- **Universal PPV Pricing Update** (`src/worker/index.ts`, `src/lib/auth/subscription.ts`, `src/components/LiveStreamPlayer.tsx`, etc.): Updated stream pricing universally to $3.99 CAD ($3.99 per view). Configured Stripe unit amount to 399 cents, preflight configurations to 3.99, updated UI paywalls and CASL nudge displays, and corrected unit/E2E test assertions to expect $3.99 base price ($4.19 tax-inclusive).
 
 ---
 

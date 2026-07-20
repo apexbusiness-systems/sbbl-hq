@@ -187,7 +187,7 @@ export function PaywallGate({
               Create a free account to access live games and purchase PPV access.
             </p>
             <div className="text-center">
-              <span className="text-[#C9A84C] font-bold text-2xl">$4.99</span>
+              <span className="text-[#C9A84C] font-bold text-2xl">$3.99</span>
               <span className="text-[#8A8A8A] text-xs ml-1">/ game day</span>
             </div>
             <button className={S.btn} onClick={onWatchClick}>
@@ -256,7 +256,7 @@ export function PaywallGate({
                   Pay once per game day. Watch on this device.
                 </p>
                 <div className="text-center">
-                  <span className="text-[#C9A84C] font-bold text-2xl">$4.99</span>
+                  <span className="text-[#C9A84C] font-bold text-2xl">$3.99</span>
                   <span className="text-[#8A8A8A] text-xs ml-1">/ game day</span>
                 </div>
                 {checkoutError && (
