@@ -220,8 +220,16 @@ export async function handleScoresCsvUpload(ctx: HandlerCtx) {
   const validatedRows: Record<string, string>[] = [];
 
   rows.forEach((row, index) => {
-    if (row.schema_version || row.format) return;
-    const parsed = config.schema.safeParse(row);
+    // v1 marker handling: skip ONLY pure marker rows (marker fields + no data).
+    // Data rows that also carry a schema_version/format column are validated
+    // with the marker fields stripped — never silently dropped (fix 2026-07-20).
+    const { schema_version: _sv, format: _fmt, ...dataFields } = row;
+    const hasMarker = Boolean(_sv || _fmt);
+    const isMarkerOnly =
+      hasMarker &&
+      Object.values(dataFields).every((v) => v == null || String(v).trim() === "");
+    if (isMarkerOnly) return;
+    const parsed = config.schema.safeParse(hasMarker ? dataFields : row);
     if (!parsed.success) {
       parsed.error.errors.forEach(err => {
         validationErrors.push({
@@ -514,6 +522,11 @@ export async function handleImportRoute(
   return json({ ok: true, summary: job });
 }
 
+// RETAINED COMPAT ROUTE (2026-07-20 audit): /ops/scores/import stays live for
+// API compatibility (tests + potential external callers), but shares
+// INGEST_CONFIGS.scores schema + classifyRiskLane with /api/ops/upload/csv,
+// guaranteeing behavioral validation parity. New UI work must use
+// /api/ops/upload/csv (kind="scores") via useOpsCsvUpload (offline queue).
 export async function handleScoresCsvImport(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireSuperAdminSession(ctx.req, ctx.admin);

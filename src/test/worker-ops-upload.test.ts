@@ -105,3 +105,75 @@ describe('handleScoresCsvUpload — functional unit tests', () => {
     expect(body.error).toBe('unsupported_schema_version');
   });
 });
+
+// ── Regression: silent row-drop fix (2026-07-20 audit) ──────────────────────
+// Previously any row carrying a schema_version/format field was dropped from
+// BOTH validation and insertion with no error surfaced anywhere.
+describe('handleScoresCsvUpload — v1 marker rows never cause silent data loss', () => {
+  const SUPER = { user_role_assignments: [{ user_id: ADMIN_ID, role: 'super_admin' }] };
+
+  it('inserts data rows that carry a format/schema_version column', async () => {
+    const state = { ...SUPER, leagues: [{ id: 'L1', code: 'WBL' }], teams: [] };
+    const ctx = mkCtx({
+      url: 'https://local/api/ops/upload/csv',
+      method: 'POST',
+      body: {
+        kind: 'teams',
+        rows: [
+          { name: 'Alpha', league_id: 'WBL', format: 'v1' },
+          { name: 'Beta', league_id: 'WBL', schema_version: 'v1' },
+        ],
+      },
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin(state),
+    });
+
+    const res = await handleScoresCsvUpload(ctx);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; inserted: number; failed: number };
+    expect(body.ok).toBe(true);
+    expect(body.inserted).toBe(2); // pre-fix: 0 inserted, 0 failed, no error — silent loss
+    expect(body.failed).toBe(0);
+  });
+
+  it('skips pure marker rows but validates and inserts the rest', async () => {
+    const state = { ...SUPER, leagues: [{ id: 'L1', code: 'WBL' }], teams: [] };
+    const ctx = mkCtx({
+      url: 'https://local/api/ops/upload/csv',
+      method: 'POST',
+      body: {
+        kind: 'teams',
+        rows: [
+          { schema_version: 'v1', name: '', league_id: '' }, // marker-only row from CSV export
+          { name: 'Gamma', league_id: 'WBL' },
+        ],
+      },
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin(state),
+    });
+
+    const res = await handleScoresCsvUpload(ctx);
+    expect(res.status).toBe(200);
+    const body = await res.json() as { ok: boolean; inserted: number; failed: number };
+    expect(body.ok).toBe(true);
+    expect(body.inserted).toBe(1);
+    expect(body.failed).toBe(0);
+  });
+
+  it('still surfaces validation errors for invalid data rows carrying a marker', async () => {
+    const state = { ...SUPER, leagues: [], teams: [] };
+    const ctx = mkCtx({
+      url: 'https://local/api/ops/upload/csv',
+      method: 'POST',
+      body: {
+        kind: 'teams',
+        rows: [{ name: '', league_id: 'WBL', format: 'v1' }], // invalid: empty name
+      },
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin(state),
+    });
+
+    const res = await handleScoresCsvUpload(ctx);
+    expect(res.status).toBe(422); // pre-fix: row vanished silently with 200
+  });
+});
