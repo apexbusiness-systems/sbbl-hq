@@ -2612,7 +2612,20 @@ async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
   if (body.leagueId === null) {
     update.league_id = null;
   } else if (typeof body.leagueId === 'string' && body.leagueId.length > 0) {
-    update.league_id = body.leagueId;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.leagueId);
+    if (isUuid) {
+      update.league_id = body.leagueId;
+    } else {
+      const { data: lg } = await ctx.admin
+        .from('leagues')
+        .select('id')
+        .ilike('code', body.leagueId)
+        .maybeSingle();
+      if (!lg?.id) {
+        return json({ ok: false, error: 'invalid_league_code' }, 400);
+      }
+      update.league_id = lg.id;
+    }
   }
   if (typeof body.sortAt === 'string' && body.sortAt.length > 0) {
     update.sort_at = body.sortAt;
@@ -3343,6 +3356,14 @@ async function handleParsePotgImage(ctx: HandlerCtx) {
   if (!match) return json({ ok: false, error: "parse_failed", raw }, 422);
   try {
     const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+    const teamName = String(parsed.team ?? "");
+    const gameResult = String(parsed.gameResult ?? "");
+    if (teamName || gameResult) {
+      const leagueCode = await inferPotgLeagueCode(ctx, teamName, gameResult);
+      if (leagueCode) {
+        parsed.leagueId = leagueCode;
+      }
+    }
     return json({ ok: true, data: parsed });
   } catch {
     return json({ ok: false, error: "invalid_json", raw }, 422);
