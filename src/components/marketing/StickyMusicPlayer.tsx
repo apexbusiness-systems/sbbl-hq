@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pause, Play, Volume2, VolumeX } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import trackUrl from '@/assets/SBBL-HQ.mp3';
 
 export const StickyMusicPlayer = () => {
+  const { pathname } = useLocation();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -41,6 +43,10 @@ export const StickyMusicPlayer = () => {
     audio.muted = nextMuted;
     setIsMuted(nextMuted);
   };
+
+  // Hidden on the Ops Console: the radio chip covered manual-ops controls on
+  // mobile (2026-07-20 visual audit). Operators can play music elsewhere.
+  if (pathname.startsWith('/ops')) return null;
 
   return (
     <div className="fixed bottom-4 right-4 z-40">

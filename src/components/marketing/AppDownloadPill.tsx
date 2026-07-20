@@ -1,10 +1,15 @@
 import { motion } from 'framer-motion';
 import { Download, Smartphone, X } from 'lucide-react';
+import { useLocation } from 'react-router-dom';
 import { useInstallPrompt } from '@/hooks/use-install-prompt';
 
 export const AppDownloadPill = () => {
   const { isVisible, canPrompt, isIOS, promptInstall, dismiss } = useInstallPrompt();
+  const { pathname } = useLocation();
 
+  // Ops Console is a work surface — floating promos covered form fields on
+  // mobile (2026-07-20 visual audit). Operators don't need the install pitch.
+  if (pathname.startsWith('/ops')) return null;
   if (!isVisible) return null;
 
   const helperText = canPrompt

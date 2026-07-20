@@ -1,25 +1,14 @@
 import { createRxDatabase, addRxPlugin, type RxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
-import { replicateSupabase } from 'rxdb/plugins/replication-supabase';
 import { RxDBLeaderElectionPlugin } from 'rxdb/plugins/leader-election';
 import { RxDBQueryBuilderPlugin } from 'rxdb/plugins/query-builder';
-import { createClient } from '@supabase/supabase-js';
 
-// SECURITY: Never fall back to hardcoded credentials.
-// All config MUST come from environment variables at build time.
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY =
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY ??
-  import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
-  throw new Error(
-    '[rxdb] Missing required env vars: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY (or VITE_SUPABASE_PUBLISHABLE_KEY). ' +
-    'Check your .env file and CI secrets.'
-  );
-}
-
-const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// 2026-07-20 hotfix: Supabase replication of leagues/teams/games removed.
+// Production tables have no _modified/_deleted replication columns, so every
+// pull cycle 400'd (PostgREST 42703) in an endless retry flood the moment the
+// VITE_SUPABASE_* build env appeared. The offline CSV queue (the only consumer
+// of this module) is purely local (Dexie) and needs no Supabase client — this
+// module is now env-independent and can never crash on missing config again.
 
 addRxPlugin(RxDBLeaderElectionPlugin);
 addRxPlugin(RxDBQueryBuilderPlugin);
@@ -103,32 +92,8 @@ export async function initDB() {
     }
   });
 
-  replicateSupabase({
-    replicationIdentifier: 'supabase_leagues_rep',
-    client: supabaseClient,
-    collection: db.leagues,
-    tableName: 'leagues',
-    pull: {},
-    push: {},
-  });
 
-  replicateSupabase({
-    replicationIdentifier: 'supabase_teams_rep',
-    client: supabaseClient,
-    collection: db.teams,
-    tableName: 'teams',
-    pull: {},
-    push: {},
-  });
 
-  replicateSupabase({
-    replicationIdentifier: 'supabase_games_rep',
-    client: supabaseClient,
-    collection: db.games,
-    tableName: 'games',
-    pull: {},
-    push: {},
-  });
 
   return db;
   })();

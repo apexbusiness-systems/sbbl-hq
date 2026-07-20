@@ -320,13 +320,19 @@ describe('POTG publisher guard', () => {
     expect(workerSrc).toMatch(/async function resolvePotgPlayer\b/);
   });
 
-  it('resolvePotgPlayer checks the player\'s league matches the publication\'s league', () => {
+  // 2026-07-20 owner directive: parser-first pipeline restored. Unknown
+  // players are AUTO-PROVISIONED (profile + player, audit-logged), and league
+  // mismatch is a warning, not a 409. These assertions pin that behavior.
+  it('resolvePotgPlayer auto-provisions instead of fail-closing', () => {
     const fnStart = workerSrc.indexOf('async function resolvePotgPlayer');
     const fnEnd   = workerSrc.indexOf('\n}', fnStart) + 2;
     const fnBody  = workerSrc.slice(fnStart, fnEnd);
-    expect(fnBody).toContain('potg_player_not_in_profiles');
-    expect(fnBody).toContain('potg_player_not_rostered');
-    expect(fnBody).toContain('potg_player_league_mismatch');
+    expect(fnBody).not.toContain('potg_player_not_in_profiles');
+    expect(fnBody).not.toContain('potg_player_not_rostered');
+    expect(fnBody).toContain('potg_profile_provision_failed');
+    expect(fnBody).toContain('potg_player_provision_failed');
+    expect(fnBody).toContain('potg_player_league_mismatch'); // warning, not error
+    expect(fnBody).toContain('warnings.push("potg_player_league_mismatch")');
   });
 
   describe('handleIngestSubmit (path B: /ops/ingest/submit kind=potg)', () => {
