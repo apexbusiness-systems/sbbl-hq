@@ -3515,6 +3515,13 @@ type PotgPlayerResolution =
 // audit-logged with created_by + a potg_auto_provisioned marker so operators
 // can review/merge later. Games were already auto-created by this pipeline —
 // players/profiles now behave consistently with that design.
+// LIKE-pattern sanitizer: OCR output can contain % or _ (SQL wildcards),
+// which would silently widen an ilike lookup and attribute stats to the
+// wrong player. Escape them so lookups always mean the literal name.
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (m) => `\\${m}`);
+}
+
 export async function resolvePotgPlayer(
   admin: SupabaseClient,
   playerName: string,
@@ -3533,7 +3540,7 @@ export async function resolvePotgPlayer(
   const { data: profile } = await admin
     .from("profiles")
     .select("user_id")
-    .ilike("display_name", trimmed)
+    .ilike("display_name", escapeLikePattern(trimmed))
     .maybeSingle();
   if (profile?.user_id) {
     userId = String(profile.user_id);
@@ -3573,7 +3580,7 @@ export async function resolvePotgPlayer(
         .from("teams")
         .select("id")
         .eq("league_id", leagueUuid)
-        .ilike("name", teamName)
+        .ilike("name", escapeLikePattern(teamName))
         .maybeSingle();
       teamId = team?.id ? String(team.id) : null;
       if (!teamId) warnings.push("potg_team_not_resolved");
