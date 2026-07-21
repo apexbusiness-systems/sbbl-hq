@@ -7,8 +7,6 @@ export type { MediaFilterBarProps } from './MediaFilterBar';
 export { ArchiveModal } from './ArchiveModal';
 export type { ArchiveModalProps } from './ArchiveModal';
 
-export { EditMetadataModal } from './EditMetadataModal';
-export type { EditMetadataModalProps } from './EditMetadataModal';
 
 export { PreviewModal } from './PreviewModal';
 export type { PreviewModalProps } from './PreviewModal';

@@ -30,8 +30,31 @@ vi.mock('@supabase/supabase-js', () => ({
           update: vi.fn((patch: Record<string, unknown>) => ({
             eq: vi.fn((_: string, id: string) => {
               mediaUpdateCalls.push({ patch, id });
-              return Promise.resolve({ error: null });
+              // Order route awaits the eq() promise directly; the patch route
+              // chains .select().single() — support both shapes.
+              const resolved = Promise.resolve({ error: null });
+              return Object.assign(resolved, {
+                select: vi.fn(() => ({
+                  single: vi.fn(() => Promise.resolve({ data: { id, ...patch }, error: null })),
+                })),
+              });
             }),
+          })),
+        };
+      }
+
+      if (table === 'leagues') {
+        return {
+          select: vi.fn(() => ({
+            ilike: vi.fn((_col: string, pattern: string) => ({
+              maybeSingle: vi.fn(() =>
+                Promise.resolve(
+                  String(pattern).toLowerCase() === 'tgifbl'
+                    ? { data: { id: '11111111-1111-4111-8111-111111111111' }, error: null }
+                    : { data: null, error: null },
+                ),
+              ),
+            })),
           })),
         };
       }
@@ -208,5 +231,55 @@ describe('POST /ops/media/publications/order', () => {
       { patch: { sort_order: 0 }, id: 'pub-2' },
     ]);
     expect(auditInsertSpy).toHaveBeenCalledTimes(1);
+  });
+});
+
+
+// Regression (2026-07-20): the media edit modal sends a league *slug/code*
+// ("tgifbl"), never a raw UUID. handleOpsPatchMediaPublications must resolve
+// it to the leagues.id UUID before writing league_id — otherwise Postgres
+// throws 22P02 "invalid input syntax for type uuid" and the edit fails. This
+// pins the fix shipped in #567.
+describe('PATCH /ops/media/publications/:id — league code is resolved to UUID', () => {
+  beforeEach(() => { mediaUpdateCalls.length = 0; });
+
+  function patch(id: string, body: unknown) {
+    return new Request(`https://local/ops/media/publications/${id}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        'x-idempotency-key': 'ops-media-patch-league-key-1234',
+        authorization: 'Bearer test-jwt-token',
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('resolves a league slug to its UUID (never writes the raw code)', async () => {
+    const res = await worker.fetch(patch('22222222-2222-4222-8222-222222222222', { leagueId: 'tgifbl' }), env);
+    expect(res.status).toBe(200);
+    const call = mediaUpdateCalls.at(-1);
+    expect(call?.patch.league_id).toBe('11111111-1111-4111-8111-111111111111');
+    expect(call?.patch.league_id).not.toBe('tgifbl');
+  });
+
+  it('accepts an already-valid UUID unchanged', async () => {
+    const uuid = '33333333-3333-4333-8333-333333333333';
+    const res = await worker.fetch(patch('22222222-2222-4222-8222-222222222222', { leagueId: uuid }), env);
+    expect(res.status).toBe(200);
+    expect(mediaUpdateCalls.at(-1)?.patch.league_id).toBe(uuid);
+  });
+
+  it('rejects an unknown league code with 400, not a UUID crash', async () => {
+    const res = await worker.fetch(patch('22222222-2222-4222-8222-222222222222', { leagueId: 'nope' }), env);
+    expect(res.status).toBe(400);
+    const body = await res.json() as { error: string };
+    expect(body.error).toBe('invalid_league_code');
+  });
+
+  it('clears the league when null is sent', async () => {
+    const res = await worker.fetch(patch('22222222-2222-4222-8222-222222222222', { leagueId: null }), env);
+    expect(res.status).toBe(200);
+    expect(mediaUpdateCalls.at(-1)?.patch.league_id).toBeNull();
   });
 });
