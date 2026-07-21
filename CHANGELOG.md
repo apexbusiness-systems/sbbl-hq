@@ -11,7 +11,11 @@ Versioning follows [semantic versioning](https://semver.org) with UTC date stamp
 ### Fixed — Vision Model Upgrade and E2E Stabilization
 
 - **Vision Model Upgrade** (`src/worker/index.ts`):
-  Upgraded the hardcoded broken model `meta-llama/llama-4-scout-17b-16e-instruct` to `llama-3.2-90b-vision-preview` to prevent 502 Bad Gateway errors for live operations users.
+  Migrated the ingestion pipeline to use `qwen/qwen3.6-27b`, which is the active vision model on Groq (replacing the deprecated `llama-3.2-90b-vision-preview` that returned 502s).
+- **POTG Auto-Categorization & Payload Hardening** (`src/worker/index.ts`, `src/pages/Ops.tsx`):
+  Eliminated the 502 `groq_error` by passing pure base64 via `arrayBuffer() + btoa()` and defensively stripping `data:` URIs in the worker. Fixed `handleParsePotgImage` to dynamically categorize leagues (e.g., TGIFBL) via `inferPotgLeagueCode`.
+- **Backend UUID Type Safety** (`src/worker/index.ts`, `src/components/OpsMediaLibrary/MediaMetadataSheet.tsx`):
+  Fixed `PATCH /ops/media/publications/:id` to correctly inspect string payloads and resolve UUIDs from the DB. Sync component state utilizing `leagueCode` instead of the raw database UUID.
 - **E2E Auth State Reset Resolution** (`src/contexts/AuthContext.tsx`):
   Introduced `lastUserIdRef` to detect same-user background token refreshes and bypass redundant `loading` state updates, preventing active page unmounting and transient state resets during test runs.
 - **E2E Ingestion Stability** (`e2e/ops-media-tabs.spec.ts` and `e2e/ops-auth-ingest-harmony.spec.ts`):
