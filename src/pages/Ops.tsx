@@ -298,32 +298,29 @@ const OpsPage = () => {
     setPotgParseError(null);
     setPotgImageFile(file);
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        const imageBase64 = event.target?.result as string;
-        try {
-          const result = await parsePotgImage(imageBase64, file.type as string);
-          if (result.ok && result.data) {
-            setPotgForm(f => ({
-              ...f,
-              playerName: result.data.playerName ?? '',
-              team: result.data.team ?? '',
-              pts: String(result.data.pts ?? ''),
-              rebs: String(result.data.rebs ?? ''),
-              assts: String(result.data.assts ?? ''),
-              gameResult: result.data.gameResult ?? '',
-            }));
-            setPotgParseState('parsed');
-          } else {
-            setPotgParseError('Parse failed — fill in manually');
-            setPotgParseState('error');
-          }
-        } catch (e) {
-          setPotgParseError(e instanceof Error ? e.message : 'Unknown error');
-          setPotgParseState('error');
-        }
-      };
-      reader.readAsDataURL(file);
+      // Pure base64 only — never pass a data: URI
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      const imageBase64 = btoa(binary);
+
+      const result = await parsePotgImage(imageBase64, file.type as string);
+      if (result.ok && result.data) {
+        setPotgForm(f => ({
+          ...f,
+          playerName: result.data.playerName ?? '',
+          team: result.data.team ?? '',
+          pts: String(result.data.pts ?? ''),
+          rebs: String(result.data.rebs ?? ''),
+          assts: String(result.data.assts ?? ''),
+          gameResult: result.data.gameResult ?? '',
+        }));
+        setPotgParseState('parsed');
+      } else {
+        setPotgParseError('Parse failed — fill in manually');
+        setPotgParseState('error');
+      }
     } catch (e) {
       setPotgParseError(e instanceof Error ? e.message : 'Unknown error');
       setPotgParseState('error');
