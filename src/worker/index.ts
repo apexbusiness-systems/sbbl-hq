@@ -3464,6 +3464,10 @@ export async function handleParsePotgImage(ctx: HandlerCtx) {
   if (!body?.imageBase64 || !body?.mimeType)
     return json({ ok: false, error: "image_required" }, 400);
 
+  const pureBase64 = body.imageBase64.includes(',')
+    ? body.imageBase64.split(',')[1] ?? body.imageBase64
+    : body.imageBase64;
+
   const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -3481,7 +3485,7 @@ export async function handleParsePotgImage(ctx: HandlerCtx) {
             {
               type: "image_url",
               image_url: {
-                url: `data:${body.mimeType};base64,${body.imageBase64}`,
+                url: `data:${body.mimeType};base64,${pureBase64}`,
               },
             },
             {
