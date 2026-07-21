@@ -2,7 +2,7 @@
 
 **Status**: MANDATORY — enforced by ESLint + vitest + CI.
 **Owner**: Data Pipeline (SBBL-HQ).
-**Last updated**: 2026-05-21.
+**Last updated**: 2026-07-21.
 
 ## TL;DR
 
@@ -116,6 +116,17 @@ kept out of production code, update:
    a new worker route.
 
 ## Incident history
+
+- **2026-07-21** — League filters were the silent-degradation flavor of this
+  rule (PR #571): `GET /api/teams` couldn't apply a slug filter DB-side, so it
+  fetched all rows and filtered in JS (masking the type mismatch); ingest write
+  paths silently nulled `league_id` on an unresolvable code; `/ops/list/media`
+  crashed outright (Postgres `22P02` → 500). Fix: all league identifier
+  resolution now goes through `resolveLeagueId` / `resolveLeagueIdFilter` in
+  `src/worker/shared.ts` — an unknown league yields `LEAGUE_NO_MATCH` → an
+  explicit **zero-row response** (visible empty state), never a dropped filter,
+  never a crash. See CLAUDE.md rule 10 and
+  `src/test/league-filter-guard.test.ts`.
 
 - **2026-04-16** — Store/Leaderboards/Scores/Stats/Live showed mock data
   because every page had a `|| mockX` fallback that silently activated

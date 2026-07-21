@@ -20,6 +20,12 @@ const players = Array.isArray(apiData) ? apiData : [];
 
 **League identity metadata:** Use `LEAGUE_REGISTRY` from `src/lib/leagues.ts`.
 
+**League slug→UUID resolution (worker):** `league_id` columns are uuid FKs.
+Never pass a client-supplied league value into a `league_id` filter or write —
+resolve it via `resolveLeagueId` / `resolveLeagueIdFilter` from
+`src/worker/shared.ts` (CLAUDE.md rule 10, PR #571; CI-guarded by
+`src/test/league-filter-guard.test.ts`).
+
 ---
 
 ## Rule 2 — Public Pages → Public Endpoints

@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-07-21 — v1.8.1 — Ops Media League Filter 500 & League Resolution Consolidation
+
+- **League Resolution Consolidation** (`src/worker/shared.ts`): Fixed the `/ops/list/media` 500 — league filter chips sent `LEAGUE_REGISTRY` slugs (e.g. `tgifbl`) straight into `.eq('league_id', slug)` against a uuid column (Postgres `22P02`). Introduced shared `resolveLeagueId` / `resolveLeagueIdFilter` helpers (UUID pass-through, case-insensitive code lookup, name fallback, `LEAGUE_NO_MATCH` sentinel → explicit zero rows) and migrated all 8 hand-rolled lookups: `handleOpsListMediaPublications`, `fetchPublicMediaRows`, `handleOpsPatchMediaPublications`, `handleTeamsList` (previously silently degraded to fetch-all-then-JS-filter), POTG ingest, ingest publish, game/event create (`src/worker/index.ts`), and 3 digest lookups (`src/worker/routes/digest.ts`).
+- **Guard tests** (`src/test/league-filter-guard.test.ts`, `src/test/worker-league-filter-regression.test.ts`): source-level tripwire blocks any future hand-rolled `.ilike('code', …)` league lookup outside `shared.ts`; regression suite pins slug→UUID resolution, UUID pass-through, and unknown-league → zero-rows semantics.
+
+---
+
 ## 2026-07-20 — v1.8.0 — Vision Model Upgrade & E2E State Reset Stabilization
 
 - **Vision Model Upgrade** (`src/worker/index.ts`): Upgraded from `meta-llama/llama-4-scout-17b-16e-instruct` to `llama-3.2-90b-vision-preview` to resolve 502 Bad Gateway errors in the Operations scoreboard parser.

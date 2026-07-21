@@ -46,7 +46,7 @@ All mutating methods (`POST/PUT/PATCH/DELETE`) require a valid idempotency key v
 - `GET /api/public/home?league=<code>` — Aggregated home page data.
 - `GET /api/public/schedule?league=<code>` — Public schedule.
 - `GET /api/public/potg?league=<code>` — Player of the Game feed.
-- `GET /api/teams` — Public team list with roster names.
+- `GET /api/teams?leagueId=<slug|uuid>` — Public team list with roster names. League filter accepts a `LEAGUE_REGISTRY` slug/code or a raw uuid; the worker normalizes to `leagues.id` via `resolveLeagueIdFilter` (`src/worker/shared.ts`, PR #571). Unknown league → `{ ok: true, teams: [] }`.
 - `GET /api/scores` — Public scores with filtering.
 - `GET /api/streams/status?gameId=<id>` — Public stream state `{ isLive, title, viewerCount, gameId }`. No playback URL. Edge-cached (10s TTL).
 - `GET /api/streams/:gameId/reactions` — Reaction counts.

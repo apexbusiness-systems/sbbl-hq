@@ -670,6 +670,41 @@ has explicitly asked for it in this session. Adding "improvements",
 "additional access control", or "game-binding features" to the broadcast
 path will break live events and is not authorized.
 
+### 10. League identifiers — resolve slugs through the shared resolver
+
+Frontends send app-level league slugs (`wbl` / `sbbl` / `tgifbl`, the
+`LEAGUE_REGISTRY` ids), but every `league_id` column is a uuid FK to
+`leagues.id`. Passing a slug straight into a `league_id` filter makes
+Postgres throw `22P02 invalid input syntax for type uuid` → 500
+(2026-07-21 `/ops/media` incident, PR #571).
+
+**Forbidden** (CI guard `src/test/league-filter-guard.test.ts` blocks the
+lookup variant; the raw-slug variant is the incident itself):
+
+```ts
+// ❌ BANNED — raw client value into a uuid column.
+query.eq('league_id', url.searchParams.get('leagueId'));
+
+// ❌ BANNED — hand-rolled lookup; 8 drifted copies caused this incident.
+const { data } = await admin.from('leagues').select('id').ilike('code', slug).maybeSingle();
+```
+
+**Required** — import from `src/worker/shared.ts`:
+
+```ts
+// Write paths (body.leagueId): UUID pass-through, else code → name lookup.
+const leagueUuid = await resolveLeagueId(admin, raw);        // null = unknown
+
+// List/filter paths (?leagueId=): null = no filter requested.
+const filter = await resolveLeagueIdFilter(admin, raw);
+if (filter === LEAGUE_NO_MATCH) return json({ ok: true, data: [] }); // zero rows, visibly
+if (filter) query = query.eq('league_id', filter);
+```
+
+Never drop the filter and return unfiltered rows, and never silently null
+a `league_id` you failed to resolve — both are the silent-degradation
+pattern rule 1/2 exists to prevent.
+
 ## Architecture at a glance
 
 ```
@@ -750,6 +785,19 @@ npm run build       # production build (vite)
 CI runs all of these. Do not merge red.
 
 ## Incident history (relevant to this guide)
+
+- **2026-07-21** — League-resolution consolidation (PR #571): every league
+  filter chip on `/ops/media` returned 500. Root cause: `handleOpsListMediaPublications`
+  passed the frontend league slug (`tgifbl`) straight into `.eq('league_id', slug)`
+  on a uuid column → Postgres `22P02`. Audit found the slug→UUID lookup hand-rolled
+  at **8** worker call sites with drifted behavior: `GET /api/teams` silently degraded
+  to fetch-all-then-JS-filter; POTG/ingest/game-create write paths silently nulled
+  `league_id`; PR #567 had already point-fixed the same class once in the PATCH
+  handler, proving point fixes don't stick. Fix: single `resolveLeagueId` /
+  `resolveLeagueIdFilter` (+ `LEAGUE_NO_MATCH` sentinel) in `src/worker/shared.ts`,
+  all 8 sites migrated (`src/worker/index.ts`, `src/worker/routes/digest.ts`).
+  See rule **10**, `src/test/worker-league-filter-regression.test.ts`, and the
+  CI guard `src/test/league-filter-guard.test.ts`.
 
 - **2026-07-20** — PPV Pricing Update: Stream purchase and preflight pricing changed from $4.99 CAD to $3.99 CAD universally. Changed stripe unit amount, constant values, JSX rendering, and updated test suite assertions (handling $3.99 + 5% GST = $4.19 total).
 
@@ -897,4 +945,4 @@ and `sbbl-hq-selfhost/WARNING_NOT_ACTIVE_SELFHOST_ROOT.md`.
 
 ---
 
-Last verified: 2026-07-20
+Last verified: 2026-07-21
