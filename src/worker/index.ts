@@ -2627,12 +2627,34 @@ type MediaPublicationStatus = typeof MEDIA_PUBLICATION_STATUSES[number];
 const isMediaPublicationStatus = (v: unknown): v is MediaPublicationStatus =>
   typeof v === 'string' && (MEDIA_PUBLICATION_STATUSES as readonly string[]).includes(v);
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Frontends pass the app-level league slug (e.g. 'tgifbl', from LEAGUE_REGISTRY),
+// not the leagues.id UUID that media_publications.league_id actually references.
+// Sending that slug straight into `.eq('league_id', slug)` makes Postgres throw
+// "invalid input syntax for type uuid" -> 500. Resolve slug/code -> UUID first.
+// Returns: a UUID to filter on, null if no filter was requested, or NO_MATCH if
+// a filter was given but no league matches it (caller should return zero rows,
+// not silently drop the filter and show everything).
+const NO_MATCH = Symbol('no_match');
+async function resolveLeagueIdFilter(
+  admin: HandlerCtx['admin'],
+  raw: string | null
+): Promise<string | null | typeof NO_MATCH> {
+  if (!raw) return null;
+  if (UUID_RE.test(raw)) return raw;
+  const { data, error } = await admin.from('leagues').select('id').ilike('code', raw).maybeSingle();
+  if (error) throw new Error(error.message);
+  return data?.id ?? NO_MATCH;
+}
+
 async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   await requireSuperAdminSession(req, admin);
   const url = new URL(req.url);
   const statusFilter = url.searchParams.get('status');
   const surfaceFilter = url.searchParams.get('surface');
-  const leagueFilter = url.searchParams.get('leagueId');
+  const leagueFilter = await resolveLeagueIdFilter(admin, url.searchParams.get('leagueId'));
+  if (leagueFilter === NO_MATCH) return json({ ok: true, data: [] });
   const searchQuery = url.searchParams.get('q');          // NEW: text search
   const pinnedFilter = url.searchParams.get('pinned');    // NEW: pin status filter
   const orderBy = url.searchParams.get('orderBy');        // NEW: sort mode
@@ -6072,7 +6094,8 @@ async function fetchPublicMediaRows(
   includeTypes?: string[],
 ) {
   const url = new URL(req.url);
-  const leagueId = url.searchParams.get("leagueId");
+  const leagueId = await resolveLeagueIdFilter(admin, url.searchParams.get("leagueId"));
+  if (leagueId === NO_MATCH) return [] as unknown as PublicMediaRow[];
   let query = admin
     .from("media_publications")
     .select(
