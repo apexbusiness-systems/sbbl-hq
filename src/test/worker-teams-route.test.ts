@@ -18,9 +18,11 @@ const teamsRows = [
   },
 ];
 
-// mvw_standings: pre-computed standings (P2-D materialized view)
+// mvw_standings: pre-computed standings (P2-D materialized view).
+// league_id present because handleTeamsList now filters standings DB-side by
+// the resolved league UUID (league-resolution consolidation, PR #571).
 const standingsRows = [
-  { team_id: 'team-1', wins: 1, losses: 0, pts_for: 91, pts_against: 84 },
+  { team_id: 'team-1', league_id: 'league-wbl', wins: 1, losses: 0, pts_for: 91, pts_against: 84 },
 ];
 
 const profilesRows = [
@@ -82,6 +84,24 @@ vi.mock('@supabase/supabase-js', () => ({
             expect(selection).toBe('user_id,full_name,display_name,avatar_url');
             return query;
           }),
+        };
+      }
+
+      // leagues: backs resolveLeagueId (shared.ts) — the route resolves the
+      // ?leagueId=wbl slug to the leagues.id value before filtering (PR #571).
+      if (table === 'leagues') {
+        return {
+          select: vi.fn(() => ({
+            ilike: vi.fn((_col: string, pattern: string) => ({
+              maybeSingle: vi.fn(() =>
+                Promise.resolve(
+                  String(pattern).toLowerCase() === 'wbl'
+                    ? { data: { id: 'league-wbl' }, error: null }
+                    : { data: null, error: null },
+                ),
+              ),
+            })),
+          })),
         };
       }
 

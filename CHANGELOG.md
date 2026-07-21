@@ -1,10 +1,20 @@
-<!-- Version: v1.8.0 | Date: 2026-07-20 | Status: Current -->
+<!-- Version: v1.8.1 | Date: 2026-07-21 | Status: Current -->
 # CHANGELOG
 
 All notable changes to SBBL HQ are documented in this file.
 Versioning follows [semantic versioning](https://semver.org) with UTC date stamps.
 
 ---
+
+## [1.8.1] - 2026-07-21
+
+### Fixed — Ops Media League Filter 500 & League Resolution Consolidation
+
+- **League Slug→UUID Resolution — Single Source of Truth** (`src/worker/shared.ts`, `src/worker/index.ts`, `src/worker/routes/digest.ts`):
+  Fixed the `/ops/list/media` 500 (Postgres `22P02` "invalid input syntax for type uuid") triggered by every league filter chip in the ops console. Frontends send `LEAGUE_REGISTRY` slugs (`wbl`/`sbbl`/`tgifbl`), but `league_id` columns are uuid FKs to `leagues.id`; the handler passed the slug straight into `.eq('league_id', slug)`. The same lookup was hand-rolled independently at 8 worker call sites — with drifted variants that silently degraded `GET /api/teams` (fetch-all-then-JS-filter) and silently nulled `league_id` on ingest writes. All 8 sites now call the shared `resolveLeagueId` / `resolveLeagueIdFilter` helpers exported from `src/worker/shared.ts`; unknown-league filters return the `LEAGUE_NO_MATCH` sentinel → explicit zero rows (visible empty state), never a crash or a silently-dropped filter.
+- **Consolidated call sites** (`src/worker/index.ts`): `handleOpsListMediaPublications`, `fetchPublicMediaRows`, `handleOpsPatchMediaPublications`, `handleTeamsList` (now filters DB-side by resolved UUID, including `mvw_standings`), POTG ingest validation, ingest publish, and game/event create. (`src/worker/routes/digest.ts`): weekly-digest facts, digest upsert, and public digest lookups.
+- **Regression + guard tests** (`src/test/worker-league-filter-regression.test.ts`, `src/test/league-filter-guard.test.ts`):
+  10 regression tests pin the incident's exact failure modes; a source-level guard fails CI if any worker file outside `shared.ts` hand-rolls a `.ilike('code', …)` league lookup again (this bug class was already point-fixed once in PR #567 and recurred).
 
 ## [1.8.0] - 2026-07-20
 

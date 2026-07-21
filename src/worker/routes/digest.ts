@@ -23,7 +23,7 @@
  */
 
 import type { HandlerCtx } from "../shared";
-import { json } from "../shared";
+import { json, resolveLeagueId } from "../shared";
 
 function isoWeekStart(d = new Date()): { start: Date; end: Date } {
   // Monday-start weeks; trailing 7 days from today.
@@ -79,12 +79,7 @@ async function collectFacts(
   leagueCode: string,
 ): Promise<DigestFacts> {
   const { start, end } = isoWeekStart();
-  const { data: leagueRow } = await admin
-    .from("leagues")
-    .select("id,code")
-    .ilike("code", leagueCode)
-    .maybeSingle();
-  const leagueId = (leagueRow as { id?: string } | null)?.id ?? null;
+  const leagueId = await resolveLeagueId(admin, leagueCode);
 
   // Games in the last 7 days.
   let gamesQ = admin
@@ -309,12 +304,7 @@ async function buildAndStoreDigest(
     }
   }
 
-  const { data: leagueRow } = await ctx.admin
-    .from("leagues")
-    .select("id")
-    .ilike("code", leagueCode)
-    .maybeSingle();
-  const leagueId = (leagueRow as { id?: string } | null)?.id ?? null;
+  const leagueId = await resolveLeagueId(ctx.admin, leagueCode);
 
   const payload = {
     league_id: leagueId,
@@ -343,12 +333,7 @@ export async function handlePublicDigest(ctx: HandlerCtx) {
   const { start } = isoWeekStart();
   const weekStart = formatDate(start);
 
-  const { data: leagueRow } = await ctx.admin
-    .from("leagues")
-    .select("id")
-    .ilike("code", leagueCode)
-    .maybeSingle();
-  const leagueId = (leagueRow as { id?: string } | null)?.id ?? null;
+  const leagueId = await resolveLeagueId(ctx.admin, leagueCode);
 
   let q = ctx.admin
     .from("ai_weekly_digest")

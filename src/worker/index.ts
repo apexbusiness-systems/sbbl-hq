@@ -8,6 +8,7 @@ import { ENTITLEMENT, ENTITLEMENT_MS } from "@/lib/constants/ENTITLEMENT_CONSTAN
 import { selectPlaybackProvider } from "@/lib/playback/selectProvider";
 import { verifyPlaybackToken } from "@/lib/playback/signed-token";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { resolveLeagueId, resolveLeagueIdFilter, LEAGUE_NO_MATCH } from "./shared";
 import {
   mergeBeaconIntoAggregate,
   parseBeaconPayload,
@@ -2632,7 +2633,8 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
   const url = new URL(req.url);
   const statusFilter = url.searchParams.get('status');
   const surfaceFilter = url.searchParams.get('surface');
-  const leagueFilter = url.searchParams.get('leagueId');
+  const leagueFilter = await resolveLeagueIdFilter(admin, url.searchParams.get('leagueId'));
+  if (leagueFilter === LEAGUE_NO_MATCH) return json({ ok: true, data: [] });
   const searchQuery = url.searchParams.get('q');          // NEW: text search
   const pinnedFilter = url.searchParams.get('pinned');    // NEW: pin status filter
   const orderBy = url.searchParams.get('orderBy');        // NEW: sort mode
@@ -2758,20 +2760,11 @@ async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
   if (body.leagueId === null) {
     update.league_id = null;
   } else if (typeof body.leagueId === 'string' && body.leagueId.length > 0) {
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.leagueId);
-    if (isUuid) {
-      update.league_id = body.leagueId;
-    } else {
-      const { data: lg } = await ctx.admin
-        .from('leagues')
-        .select('id')
-        .ilike('code', body.leagueId)
-        .maybeSingle();
-      if (!lg?.id) {
-        return json({ ok: false, error: 'invalid_league_code' }, 400);
-      }
-      update.league_id = lg.id;
+    const resolvedLeagueId = await resolveLeagueId(ctx.admin, body.leagueId);
+    if (!resolvedLeagueId) {
+      return json({ ok: false, error: 'invalid_league_code' }, 400);
     }
+    update.league_id = resolvedLeagueId;
   }
   if (typeof body.sortAt === 'string' && body.sortAt.length > 0) {
     update.sort_at = body.sortAt;
@@ -3181,7 +3174,19 @@ function splitProfileName(profile: Record<string, unknown> | undefined) {
 }
 
 async function handleTeamsList({ req, admin }: HandlerCtx) {
-  const leagueId = new URL(req.url).searchParams.get("leagueId");
+  // Resolve league slug/code → UUID once, then filter DB-side. This handler
+  // previously fetched all 200 teams and filtered in JS whenever the param
+  // was not a UUID — the silent-degradation flavor of the same bug class
+  // that 500'd /ops/media (PR #571). See resolveLeagueIdFilter in shared.ts.
+  const leagueFilter = await resolveLeagueIdFilter(
+    admin,
+    new URL(req.url).searchParams.get("leagueId"),
+  );
+  if (leagueFilter === LEAGUE_NO_MATCH) {
+    return json({ ok: true, teams: [] }, 200, {
+      "Cache-Control": "public, s-maxage=60, max-age=30",
+    });
+  }
 
   let query = admin
     .from("teams")
@@ -3193,37 +3198,15 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
     .eq("status", "published")
     .limit(200);
 
-  if (leagueId) {
-    const isUuid =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-        leagueId,
-      );
-    if (isUuid) {
-      query = query.eq("league_id", leagueId);
-    }
+  if (leagueFilter) {
+    query = query.eq("league_id", leagueFilter);
   }
 
   const { data: teamsData, error: teamsError } = await query;
   if (teamsError) throw new Error(teamsError.message);
 
-  let filteredTeamsData =
+  const filteredTeamsData =
     (teamsData as unknown as Record<string, unknown>[]) ?? [];
-  const isUuid =
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
-      leagueId || "",
-    );
-
-  if (leagueId && !isUuid) {
-    filteredTeamsData = filteredTeamsData.filter(
-      (t: Record<string, unknown>) =>
-        (
-          ((t.leagues as Record<string, unknown>)?.code as string) || ""
-        ).toLowerCase() === leagueId.toLowerCase() ||
-        (
-          ((t.leagues as Record<string, unknown>)?.name as string) || ""
-        ).toLowerCase() === leagueId.toLowerCase(),
-    );
-  }
 
   // Fetch pre-computed standings from mvw_standings (P2-D materialized view).
   // Falls back to empty statsMap (teams.record column used as fallback below).
@@ -3236,8 +3219,8 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
       .from("mvw_standings")
       .select("team_id,wins,losses,pts_for,pts_against");
 
-    if (leagueId && isUuid) {
-      standingsQuery = standingsQuery.eq("league_id", leagueId);
+    if (leagueFilter) {
+      standingsQuery = standingsQuery.eq("league_id", leagueFilter);
     }
 
     const { data: standingsData } = await standingsQuery;
@@ -6072,7 +6055,8 @@ async function fetchPublicMediaRows(
   includeTypes?: string[],
 ) {
   const url = new URL(req.url);
-  const leagueId = url.searchParams.get("leagueId");
+  const leagueId = await resolveLeagueIdFilter(admin, url.searchParams.get("leagueId"));
+  if (leagueId === LEAGUE_NO_MATCH) return [] as unknown as PublicMediaRow[];
   let query = admin
     .from("media_publications")
     .select(
@@ -7195,9 +7179,8 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     if (!body.leagueId) {
       return json({ ok: false, error: "missing_potg_league" }, 400);
     }
-    const { data: lg } = await ctx.admin
-      .from("leagues").select("id").ilike("code", body.leagueId).maybeSingle();
-    if (!lg?.id) {
+    const potgLeagueId = await resolveLeagueId(ctx.admin, body.leagueId);
+    if (!potgLeagueId) {
       return json({
         ok: false,
         error: "potg_unknown_league",
@@ -7208,7 +7191,7 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
     const playerResolution = await resolvePotgPlayer(
       ctx.admin,
       String(meta.playerName ?? ""),
-      String(lg.id),
+      potgLeagueId,
       { teamName: String(meta.team ?? meta.teamName ?? ""), actorId: userId },
     );
     if (playerResolution.ok === false) {
@@ -7263,12 +7246,9 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
   }
 
   // Resolve league UUID
-  let leagueUuid: string | null = null;
-  if (body.leagueId) {
-    const { data: lg } = await ctx.admin
-      .from("leagues").select("id").ilike("code", body.leagueId).maybeSingle();
-    leagueUuid = lg?.id ?? null;
-  }
+  const leagueUuid: string | null = body.leagueId
+    ? await resolveLeagueId(ctx.admin, body.leagueId)
+    : null;
 
   const pubStatus = body.publishStatus === "published" ? "published" : "draft";
   const meta = body.meta ?? {};
@@ -7919,15 +7899,9 @@ async function handleScoreGameUpsert(ctx: HandlerCtx) {
   if (!body) return json({ ok: false, error: "body_required" }, 400);
 
   // Resolve league_id UUID from league code if provided
-  let leagueUuid: string | null = null;
-  if (body.leagueId) {
-    const { data: leagueRow } = await ctx.admin
-      .from("leagues")
-      .select("id")
-      .ilike("code", body.leagueId)
-      .maybeSingle();
-    leagueUuid = leagueRow?.id ?? null;
-  }
+  const leagueUuid: string | null = body.leagueId
+    ? await resolveLeagueId(ctx.admin, body.leagueId)
+    : null;
 
   const payload = {
     category: body.category ?? "league",
