@@ -3490,7 +3490,7 @@ export async function handleParsePotgImage(ctx: HandlerCtx) {
             },
             {
               type: "text",
-              text: 'Extract player of the game data from this graphic. Return ONLY a JSON object with exactly these keys: playerName (string), team (string), pts (number), rebs (number), assts (number), gameResult (string, e.g. "TEAM A 77 vs TEAM B 63"). No markdown, no explanation — raw JSON only.',
+              text: 'Extract player of the game data from this graphic. Return ONLY a JSON object with exactly these keys: playerName (string), team (string, the full name of the player\'s team; this MUST perfectly match one of the two teams listed in the gameResult), pts (number), rebs (number), assts (number), gameResult (string, e.g. "TEAM A 77 vs TEAM B 63"). Do not extract watermarks or abbreviations for the team name. No markdown, no explanation — raw JSON only.',
             },
           ],
         },
