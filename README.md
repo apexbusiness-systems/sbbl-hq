@@ -1,4 +1,4 @@
-<!-- Version: v1.2.0 | Date: 2026-04-17 | Status: Current -->
+<!-- Version: v1.3.0 | Date: 2026-07-22 | Status: Current -->
 # SBBL HQ
 
 Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alberta
@@ -11,7 +11,8 @@ Three-league basketball super app by APEX Business Systems Ltd., Edmonton, Alber
 
 ## Stack
 
-- **Frontend:** Vite + React + TypeScript (strict mode not yet enabled; see tsconfig.app.json)
+- **Frontend:** Vite + React + TypeScript (strict mode enabled; see tsconfig.app.json)
+- **Performance & Web Vitals:** Cumulative Layout Shift (CLS) zero-shift target (<0.01), layout-reserved skeleton containers
 - **Styling:** Tailwind CSS (dark-first, `#C9A84C` gold accent)
 - **Database:** Supabase (PostgreSQL + Realtime + Auth + Storage)
 - **Hosting:** Cloudflare Workers — NOT Vercel

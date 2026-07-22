@@ -743,15 +743,28 @@ const OpsPage = () => {
 
   if (loading) {
     return (
-      <div className="container py-8 md:py-12 max-w-6xl">
-        <div className="panel p-4 text-sm text-muted-foreground">Loading Ops session…</div>
+      <div className="container py-8 md:py-12 max-w-6xl space-y-6 min-h-[calc(100vh-8rem)]">
+        <p className="sr-only">Loading Ops session…</p>
+        <div className="flex items-center gap-3">
+          <div className="w-6 h-6 rounded bg-muted animate-pulse" />
+          <div className="space-y-1">
+            <div className="h-8 w-48 bg-muted animate-pulse rounded" />
+            <div className="h-3 w-64 bg-muted/60 animate-pulse rounded" />
+          </div>
+        </div>
+        <div className="h-10 w-full bg-muted/40 animate-pulse rounded" />
+        <div className="grid md:grid-cols-3 gap-4">
+          <div className="panel p-4 h-24 bg-muted/30 animate-pulse" />
+          <div className="panel p-4 h-24 bg-muted/30 animate-pulse" />
+          <div className="panel p-4 h-24 bg-muted/30 animate-pulse" />
+        </div>
       </div>
     );
   }
 
   if (!sessionFresh || reauthRequired) {
     return (
-      <div className="container py-8 md:py-12 max-w-6xl">
+      <div className="container py-8 md:py-12 max-w-6xl min-h-[calc(100vh-8rem)]">
         <div className="panel p-4 text-sm text-destructive font-semibold">Session expired. Sign in again.</div>
       </div>
     );
@@ -759,14 +772,14 @@ const OpsPage = () => {
 
   if (!isSuperAdmin) {
     return (
-      <div className="container py-8 md:py-12 max-w-6xl">
+      <div className="container py-8 md:py-12 max-w-6xl min-h-[calc(100vh-8rem)]">
         <div className="panel p-4 text-sm text-destructive font-semibold">Access denied. Super Admin role required.</div>
       </div>
     );
   }
 
   return (
-    <div className="container py-8 md:py-12 max-w-6xl space-y-6">
+    <div className="container py-8 md:py-12 max-w-6xl space-y-6 min-h-[calc(100vh-8rem)]">
       <div className="flex items-center gap-3">
         <Shield className="w-6 h-6 text-primary" />
         <div>
@@ -795,29 +808,53 @@ const OpsPage = () => {
 
       <div className="space-y-6">
 
-      {activeTab === 'overview' && (<section id="overview" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">System Health</h2><div className="space-y-4"><div className="grid md:grid-cols-3 gap-4">
-          <div className="panel p-4"><p className="text-xs text-muted-foreground">Import jobs</p><p className="stat-numeral text-3xl">{jobs.length}</p></div>
-          <div className="panel p-4"><p className="text-xs text-muted-foreground">Recent successful rows</p><p className="stat-numeral text-3xl">{successfulRows}</p></div>
-          <div className="panel p-4"><p className="text-xs text-muted-foreground">Failed rows</p><p className="stat-numeral text-3xl text-destructive">{failedRows}</p></div>
-          {pipelineHealthQuery.data && Object.entries(pipelineHealthQuery.data.metrics).map(([name, m]) => (
-            <div key={name} className={`panel p-4 border ${m.status === 'critical' ? 'border-destructive/60' : m.status === 'warn' ? 'border-warning/50' : 'border-border'}`}>
-              <p className="text-xs text-muted-foreground">{name.replace(/_/g, ' ')}</p>
-              <p className={`stat-numeral text-3xl ${m.status === 'critical' ? 'text-destructive' : m.status === 'warn' ? 'text-warning' : 'text-success'}`}>{m.value}</p>
-              <p className="text-[10px] text-muted-foreground">warn ≥{m.warn} · critical ≥{m.critical}</p>
+      {activeTab === 'overview' && (
+        <section id="overview" className="space-y-6 pt-6 min-h-[480px]">
+          <h2 className="text-2xl font-display font-bold border-b border-border pb-2">System Health</h2>
+          <div className="space-y-6">
+            {/* Core System Summary Cards */}
+            <div className="grid md:grid-cols-3 gap-4">
+              <div className="panel p-4 min-h-[88px]"><p className="text-xs text-muted-foreground">Import jobs</p><p className="stat-numeral text-3xl">{jobs.length}</p></div>
+              <div className="panel p-4 min-h-[88px]"><p className="text-xs text-muted-foreground">Recent successful rows</p><p className="stat-numeral text-3xl">{successfulRows}</p></div>
+              <div className="panel p-4 min-h-[88px]"><p className="text-xs text-muted-foreground">Failed rows</p><p className="stat-numeral text-3xl text-destructive">{failedRows}</p></div>
             </div>
-          ))}
-          {pipelineHealthQuery.data && pipelineHealthQuery.data.alerts.length > 0 && (
-            <div className="panel p-4 md:col-span-3 border border-destructive/40">
-              <p className="text-xs font-bold text-destructive mb-1">Pipeline alerts</p>
-              {pipelineHealthQuery.data.alerts.map((a) => <p key={a} className="text-xs font-mono text-destructive">{a}</p>)}
+
+            {/* Pipeline Health Metrics & Alerts */}
+            {pipelineHealthQuery.isLoading ? (
+              <div className="grid md:grid-cols-3 gap-4 min-h-[120px]">
+                <div className="panel p-4 animate-pulse bg-muted/20 min-h-[88px]" />
+                <div className="panel p-4 animate-pulse bg-muted/20 min-h-[88px]" />
+                <div className="panel p-4 animate-pulse bg-muted/20 min-h-[88px]" />
+              </div>
+            ) : pipelineHealthQuery.data ? (
+              <div className="space-y-4">
+                <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Pipeline Health Metrics</h3>
+                <div className="grid md:grid-cols-3 gap-4">
+                  {Object.entries(pipelineHealthQuery.data.metrics).map(([name, m]) => (
+                    <div key={name} className={`panel p-4 border ${m.status === 'critical' ? 'border-destructive/60' : m.status === 'warn' ? 'border-warning/50' : 'border-border'}`}>
+                      <p className="text-xs text-muted-foreground">{name.replace(/_/g, ' ')}</p>
+                      <p className={`stat-numeral text-3xl ${m.status === 'critical' ? 'text-destructive' : m.status === 'warn' ? 'text-warning' : 'text-success'}`}>{m.value}</p>
+                      <p className="text-[10px] text-muted-foreground">warn ≥{m.warn} · critical ≥{m.critical}</p>
+                    </div>
+                  ))}
+                  {pipelineHealthQuery.data.alerts.length > 0 && (
+                    <div className="panel p-4 md:col-span-3 border border-destructive/40">
+                      <p className="text-xs font-bold text-destructive mb-1">Pipeline alerts</p>
+                      {pipelineHealthQuery.data.alerts.map((a) => <p key={a} className="text-xs font-mono text-destructive">{a}</p>)}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {/* Recent Actions Section */}
+            <div className="panel p-4 min-h-[140px]">
+              <h3 className="font-display text-xl mb-2">Recent Actions</h3>
+              {latestSummary.length === 0 ? <p className="text-sm text-muted-foreground">No imports yet.</p> : latestSummary.map((job) => <p key={job.id} className="text-sm">{job.job_type} · {job.status} · {job.inserted_rows}/{job.total_rows}</p>)}
             </div>
-          )}
-          <div className="panel p-4 md:col-span-3">
-            <h2 className="font-display text-xl mb-2">Recent Actions</h2>
-            {latestSummary.length === 0 ? <p className="text-sm text-muted-foreground">No imports yet.</p> : latestSummary.map((job) => <p key={job.id} className="text-sm">{job.job_type} · {job.status} · {job.inserted_rows}/{job.total_rows}</p>)}
           </div>
-        </div>
-      </div></section>)}
+        </section>
+      )}
 
       {activeTab === 'scores' && (<section id="scores" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Scores</h2><div className="space-y-4"><div className="space-y-6">
           {!isSuperAdmin && <p className="text-sm text-destructive font-semibold panel p-4">Super Admin role required for score management.</p>}

@@ -1,10 +1,28 @@
-<!-- Version: v1.8.1 | Date: 2026-07-21 | Status: Current -->
+<!-- Version: v1.9.0 | Date: 2026-07-22 | Status: Current -->
 # CHANGELOG
 
 All notable changes to SBBL HQ are documented in this file.
 Versioning follows [semantic versioning](https://semver.org) with UTC date stamps.
 
 ---
+
+## [1.9.0] - 2026-07-22
+
+### Fixed — Web Vitals Cumulative Layout Shift (CLS) & Layout Stabilization
+
+- **Ops Console Overview Layout Shift Elimination** (`src/pages/Ops.tsx`):
+  Separated dynamic `pipelineHealthQuery` metrics from core system stat counters into isolated layout containers with dedicated skeleton loading placeholders and minimum heights (`min-h-[480px]`). Preserved container layout shells across auth loading and role denial states (`min-h-[calc(100vh-8rem)]`) to eliminate cumulative layout shifts on `/ops` (restoring Cloudflare Web Analytics performance to 100% Good).
+- **Google OAuth Provider Layout Shift Elimination** (`src/pages/Login.tsx`):
+  Enclosed conditional Google OAuth sign-in controls within a reserved layout height wrapper (`min-h-[76px] flex flex-col justify-center`). Eliminates form reflow and vertical displacement of submit buttons during async runtime configuration resolution.
+- **Teams & Standings Skeleton Refinement** (`src/pages/Teams.tsx`):
+  Replaced plain-text loading fallbacks with structural multi-card skeleton containers matching standings panel dimensions (`min-h-[480px]`), preventing layout shifts during query execution on `/teams`.
+- **Router Suspense Layout Reservation** (`src/App.tsx`):
+  Upgraded `<RouteFallback />` to enforce full page container height (`min-h-[calc(100vh-8rem)]`), ensuring smooth lazy-route transitions across all application pages.
+
+### Updated — Repository Documentation Alignment
+
+- **README & Omni-Recall Sync** (`README.md`, `omni-recall/`):
+  Updated version metadata (v1.3.0 / 2026-07-22), added zero-shift Web Vitals CLS performance targets, added Omni-Recall wiki correction ledger entry (`2026-07-22-web-analytics-cls-optimization.md`), and updated corrections index.
 
 ## [1.8.1] - 2026-07-21
 
