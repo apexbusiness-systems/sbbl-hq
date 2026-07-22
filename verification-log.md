@@ -1,37 +1,39 @@
 ### ARTIFACT: Verification Evidence
 
-**Git Status:**
 ```
 $ git rev-parse HEAD
-db9a562 (Current active commit in working tree)
-```
+bcca6af00156320c00cc48e333e4e7a88548841f
 
-**E2E Tests:**
-```
-$ npx playwright test e2e/whep-volume-controls.spec.ts --project=chromium
-Running 1 test using 1 worker
-  ok 1 [chromium] › e2e\whep-volume-controls.spec.ts:9:5 › WHEP stream volume controls › respects custom UI volume inputs on WHEP streams (2.1s)
-1 passed (2.1s)
-Exit code: 0
+$ git status -sb
+## apex/sbbl-hq/cls-optimization-and-docs...origin/apex/sbbl-hq/cls-optimization-and-docs
 
-$ npx playwright test e2e/ops-media-tabs.spec.ts --project=chromium
-Running 3 tests using 3 workers
-  ok 2 [chromium] › e2e\ops-media-tabs.spec.ts:133:3 › ops media ingest tabs › no session shows fail-closed reauth state (2.3s)
-  ok 1 [chromium] › e2e\ops-media-tabs.spec.ts:147:3 › ops media ingest tabs › store and events tabs are reachable for super-admin sessions (2.6s)
-  ok 3 [chromium] › e2e\ops-media-tabs.spec.ts:160:3 › ops media ingest tabs › potg upload submits ingest job and approve/reject use wrapped ops endpoints (12.2s)
-3 passed (12.2s)
-Exit code: 0
-```
+$ npm run typecheck
+> vite_react_shadcn_ts@1.4.0 typecheck
+> tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json
+Exit code: 0 (PASSED)
 
-**Lint & Compile:**
-```
 $ npm run lint
-✔ No lint errors
-Exit code: 0
+> vite_react_shadcn_ts@1.4.0 lint
+> eslint .
+Exit code: 0 (PASSED - 0 warnings, 0 errors)
 
-$ tsc --noEmit
-✔ No type errors
-Exit code: 0
+$ npm test
+> vite_react_shadcn_ts@1.4.0 test
+> vitest run
+ Test Files  132 passed | 2 skipped (134)
+      Tests  1364 passed | 8 skipped (1372)
+   Duration  93.65s
+Exit code: 0 (PASSED)
+
+$ npm run build
+> vite_react_shadcn_ts@1.4.0 build
+> vite build
+vite v5.4.21 building for production...
+✓ 3271 modules transformed.
+dist/index.html 2.64 kB │ gzip: 0.88 kB
+PWA v1.2.0: precache 85 entries (2129.43 KiB)
+Exit code: 0 (PASSED)
+
+SonarCloud Quality Gate: PASSED (A-Grade)
+Browser Validation: E2E Playwright suites passing (Self-host owner auth ingest: PASS)
 ```
-
-**SonarCloud Quality Gate:** PASSED (A-grade)
