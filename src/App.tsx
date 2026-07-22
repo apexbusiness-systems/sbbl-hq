@@ -67,8 +67,12 @@ const queryClient = new QueryClient({
 });
 
 const RouteFallback = () => (
-  <div className="container py-16">
-    <div className="panel p-4 text-sm text-muted-foreground">Loading page…</div>
+  <div className="container py-8 md:py-12 max-w-6xl min-h-[calc(100vh-8rem)]">
+    <div className="panel p-6 space-y-4 animate-pulse">
+      <div className="h-8 w-64 bg-muted rounded" />
+      <div className="h-4 w-96 bg-muted/60 rounded" />
+      <div className="h-48 w-full bg-muted/30 rounded mt-6" />
+    </div>
   </div>
 );
 

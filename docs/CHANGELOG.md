@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-07-22 — v1.9.0 — Web Analytics Cumulative Layout Shift (CLS) & Layout Stabilization
+
+- **Ops Console Layout Shift Elimination** (`src/pages/Ops.tsx`): Separated dynamic `pipelineHealthQuery` metrics from static system overview counters into dedicated layout containers with structural skeleton placeholders (`min-h-[480px]`). Maintained container shells across loading and auth states (`min-h-[calc(100vh-8rem)]`) to eliminate layout reflow on `/ops` (restoring Cloudflare Web Analytics performance to 100% Good).
+- **Google OAuth Button Stabilization** (`src/pages/Login.tsx`): Enclosed conditional Google OAuth sign-in controls within a reserved layout height wrapper (`min-h-[76px] flex flex-col justify-center`) to eliminate form input & submit button reflow during async configuration loading.
+- **Teams & Standings Skeleton Refinement** (`src/pages/Teams.tsx`): Upgraded plain-text loading states to multi-card standings skeletons (`min-h-[480px]`), preventing layout shifts during team data fetching.
+- **Router Suspense Layout Reservation** (`src/App.tsx`): Upgraded `<RouteFallback />` to enforce full page container height (`min-h-[calc(100vh-8rem)]`) for zero-shift lazy route loading.
+
 ## 2026-07-21 — v1.8.1 — Ops Media League Filter 500 & League Resolution Consolidation
 
 - **League Resolution Consolidation** (`src/worker/shared.ts`): Fixed the `/ops/list/media` 500 — league filter chips sent `LEAGUE_REGISTRY` slugs (e.g. `tgifbl`) straight into `.eq('league_id', slug)` against a uuid column (Postgres `22P02`). Introduced shared `resolveLeagueId` / `resolveLeagueIdFilter` helpers (UUID pass-through, case-insensitive code lookup, name fallback, `LEAGUE_NO_MATCH` sentinel → explicit zero rows) and migrated all 8 hand-rolled lookups: `handleOpsListMediaPublications`, `fetchPublicMediaRows`, `handleOpsPatchMediaPublications`, `handleTeamsList` (previously silently degraded to fetch-all-then-JS-filter), POTG ingest, ingest publish, game/event create (`src/worker/index.ts`), and 3 digest lookups (`src/worker/routes/digest.ts`).

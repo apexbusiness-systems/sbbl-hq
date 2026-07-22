@@ -144,8 +144,17 @@ const TeamsPage = () => {
       </div>
 
       {teamsQuery.isLoading && (
-        <div className="flex items-center justify-center py-16">
-          <div className="text-muted-foreground">Loading teams data...</div>
+        <div className="space-y-2 max-w-3xl min-h-[480px]">
+          {[1, 2, 3, 4, 5].map((i) => (
+            <div key={i} className="panel p-3 flex items-center gap-4 animate-pulse">
+              <div className="w-6 h-5 bg-muted/60 rounded flex-shrink-0" />
+              <div className="flex-1 space-y-2 min-w-0">
+                <div className="h-4 w-40 bg-muted rounded" />
+                <div className="h-3 w-24 bg-muted/40 rounded" />
+              </div>
+              <div className="w-20 h-4 bg-muted/50 rounded flex-shrink-0" />
+            </div>
+          ))}
         </div>
       )}
 
