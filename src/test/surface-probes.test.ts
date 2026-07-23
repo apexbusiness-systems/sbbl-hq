@@ -40,8 +40,8 @@ describe('Surface Probes', () => {
         body: {
           kind: 'teams',
           format: 'v1',
-          // smallest valid row: name + league_id required. some_loose_key is NOT in the Zod schema.
-          rows: [{ name: 'Test Team', league_id: 'SBBL', some_loose_key: 'value' }],
+          // smallest valid row: name + league_id + season_id required. some_loose_key is NOT in the Zod schema.
+          rows: [{ name: 'Test Team', league_id: 'SBBL', season_id: 'cccccccc-3333-4333-8333-333333333333', some_loose_key: 'value' }],
         },
         admin: adminMock,
       });

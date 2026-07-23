@@ -95,6 +95,39 @@ export async function parsePotgImage(imageBase64: string, mimeType: string) {
   });
 }
 
+export type ParsedRosterPlayer = { name: string; jerseyNumber: number | null; position: string | null };
+
+export async function parseRosterImage(imageBase64: string, mimeType: string) {
+  return apiFetch<{
+    ok: boolean;
+    data: { teamName: string; players: ParsedRosterPlayer[] };
+  }>('/ops/roster/parse-image', {
+    method: 'POST',
+    body: JSON.stringify({ imageBase64, mimeType }),
+  });
+}
+
+export async function importRoster(params: {
+  leagueId: string;
+  seasonId: string;
+  teamName: string;
+  players: Array<{ name: string; jerseyNumber?: number | string | null; position?: string | null }>;
+}) {
+  return apiFetch<{
+    ok: boolean;
+    teamId: string;
+    inserted: number;
+    skipped: number;
+    failed: number;
+    warnings: string[];
+    errors: string[];
+  }>('/ops/roster/import', {
+    method: 'POST',
+    headers: { [IDEMPOTENCY_HEADER]: createIdempotencyKey(`roster-import-${params.leagueId}-${params.teamName}`) },
+    body: JSON.stringify(params),
+  });
+}
+
 export async function fetchOpsList(entity: 'teams' | 'players' | 'products' | 'events') {
   return apiFetch<{ ok: boolean; data: unknown[] }>(`/ops/list/${entity}`);
 }

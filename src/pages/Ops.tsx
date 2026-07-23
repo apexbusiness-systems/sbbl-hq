@@ -10,6 +10,7 @@ import {
   fetchOpsBootstrap, fetchImportHistory, fetchPipelineHealth, mergePlayerIdentities,
   parseEventImage, parsePotgImage, manualOpsAction,
   ingestPresign, ingestSubmit, ingestApprove, ingestReject,
+  parseRosterImage, importRoster, type ParsedRosterPlayer,
   type MediaPublicationStatus, type OpsMediaPublication,
 } from '@/lib/api/ops';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
@@ -17,7 +18,7 @@ import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
 import { fetchScores, submitScoreManual, parseScoreboardImage } from '@/lib/api/scores';
 import type { ScoreCategory } from '@/types';
 
-type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'media' | 'history';
+type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'roster' | 'media' | 'history';
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'overview',  label: 'Overview'       },
@@ -28,6 +29,7 @@ const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'events',    label: 'Events'         },
   { id: 'store',     label: 'Store Media'    },
   { id: 'potg',      label: 'POTG Parser'    },
+  { id: 'roster',    label: 'Roster Import'  },
   { id: 'media',     label: 'Media Library'  },
   { id: 'history',   label: 'Import History' },
 ];
@@ -224,6 +226,12 @@ const OpsPage = () => {
   const [potgParseError, setPotgParseError] = useState<string | null>(null);
   const [potgImageFile, setPotgImageFile] = useState<File | null>(null);
   const [potgForm, setPotgForm] = useState({ playerName: '', team: '', pts: '', rebs: '', assts: '', gameResult: '', leagueId: 'wbl', date: new Date().toISOString().split('T')[0] });
+  const rosterFileRef = useRef<HTMLInputElement>(null);
+  const [rosterParseState, setRosterParseState] = useState<'idle' | 'parsing' | 'parsed' | 'error'>('idle');
+  const [rosterParseError, setRosterParseError] = useState<string | null>(null);
+  const [rosterForm, setRosterForm] = useState({ teamName: '', leagueId: '', seasonId: '' });
+  const [rosterPlayers, setRosterPlayers] = useState<Array<{ name: string; jerseyNumber: string; position: string }>>([]);
+  const [rosterImportResult, setRosterImportResult] = useState<{ teamId: string; inserted: number; skipped: number; failed: number; warnings: string[]; errors: string[] } | null>(null);
   const isSuperAdmin = roles.includes('super_admin');
   const sessionFresh = isSessionFresh(session);
   const canRunOps = !loading && sessionFresh && isSuperAdmin;
@@ -327,6 +335,43 @@ const OpsPage = () => {
     }
   };
 
+  const handleRosterImageUpload = async (file: File) => {
+    ensureOpsAccess();
+    setRosterParseState('parsing');
+    setRosterParseError(null);
+    setRosterImportResult(null);
+    try {
+      // Pure base64 only — never pass a data: URI
+      const buffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = '';
+      for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+      const imageBase64 = btoa(binary);
+
+      const result = await parseRosterImage(imageBase64, file.type as string);
+      if (result.ok && result.data) {
+        setRosterForm(f => ({ ...f, teamName: result.data.teamName ?? '' }));
+        setRosterPlayers((result.data.players ?? []).map((p: ParsedRosterPlayer) => ({
+          name: p.name ?? '',
+          jerseyNumber: p.jerseyNumber != null ? String(p.jerseyNumber) : '',
+          position: p.position ?? '',
+        })));
+        setRosterParseState('parsed');
+      } else {
+        setRosterParseError('Parse failed — add players manually');
+        setRosterParseState('error');
+      }
+    } catch (e) {
+      setRosterParseError(e instanceof Error ? e.message : 'Unknown error');
+      setRosterParseState('error');
+    }
+  };
+
+  const updateRosterPlayer = (i: number, field: 'name' | 'jerseyNumber' | 'position', value: string) =>
+    setRosterPlayers(prev => prev.map((p, idx) => idx === i ? { ...p, [field]: value } : p));
+  const addRosterPlayerRow = () => setRosterPlayers(prev => [...prev, { name: '', jerseyNumber: '', position: '' }]);
+  const removeRosterPlayerRow = (i: number) => setRosterPlayers(prev => prev.filter((_, idx) => idx !== i));
+
   // Layout fix (2026-07-20): `tabs` was declared but never rendered — every
   // section stacked into one endless scroll. True tab navigation restored;
   // exactly one section mounts at a time.
@@ -395,6 +440,26 @@ const OpsPage = () => {
     },
     onSuccess: async (data) => {
       setIngestJob(data as { jobId: string; state: string });
+      await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
+      await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
+    },
+  });
+
+  const rosterImportMutation = useMutation({
+    mutationFn: () => importRoster({
+      leagueId: rosterForm.leagueId,
+      seasonId: rosterForm.seasonId,
+      teamName: rosterForm.teamName,
+      players: rosterPlayers
+        .filter(p => p.name.trim())
+        .map(p => ({
+          name: p.name.trim(),
+          jerseyNumber: p.jerseyNumber.trim() || null,
+          position: p.position.trim() || null,
+        })),
+    }),
+    onSuccess: async (data) => {
+      setRosterImportResult(data);
       await queryClient.invalidateQueries({ queryKey: ['ops-import-history'] });
       await queryClient.invalidateQueries({ queryKey: ['ops-bootstrap'] });
     },
@@ -1568,6 +1633,117 @@ const OpsPage = () => {
                 </a>
               )}
             </div>
+          )}
+        </div>
+      </div></section>)}
+
+      {activeTab === 'roster' && (<section id="roster" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Roster Import</h2><div className="space-y-4"><div className="panel p-4 space-y-5 max-w-3xl">
+          <div>
+            <h2 className="font-display text-xl">Roster Image Parser</h2>
+            <p className="text-xs text-muted-foreground mt-1">Upload a roster/team photo — AI vision extracts the team and player list, then you review and confirm before it creates the team and players.</p>
+          </div>
+
+          {!isSuperAdmin ? (
+            <p className="text-sm text-destructive font-semibold">Super Admin required to import a roster.</p>
+          ) : (
+            <>
+              {/* Image drop zone */}
+              <div
+                className="border-2 border-dashed border-border rounded-sm p-6 text-center cursor-pointer hover:border-primary/40 transition-colors"
+                onClick={() => rosterFileRef.current?.click()}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) handleRosterImageUpload(f); }}
+              >
+                <input ref={rosterFileRef} id="roster-image-input" type="file" accept="image/*" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) handleRosterImageUpload(f); }} />
+                {rosterParseState === 'parsing' ? (
+                  <div className="flex flex-col items-center gap-2">
+                    <Loader2 className="w-6 h-6 text-primary animate-spin" />
+                    <p className="text-sm text-muted-foreground">Parsing with AI vision…</p>
+                  </div>
+                ) : rosterParseState === 'parsed' ? (
+                  <div className="flex flex-col items-center gap-1">
+                    <CheckCircle2 className="w-5 h-5 text-success" />
+                    <p className="text-xs text-success font-medium">{rosterPlayers.length} player{rosterPlayers.length === 1 ? '' : 's'} extracted — review below</p>
+                    <p className="text-[10px] text-muted-foreground">Click to parse another image</p>
+                  </div>
+                ) : rosterParseState === 'error' ? (
+                  <div className="flex flex-col items-center gap-1">
+                    <AlertCircle className="w-5 h-5 text-destructive" />
+                    <p className="text-xs text-destructive">{rosterParseError}</p>
+                    <p className="text-[10px] text-muted-foreground">Add team/players manually below</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-2">
+                    <Upload className="w-6 h-6 text-muted-foreground" />
+                    <p className="text-sm text-muted-foreground">Drop roster/team photo or click to upload</p>
+                    <p className="text-[10px] text-muted-foreground">PNG, JPG — extracts team name, player names, jersey numbers, positions</p>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Team Name</label>
+                  <input className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={rosterForm.teamName} onChange={e => setRosterForm(f => ({ ...f, teamName: e.target.value }))} placeholder="e.g. Ball is Life" />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">League ID / Code *</label>
+                  <input className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={rosterForm.leagueId} onChange={e => setRosterForm(f => ({ ...f, leagueId: e.target.value }))} placeholder="e.g. wbl" />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Season ID (UUID) *</label>
+                  <input className="w-full mt-1 bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={rosterForm.seasonId} onChange={e => setRosterForm(f => ({ ...f, seasonId: e.target.value }))} placeholder="season uuid" />
+                </div>
+              </div>
+
+              {/* Editable player review table */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[10px] uppercase tracking-wider text-muted-foreground">Players ({rosterPlayers.length})</label>
+                  <button type="button" onClick={addRosterPlayerRow} className="text-xs text-primary underline">+ Add player</button>
+                </div>
+                {rosterPlayers.length === 0 ? (
+                  <p className="text-xs text-muted-foreground border border-dashed border-border rounded-sm p-4 text-center">No players yet — parse an image or add a row manually.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {rosterPlayers.map((player, i) => (
+                      <div key={i} className="grid grid-cols-[1fr_90px_90px_auto] gap-2 items-center">
+                        <input className="bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={player.name} onChange={e => updateRosterPlayer(i, 'name', e.target.value)} placeholder="Player name" />
+                        <input className="bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={player.jerseyNumber} onChange={e => updateRosterPlayer(i, 'jerseyNumber', e.target.value)} placeholder="#" />
+                        <input className="bg-secondary border border-border rounded-sm px-3 py-2 text-sm" value={player.position} onChange={e => updateRosterPlayer(i, 'position', e.target.value)} placeholder="Pos" />
+                        <button type="button" onClick={() => removeRosterPlayerRow(i)} className="p-2 text-destructive hover:bg-destructive/10 rounded-sm" aria-label={`Remove ${player.name || 'player row'}`}>
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <button
+                disabled={rosterImportMutation.isPending || !rosterForm.teamName.trim() || !rosterForm.leagueId.trim() || !rosterForm.seasonId.trim() || rosterPlayers.filter(p => p.name.trim()).length === 0}
+                onClick={() => rosterImportMutation.mutate()}
+                className="w-full gold-bg py-3 font-display font-bold text-sm uppercase tracking-wider rounded-sm disabled:opacity-50 transition-opacity"
+              >
+                {rosterImportMutation.isPending ? 'Importing…' : 'Import Roster'}
+              </button>
+
+              {rosterImportMutation.error && <p className="text-xs text-destructive">{(rosterImportMutation.error as Error).message}</p>}
+
+              {rosterImportResult && (
+                <div className="p-3 bg-success/10 border border-success/20 rounded-sm space-y-1">
+                  <p className="text-xs text-success font-medium">
+                    ✓ Team {rosterImportResult.teamId.slice(0, 8)} · {rosterImportResult.inserted} created, {rosterImportResult.skipped} already existed, {rosterImportResult.failed} failed
+                  </p>
+                  {rosterImportResult.warnings.length > 0 && (
+                    <p className="text-[10px] text-warning">{rosterImportResult.warnings.join(' · ')}</p>
+                  )}
+                  {rosterImportResult.errors.length > 0 && (
+                    <p className="text-[10px] text-destructive">{rosterImportResult.errors.join(' · ')}</p>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div></section>)}

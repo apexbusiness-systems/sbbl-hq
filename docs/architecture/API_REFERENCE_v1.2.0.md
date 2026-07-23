@@ -1,9 +1,20 @@
-<!-- Version: v1.4.0 | Date: 2026-05-21 | Status: Current -->
+<!-- Version: v1.5.0 | Date: 2026-07-23 | Status: Current -->
 # SBBL Worker API Reference
 
-**Version:** v1.4.0
-**Previous:** v1.3.0 (2026-05-06)
-**Last Updated:** 2026-05-11
+**Version:** v1.5.0
+**Previous:** v1.4.0 (2026-05-21)
+**Last Updated:** 2026-07-23
+
+**Changelog (v1.4.0 → v1.5.0):**
+- Added `POST /ops/roster/parse-image` and `POST /ops/roster/import` (Roster
+  Image Ingest) — closes the root-cause gap where no image → team/player
+  ingestion path existed. See `ROSTER_INGEST_EXECUTION_CONTRACT.md` for
+  rationale and `src/test/worker-roster-ingest-pipeline.test.ts` for coverage.
+- `teamRowSchema` (`src/worker/routes/ops-upload.ts`) now requires
+  `season_id` on every `teams`-kind row (CSV upload, JSON import, and the new
+  roster import) — closes the silent-DB-failure gap where a team row missing
+  `season_id` reached the `teams.season_id NOT NULL` constraint instead of
+  being rejected at the validation layer.
 
 **Changelog (v1.3.0 → v1.4.0):**
 - Added **OmniBridge** section documenting `POST /webhooks/omnihub`
@@ -141,6 +152,8 @@ Require `league_admin`, `super_admin`, or `team_manager` role.
 - `POST /ops/store/media` — Upload store media.
 - `POST /ops/potg/parse` — Parse POTG image with AI.
 - `POST /ops/potg/submit` — Submit POTG record.
+- `POST /ops/roster/parse-image` — Parse a roster/team photo with AI vision (`league_admin`+). Parse-only, writes nothing — returns `{ teamName, players: [{name, jerseyNumber, position}] }` for operator review.
+- `POST /ops/roster/import` — Create/find the team (by league + name) and provision every reviewed player onto it (super_admin). Body: `{ leagueId, seasonId, teamName, players[] }`. `leagueId` resolves via `resolveLeagueId` (slug, code, or uuid). Idempotent re-runs skip existing team/player rows.
 - `POST /api/coach/request` — Coach approval request.
 - `GET /ops/coach/requests` — List coach requests.
 - `POST /ops/coach/:id/resolve` — Resolve coach request.

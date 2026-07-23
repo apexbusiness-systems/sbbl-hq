@@ -92,7 +92,8 @@ import {
 import {
   handleScoresCsvUpload,
   handleImportRoute as _handleImportRoute,
-  handleScoresCsvImport as _handleScoresCsvImport
+  handleScoresCsvImport as _handleScoresCsvImport,
+  handleRosterImport as _handleRosterImport
 } from "./routes/ops-upload";
 import { parseStripeSignature, constantTimeEqualHex } from "./stripe-utils";
 export { parseStripeSignature, constantTimeEqualHex };
@@ -3505,6 +3506,70 @@ export async function handleParsePotgImage(ctx: HandlerCtx) {
   }
 }
 
+/** POST /ops/roster/parse-image — roster/team-photo OCR via Groq vision (admin only, parse-only). */
+export async function handleParseRosterImage(ctx: HandlerCtx) {
+  await requireAdminSession(ctx.req, ctx.admin);
+  const apiKey = ctx.env.GROQ_API_KEY;
+  if (!apiKey) return json({ ok: false, error: "groq_api_key_missing" }, 503);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    imageBase64: string;
+    mimeType: string;
+  } | null;
+  if (!body?.imageBase64 || !body?.mimeType)
+    return json({ ok: false, error: "image_required" }, 400);
+
+  const pureBase64 = body.imageBase64.includes(',')
+    ? body.imageBase64.split(',')[1] ?? body.imageBase64
+    : body.imageBase64;
+
+  const resp = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: ctx.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b", // env-overridable (2026-07-20): next Groq model retirement is a config change, not a redeploy. qwen3.6-27b runtime-verified on this account.
+      reasoning_effort: "none", // no thinking tokens: raw JSON only; also keeps requests inside free-tier TPM
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image_url",
+              image_url: {
+                url: `data:${body.mimeType};base64,${pureBase64}`,
+              },
+            },
+            {
+              type: "text",
+              text: 'Extract team roster data from this photo or graphic. Return ONLY a JSON object with exactly these keys: teamName (string), players (array of objects, each with name (string), jerseyNumber (number or null), position (string or null)). No markdown, no explanation — raw JSON only.',
+            },
+          ],
+        },
+      ],
+    }),
+  });
+
+  if (!resp.ok)
+    return json({ ok: false, error: "groq_error", status: resp.status }, 502);
+  const ai = (await resp.json()) as {
+    choices: Array<{ message: { content: string } }>;
+  };
+  const raw = ai.choices[0]?.message?.content ?? "";
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return json({ ok: false, error: "parse_failed", raw }, 422);
+  try {
+    const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+    if (!Array.isArray(parsed.players)) parsed.players = [];
+    return json({ ok: true, data: parsed });
+  } catch {
+    return json({ ok: false, error: "invalid_json", raw }, 422);
+  }
+}
+
 function normalizeTeamToken(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
@@ -6589,6 +6654,8 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
 
   { method: "POST", path: "/ops/event/parse", handler: handleParseEventImage },
   { method: "POST", path: "/ops/potg/parse", handler: handleParsePotgImage },
+  { method: "POST", path: "/ops/roster/parse-image", handler: handleParseRosterImage },
+  { method: "POST", path: "/ops/roster/import", handler: _handleRosterImport },
 
   { method: "GET", path: "/api/public-config", handler: handlePublicConfig },
   { method: "GET", path: "/api/public/home", handler: handlePublicHome },

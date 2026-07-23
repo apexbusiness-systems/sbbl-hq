@@ -8,15 +8,17 @@ import {
   ensureMutation,
   writeImportJob,
   writeIngressFailure,
+  resolvePotgPlayer,
   type HandlerCtx
 } from '../index';
+import { resolveLeagueId } from '../shared';
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 // ── ZOD SCHEMAS ──────────────────────────────────────────────────────────────
 const teamRowSchema = z.object({
   name: z.string().min(1, "Team name is required"),
   league_id: z.string().min(1, "League ID/Code is required"),
-  season_id: z.string().uuid("Season ID must be a valid UUID").optional().nullable(),
+  season_id: z.string().uuid("Season ID is required"),
   division_id: z.string().optional().nullable(),
   wins: z.string().regex(/^\d+$/, "Wins must be a non-negative integer").optional().nullable(),
   losses: z.string().regex(/^\d+$/, "Losses must be a non-negative integer").optional().nullable(),
@@ -640,4 +642,177 @@ export async function handleScoresCsvImport(ctx: HandlerCtx) {
   }
 
   return json({ ok: true, inserted, skipped, failed, errors });
+}
+
+// ── ROSTER IMAGE INGEST ──────────────────────────────────────────────────────
+// Closes the root-cause gap: no image → roster path existed before this (only
+// scoreboard/event/single-POTG-player parsers wrote anywhere). This handler is
+// the only path in the codebase that can bulk-create a team AND attach N
+// players to it from one operator action. Team resolution mirrors the
+// find-by-league+name-else-create pattern already proven in resolvePotgPlayer's
+// team lookup; player provisioning reuses resolvePotgPlayer itself (same
+// profile/player find-or-create the POTG pipeline relies on) so there is one
+// canonical player-provisioning path, not two.
+const rosterPlayerRowSchema = z.object({
+  name: z.string().min(1, "Player name is required"),
+  jerseyNumber: z.union([z.number(), z.string(), z.null()]).optional(),
+  position: z.string().optional().nullable(),
+});
+
+const rosterImportSchema = z.object({
+  leagueId: z.string().min(1, "League ID/code is required"),
+  seasonId: z.string().uuid("Season ID must be a valid UUID"),
+  teamName: z.string().min(1, "Team name is required"),
+  players: z.array(rosterPlayerRowSchema).min(1, "At least one player is required"),
+});
+
+export async function handleRosterImport(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+
+  const body = await ctx.req.json().catch(() => null);
+  const parsed = rosterImportSchema.safeParse(body);
+  if (!parsed.success) {
+    return json({
+      ok: false,
+      errors: parsed.error.errors.map((err) => ({
+        field: String(err.path[0] ?? ""),
+        code: err.code,
+        message: err.message,
+      })),
+    }, 422);
+  }
+  const { leagueId, seasonId, teamName, players } = parsed.data;
+
+  const riskLane = classifyRiskLane("roster_import", { teamName, players });
+  if (riskLane === "BLOCKED") {
+    await writeIngressFailure(ctx.admin, "roster_import_blocked_sql_injection", parsed.data, "admin_mutation", session.userId);
+    return json({ ok: false, error: "blocked_class_payload" }, 403);
+  }
+
+  // Rule 10 (CLAUDE.md): resolve the app-level league slug/uuid through the
+  // shared resolver — never pass a raw client value into a uuid league_id column.
+  const leagueUuid = await resolveLeagueId(ctx.admin, leagueId);
+  if (!leagueUuid) {
+    return json({ ok: false, error: "invalid_league_code" }, 400);
+  }
+
+  let teamId: string;
+  let teamInserted = false;
+  const { data: existingTeam, error: teamLookupError } = await ctx.admin
+    .from("teams")
+    .select("id")
+    .eq("league_id", leagueUuid)
+    .ilike("name", teamName)
+    .maybeSingle();
+  if (teamLookupError) return json({ ok: false, error: teamLookupError.message }, 500);
+
+  if (existingTeam?.id) {
+    teamId = String(existingTeam.id);
+  } else {
+    const { data: newTeam, error: teamInsertError } = await ctx.admin
+      .from("teams")
+      .insert({
+        league_id: leagueUuid,
+        season_id: seasonId,
+        name: teamName,
+        status: "published",
+      })
+      .select("id")
+      .single();
+    if (teamInsertError) {
+      if (isDuplicateKeyError(teamInsertError)) {
+        // Re-running an identical import — the unique(season_id, name) constraint
+        // means the row now exists; fetch it instead of failing.
+        const { data: raceTeam } = await ctx.admin
+          .from("teams")
+          .select("id")
+          .eq("league_id", leagueUuid)
+          .ilike("name", teamName)
+          .maybeSingle();
+        if (!raceTeam?.id) return json({ ok: false, error: "team_resolution_failed" }, 500);
+        teamId = String(raceTeam.id);
+      } else {
+        return json({ ok: false, error: teamInsertError.message }, 500);
+      }
+    } else {
+      teamId = String(newTeam.id);
+      teamInserted = true;
+    }
+  }
+
+  let inserted = 0;
+  let skipped = 0;
+  let failed = 0;
+  const warnings: string[] = [];
+  const errors: string[] = [];
+
+  for (const player of players) {
+    const resolution = await resolvePotgPlayer(ctx.admin, player.name, leagueUuid, {
+      teamName,
+      actorId: session.userId,
+    });
+    if (resolution.ok === false) {
+      failed++;
+      errors.push(`${player.name}: ${resolution.error}`);
+      continue;
+    }
+    warnings.push(...resolution.warnings.map((w) => `${player.name}: ${w}`));
+
+    const jerseyNumber = player.jerseyNumber != null && player.jerseyNumber !== ""
+      ? Number(player.jerseyNumber)
+      : null;
+    const { error: updateError } = await ctx.admin
+      .from("players")
+      .update({
+        team_id: teamId,
+        jersey_number: Number.isFinite(jerseyNumber) ? jerseyNumber : null,
+        position: player.position || null,
+      })
+      .eq("id", resolution.playerId)
+      .select()
+      .maybeSingle();
+    if (updateError) {
+      failed++;
+      errors.push(`${player.name}: ${updateError.message}`);
+      continue;
+    }
+
+    if (resolution.provisioned) inserted++;
+    else skipped++;
+  }
+
+  await ctx.admin.rpc("enqueue_local_domain_event", {
+    p_event_type: "roster_imported",
+    p_entity_type: "teams",
+    p_entity_id: teamId,
+    p_league_id: leagueUuid,
+    p_payload: { teamName, playerCount: players.length },
+    p_trace_id: crypto.randomUUID(),
+    p_available_at: new Date().toISOString(),
+  }).then(({ error }: { error: { message: string } | null }) => {
+    if (error) console.warn("[roster-import] enqueue_local_domain_event warning:", error.message);
+  });
+
+  await writeImportJob(ctx.admin, {
+    job_type: "roster",
+    submitted_by: session.userId,
+    total_rows: players.length,
+    inserted_rows: inserted,
+    failed_rows: failed,
+    payload_summary: { teamName, teamInserted, skipped, warnings: warnings.slice(0, 20) },
+    error_summary: errors.slice(0, 5).join("; ") || null,
+  });
+
+  const idempotencyKey = ctx.req.headers.get("x-idempotency-key") ?? crypto.randomUUID();
+  await ctx.admin.from("audit_logs").insert({
+    actor_id: session.userId,
+    action: "roster_import",
+    ref_type: "teams",
+    ref_id: teamId,
+    payload: { teamName, playerCount: players.length, inserted, skipped, failed },
+    idempotency_key: idempotencyKey,
+  });
+
+  return json({ ok: true, teamId, inserted, skipped, failed, warnings, errors });
 }
