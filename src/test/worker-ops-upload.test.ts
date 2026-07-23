@@ -114,14 +114,15 @@ describe('handleScoresCsvUpload — v1 marker rows never cause silent data loss'
 
   it('inserts data rows that carry a format/schema_version column', async () => {
     const state = { ...SUPER, leagues: [{ id: 'L1', code: 'WBL' }], teams: [] };
+    const SEASON = 'cccccccc-3333-4333-8333-333333333333';
     const ctx = mkCtx({
       url: 'https://local/api/ops/upload/csv',
       method: 'POST',
       body: {
         kind: 'teams',
         rows: [
-          { name: 'Alpha', league_id: 'WBL', format: 'v1' },
-          { name: 'Beta', league_id: 'WBL', schema_version: 'v1' },
+          { name: 'Alpha', league_id: 'WBL', season_id: SEASON, format: 'v1' },
+          { name: 'Beta', league_id: 'WBL', season_id: SEASON, schema_version: 'v1' },
         ],
       },
       headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
@@ -145,7 +146,7 @@ describe('handleScoresCsvUpload — v1 marker rows never cause silent data loss'
         kind: 'teams',
         rows: [
           { schema_version: 'v1', name: '', league_id: '' }, // marker-only row from CSV export
-          { name: 'Gamma', league_id: 'WBL' },
+          { name: 'Gamma', league_id: 'WBL', season_id: 'cccccccc-3333-4333-8333-333333333333' },
         ],
       },
       headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
@@ -199,7 +200,7 @@ describe('uniform duplicate-key tolerance — idempotent re-runs for every entit
     const ctx = mkCtx({
       url: 'https://local/api/ops/upload/csv',
       method: 'POST',
-      body: { kind: 'teams', format: 'v1', rows: [{ name: 'Delta', league_id: 'WBL' }] },
+      body: { kind: 'teams', format: 'v1', rows: [{ name: 'Delta', league_id: 'WBL', season_id: 'cccccccc-3333-4333-8333-333333333333' }] },
       headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
       admin: createAdmin(state),
     });
@@ -229,7 +230,10 @@ describe('csv upload emits domain events — parity with /ops/imports/*', () => 
       method: 'POST',
       body: {
         kind: 'teams', format: 'v1',
-        rows: [{ name: 'Echo', league_id: 'WBL' }, { name: 'Foxtrot', league_id: 'WBL' }],
+        rows: [
+          { name: 'Echo', league_id: 'WBL', season_id: 'cccccccc-3333-4333-8333-333333333333' },
+          { name: 'Foxtrot', league_id: 'WBL', season_id: 'cccccccc-3333-4333-8333-333333333333' },
+        ],
       },
       headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
       admin,
