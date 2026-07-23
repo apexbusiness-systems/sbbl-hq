@@ -90,8 +90,9 @@ async function main() {
       console.log('DB Push output:', output);
       pushed = true;
       break;
-    } catch (err: any) {
-      console.log(`Host failed: ${err.message?.split('\n')[0]}`);
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.log(`Host failed: ${errorMsg.split('\n')[0]}`);
     }
   }
 

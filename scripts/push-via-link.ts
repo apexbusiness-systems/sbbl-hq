@@ -1,6 +1,11 @@
 import fs from 'node:fs';
 import { execSync } from 'node:child_process';
 
+interface ExecError extends Error {
+  stdout?: string;
+  stderr?: string;
+}
+
 async function main() {
   const envPath = 'C:\\Users\\sinyo\\Desktop\\ENV\\SBBL-HQ -ENV.md';
   const envContent = fs.readFileSync(envPath, 'utf8');
@@ -27,8 +32,9 @@ async function main() {
       stdio: 'pipe'
     });
     console.log('Link output:', linkOutput);
-  } catch (err: any) {
-    console.log('Link output / note:', err.stdout || err.message);
+  } catch (err: unknown) {
+    const execErr = err as ExecError;
+    console.log('Link output / note:', execErr.stdout || execErr.message);
   }
 
   console.log('Pushing migrations via CLI...');
@@ -39,8 +45,9 @@ async function main() {
       stdio: 'pipe'
     });
     console.log('Push output:', pushOutput);
-  } catch (err: any) {
-    console.log('Push output / note:', err.stdout || err.stderr || err.message);
+  } catch (err: unknown) {
+    const execErr = err as ExecError;
+    console.log('Push output / note:', execErr.stdout || execErr.stderr || execErr.message);
   }
 }
 
