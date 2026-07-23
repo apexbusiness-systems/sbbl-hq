@@ -676,6 +676,29 @@ function parseJerseyNumber(raw: unknown): { value: number | null; invalid: boole
   return { value: n, invalid: false };
 }
 
+// Shared by the initial team lookup and the post-duplicate-key race recovery
+// below — deliberately NOT a Postgres upsert. teams' unique index on
+// (season_id, name) is case-sensitive text equality; an upsert's ON CONFLICT
+// would miss a same-team-different-casing OCR read (e.g. "BALL IS LIFE" vs
+// "Ball is Life") and create a second team row instead of reusing the first.
+// The ilike lookup here is what makes that dedup case-insensitive.
+async function findRosterTeamId(
+  admin: SupabaseClient,
+  leagueUuid: string,
+  seasonId: string,
+  teamName: string,
+): Promise<{ id: string | null; error: string | null }> {
+  const { data, error } = await admin
+    .from("teams")
+    .select("id")
+    .eq("league_id", leagueUuid)
+    .eq("season_id", seasonId)
+    .ilike("name", teamName)
+    .maybeSingle();
+  if (error) return { id: null, error: error.message };
+  return { id: data?.id ? String(data.id) : null, error: null };
+}
+
 export async function handleRosterImport(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireSuperAdminSession(ctx.req, ctx.admin);
@@ -716,17 +739,11 @@ export async function handleRosterImport(ctx: HandlerCtx) {
   // match the DB's actual uniqueness scope.
   let teamId: string;
   let teamInserted = false;
-  const { data: existingTeam, error: teamLookupError } = await ctx.admin
-    .from("teams")
-    .select("id")
-    .eq("league_id", leagueUuid)
-    .eq("season_id", seasonId)
-    .ilike("name", teamName)
-    .maybeSingle();
-  if (teamLookupError) return json({ ok: false, error: teamLookupError.message }, 500);
+  const initialLookup = await findRosterTeamId(ctx.admin, leagueUuid, seasonId, teamName);
+  if (initialLookup.error) return json({ ok: false, error: initialLookup.error }, 500);
 
-  if (existingTeam?.id) {
-    teamId = String(existingTeam.id);
+  if (initialLookup.id) {
+    teamId = initialLookup.id;
   } else {
     const { data: newTeam, error: teamInsertError } = await ctx.admin
       .from("teams")
@@ -742,15 +759,9 @@ export async function handleRosterImport(ctx: HandlerCtx) {
       if (isDuplicateKeyError(teamInsertError)) {
         // Re-running an identical import — the unique(season_id, name) constraint
         // means the row now exists; fetch it instead of failing.
-        const { data: raceTeam } = await ctx.admin
-          .from("teams")
-          .select("id")
-          .eq("league_id", leagueUuid)
-          .eq("season_id", seasonId)
-          .ilike("name", teamName)
-          .maybeSingle();
-        if (!raceTeam?.id) return json({ ok: false, error: "team_resolution_failed" }, 500);
-        teamId = String(raceTeam.id);
+        const raceLookup = await findRosterTeamId(ctx.admin, leagueUuid, seasonId, teamName);
+        if (!raceLookup.id) return json({ ok: false, error: "team_resolution_failed" }, 500);
+        teamId = raceLookup.id;
       } else {
         return json({ ok: false, error: teamInsertError.message }, 500);
       }
@@ -766,6 +777,17 @@ export async function handleRosterImport(ctx: HandlerCtx) {
   const warnings: string[] = [];
   const errors: string[] = [];
 
+  // Deliberately sequential, not Promise.all — resolvePotgPlayer is a
+  // read-then-write on profiles keyed by display_name with no unique
+  // constraint backing it. Two players sharing a name (twins, Jr./Sr.)
+  // processed concurrently would both miss each other's uncommitted insert
+  // and create duplicate profiles; sequential processing guarantees the
+  // second one finds the first's already-committed row instead.
+  //
+  // The per-player update() below is also deliberately not batched into one
+  // upsert — every other bulk-import path in this file (handleImportRoute)
+  // isolates failures per row for the same reason: one bad row must not sink
+  // the rest of an otherwise-good roster.
   for (const player of players) {
     const resolution = await resolvePotgPlayer(ctx.admin, player.name, leagueUuid, {
       teamName,
