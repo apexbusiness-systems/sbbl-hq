@@ -261,6 +261,105 @@ describe('handleRosterImport', () => {
     expect(jaime?.position).toBe('G');
   });
 
+  it('does NOT reuse a same-named team from a different season — creates a new one instead', async () => {
+    // teams.unique(season_id, name): the same team name legitimately recurs
+    // every season as a distinct row. A league-only lookup would silently
+    // attach this season's roster to last season's team.
+    const OTHER_SEASON = 'dddddddd-4444-4444-8444-444444444444';
+    const state = baseRosterState({
+      teams: [{ id: 'team-last-season', league_id: LEAGUE_ID, season_id: OTHER_SEASON, name: 'Ball is Life' }],
+    });
+    const ctx = mkCtx({
+      url: 'https://local/ops/roster/import',
+      method: 'POST',
+      body: rosterBody(),
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin(state),
+    });
+    const res = await handleRosterImport(ctx);
+    const body = await res.json() as { ok: boolean; teamId: string };
+    expect(res.status).toBe(200);
+    expect(body.teamId).not.toBe('team-last-season');
+    expect(state.teams).toHaveLength(2);
+    const newTeam = state.teams.find((t) => t.id === body.teamId);
+    expect(newTeam?.season_id).toBe(SEASON_ID);
+
+    // resolvePotgPlayer's own team lookup (used when it inserts a brand-new
+    // player) is scoped by league only — it would find the STALE prior-season
+    // team internally. Every player's final team_id must still land on the
+    // correct current-season team, because handleRosterImport's own update()
+    // step always overwrites team_id with the season-scoped id it resolved.
+    for (const player of state.players) {
+      expect(player.team_id).toBe(body.teamId);
+      expect(player.team_id).not.toBe('team-last-season');
+    }
+  });
+
+  it('trims surrounding whitespace on teamName/leagueId before matching', async () => {
+    const state = baseRosterState();
+    const ctx = mkCtx({
+      url: 'https://local/ops/roster/import',
+      method: 'POST',
+      body: rosterBody({ teamName: '  Ball is Life  ', leagueId: '  wbl  ' }),
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin(state),
+    });
+    const res = await handleRosterImport(ctx);
+    expect(res.status).toBe(200);
+    expect(state.teams).toHaveLength(1);
+    expect(state.teams[0].name).toBe('Ball is Life');
+  });
+
+  it('flags an unparseable jersey number as a warning instead of silently ignoring or crashing', async () => {
+    const state = baseRosterState();
+    const ctx = mkCtx({
+      url: 'https://local/ops/roster/import',
+      method: 'POST',
+      body: rosterBody({ players: [{ name: 'Jaime Phillips', jerseyNumber: '23G', position: 'G' }] }),
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin(state),
+    });
+    const res = await handleRosterImport(ctx);
+    const body = await res.json() as { ok: boolean; inserted: number; warnings: string[] };
+    expect(res.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.inserted).toBe(1);
+    expect(body.warnings.some((w) => w.includes('invalid_jersey_number_ignored'))).toBe(true);
+    expect(state.players[0].jersey_number).toBeNull();
+  });
+
+  it('accepts jersey number 0 as a real value, not a falsy no-op', async () => {
+    const state = baseRosterState();
+    const ctx = mkCtx({
+      url: 'https://local/ops/roster/import',
+      method: 'POST',
+      body: rosterBody({ players: [{ name: 'Jaime Phillips', jerseyNumber: 0 }] }),
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin(state),
+    });
+    const res = await handleRosterImport(ctx);
+    const body = await res.json() as { ok: boolean; warnings: string[] };
+    expect(res.status).toBe(200);
+    expect(body.warnings.some((w) => w.includes('invalid_jersey_number'))).toBe(false);
+    expect(state.players[0].jersey_number).toBe(0);
+  });
+
+  it('rejects a negative jersey number with a warning rather than storing it', async () => {
+    const state = baseRosterState();
+    const ctx = mkCtx({
+      url: 'https://local/ops/roster/import',
+      method: 'POST',
+      body: rosterBody({ players: [{ name: 'Jaime Phillips', jerseyNumber: -5 }] }),
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin(state),
+    });
+    const res = await handleRosterImport(ctx);
+    const body = await res.json() as { ok: boolean; warnings: string[] };
+    expect(res.status).toBe(200);
+    expect(body.warnings.some((w) => w.includes('invalid_jersey_number_ignored'))).toBe(true);
+    expect(state.players[0].jersey_number).toBeNull();
+  });
+
   it('reuses an existing team on an ilike name match — never a duplicate team row', async () => {
     const state = baseRosterState({
       teams: [{ id: 'team-existing', league_id: LEAGUE_ID, season_id: SEASON_ID, name: 'ball is life' }],
