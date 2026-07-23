@@ -660,11 +660,21 @@ const rosterPlayerRowSchema = z.object({
 });
 
 const rosterImportSchema = z.object({
-  leagueId: z.string().min(1, "League ID/code is required"),
+  leagueId: z.string().trim().min(1, "League ID/code is required"),
   seasonId: z.string().uuid("Season ID must be a valid UUID"),
-  teamName: z.string().min(1, "Team name is required"),
+  teamName: z.string().trim().min(1, "Team name is required"),
   players: z.array(rosterPlayerRowSchema).min(1, "At least one player is required"),
 });
+
+// Jersey numbers come from OCR review or free-text input — validate to a
+// non-negative integer and return a warning instead of silently storing
+// garbage (e.g. "23G" misread, or a stray negative/fractional value).
+function parseJerseyNumber(raw: unknown): { value: number | null; invalid: boolean } {
+  if (raw == null || raw === "") return { value: null, invalid: false };
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0) return { value: null, invalid: true };
+  return { value: n, invalid: false };
+}
 
 export async function handleRosterImport(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
@@ -697,12 +707,20 @@ export async function handleRosterImport(ctx: HandlerCtx) {
     return json({ ok: false, error: "invalid_league_code" }, 400);
   }
 
+  // Scoped by season_id (not just league_id): teams.unique(season_id, name)
+  // means the same team name legitimately recurs across seasons as distinct
+  // rows. A league-only lookup would silently attach this season's roster to
+  // a prior season's team of the same name — league-only matching is correct
+  // for resolvePotgPlayer (a single-player spotlight card that never creates
+  // a team), but this handler creates/targets a specific team, so it must
+  // match the DB's actual uniqueness scope.
   let teamId: string;
   let teamInserted = false;
   const { data: existingTeam, error: teamLookupError } = await ctx.admin
     .from("teams")
     .select("id")
     .eq("league_id", leagueUuid)
+    .eq("season_id", seasonId)
     .ilike("name", teamName)
     .maybeSingle();
   if (teamLookupError) return json({ ok: false, error: teamLookupError.message }, 500);
@@ -728,6 +746,7 @@ export async function handleRosterImport(ctx: HandlerCtx) {
           .from("teams")
           .select("id")
           .eq("league_id", leagueUuid)
+          .eq("season_id", seasonId)
           .ilike("name", teamName)
           .maybeSingle();
         if (!raceTeam?.id) return json({ ok: false, error: "team_resolution_failed" }, 500);
@@ -759,14 +778,15 @@ export async function handleRosterImport(ctx: HandlerCtx) {
     }
     warnings.push(...resolution.warnings.map((w) => `${player.name}: ${w}`));
 
-    const jerseyNumber = player.jerseyNumber != null && player.jerseyNumber !== ""
-      ? Number(player.jerseyNumber)
-      : null;
+    const { value: jerseyNumber, invalid: jerseyInvalid } = parseJerseyNumber(player.jerseyNumber);
+    if (jerseyInvalid) {
+      warnings.push(`${player.name}: invalid_jersey_number_ignored (${JSON.stringify(player.jerseyNumber)})`);
+    }
     const { error: updateError } = await ctx.admin
       .from("players")
       .update({
         team_id: teamId,
-        jersey_number: Number.isFinite(jerseyNumber) ? jerseyNumber : null,
+        jersey_number: jerseyNumber,
         position: player.position || null,
       })
       .eq("id", resolution.playerId)
