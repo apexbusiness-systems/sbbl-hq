@@ -3237,10 +3237,12 @@ async function handleTeamsList({ req, admin }: HandlerCtx) {
         }
       }
     }
-  } catch {
-    // mvw_standings may not exist on older DB (migration not yet applied) —
-    // the dbRecord fallback below will fill in team records from teams.record.
-  }
+} catch (mvwError) {
+      // Loud on purpose: mvw_standings is the source of truth for live
+      // standings. A caught error here means standings are NOT being shown
+      // from live data -- surface it, don't silently degrade to stale CSV.
+      console.error("[handleTeamsList] mvw_standings query failed, falling back to teams.record:", mvwError);
+    }
 
   const profileUserIds = Array.from(
     new Set(
