@@ -1,17 +1,10 @@
--- Patch get_stats_dashboard to return profile avatar_url.
+-- Fix foreign key join mismatch in get_stats_dashboard and get_leaderboards RPCs.
 --
--- Why: Stats.tsx and Leaderboards.tsx render `<img src={p.avatar}>`, but the
--- worker's normalizePublicPlayerRow hardcoded `avatar: ""` because the RPC
--- didn't expose profiles.avatar_url. Every player therefore rendered a
--- broken-image placeholder (screenshots 2026-04-17). This adds the
--- `avatar_url` column to the jsonb shape so the worker + UI can stop
--- hardcoding and start passing the real URL through.
---
--- Also widens the leaderboard coverage: the old query filtered via INNER
--- JOIN to player_game_stats which silently dropped every rostered player
--- who hadn't received a stat entry yet. We now LEFT JOIN so the full
--- roster surfaces with zero-average rows, and the UI's empty-state copy
--- ("select a player") continues to work.
+-- Why: player_game_stats.player_id references public.players(id) (the PK of players).
+-- Previous RPCs joined on `pgs.player_id = p.user_id`, which caused a mismatch
+-- between the FK target (players.id) and the join target (players.user_id).
+-- Valid stats written with player_id = players.id were silently dropped or ignored.
+-- This migration corrects the join condition to `pgs.player_id = p.id`.
 
 CREATE OR REPLACE FUNCTION public.get_stats_dashboard(
   p_filters jsonb DEFAULT NULL::jsonb
@@ -66,6 +59,54 @@ BEGIN
 END;
 $function$;
 
--- Grant execute to authenticated + anon (it was already callable; this is
--- defensive against future PRIVILEGES changes).
 GRANT EXECUTE ON FUNCTION public.get_stats_dashboard(jsonb) TO authenticated, anon, service_role;
+
+CREATE OR REPLACE FUNCTION public.get_leaderboards(
+  p_filters jsonb DEFAULT NULL::jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public'
+AS $function$
+DECLARE
+  v_league_id uuid;
+BEGIN
+  IF p_filters IS NOT NULL AND p_filters ? 'league' THEN
+    SELECT id INTO v_league_id FROM public.leagues
+    WHERE code ILIKE (p_filters->>'league') LIMIT 1;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'ok', true,
+    'leaders', COALESCE((
+      SELECT jsonb_agg(row_to_json(s))
+      FROM (
+        SELECT
+          p.user_id AS id,
+          COALESCE(pr.display_name, pr.full_name, 'Unknown') AS name,
+          p.jersey_number AS number,
+          p.position,
+          t.name AS team_name,
+          l.code AS league_id,
+          ROUND(AVG(pgs.pts)::numeric, 1) AS pts,
+          ROUND(AVG(pgs.reb)::numeric, 1) AS reb,
+          ROUND(AVG(pgs.ast)::numeric, 1) AS ast,
+          RANK() OVER (ORDER BY AVG(pgs.pts) DESC) AS rank
+        FROM public.player_game_stats pgs
+        JOIN public.players p ON p.id = pgs.player_id
+        LEFT JOIN public.profiles pr ON pr.user_id = p.user_id
+        LEFT JOIN public.teams t ON t.id = p.team_id
+        LEFT JOIN public.leagues l ON l.id = p.league_id
+        WHERE (v_league_id IS NULL OR p.league_id = v_league_id)
+        GROUP BY p.user_id, pr.display_name, pr.full_name, p.jersey_number, p.position, t.name, l.code
+        ORDER BY AVG(pgs.pts) DESC
+        LIMIT 50
+      ) s
+    ), '[]'::jsonb)
+  );
+END;
+$function$;
+
+GRANT EXECUTE ON FUNCTION public.get_leaderboards(jsonb) TO authenticated, anon, service_role;

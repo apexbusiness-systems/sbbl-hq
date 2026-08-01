@@ -26,7 +26,7 @@ BEGIN
           ROUND(AVG(pgs.min)::numeric, 1) AS min,
           COUNT(pgs.id) AS games
         FROM public.player_game_stats pgs
-        JOIN public.players p ON p.user_id = pgs.player_id
+        JOIN public.players p ON p.id = pgs.player_id
         LEFT JOIN public.profiles pr ON pr.user_id = p.user_id
         LEFT JOIN public.teams t ON t.id = p.team_id
         LEFT JOIN public.leagues l ON l.id = p.league_id
@@ -66,7 +66,7 @@ BEGIN
           ROUND(AVG(pgs.ast)::numeric, 1) AS ast,
           RANK() OVER (ORDER BY AVG(pgs.pts) DESC) AS rank
         FROM public.player_game_stats pgs
-        JOIN public.players p ON p.user_id = pgs.player_id
+        JOIN public.players p ON p.id = pgs.player_id
         LEFT JOIN public.profiles pr ON pr.user_id = p.user_id
         LEFT JOIN public.teams t ON t.id = p.team_id
         LEFT JOIN public.leagues l ON l.id = p.league_id
