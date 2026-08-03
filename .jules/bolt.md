@@ -25,3 +25,6 @@
 ## 2026-05-21 - [React Rendering & Memory Optimization]
 **Learning:** Avoid using array spread syntax `[...a, ...b]` directly inside React render or hook dependencies when searching for elements via `.find()`, as it creates unnecessary O(N) array allocations on every render or dependency change.
 **Action:** Replace the spread and combined `.find()` with sequentially short-circuited searches (e.g., `a.find(...) ?? b.find(...)`) to save memory and CPU cycles.
+## 2026-05-30 - [Performance] Optimized Ops Batch Render
+**Learning:** During array `.filter()` operations inside React map loops in render function creates an unexpected $O(N^2)$ algorithmic bottleneck, particularly when repeating on every state change and rerender.
+**Action:** Always wrap redundant array iterations such as `.filter()` inside the `.map()` loops or before them into a `useMemo` hooks.
