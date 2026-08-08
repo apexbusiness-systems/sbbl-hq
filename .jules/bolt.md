@@ -25,3 +25,6 @@
 ## 2026-05-21 - [React Rendering & Memory Optimization]
 **Learning:** Avoid using array spread syntax `[...a, ...b]` directly inside React render or hook dependencies when searching for elements via `.find()`, as it creates unnecessary O(N) array allocations on every render or dependency change.
 **Action:** Replace the spread and combined `.find()` with sequentially short-circuited searches (e.g., `a.find(...) ?? b.find(...)`) to save memory and CPU cycles.
+## 2026-05-30 - [Performance] Optimized Store Checkout Loop (Drawer Conditional Rendering & Memoization)
+**Learning:** React hooks like `useQuery` and derived state computations (`useMemo`, array reductions) placed before an early return (e.g., `if (!isOpen) return null;`) still execute on every background re-render of the parent tree, consuming unnecessary CPU cycles. Furthermore, leaving `reduce` operations un-memoized in render runs them every time the component renders.
+**Action:** Extract expensive hook-based logic into a separate conditionally-rendered inner component (e.g., `<BagDrawerContent />`) rather than relying on early returns. Always wrap array loop calculations like `.reduce` in `useMemo` hooks if they are executed during rendering to prevent O(N) execution overhead on every render cycle.
