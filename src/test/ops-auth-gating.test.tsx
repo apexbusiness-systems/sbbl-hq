@@ -56,6 +56,15 @@ vi.mock('@/lib/imageResize', () => ({
   resizeImageToFit: vi.fn(async (file: File) => file),
 }));
 
+const renderOps = () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <OpsPage />
+    </QueryClientProvider>,
+  );
+};
+
 describe('ops auth gating', () => {
   beforeEach(() => {
     fetchOpsBootstrap.mockReset();
@@ -64,15 +73,6 @@ describe('ops auth gating', () => {
     fetchOpsBootstrap.mockResolvedValue({ ok: true, importHistory: [] });
     fetchImportHistory.mockResolvedValue({ ok: true, jobs: [] });
   });
-
-  const renderOps = () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return render(
-      <QueryClientProvider client={client}>
-        <OpsPage />
-      </QueryClientProvider>,
-    );
-  };
 
   it('keeps ops queries disabled until auth is ready', async () => {
     authState.loading = true;
@@ -126,5 +126,88 @@ describe('ops auth gating', () => {
 
     expect(screen.getByText('Session expired. Sign in again.')).toBeInTheDocument();
     expect(fetchOpsBootstrap).not.toHaveBeenCalled();
+  });
+});
+
+// ── BEHAVIORAL: regular admin (league_admin) real DOM rendering ─────────────
+//
+// Renders the actual OpsPage component tree with a mocked auth session — real
+// React render, real conditional JSX evaluation, real DOM queries. No network
+// calls (api modules are mocked above), no production data touched. This is
+// what a league_admin and a super_admin actually SEE in the browser, not a
+// string match against the source.
+describe('regular admin (league_admin) — real rendered Ops Console', () => {
+  const freshSession = (userId: string, email: string) => ({
+    access_token: 'token',
+    user: { id: userId, email },
+    expires_at: Math.floor(Date.now() / 1000) + 3600,
+  });
+
+  beforeEach(() => {
+    fetchOpsBootstrap.mockReset();
+    fetchImportHistory.mockReset();
+    fetchOpsBootstrap.mockResolvedValue({ ok: true, importHistory: [] });
+    fetchImportHistory.mockResolvedValue({ ok: true, jobs: [] });
+  });
+
+  it('league_admin is NOT denied entry (the old super_admin-only gate is gone)', () => {
+    authState.loading = false;
+    authState.session = freshSession('league-admin-1', 'statssbbl@gmail.com');
+    authState.roles = ['league_admin'];
+
+    renderOps();
+
+    expect(screen.queryByText('Access denied. Super Admin role required.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/League Admin role or higher required/)).not.toBeInTheDocument();
+    // Content tabs a regular admin must be able to reach are actually in the DOM.
+    expect(screen.getByRole('button', { name: 'Scores' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Teams' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Players' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Schedules' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Roster Import' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'POTG Parser' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Media Library' })).toBeInTheDocument();
+  });
+
+  it('league_admin does NOT see the Store Media tab at all (real DOM, not just disabled)', () => {
+    authState.loading = false;
+    authState.session = freshSession('league-admin-1', 'statssbbl@gmail.com');
+    authState.roles = ['league_admin'];
+
+    renderOps();
+
+    expect(screen.queryByRole('button', { name: 'Store Media' })).not.toBeInTheDocument();
+  });
+
+  it('super_admin DOES see the Store Media tab', () => {
+    authState.loading = false;
+    authState.session = freshSession('super-admin-1', 'super@test.com');
+    authState.roles = ['super_admin'];
+
+    renderOps();
+
+    expect(screen.getByRole('button', { name: 'Store Media' })).toBeInTheDocument();
+  });
+
+  it('a fan (below league_admin) is denied entry with the new copy', () => {
+    authState.loading = false;
+    authState.session = freshSession('fan-1', 'fan@test.com');
+    authState.roles = ['fan'];
+
+    renderOps();
+
+    expect(screen.getByText('Access denied. League Admin role or higher required.')).toBeInTheDocument();
+    // None of the content tabs render behind the denial.
+    expect(screen.queryByRole('button', { name: 'Scores' })).not.toBeInTheDocument();
+  });
+
+  it('a team_manager (below league_admin) is denied entry', () => {
+    authState.loading = false;
+    authState.session = freshSession('tm-1', 'tm@test.com');
+    authState.roles = ['team_manager'];
+
+    renderOps();
+
+    expect(screen.getByText('Access denied. League Admin role or higher required.')).toBeInTheDocument();
   });
 });

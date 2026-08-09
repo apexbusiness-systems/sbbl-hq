@@ -1238,7 +1238,7 @@ async function handleStreamSessions({ req, admin }: HandlerCtx) {
 
 // PPV revenue reporting is a live-PPV surface: super-admin only.
 // Regular admins have no access to live-PPV controls or their financials.
-async function handleOpsRevenue({ req, admin }: HandlerCtx) {
+export async function handleOpsRevenue({ req, admin }: HandlerCtx) {
   await requireSuperAdminSession(req, admin);
   const [orders, invites, sessions] = await Promise.all([
     admin
@@ -2635,9 +2635,9 @@ async function handleOpsPatch(table: string, req: Request, admin: import("@supab
 
   return json({ ok: true, data });
 }
-async function handleOpsPatchTeams(ctx: HandlerCtx) { return handleOpsPatch('teams', ctx.req, ctx.admin, ctx.params); }
+export async function handleOpsPatchTeams(ctx: HandlerCtx) { return handleOpsPatch('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchPlayers(ctx: HandlerCtx) { return handleOpsPatch('players', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsPatchProducts(ctx: HandlerCtx) { return handleOpsPatch('products', ctx.req, ctx.admin, ctx.params); }
+export async function handleOpsPatchProducts(ctx: HandlerCtx) { return handleOpsPatch('products', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchEvents(ctx: HandlerCtx) { return handleOpsPatch('league_events', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch('schedule_slots', ctx.req, ctx.admin, ctx.params); }
 
@@ -2663,9 +2663,9 @@ async function handleOpsDelete(table: string, req: Request, admin: import("@supa
 
   return json({ ok: true, data });
 }
-async function handleOpsDeleteTeams(ctx: HandlerCtx) { return handleOpsDelete('teams', ctx.req, ctx.admin, ctx.params); }
+export async function handleOpsDeleteTeams(ctx: HandlerCtx) { return handleOpsDelete('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeletePlayers(ctx: HandlerCtx) { return handleOpsDelete('players', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete('products', ctx.req, ctx.admin, ctx.params); }
+export async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete('products', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('league_events', ctx.req, ctx.admin, ctx.params); }
 
 // ── Media Editor (Admin) ──────────────────────────────────────────────────
@@ -4009,7 +4009,7 @@ export async function handleInviteGenerate(ctx: HandlerCtx) {
 export const LEAGUE_ADMIN_COMP_CODE_DAILY_LIMIT = 5;
 export const COMP_CODE_LIMIT_WINDOW_HOURS = 24;
 
-async function handleSuperAdminCompCode(ctx: HandlerCtx) {
+export async function handleSuperAdminCompCode(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const session = await requireOpsAdminSession(ctx.req, ctx.admin);
   const isSuper = session.roles.includes("super_admin");
@@ -4099,7 +4099,7 @@ async function handleSuperAdminCompCode(ctx: HandlerCtx) {
  * LEAGUE_ADMIN_COMP_CODE_DAILY_LIMIT) so they must be able to reprint their own,
  * but the full PPV comp ledger stays a super-admin view.
  */
-async function handleSuperAdminCompCodeList(ctx: HandlerCtx) {
+export async function handleSuperAdminCompCodeList(ctx: HandlerCtx) {
   const session = await requireOpsAdminSession(ctx.req, ctx.admin);
   const isSuper = session.roles.includes("super_admin");
 
@@ -7826,7 +7826,7 @@ async function handleOpsDeleteSchedules(ctx: HandlerCtx) {
  */
 // Store product creation is excluded from league_admin — store media upload and
 // edit remain super-admin only. See STORE_ONLY_TABLES below for the edit path.
-async function handleOpsBatchProducts(ctx: HandlerCtx) {
+export async function handleOpsBatchProducts(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const body = await ctx.req.json().catch(() => null) as { items?: Array<{ title?: string; price?: string | number; leagueId?: string }> } | null;
