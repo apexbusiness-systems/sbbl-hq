@@ -40,24 +40,31 @@ describe('ops import routes auth', () => {
   });
 });
 
-// ── 2. SUPER_ADMIN auth gate on handleImportRoute (Gap 1) ────────────────────
+// ── 2. Ops-admin auth gate on handleImportRoute (Gap 1) ──────────────────────
+//
+// Originally pinned to requireSuperAdminSession. Regular admins (league_admin)
+// now run league imports, so the bar is requireOpsAdminSession — which is still
+// strictly ABOVE requireAdminSession. The point of the original guard was to keep
+// `team_manager` out of league-wide imports, and requireOpsAdminSession preserves
+// exactly that: it admits league_admin + super_admin only.
 describe('handleImportRoute auth level (Gap 1)', () => {
-  it('handleImportRoute calls requireSuperAdminSession, not requireAdminSession', () => {
+  it('handleImportRoute calls requireOpsAdminSession, not the broader requireAdminSession', () => {
     const fnStart = routeSrc.indexOf('export async function handleImportRoute');
     const fnEnd   = routeSrc.indexOf('\nexport async function ', fnStart + 10);
     const fnBody  = routeSrc.slice(fnStart, fnEnd);
 
-    expect(fnBody).toContain('requireSuperAdminSession');
-    // Ensure the old lower-bar auth is gone from this specific function body
-    expect(fnBody).not.toContain('requireAdminSession');
+    expect(fnBody).toContain('requireOpsAdminSession');
+    // The broader gate (admits team_manager) must never appear here.
+    expect(fnBody).not.toContain('requireAdminSession(');
   });
 
-  it('handleScoresCsvImport keeps requireSuperAdminSession', () => {
+  it('handleScoresCsvImport keeps an ops-admin gate', () => {
     const fnStart = routeSrc.indexOf('export async function handleScoresCsvImport');
     const fnEnd   = routeSrc.length; // last export in file
     const fnBody  = routeSrc.slice(fnStart, fnEnd);
 
-    expect(fnBody).toContain('requireSuperAdminSession');
+    expect(fnBody).toContain('requireOpsAdminSession');
+    expect(fnBody).not.toContain('requireAdminSession(');
   });
 });
 

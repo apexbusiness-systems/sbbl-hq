@@ -29,6 +29,10 @@ sentry-cli issues list \
 
 ## Regression shield — added in PR https://github.com/apexbusiness-systems/sbbl-hq/pull/439
 
+> Historical link. Pull requests were **not** carried over by the 2026-08-09
+> migration to `sbblhqapp/sbblhq`, so pre-migration PR permalinks intentionally
+> still resolve against the archived repo.
+
 - `playwright.config.ts`: webkit + mobile-safari projects added
 - `.github/workflows/*.yml`: install `chromium webkit` in every workflow that
   runs Playwright (`989d404`, `0775242`)

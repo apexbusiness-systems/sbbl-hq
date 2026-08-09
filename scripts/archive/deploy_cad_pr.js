@@ -1,7 +1,10 @@
 const fs = require('fs');
 
 const TOKEN = process.env.GH_TOKEN;
-const REPO = 'apexbusiness-systems/sbbl-hq';
+// Canonical remote as of the 2026-08-09 migration. Override with GH_REPO when
+// operating against a fork or the archived apexbusiness-systems/sbbl-hq repo.
+// See docs/ops/REPO_MIGRATION_2026-08-09.md.
+const REPO = process.env.GH_REPO || 'sbblhqapp/sbblhq';
 const FILE_PATH = 'src/pages/Ops.tsx';
 const BRANCH_NAME = 'codex/ops-console-cad-localization-v2';
 

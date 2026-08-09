@@ -10,9 +10,15 @@ describe('stats join contract — player_game_stats joins on players.id, not use
     
     for (const file of files) {
       const rawSql = readFileSync(join(MIGRATIONS_DIR, file), 'utf8');
-      // Strip all SQL comments (full line or inline trailing comments)
+      // Strip all SQL comments (full line or inline trailing comments).
+      // Split on /\r?\n/, NOT '\n': with core.autocrlf=true every line keeps a
+      // trailing '\r', and `/--.*$/` cannot match it — `.` never consumes a line
+      // terminator and `$` (no `m` flag) only anchors at end of input. The
+      // comment therefore survived stripping, and the guard below false-failed
+      // on the *documentation* of the old join in 20260731060000. Green on
+      // Linux CI, red on every Windows checkout.
       const codeOnlySql = rawSql
-        .split('\n')
+        .split(/\r?\n/)
         .map((line) => line.replace(/--.*$/, ''))
         .join('\n');
       
