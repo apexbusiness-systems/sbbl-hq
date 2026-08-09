@@ -14,11 +14,19 @@ import {
   type MediaPublicationStatus, type OpsMediaPublication,
 } from '@/lib/api/ops';
 import { LEAGUE_REGISTRY } from '@/lib/leagues';
+import { canAccessOps, type AppRole } from '@/lib/auth/roles';
 import { resizeImageToFit, inferTargetDimensions } from '@/lib/imageResize';
 import { fetchScores, submitScoreManual, parseScoreboardImage } from '@/lib/api/scores';
 import type { ScoreCategory } from '@/types';
 
 type Tab = 'overview' | 'scores' | 'teams' | 'players' | 'schedules' | 'events' | 'store' | 'potg' | 'roster' | 'media' | 'history';
+
+/**
+ * Tabs a regular admin (`league_admin`) must NOT see. Store media upload and
+ * edit are super-admin only; the server enforces this independently via
+ * STORE_ONLY_TABLES, this list just avoids rendering a tab that would 403.
+ */
+const SUPER_ADMIN_ONLY_TABS: ReadonlySet<Tab> = new Set<Tab>(['store']);
 
 const tabs: Array<{ id: Tab; label: string }> = [
   { id: 'overview',  label: 'Overview'       },
@@ -62,10 +70,11 @@ type OpsCsvImportSectionProps = {
   csvUpload: ReturnType<typeof useOpsCsvUpload>;
   csvLeagueId: string;
   setCsvLeagueId: (id: string) => void;
-  isSuperAdmin: boolean;
+  /** True when the signed-in user may run ops writes (league_admin or higher). */
+  canOperate: boolean;
 };
 
-function OpsCsvImportSection({ kind, csvUpload, csvLeagueId, setCsvLeagueId, isSuperAdmin }: OpsCsvImportSectionProps) {
+function OpsCsvImportSection({ kind, csvUpload, csvLeagueId, setCsvLeagueId, canOperate }: OpsCsvImportSectionProps) {
   const [localRows, setLocalRows] = useState<Record<string, string>[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -137,7 +146,7 @@ function OpsCsvImportSection({ kind, csvUpload, csvLeagueId, setCsvLeagueId, isS
       )}
 
       <button
-        disabled={(!isSuperAdmin && kind === 'scores') || localRows.length === 0 || csvUpload.isUploading}
+        disabled={(!canOperate && kind === 'scores') || localRows.length === 0 || csvUpload.isUploading}
         className="gold-bg px-4 py-2 rounded-sm text-sm font-semibold disabled:opacity-60"
         onClick={handleUpload}
       >
@@ -232,9 +241,22 @@ const OpsPage = () => {
   const [rosterForm, setRosterForm] = useState({ teamName: '', leagueId: '', seasonId: '' });
   const [rosterPlayers, setRosterPlayers] = useState<Array<{ name: string; jerseyNumber: string; position: string }>>([]);
   const [rosterImportResult, setRosterImportResult] = useState<{ teamId: string; inserted: number; skipped: number; failed: number; warnings: string[]; errors: string[] } | null>(null);
+  // Ops Console is a league_admin surface, not a super_admin one. Regular admins
+  // run day-to-day operations for all three leagues (scores, schedules, stats,
+  // rosters, teams, players, media, POTG, store). Gating entry on super_admin
+  // made league_admin a role that could sign in and see only "Access denied".
+  //
+  // The genuinely super-admin-only surfaces (broadcast control, PPV comp codes,
+  // access overrides, coach-request approval) do not live on this page — they
+  // are gated server-side by requireSuperAdminSession and rendered elsewhere.
+  const canOperateOps = canAccessOps(roles as AppRole[]);
   const isSuperAdmin = roles.includes('super_admin');
   const sessionFresh = isSessionFresh(session);
-  const canRunOps = !loading && sessionFresh && isSuperAdmin;
+  const canRunOps = !loading && sessionFresh && canOperateOps;
+  const visibleTabs = useMemo(
+    () => (isSuperAdmin ? tabs : tabs.filter((t) => !SUPER_ADMIN_ONLY_TABS.has(t.id))),
+    [isSuperAdmin],
+  );
   const ensureOpsAccess = () => {
     assertOpsAccess(canRunOps);
   };
@@ -835,10 +857,10 @@ const OpsPage = () => {
     );
   }
 
-  if (!isSuperAdmin) {
+  if (!canOperateOps) {
     return (
       <div className="container py-8 md:py-12 max-w-6xl min-h-[calc(100vh-8rem)]">
-        <div className="panel p-4 text-sm text-destructive font-semibold">Access denied. Super Admin role required.</div>
+        <div className="panel p-4 text-sm text-destructive font-semibold">Access denied. League Admin role or higher required.</div>
       </div>
     );
   }
@@ -854,7 +876,7 @@ const OpsPage = () => {
       </div>
 
       <nav aria-label="Ops sections" className="sticky top-0 z-20 -mx-2 px-2 py-2 bg-background/95 backdrop-blur border-b border-border flex flex-wrap gap-2">
-        {tabs.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t.id}
             type="button"
@@ -922,7 +944,7 @@ const OpsPage = () => {
       )}
 
       {activeTab === 'scores' && (<section id="scores" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Scores</h2><div className="space-y-4"><div className="space-y-6">
-          {!isSuperAdmin && <p className="text-sm text-destructive font-semibold panel p-4">Super Admin role required for score management.</p>}
+          {!canOperateOps && <p className="text-sm text-destructive font-semibold panel p-4">League Admin role or higher required for score management.</p>}
 
           {/* ── Scoreboard image OCR ──────────────────────────────── */}
           <div className="panel p-4 space-y-4 max-w-2xl">
@@ -1038,7 +1060,7 @@ const OpsPage = () => {
             </div>
 
             <button
-              disabled={!isSuperAdmin || !scoresForm.homeLabel || !scoresForm.awayLabel || scoreManualMutation.isPending}
+              disabled={!canOperateOps || !scoresForm.homeLabel || !scoresForm.awayLabel || scoreManualMutation.isPending}
               className="w-full gold-bg py-2.5 font-display font-bold text-sm uppercase tracking-wider rounded-sm disabled:opacity-50 transition-opacity"
               onClick={() => scoreManualMutation.mutate()}
             >
@@ -1054,7 +1076,7 @@ const OpsPage = () => {
             csvUpload={csvUpload}
             csvLeagueId={csvLeagueId}
             setCsvLeagueId={setCsvLeagueId}
-            isSuperAdmin={isSuperAdmin}
+            canOperate={canOperateOps}
           />
 
           {/* ── Recent scores list ────────────────────────────────── */}
@@ -1091,12 +1113,12 @@ const OpsPage = () => {
             csvUpload={csvUpload}
             csvLeagueId={csvLeagueId}
             setCsvLeagueId={setCsvLeagueId}
-            isSuperAdmin={isSuperAdmin}
+            canOperate={canOperateOps}
           />
 <div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Teams Manual Ops</h2>
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage teams.</p>
+          {!canOperateOps ? (
+            <p className="text-sm text-destructive font-semibold">League Admin role or higher required to manually manage teams.</p>
           ) : (
             <div className="space-y-4">
               <div className="border border-border p-3 rounded-sm">
@@ -1131,12 +1153,12 @@ const OpsPage = () => {
             csvUpload={csvUpload}
             csvLeagueId={csvLeagueId}
             setCsvLeagueId={setCsvLeagueId}
-            isSuperAdmin={isSuperAdmin}
+            canOperate={canOperateOps}
           />
 <div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Players Manual Ops</h2>
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage players.</p>
+          {!canOperateOps ? (
+            <p className="text-sm text-destructive font-semibold">League Admin role or higher required to manually manage players.</p>
           ) : (
             <div className="space-y-4">
               <div className="border border-border p-3 rounded-sm">
@@ -1198,12 +1220,12 @@ const OpsPage = () => {
             csvUpload={csvUpload}
             csvLeagueId={csvLeagueId}
             setCsvLeagueId={setCsvLeagueId}
-            isSuperAdmin={isSuperAdmin}
+            canOperate={canOperateOps}
           />
 <div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Schedules Manual Ops</h2>
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage schedules.</p>
+          {!canOperateOps ? (
+            <p className="text-sm text-destructive font-semibold">League Admin role or higher required to manually manage schedules.</p>
           ) : (
             <div className="space-y-4">
               <div className="border border-border p-3 rounded-sm">
@@ -1246,12 +1268,12 @@ const OpsPage = () => {
             csvUpload={csvUpload}
             csvLeagueId={csvLeagueId}
             setCsvLeagueId={setCsvLeagueId}
-            isSuperAdmin={isSuperAdmin}
+            canOperate={canOperateOps}
           />
 <div className="panel p-4 max-w-xl">
           <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Events Manual Ops</h2>
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage events.</p>
+          {!canOperateOps ? (
+            <p className="text-sm text-destructive font-semibold">League Admin role or higher required to manually manage events.</p>
           ) : (
             <div className="space-y-4">
               <div className="border border-border p-3 rounded-sm">
@@ -1350,11 +1372,11 @@ const OpsPage = () => {
         </div>
       </div></section>)}
 
-      {activeTab === 'store' && (<section id="store" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Store Catalog</h2><div className="space-y-4"><div className="panel p-4 max-w-xl space-y-8">
+      {activeTab === 'store' && isSuperAdmin && (<section id="store" className="space-y-6 pt-6"><h2 className="text-2xl font-display font-bold border-b border-border pb-2">Store Catalog</h2><div className="space-y-4"><div className="panel p-4 max-w-xl space-y-8">
           <div>
             <h2 className="font-display text-xl mb-4 flex items-center gap-2"><Shield className="w-5 h-5 text-primary" /> Store Media & Product Ops</h2>
             {!isSuperAdmin ? (
-              <p className="text-sm text-destructive font-semibold">Super Admin required to manually manage store operations.</p>
+              <p className="text-sm text-destructive font-semibold">Super Admin role required to manage store media and products.</p>
             ) : (
               <div className="space-y-6">
 
@@ -1643,8 +1665,8 @@ const OpsPage = () => {
             <p className="text-xs text-muted-foreground mt-1">Upload a roster/team photo — AI vision extracts the team and player list, then you review and confirm before it creates the team and players.</p>
           </div>
 
-          {!isSuperAdmin ? (
-            <p className="text-sm text-destructive font-semibold">Super Admin required to import a roster.</p>
+          {!canOperateOps ? (
+            <p className="text-sm text-destructive font-semibold">League Admin role or higher required to import a roster.</p>
           ) : (
             <>
               {/* Image drop zone */}

@@ -3,7 +3,7 @@ import { parseCsv } from '@/lib/parseCsv';
 import { classifyRiskLane } from '@/lib/omniport';
 import {
   json,
-  requireSuperAdminSession,
+  requireOpsAdminSession,
   requireAdminSession,
   ensureMutation,
   writeImportJob,
@@ -192,7 +192,7 @@ export function isDuplicateKeyError(err: unknown): boolean {
 // ── HANDLERS ─────────────────────────────────────────────────────────────────
 export async function handleScoresCsvUpload(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const session = await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = (await ctx.req.json().catch(() => null)) as {
     kind: "teams" | "players" | "schedules" | "events" | "scores";
@@ -360,7 +360,7 @@ export async function handleImportRoute(
   kind: "teams" | "players" | "schedules" | "events",
 ) {
   await ensureMutation(ctx.req, ctx);
-  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const session = await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = (await ctx.req.json().catch(() => null)) as {
     rows?: Array<Record<string, string>>;
@@ -565,7 +565,7 @@ export async function handleImportRoute(
 // /api/ops/upload/csv (kind="scores") via useOpsCsvUpload (offline queue).
 export async function handleScoresCsvImport(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const session = await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = (await ctx.req.json().catch(() => null)) as { rows?: Array<Record<string, string>> } | null;
   const rows = body?.rows ?? [];
@@ -701,7 +701,7 @@ async function findRosterTeamId(
 
 export async function handleRosterImport(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const session = await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null);
   const parsed = rosterImportSchema.safeParse(body);

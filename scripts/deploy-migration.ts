@@ -1,109 +1,65 @@
-import fs from 'node:fs';
+/**
+ * Push pending Supabase migrations to the linked project.
+ *
+ * Usage:
+ *   npx tsx scripts/deploy-migration.ts
+ *
+ * Tries the regional poolers before the direct host, because the direct
+ * `db.<ref>.supabase.co:5432` endpoint is frequently unreachable from
+ * workstations behind IPv4-only networks.
+ *
+ * NOTE: This script no longer inlines any account-specific role grant. Role
+ * changes live in their own migration and in `scripts/grant-regular-admin.ts`;
+ * duplicating them here is what let the two paths drift apart previously.
+ */
+
 import { execSync } from 'node:child_process';
-import { createClient } from '@supabase/supabase-js';
+import { loadSbblCredentials } from './lib/sbbl-env';
+
+function candidateDbUrls(projectRef: string, password: string): string[] {
+  const pw = encodeURIComponent(password);
+  return [
+    `postgresql://postgres.${projectRef}:${pw}@aws-0-ca-central-1.pooler.supabase.com:6543/postgres`,
+    `postgresql://postgres.${projectRef}:${pw}@aws-0-us-west-1.pooler.supabase.com:6543/postgres`,
+    `postgresql://postgres:${pw}@db.${projectRef}.supabase.co:5432/postgres`
+  ];
+}
 
 async function main() {
-  const envPath = 'C:\\Users\\sinyo\\Desktop\\ENV\\SBBL-HQ -ENV.md';
-  const envContent = fs.readFileSync(envPath, 'utf8');
+  const creds = loadSbblCredentials();
 
-  const dbPassMatch = envContent.match(/database password\s*-\s*([^\r\n]+)/);
-  const tokenMatch = envContent.match(/SUPABASE_TOKEN=([^\s]+)/);
-  const urlMatch = envContent.match(/SUPABASE_URL=(https:\/\/[^\s]+)/);
-
-  if (!urlMatch || !tokenMatch || !dbPassMatch) {
-    console.error('Failed to parse credentials from ENV file.');
+  if (!creds.dbPassword) {
+    console.error(
+      'Missing database password. Set SUPABASE_DB_PASSWORD, or provide it in the operator ENV file.'
+    );
     process.exit(1);
   }
 
-  const supabaseUrl = urlMatch[1].trim();
-  const token = tokenMatch[1].trim();
-  const dbPass = dbPassMatch[1].trim();
-  const projectRef = supabaseUrl.replace('https://', '').split('.')[0];
+  console.log(`Deploying migrations to project: ${creds.projectRef}`);
 
-  console.log(`Deploying migration to target project: ${projectRef}`);
-
-  // 1. First verify using Supabase JS client
-  const serviceKeyMatch = envContent.match(/SUPABASE_SERVICE_ROLE_KEY=([^\s]+)/);
-  if (serviceKeyMatch) {
-    const serviceKey = serviceKeyMatch[1].trim();
-    const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } });
-
-    const migrationSql = fs.readFileSync('supabase/migrations/20260722180000_grant_rondalesteve_league_admin.sql', 'utf8');
-    console.log('Migration SQL content loaded (length:', migrationSql.length, 'bytes).');
-
-    // Execute the statements via service client to guarantee live DB sync
-    const { data: grantData, error: grantErr } = await supabase
-      .from('admin_email_grants')
-      .upsert({
-        email: 'rondalesteve@gmail.com',
-        role: 'league_admin',
-        note: 'Regular admin grant'
-      }, { onConflict: 'email' })
-      .select();
-
-    if (grantErr) {
-      console.error('Error applying admin_email_grants:', grantErr);
-    } else {
-      console.log('Successfully synced admin_email_grants on target DB:', grantData);
-    }
-
-    const { data: usersData } = await supabase.auth.admin.listUsers();
-    const targetUser = usersData?.users.find(u => u.email?.toLowerCase() === 'rondalesteve@gmail.com');
-    if (targetUser) {
-      console.log('Found target user ID on DB:', targetUser.id);
-      await supabase
-        .from('user_role_assignments')
-        .delete()
-        .eq('user_id', targetUser.id)
-        .eq('role', 'super_admin');
-
-      const { data: currentRoles } = await supabase
-        .from('user_role_assignments')
-        .select('*')
-        .eq('user_id', targetUser.id);
-
-      if (!currentRoles?.some(r => r.role === 'league_admin')) {
-        await supabase
-          .from('user_role_assignments')
-          .insert({ user_id: targetUser.id, role: 'league_admin' });
-      }
-      console.log('Target user role assignments synced.');
-    }
-  }
-
-  // 2. Try CLI db push if pooler/direct host is available
-  const hosts = [
-    `postgresql://postgres.${projectRef}:${encodeURIComponent(dbPass)}@aws-0-ca-central-1.pooler.supabase.com:6543/postgres`,
-    `postgresql://postgres.${projectRef}:${encodeURIComponent(dbPass)}@aws-0-us-west-1.pooler.supabase.com:6543/postgres`,
-    `postgresql://postgres:${encodeURIComponent(dbPass)}@db.${projectRef}.supabase.co:5432/postgres`
-  ];
-
-  let pushed = false;
-  for (const dbUrl of hosts) {
+  for (const dbUrl of candidateDbUrls(creds.projectRef, creds.dbPassword)) {
+    const redacted = dbUrl.replace(encodeURIComponent(creds.dbPassword), '***');
+    console.log(`Attempting db push via: ${redacted}`);
     try {
-      console.log(`Attempting db push to host: ${dbUrl.replace(encodeURIComponent(dbPass), '***')}`);
       const output = execSync(`npx supabase db push --db-url "${dbUrl}"`, {
-        env: { ...process.env, SUPABASE_ACCESS_TOKEN: token },
+        env: { ...process.env, SUPABASE_ACCESS_TOKEN: creds.accessToken ?? '' },
         encoding: 'utf8',
         stdio: 'pipe'
       });
-      console.log('DB Push output:', output);
-      pushed = true;
-      break;
+      console.log('DB push output:', output);
+      console.log('✅ Migrations pushed successfully.');
+      return;
     } catch (err: unknown) {
-      const errorMsg = err instanceof Error ? err.message : String(err);
-      console.log(`Host failed: ${errorMsg.split('\n')[0]}`);
+      const message = err instanceof Error ? err.message : String(err);
+      console.log(`Host failed: ${message.split('\n')[0]}`);
     }
   }
 
-  if (pushed) {
-    console.log('Successfully executed supabase db push to target environment!');
-  } else {
-    console.log('Supabase db push completed with live DB schema and role synchronization confirmed via API.');
-  }
+  console.error('❌ All candidate database hosts failed. Migrations were NOT pushed.');
+  process.exit(1);
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('Deploy script error:', err);
   process.exit(1);
 });

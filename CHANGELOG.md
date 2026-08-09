@@ -1,8 +1,92 @@
-<!-- Version: v1.9.0 | Date: 2026-07-22 | Status: Current -->
+<!-- Version: v1.9.1 | Date: 2026-08-09 | Status: Current -->
 # CHANGELOG
 
 All notable changes to SBBL HQ are documented in this file.
 Versioning follows [semantic versioning](https://semver.org) with UTC date stamps.
+
+---
+
+## [1.9.1] - 2026-08-09
+
+### Changed — Repository migration to `sbblhqapp/sbblhq`
+
+- **Canonical remote moved** from `apexbusiness-systems/sbbl-hq` to
+  `sbblhqapp/sbblhq`. Git history was imported; pull requests and issues were
+  **not**, so pre-migration PR permalinks intentionally still resolve against the
+  archived repo (rewriting them would 404). Local `origin` repointed, old remote
+  retained as `legacy-origin`. Full runbook:
+  `docs/ops/REPO_MIGRATION_2026-08-09.md`.
+- **17 GitHub Actions secrets re-provisioned** on the new repo. A GitHub import
+  carries no secrets, and `.github/workflows/deploy.yml` hard-fails without
+  `SUPABASE_SERVICE_ROLE_KEY`. `OMNIHUB_SIGNING_SECRET` and `OMNIHUB_VERIFY_KEY`
+  remain outstanding — deploys are unaffected (optional secrets are skipped when
+  empty and the live Worker retains its values), but there is no GitHub-side
+  source of truth to restore from if the Worker is recreated.
+- **Cloudflare intentionally untouched.** The Worker `sbbl-hq-worker`, account,
+  zone `sbbl-hq.icu`, and both custom domains are not keyed to the GitHub
+  repository; `wrangler.jsonc` required no change. Verified live via the
+  Cloudflare API during migration.
+- `scripts/archive/deploy_cad_pr.js` now defaults to the new slug and accepts a
+  `GH_REPO` override.
+
+### Fixed — Operator scripts were silently inert
+
+- **Markdown-escaped credentials were never parsed** (`scripts/lib/sbbl-env.ts`,
+  new). The operator ENV file is Markdown, so underscores arrive escaped
+  (`SUPABASE\_URL=`, `sbp\_badb…`). All four scripts in `scripts/` matched on the
+  unescaped form, so every one exited "Failed to parse credentials" before doing
+  any work. `scripts/push-via-link.ts` additionally matched `SUPABASE_TOKEN=`, a
+  key that does not exist in the file. All four now share one loader.
+- **Ambient environment could retarget the wrong database.** `SBBL_ENV_FILE`, when
+  set, now outranks `process.env`. Previously an unrelated `SUPABASE_URL` exported
+  in the shell silently redirected the admin-grant script to a different Supabase
+  project; it failed safely only because that project lacks the target table.
+- `scripts/deploy-migration.ts` no longer inlines an account-specific role grant
+  (a duplicate of `grant-regular-admin.ts` that had already drifted); it is now a
+  general migration pusher that exits non-zero when every host fails, instead of
+  reporting success unconditionally.
+
+### Changed — Ops Console is now a `league_admin` surface (owner-defined matrix)
+
+- **Regular admins can operate the Ops Console.** Entry was gated on
+  `roles.includes('super_admin')` in `src/pages/Ops.tsx`, and 29 worker handlers
+  used `requireSuperAdminSession`. A `league_admin` could sign in and see only
+  "Access denied. Super Admin role required." Scores, schedules, stats, players,
+  teams, media, POTG, roster, and every CSV/image import path now run through the
+  new `requireOpsAdminSession` gate for all three leagues.
+- **`requireOpsAdminSession` is deliberately narrower than `requireAdminSession`**
+  — it admits `league_admin` + `super_admin` only. `team_manager` is scoped to a
+  single team and must never post league-wide results.
+- **Live-PPV controls remain super-admin only**: stream config, go-live, access
+  lookup/override, and PPV revenue. Broadcast surfaces are untouched per the hard
+  freeze in `CLAUDE.md` §7.1/§8.4.
+- **Regular admins may generate PPV comp codes, capped at 5 per rolling 24 hours**
+  (non-compounding; over-cap returns `429 comp_code_daily_limit_reached`). Super
+  admin stays uncapped. Regular admins can list only their own codes.
+- **Store media upload and product edit are excluded from `league_admin`.** The
+  shared CRUD helpers now dispatch through `requireTableWriteSession`, which
+  escalates to super-admin for `STORE_ONLY_TABLES`; the Store tab is hidden from
+  non-super-admins.
+- Contract pinned by `src/test/regular-admin-permissions.test.ts` (32 assertions)
+  and documented as hard rule **12** in `CLAUDE.md`.
+
+### Fixed — stats join guard false-failed on every Windows checkout
+
+- `src/test/stats-dashboard-join-fix.test.ts` stripped SQL comments by splitting
+  on `'\n'`, leaving a trailing `'\r'` under `core.autocrlf=true`. `/--.*$/` can
+  never match there (`.` does not consume a line terminator and `$` without `m`
+  anchors only at end of input), so the comment survived and the guard flagged
+  the *documentation* of the old join in `20260731060000` as a live violation.
+  Green in Linux CI, red on every Windows machine. Now splits on `/\r?\n/`.
+
+### Added — Regular admin grant for `statssbbl@gmail.com`
+
+- `supabase/migrations/20260809120000_grant_statssbbl_league_admin.sql` grants
+  `league_admin` (regular admin, **not** super admin) and explicitly revokes any
+  pre-existing `super_admin` assignment. Idempotent; applied and verified live.
+- `scripts/grant-regular-admin.ts` and `scripts/verify-deployment.ts` now take the
+  target email as an argument (`ADMIN_EMAIL` env or argv) instead of hardcoding
+  one account. `verify-deployment.ts` exits non-zero if `super_admin` survives.
 
 ---
 

@@ -1,57 +1,74 @@
-import fs from 'node:fs';
+/**
+ * Link the local repo to the Supabase project, then push migrations via the CLI.
+ *
+ * Usage:
+ *   npx tsx scripts/push-via-link.ts
+ *
+ * Prefer `scripts/deploy-migration.ts` when the project is already linked —
+ * this script exists for the first-run / re-link case.
+ */
+
 import { execSync } from 'node:child_process';
+import { loadSbblCredentials } from './lib/sbbl-env';
 
 interface ExecError extends Error {
   stdout?: string;
   stderr?: string;
 }
 
-async function main() {
-  const envPath = 'C:\\Users\\sinyo\\Desktop\\ENV\\SBBL-HQ -ENV.md';
-  const envContent = fs.readFileSync(envPath, 'utf8');
-
-  const dbPassMatch = envContent.match(/database password\s*-\s*([^\r\n]+)/);
-  const tokenMatch = envContent.match(/SUPABASE_TOKEN=([^\s]+)/);
-  const urlMatch = envContent.match(/SUPABASE_URL=(https:\/\/[^\s]+)/);
-
-  if (!urlMatch || !tokenMatch || !dbPassMatch) {
-    console.error('Failed to parse credentials from ENV file.');
-    process.exit(1);
-  }
-
-  const supabaseUrl = urlMatch[1].trim();
-  const token = tokenMatch[1].trim();
-  const dbPass = dbPassMatch[1].trim();
-  const projectRef = supabaseUrl.replace('https://', '').split('.')[0];
-
-  console.log(`Linking project ${projectRef}...`);
+function run(command: string, accessToken: string, label: string) {
   try {
-    const linkOutput = execSync(`npx supabase link --project-ref ${projectRef} --password "${dbPass}"`, {
-      env: { ...process.env, SUPABASE_ACCESS_TOKEN: token },
+    const output = execSync(command, {
+      env: { ...process.env, SUPABASE_ACCESS_TOKEN: accessToken },
       encoding: 'utf8',
       stdio: 'pipe'
     });
-    console.log('Link output:', linkOutput);
+    console.log(`${label} output:`, output);
+    return true;
   } catch (err: unknown) {
     const execErr = err as ExecError;
-    console.log('Link output / note:', execErr.stdout || execErr.message);
-  }
-
-  console.log('Pushing migrations via CLI...');
-  try {
-    const pushOutput = execSync(`npx supabase db push --password "${dbPass}"`, {
-      env: { ...process.env, SUPABASE_ACCESS_TOKEN: token },
-      encoding: 'utf8',
-      stdio: 'pipe'
-    });
-    console.log('Push output:', pushOutput);
-  } catch (err: unknown) {
-    const execErr = err as ExecError;
-    console.log('Push output / note:', execErr.stdout || execErr.stderr || execErr.message);
+    console.log(`${label} output / note:`, execErr.stdout || execErr.stderr || execErr.message);
+    return false;
   }
 }
 
-main().catch(err => {
+async function main() {
+  const creds = loadSbblCredentials();
+
+  // `SUPABASE_ACCESS_TOKEN` is the canonical name. The previous version of this
+  // script matched on `SUPABASE_TOKEN=`, which never appears in the ENV file —
+  // so it always exited before doing anything.
+  if (!creds.accessToken) {
+    console.error('Missing SUPABASE_ACCESS_TOKEN — cannot authenticate the Supabase CLI.');
+    process.exit(1);
+  }
+  if (!creds.dbPassword) {
+    console.error('Missing database password — set SUPABASE_DB_PASSWORD.');
+    process.exit(1);
+  }
+
+  console.log(`Linking project ${creds.projectRef}...`);
+  run(
+    `npx supabase link --project-ref ${creds.projectRef} --password "${creds.dbPassword}"`,
+    creds.accessToken,
+    'Link'
+  );
+
+  console.log('Pushing migrations via CLI...');
+  const pushed = run(
+    `npx supabase db push --password "${creds.dbPassword}"`,
+    creds.accessToken,
+    'Push'
+  );
+
+  if (!pushed) {
+    console.error('❌ Migration push did not complete successfully.');
+    process.exit(1);
+  }
+  console.log('✅ Migrations pushed.');
+}
+
+main().catch((err) => {
   console.error('Error:', err);
   process.exit(1);
 });
