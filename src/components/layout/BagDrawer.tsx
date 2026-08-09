@@ -8,7 +8,13 @@ import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export const BagDrawer = () => {
-  const { bagOpen, setBagOpen, bagItems, removeFromBag } = useBag();
+  const { bagOpen } = useBag();
+  if (!bagOpen) return null;
+  return <BagDrawerContent />;
+};
+
+const BagDrawerContent = () => {
+  const { setBagOpen, bagItems, removeFromBag } = useBag();
   const { session } = useAuth();
   const [checkingOut, setCheckingOut] = useState(false);
 
@@ -27,12 +33,13 @@ export const BagDrawer = () => {
     }, {} as Record<string, typeof products[0]>);
   }, [products]);
 
-  if (!bagOpen) return null;
-
-  const subtotal = bagItems.reduce((sum, id) => {
-    const product = productMap[id];
-    return sum + (product?.price ?? 0);
-  }, 0);
+  // ⚡ Bolt Performance Optimization: Memoize the subtotal calculation to prevent O(N) recalculations on every render
+  const subtotal = useMemo(() => {
+    return bagItems.reduce((sum, id) => {
+      const product = productMap[id];
+      return sum + (product?.price ?? 0);
+    }, 0);
+  }, [bagItems, productMap]);
 
   const handleCheckout = async () => {
     if (!session) { toast.error('Sign in to complete your purchase.'); return; }
