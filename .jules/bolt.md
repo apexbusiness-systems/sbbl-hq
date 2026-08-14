@@ -25,3 +25,6 @@
 ## 2026-05-21 - [React Rendering & Memory Optimization]
 **Learning:** Avoid using array spread syntax `[...a, ...b]` directly inside React render or hook dependencies when searching for elements via `.find()`, as it creates unnecessary O(N) array allocations on every render or dependency change.
 **Action:** Replace the spread and combined `.find()` with sequentially short-circuited searches (e.g., `a.find(...) ?? b.find(...)`) to save memory and CPU cycles.
+## 2026-05-24 - [React Component Extraction]
+**Learning:** Extracting complex hooks and UI elements into conditionally rendered inner components guarantees that they only execute when actually needed (e.g., when a drawer/modal is open), saving background CPU overhead.
+**Action:** Always favor component-level conditional rendering for expensive UIs instead of returning `null` after executing heavy hooks at the parent level.
