@@ -5,6 +5,7 @@ export type TestState = Record<string, Row[]>;
 
 type RpcOverride = (payload: Row) => Promise<{ data: unknown; error: { message: string } | null }> | { data: unknown; error: { message: string } | null };
 type QueryResponse<T> = { data: T; error: { message: string } | null };
+type CountResponse = { count: number | null; error: { message: string } | null };
 type MaybeSingleBuilder = {
   maybeSingle: () => Promise<QueryResponse<Row | null>>;
   single: () => Promise<QueryResponse<Row | null>>;
@@ -20,17 +21,22 @@ type QueryApi = {
   is: (col: string, value: unknown) => QueryApi;
   neq: (col: string, value: unknown) => QueryApi;
   gt: (col: string, value: unknown) => QueryApi;
+  gte: (col: string, value: unknown) => QueryApi;
+  lt: (col: string, value: unknown) => QueryApi;
   in: (col: string, values: unknown[]) => QueryApi;
   ilike: (col: string, pattern: string) => QueryApi;
   order: () => QueryApi;
   limit: () => QueryApi;
-  select: () => QueryApi;
+  /** Second arg mirrors supabase-js `{ count: 'exact', head: true }` for count-only queries. */
+  select: (columns?: string, opts?: { count?: string; head?: boolean }) => QueryApi;
   maybeSingle: () => Promise<QueryResponse<Row | null>>;
   single: () => Promise<QueryResponse<Row | null>>;
-  then: (resolve: (value: QueryResponse<Row[]>) => unknown) => Promise<unknown>;
-  insert: (row: Row) => { select?: () => { single: () => Promise<QueryResponse<Row>> }; error: null };
+  then: (
+    resolve: (value: QueryResponse<Row[]> | CountResponse) => unknown,
+  ) => Promise<unknown>;
+  insert: (row: Row | Row[]) => { select?: () => { single: () => Promise<QueryResponse<Row>> }; error: null };
   update: (patch: Row) => UpdateBuilder;
-  upsert: (row: Row) => { select: () => { single: () => Promise<QueryResponse<Row | null>> } };
+  upsert: (row: Row | Row[], opts?: { onConflict?: string }) => { select: () => { single: () => Promise<QueryResponse<Row | null>> } } | { error: null };
 };
 
 export const testEnv = {
@@ -50,11 +56,14 @@ export function createAdmin(
 ): SupabaseClient {
   function query(table: string): QueryApi {
     const filters: Array<(row: Row) => boolean> = [];
+    let countMode = false;
     const api: QueryApi = {
       eq(col, value) { filters.push((row) => row[col] === value); return api; },
       is(col, value) { filters.push((row) => (value === null ? row[col] == null : row[col] === value)); return api; },
       neq(col, value) { filters.push((row) => row[col] !== value); return api; },
       gt(col, value) { filters.push((row) => String(row[col]) > String(value)); return api; },
+      gte(col, value) { filters.push((row) => String(row[col]) >= String(value)); return api; },
+      lt(col, value) { filters.push((row) => String(row[col]) < String(value)); return api; },
       in(col, values) { filters.push((row) => values.includes(row[col])); return api; },
       ilike(col, pattern) {
         const rx = new RegExp('^' + String(pattern).replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/%/g, '.*') + '$', 'i');
@@ -63,16 +72,34 @@ export function createAdmin(
       },
       order() { return api; },
       limit() { return api; },
-      select() { return api; },
+      select(_columns, opts) { if (opts?.count) countMode = true; return api; },
       maybeSingle: async () => ({ data: (state[table] ?? []).find((row) => rowMatches(row, filters)) ?? null, error: null }),
       single: async () => {
         const row = (state[table] ?? []).find((item) => rowMatches(item, filters));
         return row ? { data: row, error: null } : { data: null, error: { message: 'not_found' } };
       },
-      then: async (resolve) => resolve({ data: (state[table] ?? []).filter((row) => rowMatches(row, filters)), error: null }),
+      then: async (resolve) => {
+        const matched = (state[table] ?? []).filter((row) => rowMatches(row, filters));
+        return countMode
+          ? resolve({ count: matched.length, error: null })
+          : resolve({ data: matched, error: null });
+      },
       insert(row) {
         if (table === 'api_idempotency_keys') return { error: null };
-        const normalized = { ...row, id: row.id ?? crypto.randomUUID(), code: row.code ?? crypto.randomUUID() };
+        const normalizeOne = (r: Row) => ({
+          ...r,
+          id: r.id ?? crypto.randomUUID(),
+          code: r.code ?? crypto.randomUUID(),
+          created_at: r.created_at ?? new Date().toISOString(),
+        });
+        // Bulk insert (array payload, e.g. handleImportRoute) — no .select()
+        // chained by real callers of this path, so just persist and resolve.
+        if (Array.isArray(row)) {
+          const normalized = row.map(normalizeOne);
+          state[table] = [...(state[table] ?? []), ...normalized];
+          return { error: null } as unknown as ReturnType<QueryApi['insert']>;
+        }
+        const normalized = normalizeOne(row);
         state[table] = [...(state[table] ?? []), normalized];
         return { select: () => ({ single: async () => ({ data: normalized, error: null }) }), error: null };
       },
@@ -107,12 +134,22 @@ export function createAdmin(
           return { select: () => ({ single: async () => ({ data: null, error: { message: 'forced_upsert_error' } }) }) };
         }
         const rows = state[table] = state[table] ?? [];
-        const existing = table === 'stream_access_sessions'
-          ? rows.find((r) => r.user_id === row.user_id && (r.game_id ?? null) === (row.game_id ?? null) && r.idempotency_key === row.idempotency_key)
-          : rows.find((r) => r.id === row.id);
-        const target = existing ?? { ...row, id: row.id ?? crypto.randomUUID(), code: row.code ?? crypto.randomUUID() };
-        Object.assign(target, row);
-        if (!existing) rows.push(target);
+        const upsertOne = (r: Row) => {
+          const existing = table === 'stream_access_sessions'
+            ? rows.find((x) => x.user_id === r.user_id && (x.game_id ?? null) === (r.game_id ?? null) && x.idempotency_key === r.idempotency_key)
+            : rows.find((x) => x.id === r.id);
+          const target = existing ?? { ...r, id: r.id ?? crypto.randomUUID(), code: r.code ?? crypto.randomUUID() };
+          Object.assign(target, r);
+          if (!existing) rows.push(target);
+          return target;
+        };
+        // Bulk upsert (array payload, e.g. handleImportRoute) — no .select()
+        // chained by real callers of this path, so just persist and resolve.
+        if (Array.isArray(row)) {
+          row.forEach(upsertOne);
+          return { error: null } as unknown as ReturnType<QueryApi['upsert']>;
+        }
+        const target = upsertOne(row);
         return { select: () => ({ single: async () => ({ data: target, error: null }) }) };
       },
     };

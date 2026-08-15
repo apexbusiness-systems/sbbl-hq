@@ -1,8 +1,156 @@
-<!-- Version: v1.9.0 | Date: 2026-07-22 | Status: Current -->
+<!-- Version: v1.9.2 | Date: 2026-08-09 | Status: Current -->
 # CHANGELOG
 
 All notable changes to SBBL HQ are documented in this file.
 Versioning follows [semantic versioning](https://semver.org) with UTC date stamps.
+
+---
+
+## [1.9.2] - 2026-08-09
+
+### Changed — Ops Console: no more raw UUIDs in any regular-admin form
+
+- **Every Manual Ops form now resolves identifiers automatically.** Create/
+  Delete Team, Create Player, Suspend/Delete/Merge Player, Create/Delete
+  Schedule Slot, Create/Delete Event, and the Roster Import League/Season
+  fields no longer ask the operator to paste a League/Season/Division/Team/
+  Player/Event/Schedule-slot UUID. League fields are a `<select>` sourced from
+  `LEAGUE_REGISTRY` (same pattern the POTG form already used); Season/
+  Division/Team/Player/Event/Schedule fields are `<select>`s backed by
+  `/ops/bootstrap` references and new/existing `/ops/list/*` endpoints.
+- **Create Player no longer requires a pre-existing account.** New `POST
+  /ops/players/find-or-create` reuses `resolvePotgPlayer` — the same
+  find-or-create-by-name logic already proven by Roster Import and POTG
+  ingest — so the form now just takes a name.
+- **`GET /ops/list/players`** now joins `profiles.display_name` and
+  `teams.name` (via the single unambiguous FK each) so the picker shows a
+  human name instead of a raw ID.
+- **New `GET /ops/list/schedules`** — no list endpoint existed for
+  `schedule_slots` before this; Delete Schedule Entry had nothing to pick
+  from.
+
+### Fixed — league codes silently failed to resolve on 3 of 4 import types
+
+- **`players`/`schedules`/`events` import configs ignored the `leagueMap`
+  argument** passed to `resolvePayload` and wrote `row.league_id` straight
+  through unresolved — a live violation of the rule-10 league-resolution
+  contract that predates this audit. `schedules` additionally had
+  `league_id: z.string().uuid()` (strict), so a typed code 422'd before ever
+  reaching resolution.
+- **`fetchLeagueMap` did a case-sensitive exact match** (`.in("code",
+  uniqueCodes)`) against codes stored uppercase in the DB — a typed lowercase
+  code (`"wbl"`) never matched, so the raw string fell into a `league_id` uuid
+  column (`22P02` in a real Postgres). Same failure class as the 2026-07-21
+  `/ops/media` incident, this time on the write path. Rebuilt on the
+  canonical `resolveLeagueId` (rule 10) instead of a second, drifted lookup.
+- All four `INGEST_CONFIGS` entries (`teams`, `players`, `schedules`,
+  `events`) now consistently resolve `league_id` through the fixed
+  `fetchLeagueMap`.
+
+### Added — test coverage, mutation-verified
+
+- `src/test/ops-console-uuid-free.test.tsx` (9 tests) — real DOM render of
+  `OpsPage`, proves League→Season filtering actually resolves against mocked
+  reference data (not just that a dropdown exists), and that Create Player
+  calls `findOrCreatePlayer` with a name, never the old
+  `manualOpsAction('player','create',{userId})` contract.
+- `src/test/worker-league-code-import-fix.test.ts` (7 tests) — real
+  `handleImportRoute` calls against a mock Supabase client, asserting the
+  actual resolved `league_id` that lands in the row.
+- Both suites were mutation-tested: each of the 4 rules this changeset
+  enforces (Ops-admin gate, comp-code cap, store-table escalation, league-slug
+  resolution) was deliberately broken, confirmed to produce a distinct
+  correctly-scoped test failure, then reverted — not just "tests are green."
+- `src/test/broadcast-test-utils.ts`'s mock Supabase client gained array
+  support for `.insert()`/`.upsert()` (matching real Supabase semantics,
+  needed to exercise the bulk-row `handleImportRoute` path). This corrected a
+  latent bug in `src/test/surface-probes.test.ts`, which had encoded the
+  mock's old broken array-spread behavior as an expected value; updated to
+  assert against the real resolved payload.
+
+---
+
+## [1.9.1] - 2026-08-09
+
+### Changed — Repository migration to `sbblhqapp/sbblhq`
+
+- **Canonical remote moved** from `apexbusiness-systems/sbbl-hq` to
+  `sbblhqapp/sbblhq`. Git history was imported; pull requests and issues were
+  **not**, so pre-migration PR permalinks intentionally still resolve against the
+  archived repo (rewriting them would 404). Local `origin` repointed, old remote
+  retained as `legacy-origin`. Full runbook:
+  `docs/ops/REPO_MIGRATION_2026-08-09.md`.
+- **17 GitHub Actions secrets re-provisioned** on the new repo. A GitHub import
+  carries no secrets, and `.github/workflows/deploy.yml` hard-fails without
+  `SUPABASE_SERVICE_ROLE_KEY`. `OMNIHUB_SIGNING_SECRET` and `OMNIHUB_VERIFY_KEY`
+  remain outstanding — deploys are unaffected (optional secrets are skipped when
+  empty and the live Worker retains its values), but there is no GitHub-side
+  source of truth to restore from if the Worker is recreated.
+- **Cloudflare intentionally untouched.** The Worker `sbbl-hq-worker`, account,
+  zone `sbbl-hq.icu`, and both custom domains are not keyed to the GitHub
+  repository; `wrangler.jsonc` required no change. Verified live via the
+  Cloudflare API during migration.
+- `scripts/archive/deploy_cad_pr.js` now defaults to the new slug and accepts a
+  `GH_REPO` override.
+
+### Fixed — Operator scripts were silently inert
+
+- **Markdown-escaped credentials were never parsed** (`scripts/lib/sbbl-env.ts`,
+  new). The operator ENV file is Markdown, so underscores arrive escaped
+  (`SUPABASE\_URL=`, `sbp\_badb…`). All four scripts in `scripts/` matched on the
+  unescaped form, so every one exited "Failed to parse credentials" before doing
+  any work. `scripts/push-via-link.ts` additionally matched `SUPABASE_TOKEN=`, a
+  key that does not exist in the file. All four now share one loader.
+- **Ambient environment could retarget the wrong database.** `SBBL_ENV_FILE`, when
+  set, now outranks `process.env`. Previously an unrelated `SUPABASE_URL` exported
+  in the shell silently redirected the admin-grant script to a different Supabase
+  project; it failed safely only because that project lacks the target table.
+- `scripts/deploy-migration.ts` no longer inlines an account-specific role grant
+  (a duplicate of `grant-regular-admin.ts` that had already drifted); it is now a
+  general migration pusher that exits non-zero when every host fails, instead of
+  reporting success unconditionally.
+
+### Changed — Ops Console is now a `league_admin` surface (owner-defined matrix)
+
+- **Regular admins can operate the Ops Console.** Entry was gated on
+  `roles.includes('super_admin')` in `src/pages/Ops.tsx`, and 29 worker handlers
+  used `requireSuperAdminSession`. A `league_admin` could sign in and see only
+  "Access denied. Super Admin role required." Scores, schedules, stats, players,
+  teams, media, POTG, roster, and every CSV/image import path now run through the
+  new `requireOpsAdminSession` gate for all three leagues.
+- **`requireOpsAdminSession` is deliberately narrower than `requireAdminSession`**
+  — it admits `league_admin` + `super_admin` only. `team_manager` is scoped to a
+  single team and must never post league-wide results.
+- **Live-PPV controls remain super-admin only**: stream config, go-live, access
+  lookup/override, and PPV revenue. Broadcast surfaces are untouched per the hard
+  freeze in `CLAUDE.md` §7.1/§8.4.
+- **Regular admins may generate PPV comp codes, capped at 5 per rolling 24 hours**
+  (non-compounding; over-cap returns `429 comp_code_daily_limit_reached`). Super
+  admin stays uncapped. Regular admins can list only their own codes.
+- **Store media upload and product edit are excluded from `league_admin`.** The
+  shared CRUD helpers now dispatch through `requireTableWriteSession`, which
+  escalates to super-admin for `STORE_ONLY_TABLES`; the Store tab is hidden from
+  non-super-admins.
+- Contract pinned by `src/test/regular-admin-permissions.test.ts` (32 assertions)
+  and documented as hard rule **12** in `CLAUDE.md`.
+
+### Fixed — stats join guard false-failed on every Windows checkout
+
+- `src/test/stats-dashboard-join-fix.test.ts` stripped SQL comments by splitting
+  on `'\n'`, leaving a trailing `'\r'` under `core.autocrlf=true`. `/--.*$/` can
+  never match there (`.` does not consume a line terminator and `$` without `m`
+  anchors only at end of input), so the comment survived and the guard flagged
+  the *documentation* of the old join in `20260731060000` as a live violation.
+  Green in Linux CI, red on every Windows machine. Now splits on `/\r?\n/`.
+
+### Added — Regular admin grant for `statssbbl@gmail.com`
+
+- `supabase/migrations/20260809120000_grant_statssbbl_league_admin.sql` grants
+  `league_admin` (regular admin, **not** super admin) and explicitly revokes any
+  pre-existing `super_admin` assignment. Idempotent; applied and verified live.
+- `scripts/grant-regular-admin.ts` and `scripts/verify-deployment.ts` now take the
+  target email as an argument (`ADMIN_EMAIL` env or argv) instead of hardcoding
+  one account. `verify-deployment.ts` exits non-zero if `super_admin` survives.
 
 ---
 

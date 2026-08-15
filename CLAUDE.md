@@ -705,6 +705,178 @@ Never drop the filter and return unfiltered rows, and never silently null
 a `league_id` you failed to resolve — both are the silent-degradation
 pattern rule 1/2 exists to prevent.
 
+### 11. Canonical remote + operator credential loading
+
+**Canonical remote (since 2026-08-09): `https://github.com/sbblhqapp/sbblhq`.**
+The former `apexbusiness-systems/sbbl-hq` is an **archive**. Full context:
+[`docs/ops/REPO_MIGRATION_2026-08-09.md`](docs/ops/REPO_MIGRATION_2026-08-09.md).
+
+#### 11.1 — Pre-migration PR/issue permalinks stay pointed at the archive
+
+The import carried git history only. Pull requests and issues were **not**
+migrated (the new repo has zero PRs). Do not "modernize" historical PR links —
+rewriting `…/apexbusiness-systems/sbbl-hq/pull/439` to the new slug produces a
+404. New links use the new slug; historical ones stay.
+
+#### 11.2 — A repo migration is never a reason to touch Cloudflare
+
+The Worker (`sbbl-hq-worker`), account, zone (`sbbl-hq.icu`), and custom domains
+are not keyed to the GitHub repository. `wrangler.jsonc` required **no** change.
+The Worker name rule at the top of `wrangler.jsonc` still stands absolutely.
+
+What a migration *does* invalidate: **GitHub Actions secrets are never carried by
+an import.** A fresh repo has zero, and `deploy.yml` hard-fails on a missing
+`SUPABASE_SERVICE_ROLE_KEY`. Re-provision before expecting a green deploy.
+
+#### 11.3 — All `scripts/` credential loading goes through `scripts/lib/sbbl-env.ts`
+
+Do not hand-roll `fs.readFileSync(envPath)` + a regex in a new script. Two
+non-obvious behaviours in the shared loader are load-bearing:
+
+```ts
+// CORRECT
+import { loadSbblCredentials, resolveTargetEmail } from './lib/sbbl-env';
+const creds = loadSbblCredentials();
+```
+
+```ts
+// ❌ BANNED — the operator ENV file is Markdown, so underscores arrive
+// backslash-escaped (`SUPABASE\_URL=`, `sk\_live\_…`). This regex never
+// matches, and the script exits "Failed to parse credentials" having done
+// nothing. All four scripts/ entrypoints shipped broken this way.
+const url = envContent.match(/SUPABASE_URL=(https:\/\/[^\s]+)/);
+```
+
+`SBBL_ENV_FILE`, when set, **outranks ambient `process.env`**. An explicitly
+named credential file is a deliberate operator choice and must beat whatever is
+exported in the shell — see the 2026-08-09 incident below.
+
+#### 11.4 — Regular admin means `league_admin`, and the grant must revoke `super_admin`
+
+Use `scripts/grant-regular-admin.ts` (email via argv or `ADMIN_EMAIL`). A
+"regular admin" grant is not complete until any existing `super_admin` row in
+`user_role_assignments` is deleted — upserting `admin_email_grants` alone leaves
+a previously-escalated account escalated. `scripts/verify-deployment.ts` exits
+non-zero if `super_admin` survives, and is the check to run after any grant.
+
+### 12. Regular-admin (`league_admin`) permission model — OWNER-DEFINED
+
+**This matrix is an owner rule. Do not widen or narrow it without approval.**
+Enforced by `src/test/regular-admin-permissions.test.ts`.
+
+The Ops Console is a **`league_admin` surface, not a `super_admin` one**. It was
+previously gated on `roles.includes('super_admin')` end-to-end, which made
+`league_admin` a role that could sign in and see only "Access denied".
+
+| Surface | `league_admin` | Gate |
+|---|---|---|
+| Scores, schedules, stats, players, teams | ✅ | `requireOpsAdminSession` |
+| CSV / roster / image imports, POTG | ✅ | `requireOpsAdminSession` |
+| Media library + generic media publish | ✅ | `requireOpsAdminSession` |
+| **Store media upload & product edit** | ❌ | `requireSuperAdminSession` |
+| **Live-PPV controls** (stream config, go-live, access override, PPV revenue) | ❌ | `requireSuperAdminSession` |
+| PPV comp codes | ⚠️ **max 5 / rolling 24h** | `requireOpsAdminSession` + cap |
+| Coach-request approval, role grants | ❌ | `requireSuperAdminSession` |
+
+#### 12.1 — `requireOpsAdminSession` is narrower than `requireAdminSession`
+
+```ts
+// ✅ CORRECT — content ops. Admits league_admin + super_admin ONLY.
+const session = await requireOpsAdminSession(ctx.req, ctx.admin);
+```
+
+```ts
+// ❌ BANNED on league-wide writes — requireAdminSession also admits
+// `team_manager`, who is scoped to a single team and must never rewrite
+// another team's roster or post league-wide results.
+await requireAdminSession(ctx.req, ctx.admin);
+```
+
+#### 12.2 — Store tables escalate on the SHARED CRUD path
+
+`handleOpsPatch` / `handleOpsDelete` are generic over a table name. They must go
+through `requireTableWriteSession`, which escalates to super-admin for
+`STORE_ONLY_TABLES`. Calling `requireOpsAdminSession` directly in those helpers
+silently re-opens store editing to every regular admin.
+
+#### 12.3 — The comp-code cap is a ROLLING window, and that is the point
+
+5 codes per **rolling 24 hours**, counted as `ppv_invites` rows where
+`generated_by = caller AND is_comp = true AND created_at >= now() - 24h`.
+
+A rolling window is what makes the allowance **non-compounding** — an unused day
+never banks extra codes. Do not "simplify" this to a calendar-day counter or a
+stored per-day balance; both let an admin accumulate well past 5. Over-cap
+requests return `429 comp_code_daily_limit_reached`. Super admin is uncapped.
+
+Regular admins may list only the comp codes they generated themselves; the full
+comp ledger stays a super-admin view.
+
+**Known gap (tracked, not yet fixed):** the API accepts `league_admin` for
+`POST /ops/streams/comp-code`, but the only shipped UI entry point — the Admin
+Stream Overlay on `/live` (`src/pages/Live.tsx:1345`, `{isSuperAdmin && (...)}`)
+— still renders for `super_admin` only. A regular admin cannot reach comp-code
+generation through any button in the app yet. Documented in
+`docs/features/STREAM_GATING_v1.7.0.md`. Do not silently "fix" this by loosening
+the overlay's gate to `canModerateLive` — that would also expose the
+stream-config/go-live/access-override controls the overlay bundles alongside
+comp codes, all of which stay super-admin-only per §12.1. The correct fix is a
+comp-code-only entry point, not a broader overlay gate change.
+
+### 13. Ops Console — no raw UUIDs, ever, in a form a regular admin can reach
+
+**Owner rule (2026-08-09).** Every Manual Ops create/delete/suspend/merge form
+must resolve identifiers automatically. An operator without database access
+must never be asked to paste a League/Season/Division/Team/Player/Event/
+Schedule-slot ID.
+
+```tsx
+// ❌ BANNED — the exact pattern this rule replaced.
+<input placeholder="League ID (UUID) *" value={form.leagueId}
+  onChange={e => setForm(f => ({ ...f, leagueId: e.target.value }))} />
+```
+
+```tsx
+// ✅ CORRECT — League submits the LEAGUE_REGISTRY slug (same pattern the
+// POTG form already used); Season/Division/Team/Player/Event/Schedule use
+// the components in src/pages/Ops.tsx (LeagueSelect, SeasonSelect,
+// DivisionSelect, TeamSelect, PlayerSelect, EventSelect, ScheduleSelect),
+// backed by /ops/bootstrap `references` and the /ops/list/* endpoints.
+<LeagueSelect value={form.leagueId} onChange={(slug) => setForm(f => ({ ...f, leagueId: slug }))} />
+```
+
+#### 13.1 — League fields send a SLUG, never a UUID picked by the frontend
+
+`leagueId` submitted by every Ops form is the `LEAGUE_REGISTRY` slug
+(`'wbl'`/`'sbbl'`/`'tgifbl'`), resolved server-side via `resolveLeagueId`
+(rule 10). Season/Team dropdowns need the league's real UUID only to
+client-side FILTER their own options (`leagueUuidForSlug` in `Ops.tsx`) — that
+UUID is derived, never typed or displayed.
+
+#### 13.2 — `handleImportRoute`'s `INGEST_CONFIGS` must resolve `league_id` through `fetchLeagueMap`, not pass it through raw
+
+Every `resolvePayload` in `INGEST_CONFIGS` (teams/players/schedules/events)
+must consume the `leagueMap` argument. Before 2026-08-09, `players`/
+`schedules`/`events` silently ignored it and passed `row.league_id` straight
+through — a live rule-10 violation nobody caught until this audit. See
+`fetchLeagueMap`'s doc comment in `src/worker/routes/ops-upload.ts` for the
+original bug (case-sensitive `.in("code", …)` against uppercase-stored codes).
+
+#### 13.3 — Create Player has no UUID to require
+
+`POST /ops/players/find-or-create` (`handleOpsFindOrCreatePlayer`) reuses
+`resolvePotgPlayer` — the same name-based find-or-create already proven by
+Roster Import and POTG ingest. There is no "search for an existing user"
+endpoint and none should be added for this form; find-or-create by display
+name is the contract. Do not resurrect a raw `user_id` field on Create Player.
+
+**Enforcement:** `src/test/ops-console-uuid-free.test.tsx` (real DOM render,
+proves League→Season filtering actually resolves and Create Player never
+calls the old `manualOpsAction('player','create',{userId})` contract) and
+`src/test/worker-league-code-import-fix.test.ts` (real handler calls proving
+`fetchLeagueMap` resolves case-insensitively). Both suites are mutation-tested
+— see the incident entry below for the exact regressions each one catches.
+
 ## Architecture at a glance
 
 ```
@@ -785,6 +957,54 @@ npm run build       # production build (vite)
 CI runs all of these. Do not merge red.
 
 ## Incident history (relevant to this guide)
+
+- **2026-08-09** — Ops Console UUID-elimination + a live rule-10 violation
+  found in the audit. The Manual Ops forms (Teams/Players/Schedules/Events)
+  required regular admins to paste raw League/Season/Division/Team/Player/
+  Event/Schedule-slot UUIDs with no way to look one up — the operator-reported
+  trigger was `statssbbl@gmail.com` unable to use the console at all. Audit
+  also found `handleImportRoute`'s `players`/`schedules`/`events` configs
+  silently ignored the `leagueMap` argument passed to `resolvePayload` and
+  wrote `row.league_id` straight through — meaning a typed league code (or,
+  for `schedules`, ANY non-UUID value, since `scheduleRowSchema.league_id` was
+  `.uuid()`-strict) either 422'd or landed unresolved. Separately, the existing
+  `fetchLeagueMap` helper backing `teams`/`scores` did `.in("code",
+  uniqueCodes)` — case-sensitive exact match against uppercase-stored codes —
+  so a typed lowercase code (`"wbl"`) never matched and the raw string fell
+  into a `uuid` column (would 22P02 in production; masked in dev because the
+  fallback silently accepted the unresolved string). This is the same failure
+  class as the 2026-07-21 league-filter incident, just on the write path
+  instead of the read path. Root-caused this time by a proactive audit, not a
+  production 500. Fix: `fetchLeagueMap` rebuilt on the canonical
+  `resolveLeagueId`; all four `INGEST_CONFIGS` entries now actually consume
+  `leagueMap`; `scheduleRowSchema`/`eventRowSchema`/`playerRowSchema.league_id`
+  loosened from `.uuid()` to accept a code; new `POST
+  /ops/players/find-or-create` (reuses `resolvePotgPlayer`) replaces the raw
+  `user_id` Create Player field; new `GET /ops/list/schedules` and joined
+  display names on `GET /ops/list/players` back the new pickers. See rule
+  **13**. Verified via mutation testing: 4 separate deliberate breaks (gate
+  role check, comp-code cap comparison, `STORE_ONLY_TABLES`, and here
+  `leagueUuidForSlug`/`fetchLeagueMap`) each produced a distinct, correctly-
+  scoped test failure before being reverted — not just "tests are green."
+
+- **2026-08-09** — Repo migration to `sbblhqapp/sbblhq` + near-miss write to the
+  wrong Supabase project. Two latent defects surfaced while migrating the remote
+  and granting `statssbbl@gmail.com` regular admin. (1) **Every script in
+  `scripts/` was inert.** All four parsed the operator ENV file with regexes like
+  `/SUPABASE_URL=…/`, but that file is Markdown — underscores arrive escaped
+  (`SUPABASE\_URL=`, `sbp\_badb…`), so no pattern ever matched and each script
+  exited "Failed to parse credentials" before doing any work.
+  `scripts/push-via-link.ts` additionally matched `SUPABASE_TOKEN=`, a key that
+  does not exist in the file at all. (2) **Ambient env silently retargeted the
+  database.** The first grant run resolved to an unrelated Supabase project
+  instead of the SBBL one, because a stray `SUPABASE_URL` exported in the shell
+  outranked the explicitly-supplied ENV file. It failed safely only by luck —
+  that project has no `admin_email_grants` table. Fix: single loader
+  `scripts/lib/sbbl-env.ts` (Markdown de-escaping + `SBBL_ENV_FILE` outranks
+  `process.env`), all four scripts migrated, target email parameterized. Also
+  re-provisioned 17 Actions secrets, which a GitHub import never carries.
+  See rule **11** and
+  [`docs/ops/REPO_MIGRATION_2026-08-09.md`](docs/ops/REPO_MIGRATION_2026-08-09.md).
 
 - **2026-07-21** — League-resolution consolidation (PR #571): every league
   filter chip on `/ops/media` returned 500. Root cause: `handleOpsListMediaPublications`
@@ -945,4 +1165,4 @@ and `sbbl-hq-selfhost/WARNING_NOT_ACTIVE_SELFHOST_ROOT.md`.
 
 ---
 
-Last verified: 2026-07-21
+Last verified: 2026-08-09

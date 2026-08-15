@@ -1,24 +1,30 @@
-import fs from 'node:fs';
+/**
+ * Verify the live admin-role state for an account.
+ *
+ * Usage:
+ *   npx tsx scripts/verify-deployment.ts [email]
+ *
+ * Read-only. Exits non-zero if the account holds super_admin, so this doubles
+ * as a guard that a "regular admin" grant did not silently escalate.
+ */
+
 import { createClient } from '@supabase/supabase-js';
+import { loadSbblCredentials, resolveTargetEmail } from './lib/sbbl-env';
+
+const DEFAULT_EMAIL = 'statssbbl@gmail.com';
 
 async function main() {
-  const envPath = 'C:\\Users\\sinyo\\Desktop\\ENV\\SBBL-HQ -ENV.md';
-  const envContent = fs.readFileSync(envPath, 'utf8');
+  const creds = loadSbblCredentials();
+  const targetEmail = resolveTargetEmail(DEFAULT_EMAIL);
 
-  const urlMatch = envContent.match(/SUPABASE_URL=(https:\/\/[^\s]+)/);
-  const keyMatch = envContent.match(/SUPABASE_SERVICE_ROLE_KEY=([^\s]+)/);
+  const supabase = createClient(creds.supabaseUrl, creds.serviceRoleKey, {
+    auth: { persistSession: false }
+  });
 
-  if (!urlMatch || !keyMatch) {
-    console.error('Failed to parse credentials from ENV file.');
-    process.exit(1);
-  }
+  console.log('=== VERIFYING TARGET DATABASE STATE ===');
+  console.log(`Project: ${creds.projectRef}`);
+  console.log(`Email:   ${targetEmail}`);
 
-  const supabase = createClient(urlMatch[1].trim(), keyMatch[1].trim(), { auth: { persistSession: false } });
-  const targetEmail = 'rondalesteve@gmail.com';
-
-  console.log('=== VERIFYING TARGET PRODUCTION/STAGING DATABASE STATE ===');
-
-  // Check admin_email_grants
   const { data: grants, error: grantsErr } = await supabase
     .from('admin_email_grants')
     .select('*')
@@ -26,27 +32,49 @@ async function main() {
 
   if (grantsErr) {
     console.error('Error fetching admin_email_grants:', grantsErr);
-  } else {
-    console.log('admin_email_grants:', grants);
+    process.exit(1);
+  }
+  console.log('admin_email_grants:', grants);
+
+  if (grants?.some((g) => g.role === 'super_admin')) {
+    console.error('❌ admin_email_grants maps this email to super_admin.');
+    process.exit(1);
   }
 
-  // Check auth user and role assignments
-  const { data: usersData } = await supabase.auth.admin.listUsers();
-  const matchedUser = usersData?.users.find(u => u.email?.toLowerCase() === targetEmail.toLowerCase());
-
-  if (matchedUser) {
-    console.log('User ID:', matchedUser.id);
-    const { data: roles } = await supabase
-      .from('user_role_assignments')
-      .select('*')
-      .eq('user_id', matchedUser.id);
-    console.log('user_role_assignments:', roles);
-  } else {
-    console.log('User not yet registered in auth.users. Trigger trg_auto_grant_role_on_signup is active for signup auto-grant.');
+  const { data: usersData, error: usersErr } = await supabase.auth.admin.listUsers();
+  if (usersErr) {
+    console.error('Error listing auth users:', usersErr);
+    process.exit(1);
   }
+
+  const matchedUser = usersData?.users.find(
+    (u) => u.email?.toLowerCase() === targetEmail
+  );
+
+  if (!matchedUser) {
+    console.log(
+      'User not yet registered in auth.users. ' +
+        'trg_auto_grant_role_on_signup is active and will apply the grant on signup.'
+    );
+    return;
+  }
+
+  console.log('User ID:', matchedUser.id);
+  const { data: roles } = await supabase
+    .from('user_role_assignments')
+    .select('*')
+    .eq('user_id', matchedUser.id);
+  console.log('user_role_assignments:', roles);
+
+  if (roles?.some((r) => r.role === 'super_admin')) {
+    console.error('❌ Account holds super_admin — expected league_admin only.');
+    process.exit(1);
+  }
+
+  console.log('✅ Verified: regular admin only, no super_admin assignment.');
 }
 
-main().catch(err => {
+main().catch((err) => {
   console.error('Verification failed:', err);
   process.exit(1);
 });

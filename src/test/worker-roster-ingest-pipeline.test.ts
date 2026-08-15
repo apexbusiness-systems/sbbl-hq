@@ -183,7 +183,21 @@ describe('handleRosterImport', () => {
     await expect(handleRosterImport(ctx)).rejects.toThrow(/unauthorized/);
   });
 
-  it('403s non-super-admin callers', async () => {
+  // Roster import is a core league operation: league_admin must be allowed.
+  // team_manager must not be — they are scoped to a single team and cannot be
+  // permitted to rewrite another team's roster.
+  it('403s team_manager callers (below the ops-admin bar)', async () => {
+    const ctx = mkCtx({
+      url: 'https://local/ops/roster/import',
+      method: 'POST',
+      body: rosterBody(),
+      headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
+      admin: createAdmin({ user_role_assignments: [{ user_id: ADMIN_ID, role: 'team_manager' }] }),
+    });
+    await expect(handleRosterImport(ctx)).rejects.toThrow(/forbidden/);
+  });
+
+  it('does NOT reject league_admin (regular admins run roster imports)', async () => {
     const ctx = mkCtx({
       url: 'https://local/ops/roster/import',
       method: 'POST',
@@ -191,7 +205,7 @@ describe('handleRosterImport', () => {
       headers: { 'x-sbbl-user-id-verified': ADMIN_ID },
       admin: createAdmin({ user_role_assignments: [{ user_id: ADMIN_ID, role: 'league_admin' }] }),
     });
-    await expect(handleRosterImport(ctx)).rejects.toThrow(/forbidden/);
+    await expect(handleRosterImport(ctx)).resolves.not.toThrow();
   });
 
   it('422s when seasonId is missing (proves the tightened team schema contract)', async () => {

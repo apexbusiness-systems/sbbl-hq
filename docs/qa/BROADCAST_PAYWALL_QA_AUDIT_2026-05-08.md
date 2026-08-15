@@ -3,7 +3,8 @@
 **Skills active:** apex-live, apex-qa, apex-master-debug, sbbl-agent, omnidev-v2  
 **Date:** 2026-05-08  
 **Branch audited:** `work` @ `5ff9713`  
-**Repo:** apexbusiness-systems/sbbl-hq  
+**Repo:** `apexbusiness-systems/sbbl-hq` (pre-migration archive — the canonical
+remote is now `sbblhqapp/sbblhq`; see `docs/ops/REPO_MIGRATION_2026-08-09.md`)  
 
 ---
 

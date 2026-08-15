@@ -898,6 +898,36 @@ export async function requireSuperAdminSession(req: Request, admin: SupabaseClie
   return session;
 }
 
+/**
+ * Ops Console content-operations gate — `league_admin` OR `super_admin`.
+ *
+ * A regular admin (`league_admin`) runs day-to-day league operations across all
+ * three leagues: uploading scores, schedules, stats, rosters, teams, players,
+ * media, POTG, and store products. Those endpoints were previously pinned to
+ * `requireSuperAdminSession`, which made `league_admin` a role that could log in
+ * and see nothing — the Ops Console rendered "Access denied. Super Admin role
+ * required." for every regular admin.
+ *
+ * Deliberately NARROWER than `requireAdminSession`: `team_manager` is excluded.
+ * A team manager is scoped to one team and must not write league-wide results.
+ *
+ * Deliberately does NOT replace `requireSuperAdminSession` everywhere. These
+ * remain super-admin only, because they grant privilege or control the live
+ * broadcast rather than manage content:
+ *   - stream/broadcast control  — CLAUDE.md §7.1, §8.4 (frozen surface)
+ *   - access lookup / override  — grants entitlements
+ *   - coach request approval    — grants a role
+ *   - PPV comp codes            — grants paid access
+ */
+export async function requireOpsAdminSession(req: Request, admin: SupabaseClient) {
+  const session = await requireAdminSession(req, admin);
+  const permitted = session.roles.some(
+    (role) => role === "league_admin" || role === "super_admin",
+  );
+  if (!permitted) throw new Error("forbidden");
+  return session;
+}
+
 function resolveStreamConfigPlaybackUrl(cfg: Record<string, unknown>, env: Env): string {
   return String(cfg.playback_asset_id ?? "").trim()
     || String(cfg.collection_id ?? "").trim()
@@ -1206,7 +1236,9 @@ async function handleStreamSessions({ req, admin }: HandlerCtx) {
   });
 }
 
-async function handleOpsRevenue({ req, admin }: HandlerCtx) {
+// PPV revenue reporting is a live-PPV surface: super-admin only.
+// Regular admins have no access to live-PPV controls or their financials.
+export async function handleOpsRevenue({ req, admin }: HandlerCtx) {
   await requireSuperAdminSession(req, admin);
   const [orders, invites, sessions] = await Promise.all([
     admin
@@ -2473,7 +2505,7 @@ export async function handlePipelineHealth({ req, admin }: HandlerCtx) {
 // gets a merged_into pointer that resolvePotgPlayer follows. Nothing deleted.
 export async function handlePlayerIdentityMerge(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId: actorId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId: actorId } = await requireOpsAdminSession(ctx.req, ctx.admin);
   const body = (await ctx.req.json().catch(() => null)) as { sourcePlayerId?: string; targetPlayerId?: string } | null;
   const sourceId = body?.sourcePlayerId?.trim();
   const targetId = body?.targetPlayerId?.trim();
@@ -2538,34 +2570,89 @@ const handlePublicPotg = _handlePublicPotg;
 
 // Ops List handlers
 async function handleOpsListTeams({ req, admin }: HandlerCtx) {
-  await requireSuperAdminSession(req, admin);
+  await requireOpsAdminSession(req, admin);
   const { data, error } = await admin.from('teams').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
+// Joins profiles.display_name (via the single players.profile_id FK) and
+// teams.name (via the single players.team_id FK) so the Ops Console can
+// render a human-readable player picker instead of a raw Player ID text box.
+// Both FKs are unambiguous (players has exactly one FK to each target table),
+// so PostgREST embedding is safe here — unlike the player_game_stats join
+// history, there is no second candidate FK path to accidentally match.
 async function handleOpsListPlayers({ req, admin }: HandlerCtx) {
-  await requireSuperAdminSession(req, admin);
-  const { data, error } = await admin.from('players').select('*').order('created_at', { ascending: false });
+  await requireOpsAdminSession(req, admin);
+  const { data, error } = await admin
+    .from('players')
+    .select('*, profiles(display_name,full_name), teams(name)')
+    .order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
-  return json({ ok: true, data });
+  const rows = ((data ?? []) as Array<Record<string, unknown>>).map((row) => {
+    const profile = row.profiles as { display_name?: string | null; full_name?: string | null } | null;
+    const team = row.teams as { name?: string | null } | null;
+    const { profiles: _profiles, teams: _teams, ...rest } = row;
+    return {
+      ...rest,
+      display_name: profile?.display_name || profile?.full_name || null,
+      team_name: team?.name ?? null,
+    };
+  });
+  return json({ ok: true, data: rows });
 }
 async function handleOpsListProducts({ req, admin }: HandlerCtx) {
-  await requireSuperAdminSession(req, admin);
+  await requireOpsAdminSession(req, admin);
   const { data, error } = await admin.from('products').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
 async function handleOpsListEvents({ req, admin }: HandlerCtx) {
-  await requireSuperAdminSession(req, admin);
+  await requireOpsAdminSession(req, admin);
   const { data, error } = await admin.from('league_events').select('*').order('created_at', { ascending: false });
   if (error) throw new Error(error.message);
   return json({ ok: true, data });
 }
+// Joins leagues.code (via schedule_slots.league_id, single unambiguous FK) so
+// the Ops Console can render a human-readable schedule-slot picker for
+// "Delete Schedule Entry" instead of a raw Schedule Slot ID text box. No
+// list endpoint for schedule_slots existed before this.
+async function handleOpsListSchedules({ req, admin }: HandlerCtx) {
+  await requireOpsAdminSession(req, admin);
+  const { data, error } = await admin
+    .from('schedule_slots')
+    .select('*, leagues(code,name)')
+    .order('starts_at', { ascending: false });
+  if (error) throw new Error(error.message);
+  const rows = ((data ?? []) as Array<Record<string, unknown>>).map((row) => {
+    const league = row.leagues as { code?: string | null; name?: string | null } | null;
+    const { leagues: _leagues, ...rest } = row;
+    return { ...rest, league_code: league?.code ?? null, league_name: league?.name ?? null };
+  });
+  return json({ ok: true, data: rows });
+}
 
 // Ops Edit (Patch) handlers
+/**
+ * Tables that stay super-admin only even on the shared ops CRUD path.
+ * Regular admins are excluded from store media upload and edit access, so the
+ * generic patch/delete helpers must escalate for these — otherwise `products`
+ * would inherit league_admin access through the shared handler.
+ */
+const STORE_ONLY_TABLES = new Set(["products", "store_products"]);
+
+async function requireTableWriteSession(
+  table: string,
+  req: Request,
+  admin: import("@supabase/supabase-js").SupabaseClient,
+) {
+  return STORE_ONLY_TABLES.has(table)
+    ? requireSuperAdminSession(req, admin)
+    : requireOpsAdminSession(req, admin);
+}
+
 async function handleOpsPatch(table: string, req: Request, admin: import("@supabase/supabase-js").SupabaseClient, params: Record<string, string>) {
   await ensureMutation(req, { req, admin, params } as unknown as HandlerCtx);
-  await requireSuperAdminSession(req, admin);
+  await requireTableWriteSession(table, req, admin);
   const id = params.id;
   if (!id) throw new Error('Missing ID');
   const body = await req.json().catch(() => null);
@@ -2585,16 +2672,16 @@ async function handleOpsPatch(table: string, req: Request, admin: import("@supab
 
   return json({ ok: true, data });
 }
-async function handleOpsPatchTeams(ctx: HandlerCtx) { return handleOpsPatch('teams', ctx.req, ctx.admin, ctx.params); }
+export async function handleOpsPatchTeams(ctx: HandlerCtx) { return handleOpsPatch('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchPlayers(ctx: HandlerCtx) { return handleOpsPatch('players', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsPatchProducts(ctx: HandlerCtx) { return handleOpsPatch('products', ctx.req, ctx.admin, ctx.params); }
+export async function handleOpsPatchProducts(ctx: HandlerCtx) { return handleOpsPatch('products', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchEvents(ctx: HandlerCtx) { return handleOpsPatch('league_events', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsPatchSchedules(ctx: HandlerCtx) { return handleOpsPatch('schedule_slots', ctx.req, ctx.admin, ctx.params); }
 
 // Ops Delete (Archive) handlers
 async function handleOpsDelete(table: string, req: Request, admin: import("@supabase/supabase-js").SupabaseClient, params: Record<string, string>) {
   await ensureMutation(req, { req, admin, params } as unknown as HandlerCtx);
-  await requireSuperAdminSession(req, admin);
+  await requireTableWriteSession(table, req, admin);
   const id = params.id;
   if (!id) throw new Error('Missing ID');
 
@@ -2613,9 +2700,9 @@ async function handleOpsDelete(table: string, req: Request, admin: import("@supa
 
   return json({ ok: true, data });
 }
-async function handleOpsDeleteTeams(ctx: HandlerCtx) { return handleOpsDelete('teams', ctx.req, ctx.admin, ctx.params); }
+export async function handleOpsDeleteTeams(ctx: HandlerCtx) { return handleOpsDelete('teams', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeletePlayers(ctx: HandlerCtx) { return handleOpsDelete('players', ctx.req, ctx.admin, ctx.params); }
-async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete('products', ctx.req, ctx.admin, ctx.params); }
+export async function handleOpsDeleteProducts(ctx: HandlerCtx) { return handleOpsDelete('products', ctx.req, ctx.admin, ctx.params); }
 async function handleOpsDeleteEvents(ctx: HandlerCtx) { return handleOpsDelete('league_events', ctx.req, ctx.admin, ctx.params); }
 
 // ── Media Editor (Admin) ──────────────────────────────────────────────────
@@ -2630,7 +2717,7 @@ const isMediaPublicationStatus = (v: unknown): v is MediaPublicationStatus =>
   typeof v === 'string' && (MEDIA_PUBLICATION_STATUSES as readonly string[]).includes(v);
 
 async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
-  await requireSuperAdminSession(req, admin);
+  await requireOpsAdminSession(req, admin);
   const url = new URL(req.url);
   const statusFilter = url.searchParams.get('status');
   const surfaceFilter = url.searchParams.get('surface');
@@ -2728,7 +2815,7 @@ async function handleOpsListMediaPublications({ req, admin }: HandlerCtx) {
 
 async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
   const id = ctx.params.id;
   if (!id) return json({ ok: false, error: 'missing_id' }, 400);
 
@@ -2813,7 +2900,7 @@ async function handleOpsPatchMediaPublications(ctx: HandlerCtx) {
 
 async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
   const id = ctx.params.id;
   if (!id) return json({ ok: false, error: 'missing_id' }, 400);
 
@@ -2864,7 +2951,7 @@ async function handleOpsDeleteMediaPublications(ctx: HandlerCtx) {
 }
 async function handleOpsReorderMediaPublications(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
   const body = (await ctx.req.json().catch(() => null)) as {
     items?: Array<{ id?: unknown; sortOrder?: unknown }>;
   } | null;
@@ -2918,7 +3005,7 @@ async function handleOpsReorderMediaPublications(ctx: HandlerCtx) {
 /** POST /ops/media/publications/:id/restore — restore an archived publication to draft */
 async function handleOpsMediaRestore(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
   const id = ctx.params.id;
   if (!id) return json({ ok: false, error: 'missing_id' }, 400);
 
@@ -2960,7 +3047,7 @@ async function handleOpsMediaRestore(ctx: HandlerCtx) {
 
 /** POST /ops/media/stale-cleanup-preview — preview which publications would be archived */
 async function handleOpsMediaStalePreview(ctx: HandlerCtx) {
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = (await ctx.req.json().catch(() => ({}))) as {
     olderThanDays?: number;
@@ -3030,7 +3117,7 @@ async function handleOpsMediaStalePreview(ctx: HandlerCtx) {
 /** POST /ops/media/stale-cleanup-execute — archive stale publications (re-validates server-side) */
 async function handleOpsMediaStaleExecute(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = (await ctx.req.json().catch(() => ({}))) as {
     olderThanDays?: number;
@@ -3097,7 +3184,7 @@ async function handleOpsMediaStaleExecute(ctx: HandlerCtx) {
 /** POST /ops/media/bulk-archive — transactional bulk archive via RPC */
 async function handleOpsBulkArchive(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = (await ctx.req.json().catch(() => null)) as { ids?: unknown[] } | null;
   const ids = Array.isArray(body?.ids) ? body.ids : [];
@@ -3832,6 +3919,90 @@ export async function resolvePotgPlayer(
   return { ok: true, playerId, userId, provisioned, warnings };
 }
 
+/**
+ * POST /ops/players/find-or-create
+ *
+ * Replaces the old "Create Player" contract, which required the operator to
+ * already know and paste a raw `user_id` UUID with no lookup endpoint to find
+ * one — the only field in the Ops Console with genuinely nothing to search
+ * against. Regular admins do not have database access, so that field was
+ * effectively unusable.
+ *
+ * Reuses `resolvePotgPlayer` — the same find-or-create-by-display-name logic
+ * already proven in production by Roster Import and POTG ingest — instead of
+ * requiring a pre-existing account. Body: { name, leagueId, teamId?,
+ * jerseyNumber?, position? }. `leagueId` accepts a code or a UUID (resolved
+ * via resolveLeagueId); `teamId`, if given, is a real UUID selected from a
+ * dropdown by the caller, not a name — set directly rather than re-resolved
+ * by name, since resolvePotgPlayer only assigns a team on first provisioning
+ * and an operator may also be attaching a team to an already-registered
+ * player (e.g. a self-registered fan being rostered for the first time).
+ */
+async function handleOpsFindOrCreatePlayer(ctx: HandlerCtx) {
+  await ensureMutation(ctx.req, ctx);
+  const session = await requireOpsAdminSession(ctx.req, ctx.admin);
+
+  const body = (await ctx.req.json().catch(() => null)) as {
+    name?: string;
+    leagueId?: string;
+    teamId?: string;
+    jerseyNumber?: string | number;
+    position?: string;
+  } | null;
+
+  const name = body?.name?.trim();
+  if (!name) return json({ ok: false, error: "name_required" }, 400);
+
+  const rawLeague = body?.leagueId?.trim();
+  if (!rawLeague) return json({ ok: false, error: "league_id_required" }, 400);
+  const leagueUuid = await resolveLeagueId(ctx.admin, rawLeague);
+  if (!leagueUuid) return json({ ok: false, error: "league_not_found" }, 404);
+
+  const result = await resolvePotgPlayer(ctx.admin, name, leagueUuid, {
+    actorId: session.userId,
+  });
+  if (result.ok === false) {
+    return json({ ok: false, error: result.error, details: result.details }, 422);
+  }
+
+  const patch: Record<string, unknown> = {};
+  if (body?.teamId) patch.team_id = body.teamId;
+  if (body?.jerseyNumber !== undefined && body.jerseyNumber !== "") {
+    const jersey = Number(body.jerseyNumber);
+    if (Number.isFinite(jersey) && jersey >= 0) patch.jersey_number = jersey;
+  }
+  if (body?.position?.trim()) patch.position = body.position.trim();
+
+  let player: Record<string, unknown> | null = null;
+  if (Object.keys(patch).length > 0) {
+    const { data, error } = await ctx.admin
+      .from("players")
+      .update(patch)
+      .eq("id", result.playerId)
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    player = data as Record<string, unknown>;
+  } else {
+    const { data, error } = await ctx.admin
+      .from("players")
+      .select()
+      .eq("id", result.playerId)
+      .single();
+    if (error) throw new Error(error.message);
+    player = data as Record<string, unknown>;
+  }
+
+  return json({
+    ok: true,
+    playerId: result.playerId,
+    userId: result.userId,
+    provisioned: result.provisioned,
+    warnings: result.warnings,
+    player,
+  });
+}
+
 
 // ── PPV INVITE SYSTEM ────────────────────────────────────────────────────────
 //
@@ -3942,15 +4113,57 @@ export async function handleInviteGenerate(ctx: HandlerCtx) {
  * Unlike the regular invite generator, super admin can create UNLIMITED codes
  * per game (the partial unique index only applies to is_comp = false rows).
  *
+ * A regular admin (`league_admin`) may also generate comp codes, but is capped
+ * at LEAGUE_ADMIN_COMP_CODE_DAILY_LIMIT within a rolling 24-hour window. The
+ * allowance does NOT compound — it is a ceiling on codes generated in any 24h
+ * window, not a per-day budget that accrues while unused. Regular admins remain
+ * excluded from every other live-PPV control (config, go-live, access override,
+ * revenue).
+ *
  * Body:
  *   { gameId: string, note?: string, expiresInHours?: number }
  *
  * Response:
  *   { ok: true, code: string, gameId: string, expiresAt: string, note?: string }
+ *   429 { ok: false, error: 'comp_code_daily_limit_reached' } when capped.
  */
-async function handleSuperAdminCompCode(ctx: HandlerCtx) {
+export const LEAGUE_ADMIN_COMP_CODE_DAILY_LIMIT = 5;
+export const COMP_CODE_LIMIT_WINDOW_HOURS = 24;
+
+export async function handleSuperAdminCompCode(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const session = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const session = await requireOpsAdminSession(ctx.req, ctx.admin);
+  const isSuper = session.roles.includes("super_admin");
+
+  // Rolling-window cap for regular admins. A rolling window is what makes the
+  // allowance non-compounding: an unused day never banks extra codes.
+  if (!isSuper) {
+    const windowStart = new Date(
+      Date.now() - COMP_CODE_LIMIT_WINDOW_HOURS * 60 * 60 * 1000,
+    ).toISOString();
+
+    const { count, error: countErr } = await ctx.admin
+      .from("ppv_invites")
+      .select("id", { count: "exact", head: true })
+      .eq("generated_by", session.userId)
+      .eq("is_comp", true)
+      .gte("created_at", windowStart);
+
+    if (countErr) throw new Error(countErr.message);
+
+    if ((count ?? 0) >= LEAGUE_ADMIN_COMP_CODE_DAILY_LIMIT) {
+      return json(
+        {
+          ok: false,
+          error: "comp_code_daily_limit_reached",
+          limit: LEAGUE_ADMIN_COMP_CODE_DAILY_LIMIT,
+          windowHours: COMP_CODE_LIMIT_WINDOW_HOURS,
+          used: count ?? 0,
+        },
+        429,
+      );
+    }
+  }
 
   const body = (await ctx.req.json().catch(() => null)) as {
     gameId?: string;
@@ -3999,21 +4212,32 @@ async function handleSuperAdminCompCode(ctx: HandlerCtx) {
 
 /**
  * GET /ops/streams/comp-code
- * Super-admin only. Lists recent comp codes for ops tracking + reprinting.
- * Returns the 50 most recently generated codes that are still unused or
- * within their expiry window.
+ * Lists recent comp codes for ops tracking + reprinting. Returns the 50 most
+ * recently generated codes that are still unused or within their expiry window.
+ *
+ * Super admin sees every code. A regular admin (`league_admin`) sees ONLY the
+ * codes they generated themselves — they can generate codes (§ capped at
+ * LEAGUE_ADMIN_COMP_CODE_DAILY_LIMIT) so they must be able to reprint their own,
+ * but the full PPV comp ledger stays a super-admin view.
  */
-async function handleSuperAdminCompCodeList(ctx: HandlerCtx) {
-  await requireSuperAdminSession(ctx.req, ctx.admin);
-  const { data, error } = await ctx.admin
+export async function handleSuperAdminCompCodeList(ctx: HandlerCtx) {
+  const session = await requireOpsAdminSession(ctx.req, ctx.admin);
+  const isSuper = session.roles.includes("super_admin");
+
+  let query = ctx.admin
     .from("ppv_invites")
-    .select("id,code,game_id,used_by,used_at,expires_at,note,created_at")
-    .eq("is_comp", true)
+    .select("id,code,game_id,used_by,used_at,expires_at,note,created_at,generated_by")
+    .eq("is_comp", true);
+
+  if (!isSuper) query = query.eq("generated_by", session.userId);
+
+  const { data, error } = await query
     .order("created_at", { ascending: false })
     .limit(50);
   if (error) throw new Error(error.message);
   return json({
     ok: true,
+    scope: isSuper ? "all" : "own",
     codes: (data ?? []).map((row: Record<string, unknown>) => ({
       code: String(row.code),
       gameId: String(row.game_id),
@@ -6653,6 +6877,7 @@ const routes: Array<{ method: string; path: string; handler: Handler }> = [
   { method: "GET", path: "/ops/imports/history", handler: handleImportHistory },
   { method: "GET", path: "/ops/pipeline/health", handler: handlePipelineHealth },
   { method: "POST", path: "/ops/players/merge", handler: handlePlayerIdentityMerge },
+  { method: "POST", path: "/ops/players/find-or-create", handler: handleOpsFindOrCreatePlayer },
 
   { method: "POST", path: "/ops/event/parse", handler: handleParseEventImage },
   { method: "POST", path: "/ops/potg/parse", handler: handleParsePotgImage },
@@ -7150,7 +7375,7 @@ export default Sentry.withSentry(
  */
 async function handleIngestPresign(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  await requireSuperAdminSession(ctx.req, ctx.admin);
+  await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     kind?: string;
@@ -7213,7 +7438,7 @@ async function handleIngestPresign(ctx: HandlerCtx) {
  */
 async function handleIngestSubmit(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     kind?: string;
@@ -7529,7 +7754,7 @@ async function handleIngestSubmit(ctx: HandlerCtx) {
  * Returns current state of an ingest job.
  */
 async function handleIngestStatus(ctx: HandlerCtx) {
-  await requireSuperAdminSession(ctx.req, ctx.admin);
+  await requireOpsAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
@@ -7552,7 +7777,7 @@ async function handleIngestStatus(ctx: HandlerCtx) {
  */
 async function handleIngestApprove(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
@@ -7598,7 +7823,7 @@ async function handleIngestApprove(ctx: HandlerCtx) {
  */
 async function handleIngestReject(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
@@ -7639,7 +7864,7 @@ async function handleIngestReject(ctx: HandlerCtx) {
  */
 async function handleIngestReplay(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
+  const { userId } = await requireOpsAdminSession(ctx.req, ctx.admin);
   const { jobId } = ctx.params;
   if (!jobId) return json({ ok: false, error: "missing_job_id" }, 400);
 
@@ -7721,7 +7946,9 @@ async function handleOpsDeleteSchedules(ctx: HandlerCtx) {
  * POST /ops/products/batch
  * Creates up to 4 products without media. Uses actual schema columns.
  */
-async function handleOpsBatchProducts(ctx: HandlerCtx) {
+// Store product creation is excluded from league_admin — store media upload and
+// edit remain super-admin only. See STORE_ONLY_TABLES below for the edit path.
+export async function handleOpsBatchProducts(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
   const { userId } = await requireSuperAdminSession(ctx.req, ctx.admin);
   const body = await ctx.req.json().catch(() => null) as { items?: Array<{ title?: string; price?: string | number; leagueId?: string }> } | null;
@@ -7760,7 +7987,7 @@ async function handleOpsBatchProducts(ctx: HandlerCtx) {
 // surface that needs to push an already-uploaded image into the public render layer.
 async function handleOpsMediaPublish(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  await requireSuperAdminSession(ctx.req, ctx.admin);
+  await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = await ctx.req.json().catch(() => null) as {
     title?: string;
@@ -7834,6 +8061,7 @@ routes.push(
   { method: "GET",    path: "/ops/list/players",   handler: handleOpsListPlayers },
   { method: "GET",    path: "/ops/list/products",  handler: handleOpsListProducts },
   { method: "GET",    path: "/ops/list/events",    handler: handleOpsListEvents },
+  { method: "GET",    path: "/ops/list/schedules", handler: handleOpsListSchedules },
   { method: "GET",    path: "/ops/list/media",              handler: handleOpsListMediaPublications },
   { method: "PATCH",  path: "/ops/media/publications/:id",  handler: handleOpsPatchMediaPublications },
   { method: "DELETE", path: "/ops/media/publications/:id",  handler: handleOpsDeleteMediaPublications },
@@ -7945,7 +8173,7 @@ async function handleScoresList({ req, admin }: HandlerCtx) {
 /** POST /ops/scores/game — upsert a single game (super_admin only) */
 async function handleScoreGameUpsert(ctx: HandlerCtx) {
   await ensureMutation(ctx.req, ctx);
-  await requireSuperAdminSession(ctx.req, ctx.admin);
+  await requireOpsAdminSession(ctx.req, ctx.admin);
 
   const body = (await ctx.req.json().catch(() => null)) as {
     gameId?: string;
