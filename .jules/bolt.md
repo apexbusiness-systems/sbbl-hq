@@ -25,3 +25,6 @@
 ## 2026-05-21 - [React Rendering & Memory Optimization]
 **Learning:** Avoid using array spread syntax `[...a, ...b]` directly inside React render or hook dependencies when searching for elements via `.find()`, as it creates unnecessary O(N) array allocations on every render or dependency change.
 **Action:** Replace the spread and combined `.find()` with sequentially short-circuited searches (e.g., `a.find(...) ?? b.find(...)`) to save memory and CPU cycles.
+## 2026-05-24 - [Performance] Ops Ingest Queue Deduplication
+**Learning:** React components executing identical `array.filter()` operations multiple times inline within the same render cycle (e.g., `queue.filter()` referenced 3+ times in JSX) cause a linear O(N) penalty multiplied by the number of references on every re-render.
+**Action:** Always extract and deduplicate redundant inline array filtering or mapping operations into a single local variable before the return block to eliminate redundant CPU overhead during re-renders.
