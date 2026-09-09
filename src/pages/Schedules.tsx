@@ -43,6 +43,8 @@ function formatScheduleTime(input: string): string {
   return parsed.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
+const validLeagueIds = new Set<string>(LEAGUE_REGISTRY.map(l => l.id));
+
 const SchedulesPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const paramLeague = searchParams.get('league') as LeagueId | 'all' | null;
@@ -91,7 +93,8 @@ const SchedulesPage = () => {
       const rawLeagueId = typeof curr.league_id === 'string' ? curr.league_id : 'sbbl';
       const key = `${rawLeagueId}-${gameDate}`;
       if (!acc[key]) {
-        const leagueId = LEAGUE_REGISTRY.some((l) => l.id === rawLeagueId)
+        // ⚡ Bolt Performance Optimization: Use O(1) Set lookup to avoid O(N * M) traversal on every render
+        const leagueId = validLeagueIds.has(rawLeagueId)
           ? (rawLeagueId as LeagueId)
           : 'sbbl';
         acc[key] = {
