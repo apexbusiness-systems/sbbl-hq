@@ -43,7 +43,7 @@ function formatScheduleTime(input: string): string {
   return parsed.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 }
 
-const validLeagueIds = new Set(LEAGUE_REGISTRY.map(l => l.id));
+const validLeagueIds = new Set<string>(LEAGUE_REGISTRY.map(l => l.id));
 
 const SchedulesPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
