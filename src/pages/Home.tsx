@@ -1,5 +1,5 @@
 import { useApp } from '@/contexts/AppContext';
-import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY } from '@/lib/leagues';
+import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY, VALID_LEAGUE_IDS } from '@/lib/leagues';
 import { fetchPublicHome, fetchPublicPotg, type PublicHomeData } from '@/lib/api/public';
 
 import { PotgCard } from '@/components/ui/PotgCard';
@@ -19,12 +19,12 @@ const HomePage = () => {
 
   // Sync URL param → context
   useEffect(() => {
-    if (leagueParam && LEAGUE_REGISTRY.some(l => l.id === leagueParam)) {
+    if (leagueParam && VALID_LEAGUE_IDS.has(leagueParam as LeagueId)) {
       setActiveLeague(leagueParam as LeagueId);
     }
   }, [leagueParam, setActiveLeague]);
 
-  const resolvedLeague = (leagueParam && LEAGUE_REGISTRY.some(l => l.id === leagueParam))
+  const resolvedLeague = (leagueParam && VALID_LEAGUE_IDS.has(leagueParam as LeagueId))
     ? leagueParam as LeagueId
     : activeLeague;
   const league = getLeagueConfig(resolvedLeague);
