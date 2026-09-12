@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, type SyntheticEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
-import { LEAGUE_REGISTRY } from '@/lib/leagues';
+import { LEAGUE_REGISTRY , VALID_LEAGUE_IDS} from '@/lib/leagues';
 import { useApp } from '@/contexts/AppContext';
 import { LeagueId, MediaAsset } from '@/types';
 import { useQuery } from '@tanstack/react-query';
@@ -22,7 +22,7 @@ const MediaPage = () => {
   // League filter — URL param sync, default to active league
   const paramLeague = searchParams.get('league');
   const initialLeague: LeagueId | 'all' =
-    paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))
+    paramLeague && (paramLeague === 'all' || VALID_LEAGUE_IDS.has(paramLeague))
       ? (paramLeague as LeagueId | 'all')
       : activeLeague;
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(initialLeague);
@@ -33,7 +33,7 @@ const MediaPage = () => {
     setSearchParams({ league: val }, { replace: true });
   };
 
-  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague));
+  const isValidParam = paramLeague && (paramLeague === 'all' || VALID_LEAGUE_IDS.has(paramLeague));
 
   useEffect(() => {
     if (isValidParam) {
