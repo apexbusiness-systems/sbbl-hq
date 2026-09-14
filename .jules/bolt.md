@@ -25,3 +25,6 @@
 ## 2026-05-21 - [React Rendering & Memory Optimization]
 **Learning:** Avoid using array spread syntax `[...a, ...b]` directly inside React render or hook dependencies when searching for elements via `.find()`, as it creates unnecessary O(N) array allocations on every render or dependency change.
 **Action:** Replace the spread and combined `.find()` with sequentially short-circuited searches (e.g., `a.find(...) ?? b.find(...)`) to save memory and CPU cycles.
+## 2025-05-14 - [React Rendering Loop Optimization]
+**Learning:** Checking for the existence of an item using `LEAGUE_REGISTRY.some(...)` or `.find(...)` inside React components (or hooks) results in an O(N) iteration each time. In a codebase where these validation checks are ubiquitous across URL param parsing and filters, this CPU overhead accumulates.
+**Action:** Export precomputed `Set` (for O(1) existence checks like `.has()`) and `Map` (for O(1) key lookups like `.get()`) from the configuration module to eliminate background array traversal in the rendering path.
