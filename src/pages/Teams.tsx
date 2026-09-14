@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchTeams, type TeamCard } from '@/lib/api/teams';
 import { useApp } from '@/contexts/AppContext';
-import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, VALID_LEAGUE_IDS, getLeagueConfig } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
 import { Users, Trophy, Briefcase, Activity } from 'lucide-react';
@@ -15,7 +15,7 @@ const TeamsPage = () => {
   const paramLeague = searchParams.get('league') as LeagueId | 'all' | null;
   const { activeLeague, setActiveLeague } = useApp();
 
-  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some((l) => l.id === paramLeague));
+  const isValidParam = paramLeague && (paramLeague === 'all' || VALID_LEAGUE_IDS.has(paramLeague));
 
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(
     isValidParam
@@ -172,7 +172,7 @@ const TeamsPage = () => {
             const pct = Number.parseFloat(team.stats?.winPct ?? '0');
             const diff = team.stats?.diff ?? 0;
             const leagueLower = team.league_code.toLowerCase();
-            const leagueId: LeagueId = LEAGUE_REGISTRY.some(l => l.id === leagueLower) ? (leagueLower as LeagueId) : 'sbbl';
+            const leagueId: LeagueId = VALID_LEAGUE_IDS.has(leagueLower) ? (leagueLower as LeagueId) : 'sbbl';
             return (
               <div key={team.id} className={`panel p-3 flex items-center gap-4 transition-colors hover:border-border/60 ${index < 3 ? 'border-primary/20' : ''}`}>
                 <span className="stat-numeral text-sm text-muted-foreground w-6 text-center flex-shrink-0">{index + 1}</span>

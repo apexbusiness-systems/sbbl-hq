@@ -19,12 +19,12 @@ const HomePage = () => {
 
   // Sync URL param → context
   useEffect(() => {
-    if (leagueParam && LEAGUE_REGISTRY.some(l => l.id === leagueParam)) {
+    if (leagueParam && VALID_LEAGUE_IDS.has(leagueParam)) {
       setActiveLeague(leagueParam as LeagueId);
     }
   }, [leagueParam, setActiveLeague]);
 
-  const resolvedLeague = (leagueParam && LEAGUE_REGISTRY.some(l => l.id === leagueParam))
+  const resolvedLeague = (leagueParam && VALID_LEAGUE_IDS.has(leagueParam))
     ? leagueParam as LeagueId
     : activeLeague;
   const league = getLeagueConfig(resolvedLeague);

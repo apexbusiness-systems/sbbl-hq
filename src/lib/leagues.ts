@@ -66,8 +66,13 @@ export const LEAGUE_REGISTRY: LeagueIdentity[] = [
 /** Backwards-compatible alias */
 export const LEAGUE_CONFIGS = LEAGUE_REGISTRY;
 
+export const VALID_LEAGUE_IDS = new Set<string>(LEAGUE_REGISTRY.map(l => l.id));
+export const LEAGUE_MAP = new Map<LeagueId, LeagueIdentity>(
+  LEAGUE_REGISTRY.map(l => [l.id, l] as const)
+);
+
 export function getLeagueConfig(id: LeagueId): LeagueIdentity {
-  return LEAGUE_REGISTRY.find((l) => l.id === id) ?? LEAGUE_REGISTRY.find((l) => l.id === 'sbbl')!;
+  return LEAGUE_MAP.get(id) ?? LEAGUE_MAP.get('sbbl')!;
 }
 
 export function leagueIdFromCode(code: string): LeagueId {
@@ -93,7 +98,7 @@ export function persistLeague(id: LeagueId): void {
 export function loadPersistedLeague(): LeagueId | null {
   try {
     const stored = localStorage.getItem(LEAGUE_STORAGE_KEY);
-    if (stored && LEAGUE_REGISTRY.some((l) => l.id === stored)) return stored as LeagueId;
+    if (stored && VALID_LEAGUE_IDS.has(stored)) return stored as LeagueId;
   } catch { /* noop */ }
   return null;
 }
