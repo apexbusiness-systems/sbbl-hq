@@ -1,5 +1,5 @@
 import { useApp } from '@/contexts/AppContext';
-import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY } from '@/lib/leagues';
+import { getLeagueConfig, leagueCodeFromId, LEAGUE_REGISTRY, LEAGUE_ID_SET } from '@/lib/leagues';
 import { fetchPublicHome, fetchPublicPotg, type PublicHomeData } from '@/lib/api/public';
 
 import { PotgCard } from '@/components/ui/PotgCard';
