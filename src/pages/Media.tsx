@@ -11,6 +11,10 @@ import { toast } from 'sonner';
 
 const statusColors = { draft: 'text-muted-foreground', ready: 'text-warning', published: 'text-success' };
 
+// ⚡ Bolt Performance Optimization: Precompute static maps and sets for O(1) lookups
+const LEAGUE_ID_SET = new Set(LEAGUE_REGISTRY.map(l => l.id));
+const LEAGUE_MAP = new Map(LEAGUE_REGISTRY.map(l => [l.id, l]));
+
 const MediaPage = () => {
   const { activeLeague, setActiveLeague } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -22,7 +26,7 @@ const MediaPage = () => {
   // League filter — URL param sync, default to active league
   const paramLeague = searchParams.get('league');
   const initialLeague: LeagueId | 'all' =
-    paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))
+    paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId))
       ? (paramLeague as LeagueId | 'all')
       : activeLeague;
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(initialLeague);
@@ -33,7 +37,7 @@ const MediaPage = () => {
     setSearchParams({ league: val }, { replace: true });
   };
 
-  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague));
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId));
 
   useEffect(() => {
     if (isValidParam) {
@@ -95,7 +99,7 @@ const MediaPage = () => {
     return allMedia.find(m => m.id === shareModal) ?? posterProjection.find(m => m.id === shareModal) ?? null;
   }, [shareModal, allMedia, posterProjection]);
 
-  const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
+  const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_MAP.get(leagueFilter as LeagueId) : null;
 
   const resolveAspectRatio = (id: string, mediaType: MediaAsset['type']) => {
     const orientation = assetOrientation[id];

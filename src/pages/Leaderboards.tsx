@@ -21,6 +21,11 @@ const categories: { key: StatKey; label: string }[] = [
   { key: 'min', label: 'Minutes' },
 ];
 
+// ⚡ Bolt Performance Optimization: Precompute static maps and sets for O(1) lookups
+const CATEGORY_LABEL_MAP = new Map(categories.map(c => [c.key, c.label]));
+const LEAGUE_ID_SET = new Set(LEAGUE_REGISTRY.map(l => l.id));
+const LEAGUE_MAP = new Map(LEAGUE_REGISTRY.map(l => [l.id, l]));
+
 const LeaderboardsPage = () => {
   const { activeLeague, setActiveLeague } = useApp();
   const { session, loading: authLoading } = useAuth();
@@ -43,7 +48,7 @@ const LeaderboardsPage = () => {
     setSearchParams({ league: val }, { replace: true });
   };
 
-  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague));
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId));
 
   useEffect(() => {
     if (isValidParam) {
@@ -102,10 +107,10 @@ const LeaderboardsPage = () => {
     return <span className="stat-numeral text-sm text-muted-foreground w-4 text-center">{i + 1}</span>;
   };
 
-  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
+  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_MAP.get(leagueFilter as LeagueId);
 
   const activeCategoryLabel = useMemo(() => {
-    return categories.find(c => c.key === activeCategory)?.label || '';
+    return CATEGORY_LABEL_MAP.get(activeCategory) || '';
   }, [activeCategory]);
 
   return (
