@@ -17,6 +17,10 @@ const FULL_STAT_KEYS: StatKey[] = ['pts', 'reb', 'ast', 'stl', 'blk', 'fls', 'mi
 const MINIMAL_STAT_KEYS: StatKey[] = ['pts', 'reb', 'ast'];
 const statLabels: Record<StatKey, string> = { pts: 'PTS', reb: 'REB', ast: 'AST', stl: 'STL', blk: 'BLK', fls: 'FLS', min: 'MIN' };
 
+// ⚡ Bolt Performance Optimization: Precompute static sets and maps for O(1) lookups
+const LEAGUE_ID_SET = new Set(LEAGUE_REGISTRY.map(l => l.id));
+const LEAGUE_MAP = new Map(LEAGUE_REGISTRY.map(l => [l.id, l]));
+
 const StatsPage = () => {
   const { activeLeague, setActiveLeague } = useApp();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -26,7 +30,7 @@ const StatsPage = () => {
   // Initialise from URL param; fall back to current active league
   const paramLeague = searchParams.get('league');
   const initialFilter: LeagueId | 'all' =
-    paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))
+    paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId))
       ? (paramLeague as LeagueId | 'all')
       : activeLeague;
 
@@ -39,7 +43,7 @@ const StatsPage = () => {
     setSearchParams({ league: val }, { replace: true });
   };
 
-  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague));
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId));
 
   useEffect(() => {
     if (isValidParam) {
@@ -102,7 +106,7 @@ const StatsPage = () => {
     return maxes;
   }, [filtered, statKeys]);
 
-  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
+  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_MAP.get(leagueFilter as LeagueId);
 
   return (
     <div className="min-h-screen">

@@ -10,12 +10,15 @@ import { Link, useSearchParams } from 'react-router-dom';
 
 type TabView = 'standings' | 'rosters' | 'stats';
 
+// ⚡ Bolt Performance Optimization: Precompute static set for O(1) lookups
+const LEAGUE_ID_SET = new Set(LEAGUE_REGISTRY.map(l => l.id));
+
 const TeamsPage = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const paramLeague = searchParams.get('league') as LeagueId | 'all' | null;
   const { activeLeague, setActiveLeague } = useApp();
 
-  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some((l) => l.id === paramLeague));
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId));
 
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(
     isValidParam
@@ -172,7 +175,7 @@ const TeamsPage = () => {
             const pct = Number.parseFloat(team.stats?.winPct ?? '0');
             const diff = team.stats?.diff ?? 0;
             const leagueLower = team.league_code.toLowerCase();
-            const leagueId: LeagueId = LEAGUE_REGISTRY.some(l => l.id === leagueLower) ? (leagueLower as LeagueId) : 'sbbl';
+            const leagueId: LeagueId = LEAGUE_ID_SET.has(leagueLower as LeagueId) ? (leagueLower as LeagueId) : 'sbbl';
             return (
               <div key={team.id} className={`panel p-3 flex items-center gap-4 transition-colors hover:border-border/60 ${index < 3 ? 'border-primary/20' : ''}`}>
                 <span className="stat-numeral text-sm text-muted-foreground w-6 text-center flex-shrink-0">{index + 1}</span>
