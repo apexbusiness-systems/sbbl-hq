@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
-import { LEAGUE_REGISTRY } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, LEAGUE_ID_SET, LEAGUE_MAP } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
 import { Trophy, Crown, Medal, Lock, LogIn } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
@@ -30,7 +30,7 @@ const LeaderboardsPage = () => {
   // Initialise from URL param; fall back to current active league
   const paramLeague = searchParams.get('league');
   const initialFilter: LeagueId | 'all' =
-    paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague))
+    paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId))
       ? (paramLeague as LeagueId | 'all')
       : activeLeague;
 
@@ -43,7 +43,7 @@ const LeaderboardsPage = () => {
     setSearchParams({ league: val }, { replace: true });
   };
 
-  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some(l => l.id === paramLeague));
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId));
 
   useEffect(() => {
     if (isValidParam) {
@@ -102,7 +102,7 @@ const LeaderboardsPage = () => {
     return <span className="stat-numeral text-sm text-muted-foreground w-4 text-center">{i + 1}</span>;
   };
 
-  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
+  const activeLeagueObj = leagueFilter === 'all' ? null : (LEAGUE_MAP.get(leagueFilter) ?? null);
 
   const activeCategoryLabel = useMemo(() => {
     return categories.find(c => c.key === activeCategory)?.label || '';
