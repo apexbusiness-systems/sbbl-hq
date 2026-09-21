@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
-import { LEAGUE_REGISTRY } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, LEAGUE_MAP, LEAGUE_ID_SET } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
 import { BarChart3 } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
