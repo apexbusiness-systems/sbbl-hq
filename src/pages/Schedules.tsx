@@ -1,5 +1,5 @@
 import { useApp } from '@/contexts/AppContext';
-import { LEAGUE_REGISTRY, getLeagueConfig, getLeagueSeasonLabel } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, LEAGUE_ID_SET, getLeagueConfig, getLeagueSeasonLabel } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
 import { Calendar, MapPin, Clock } from 'lucide-react';
@@ -48,8 +48,8 @@ const SchedulesPage = () => {
   const paramLeague = searchParams.get('league') as LeagueId | 'all' | null;
   const { activeLeague, setActiveLeague } = useApp();
 
-  // Validate paramLeague: must be 'all' or in LEAGUE_REGISTRY
-  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some((l) => l.id === paramLeague));
+  // Validate paramLeague: must be 'all' or in LEAGUE_ID_SET
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId));
 
   // League filter state: initialize from URL param or activeLeague.
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(
@@ -91,7 +91,7 @@ const SchedulesPage = () => {
       const rawLeagueId = typeof curr.league_id === 'string' ? curr.league_id : 'sbbl';
       const key = `${rawLeagueId}-${gameDate}`;
       if (!acc[key]) {
-        const leagueId = LEAGUE_REGISTRY.some((l) => l.id === rawLeagueId)
+        const leagueId = LEAGUE_ID_SET.has(rawLeagueId as LeagueId)
           ? (rawLeagueId as LeagueId)
           : 'sbbl';
         acc[key] = {

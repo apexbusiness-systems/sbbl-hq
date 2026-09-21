@@ -25,3 +25,6 @@
 ## 2026-05-21 - [React Rendering & Memory Optimization]
 **Learning:** Avoid using array spread syntax `[...a, ...b]` directly inside React render or hook dependencies when searching for elements via `.find()`, as it creates unnecessary O(N) array allocations on every render or dependency change.
 **Action:** Replace the spread and combined `.find()` with sequentially short-circuited searches (e.g., `a.find(...) ?? b.find(...)`) to save memory and CPU cycles.
+## 2026-05-24 - [Performance] O(1) Lookup Optimization for Static Collections
+**Learning:** Frequent use of array methods like `.find()` and `.some()` on static registries (like `LEAGUE_REGISTRY`) inside React render cycles or module scopes adds unnecessary O(N) CPU overhead on every evaluation.
+**Action:** Always precompute static registries into O(1) lookup structures like `Map` or `Set` outside component lifecycles and replace O(N) array traversals with these optimized data structures to eliminate repeated overhead.
