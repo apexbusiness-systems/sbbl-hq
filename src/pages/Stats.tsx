@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import { PlayerAvatar } from '@/components/ui/PlayerAvatar';
-import { LEAGUE_REGISTRY } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, LEAGUE_MAP } from '@/lib/leagues';
 import { LeagueId, StatLine, PlayerProfile } from '@/types';
 import { BarChart3 } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
@@ -102,7 +102,7 @@ const StatsPage = () => {
     return maxes;
   }, [filtered, statKeys]);
 
-  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
+  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_MAP.get(leagueFilter as LeagueId) ?? null;
 
   return (
     <div className="min-h-screen">
