@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * whep-player.test.tsx
  *

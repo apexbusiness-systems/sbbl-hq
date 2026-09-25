@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * REGRESSION SHIELD — Scores page client-side filtering
  *
