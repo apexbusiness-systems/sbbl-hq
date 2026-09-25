@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * ViewerPreflight orchestrator — integration-style render tests.
  *

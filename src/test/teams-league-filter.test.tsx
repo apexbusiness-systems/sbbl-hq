@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * REGRESSION SHIELD — Teams page case-insensitive league_code filter
  *

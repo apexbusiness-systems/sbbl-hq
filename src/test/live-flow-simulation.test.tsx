@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * live-flow-simulation.test.tsx
  *

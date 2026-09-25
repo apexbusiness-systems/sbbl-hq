@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * use-whip-ingest.test.ts
  *
