@@ -63,16 +63,22 @@ export const LEAGUE_REGISTRY: LeagueIdentity[] = [
   },
 ];
 
+// ⚡ Bolt Performance Optimization: Precompute O(1) lookup structures
+// to avoid O(N) array traversals (.find, .some) in React render loops
+export const LEAGUE_ID_SET = new Set(LEAGUE_REGISTRY.map((l) => l.id));
+export const LEAGUE_MAP = new Map(LEAGUE_REGISTRY.map((l) => [l.id, l]));
+export const LEAGUE_CODE_MAP = new Map(LEAGUE_REGISTRY.map((l) => [l.code.toUpperCase(), l]));
+
 /** Backwards-compatible alias */
 export const LEAGUE_CONFIGS = LEAGUE_REGISTRY;
 
 export function getLeagueConfig(id: LeagueId): LeagueIdentity {
-  return LEAGUE_REGISTRY.find((l) => l.id === id) ?? LEAGUE_REGISTRY.find((l) => l.id === 'sbbl')!;
+  return LEAGUE_MAP.get(id) ?? LEAGUE_MAP.get('sbbl')!;
 }
 
 export function leagueIdFromCode(code: string): LeagueId {
   const upper = code.toUpperCase();
-  const match = LEAGUE_REGISTRY.find((l) => l.code === upper);
+  const match = LEAGUE_CODE_MAP.get(upper);
   return match?.id ?? 'sbbl';
 }
 
@@ -93,7 +99,7 @@ export function persistLeague(id: LeagueId): void {
 export function loadPersistedLeague(): LeagueId | null {
   try {
     const stored = localStorage.getItem(LEAGUE_STORAGE_KEY);
-    if (stored && LEAGUE_REGISTRY.some((l) => l.id === stored)) return stored as LeagueId;
+    if (stored && LEAGUE_ID_SET.has(stored as LeagueId)) return stored as LeagueId;
   } catch { /* noop */ }
   return null;
 }
