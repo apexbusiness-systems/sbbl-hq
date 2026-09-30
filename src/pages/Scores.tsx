@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useApp } from '@/contexts/AppContext';
-import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, getLeagueConfig, LEAGUE_ID_SET } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId, ScoreCategory, ScoreEntry } from '@/types';
 import { useState, useMemo, useEffect } from 'react';
@@ -136,7 +136,7 @@ const ScoresPage = () => {
   const paramLeague   = searchParams.get('league')   as LeagueId | 'all' | null;
   const paramCategory = searchParams.get('category') as ScoreCategory | 'all' | null;
 
-  const isValidLeague = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some((l) => l.id === paramLeague));
+  const isValidLeague = paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId));
   const isValidCat    = paramCategory && CATEGORIES.some((c) => c.id === paramCategory);
 
   const [category,     setCategory]     = useState<ScoreCategory | 'all'>(isValidCat    ? paramCategory! : 'all');
