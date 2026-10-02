@@ -136,7 +136,7 @@ const ScoresPage = () => {
   const paramLeague   = searchParams.get('league')   as LeagueId | 'all' | null;
   const paramCategory = searchParams.get('category') as ScoreCategory | 'all' | null;
 
-  const isValidLeague = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some((l) => l.id === paramLeague));
+  const isValidLeague = paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId));
   const isValidCat    = paramCategory && CATEGORIES.some((c) => c.id === paramCategory);
 
   const [category,     setCategory]     = useState<ScoreCategory | 'all'>(isValidCat    ? paramCategory! : 'all');

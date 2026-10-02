@@ -1,5 +1,5 @@
 import { useApp } from '@/contexts/AppContext';
-import { LEAGUE_REGISTRY, getLeagueConfig, getLeagueSeasonLabel } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, getLeagueConfig, getLeagueSeasonLabel, LEAGUE_ID_SET } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId } from '@/types';
 import { Calendar, MapPin, Clock } from 'lucide-react';
@@ -91,7 +91,7 @@ const SchedulesPage = () => {
       const rawLeagueId = typeof curr.league_id === 'string' ? curr.league_id : 'sbbl';
       const key = `${rawLeagueId}-${gameDate}`;
       if (!acc[key]) {
-        const leagueId = LEAGUE_REGISTRY.some((l) => l.id === rawLeagueId)
+        const leagueId = LEAGUE_ID_SET.has(rawLeagueId as LeagueId)
           ? (rawLeagueId as LeagueId)
           : 'sbbl';
         acc[key] = {
