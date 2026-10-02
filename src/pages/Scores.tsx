@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useApp } from '@/contexts/AppContext';
-import { LEAGUE_REGISTRY, getLeagueConfig } from '@/lib/leagues';
+import { LEAGUE_REGISTRY, getLeagueConfig, getLeagueSeasonLabel, LEAGUE_ID_SET } from '@/lib/leagues';
 import { LeagueBadge } from '@/components/ui/LeagueBadge';
 import type { LeagueId, ScoreCategory, ScoreEntry } from '@/types';
 import { useState, useMemo, useEffect } from 'react';

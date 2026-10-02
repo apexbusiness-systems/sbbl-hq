@@ -49,7 +49,7 @@ const SchedulesPage = () => {
   const { activeLeague, setActiveLeague } = useApp();
 
   // Validate paramLeague: must be 'all' or in LEAGUE_REGISTRY
-  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_REGISTRY.some((l) => l.id === paramLeague));
+  const isValidParam = paramLeague && (paramLeague === 'all' || LEAGUE_ID_SET.has(paramLeague as LeagueId));
 
   // League filter state: initialize from URL param or activeLeague.
   const [leagueFilter, setLeagueFilter] = useState<LeagueId | 'all'>(
