@@ -69,6 +69,11 @@ function OpsCsvImportSection({ kind, csvUpload, csvLeagueId, setCsvLeagueId, isS
   const [localRows, setLocalRows] = useState<Record<string, string>[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ⚡ Bolt Performance Optimization: Deduplicate queue filtering
+  // This extracts the `.filter()` call out of the render loop's multiple UI references
+  // to prevent running O(N) array traversal multiple times per render.
+  const kindQueue = useMemo(() => csvUpload.queue.filter(q => q.type === kind), [csvUpload.queue, kind]);
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -104,7 +109,7 @@ function OpsCsvImportSection({ kind, csvUpload, csvLeagueId, setCsvLeagueId, isS
           <p className="text-xs text-muted-foreground mt-1">
             All imported rows will be validated against the {kind} schema (format=v1).
           </p>
-        )}
+      )}
       </div>
 
       {kind !== 'scores' && (
@@ -163,12 +168,12 @@ function OpsCsvImportSection({ kind, csvUpload, csvLeagueId, setCsvLeagueId, isS
       )}
 
       {/* Offline Ingest Queue */}
-      {csvUpload.queue.filter(q => q.type === kind).length > 0 && (
+      {kindQueue.length > 0 && (
         <div className="mt-4 p-3 bg-secondary rounded-sm border border-border">
           <div className="flex items-center justify-between mb-2">
             <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
               <Shield className="w-3.5 h-3.5" />
-              Offline Ingest Queue ({csvUpload.queue.filter(q => q.type === kind).length})
+              Offline Ingest Queue ({kindQueue.length})
             </h3>
             <button
               onClick={() => csvUpload.flushQueue()}
@@ -179,7 +184,7 @@ function OpsCsvImportSection({ kind, csvUpload, csvLeagueId, setCsvLeagueId, isS
             </button>
           </div>
           <div className="space-y-1.5 max-h-48 overflow-auto">
-            {csvUpload.queue.filter(q => q.type === kind).map((item) => (
+            {kindQueue.map((item) => (
               <div key={item.id} className="flex items-center justify-between text-2xs bg-card p-2 rounded-sm border border-border/50">
                 <div className="flex-1 min-w-0 pr-2">
                   <div className="font-semibold text-foreground truncate uppercase">{item.type} Upload</div>
@@ -188,7 +193,7 @@ function OpsCsvImportSection({ kind, csvUpload, csvLeagueId, setCsvLeagueId, isS
                   </div>
                   {item.error_message && (
                     <div className="text-destructive truncate mt-0.5 font-mono">{item.error_message}</div>
-                  )}
+                )}
                 </div>
                 <div className="flex items-center gap-1">
                   <button
@@ -907,7 +912,7 @@ const OpsPage = () => {
                       <p className="text-xs font-bold text-destructive mb-1">Pipeline alerts</p>
                       {pipelineHealthQuery.data.alerts.map((a) => <p key={a} className="text-xs font-mono text-destructive">{a}</p>)}
                     </div>
-                  )}
+                )}
                 </div>
               </div>
             ) : null}
@@ -945,7 +950,7 @@ const OpsPage = () => {
                 <div className="flex flex-col items-center gap-1"><AlertCircle className="w-5 h-5 text-destructive" /><p className="text-xs text-destructive">{scoreboardParseError}</p><p className="text-[10px] text-muted-foreground">Fill in fields manually below</p></div>
               ) : (
                 <div className="flex flex-col items-center gap-2"><Upload className="w-6 h-6 text-muted-foreground" /><p className="text-sm text-muted-foreground">Drop scoreboard photo or click to upload</p><p className="text-[10px] text-muted-foreground">PNG, JPG — reads team names, scores, date</p></div>
-              )}
+            )}
             </div>
           </div>
 
@@ -980,7 +985,7 @@ const OpsPage = () => {
                   ))}
                 </div>
               </div>
-            )}
+          )}
 
             {/* Event name — for special events */}
             {scoresForm.category === 'special_event' && (
@@ -988,7 +993,7 @@ const OpsPage = () => {
                 <label className="text-[10px] uppercase tracking-wider text-muted-foreground block mb-1">Event Name</label>
                 <input className="w-full bg-secondary border border-border rounded-sm px-3 py-2 text-sm" placeholder="e.g. SBBL All-Star Weekend" value={scoresForm.eventName} onChange={e => setScoresForm(f => ({ ...f, eventName: e.target.value }))} />
               </div>
-            )}
+          )}
 
             {/* Teams / participants */}
             <div className="grid grid-cols-2 gap-3">
@@ -1063,7 +1068,7 @@ const OpsPage = () => {
             {scoresQuery.isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
             {!scoresQuery.isLoading && (scoresQuery.data?.games ?? []).length === 0 && (
               <p className="text-sm text-muted-foreground">No scores yet. Add them above or import a CSV.</p>
-            )}
+          )}
             <div className="space-y-2 max-h-96 overflow-auto pr-1">
               {(scoresQuery.data?.games ?? []).slice(0, 20).map(g => (
                 <div key={g.id} className="border border-border rounded-sm p-3 text-xs flex items-center justify-between gap-4">
@@ -1121,7 +1126,7 @@ const OpsPage = () => {
                 {deleteTeamMutation.isSuccess && <p className="text-xs text-success mt-1">Team archived.</p>}
               </div>
             </div>
-          )}
+        )}
         </div>
       </div></section>)}
 
@@ -1187,7 +1192,7 @@ const OpsPage = () => {
                 {deletePlayerMutation.isSuccess && <p className="text-xs text-success mt-1">Player deleted.</p>}
               </div>
             </div>
-          )}
+        )}
         </div>
       </div></section>)}
 
@@ -1236,7 +1241,7 @@ const OpsPage = () => {
                 {deleteScheduleMutation.isSuccess && <p className="text-xs text-success mt-1">Schedule slot deleted.</p>}
               </div>
             </div>
-          )}
+        )}
         </div>
       </div></section>)}
 
@@ -1302,7 +1307,7 @@ const OpsPage = () => {
                       <Upload className="w-6 h-6 text-muted-foreground" />
                       <p className="text-sm text-muted-foreground">Drop flyer image or click to upload</p>
                     </div>
-                  )}
+                )}
                 </div>
 
                 <div className="space-y-2 bg-secondary/30 p-3 rounded-sm border border-border">
@@ -1330,10 +1335,10 @@ const OpsPage = () => {
                   </button>
                   {eventMediaMutation.isSuccess && eventMediaMutation.data && (
                     <p className="text-xs text-success">✓ Event graphic published to Media page</p>
-                  )}
+                )}
                   {eventMediaMutation.error && (
                     <p className="text-xs text-destructive">{(eventMediaMutation.error as Error).message}</p>
-                  )}
+                )}
                 </div>
               </div>
               <div className="border border-destructive/20 p-3 rounded-sm bg-destructive/5">
@@ -1346,7 +1351,7 @@ const OpsPage = () => {
                 {deleteEventMutation.isSuccess && <p className="text-xs text-success mt-1">Event archived.</p>}
               </div>
             </div>
-          )}
+        )}
         </div>
       </div></section>)}
 
@@ -1444,7 +1449,7 @@ const OpsPage = () => {
                         <p className="text-xs text-success font-medium">✓ {storeForm.imageFile.name}</p>
                       ) : (
                         <p className="text-xs text-muted-foreground">Drop product image or click to select (PNG/JPG)</p>
-                      )}
+                    )}
                     </div>
                     <button
                       disabled={!storeForm.title || !storeForm.imageFile || storeMutation.isPending}
@@ -1480,7 +1485,7 @@ const OpsPage = () => {
                 </div>
 
               </div>
-            )}
+          )}
           </div>
         </div>
       </div></section>)}
@@ -1521,7 +1526,7 @@ const OpsPage = () => {
                 <p className="text-sm text-muted-foreground">Drop POTG graphic or click to upload</p>
                 <p className="text-[10px] text-muted-foreground">PNG, JPG — Claude reads PTS / REB / AST / player name / team / game result</p>
               </div>
-            )}
+          )}
           </div>
 
           {/* Editable parsed fields */}
@@ -1589,7 +1594,7 @@ const OpsPage = () => {
                 featured
               />
             </div>
-          )}
+        )}
 
           <button
             disabled={potgMutation.isPending || !potgForm.playerName || !potgForm.team}
@@ -1626,14 +1631,14 @@ const OpsPage = () => {
                     Reject
                   </button>
                 </div>
-              )}
+            )}
               {ingestJob.state === 'published' && (
                 <a href="/media" className="text-xs text-primary underline">
                   View on /media →
                 </a>
-              )}
+            )}
             </div>
-          )}
+        )}
         </div>
       </div></section>)}
 
@@ -1678,7 +1683,7 @@ const OpsPage = () => {
                     <p className="text-sm text-muted-foreground">Drop roster/team photo or click to upload</p>
                     <p className="text-[10px] text-muted-foreground">PNG, JPG — extracts team name, player names, jersey numbers, positions</p>
                   </div>
-                )}
+              )}
               </div>
 
               <div className="grid grid-cols-3 gap-3">
@@ -1717,7 +1722,7 @@ const OpsPage = () => {
                       </div>
                     ))}
                   </div>
-                )}
+              )}
               </div>
 
               <button
@@ -1737,14 +1742,14 @@ const OpsPage = () => {
                   </p>
                   {rosterImportResult.warnings.length > 0 && (
                     <p className="text-[10px] text-warning">{rosterImportResult.warnings.join(' · ')}</p>
-                  )}
+                )}
                   {rosterImportResult.errors.length > 0 && (
                     <p className="text-[10px] text-destructive">{rosterImportResult.errors.join(' · ')}</p>
-                  )}
+                )}
                 </div>
-              )}
+            )}
             </>
-          )}
+        )}
         </div>
       </div></section>)}
 
@@ -1766,7 +1771,7 @@ const OpsPage = () => {
                 </li>
               ))}
             </ul>
-          )}
+        )}
         </div>
         <div className="panel p-4">
           <div className="flex items-center justify-between mb-3 gap-3">
@@ -1784,13 +1789,13 @@ const OpsPage = () => {
                   onClick={() => setHistorySearch('')}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs"
                 >✕</button>
-              )}
+            )}
             </div>
             {historySearch && (
               <span className="text-xs text-muted-foreground shrink-0">
                 {filteredJobs.length}/{jobs.length}
               </span>
-            )}
+          )}
           </div>
           {jobs.length === 0 ? <p className="text-sm text-muted-foreground">No import history.</p> : filteredJobs.length === 0 ? (
             <p className="text-sm text-muted-foreground">No jobs match <span className="font-mono">{historySearch}</span>.</p>
@@ -1802,11 +1807,11 @@ const OpsPage = () => {
                   <p className="text-xs text-muted-foreground">Rows {job.inserted_rows}/{job.total_rows} · failed {job.failed_rows}</p>
                   {job.error_summary && (
                     <p className="text-xs text-destructive mt-1 font-mono">{job.error_summary}</p>
-                  )}
+                )}
                 </div>
               ))}
             </div>
-          )}
+        )}
         </div>
       </div></section>)}
       </div>
