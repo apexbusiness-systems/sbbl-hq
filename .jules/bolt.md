@@ -25,3 +25,6 @@
 ## 2026-05-21 - [React Rendering & Memory Optimization]
 **Learning:** Avoid using array spread syntax `[...a, ...b]` directly inside React render or hook dependencies when searching for elements via `.find()`, as it creates unnecessary O(N) array allocations on every render or dependency change.
 **Action:** Replace the spread and combined `.find()` with sequentially short-circuited searches (e.g., `a.find(...) ?? b.find(...)`) to save memory and CPU cycles.
+## 2026-10-14 - [Deduplicating inline array operations]
+**Learning:** When optimizing React components, do not use Immediately Invoked Function Expressions (IIFEs) inside JSX to declare local variables. Instead, deduplicate identical inline array operations (like `.filter()`) by extracting them to the top of the component using `useMemo` to eliminate redundant CPU overhead and preserve referential equality.
+**Action:** Use `useMemo` instead of evaluating inline array functions when a filtered array is accessed multiple times across JSX output.
