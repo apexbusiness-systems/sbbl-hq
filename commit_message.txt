@@ -1,0 +1,9 @@
+⚡ Bolt: [performance improvement] Deduplicate inline array filter in Ops.tsx
+
+💡 What: Extracted three identical array `.filter()` calls inside the `OpsCsvImportSection` render phase into a single local variable `queueForKind` wrapped in a `useMemo` hook.
+
+🎯 Why: To prevent redundant array traversals and background execution of `O(N)` logic during every component re-render when the `csvUpload.queue` or `kind` references have not changed.
+
+📊 Impact: Reduces CPU overhead on array recalculations by deduplicating 3 filters to 1, and memoizes the result to preserve referential equality and skip unnecessary executions on subsequent renders.
+
+🔬 Measurement: Verified the UI works as expected when loading `src/pages/Ops.tsx` locally, specifically ensuring the "Offline Ingest Queue" renders the correct item count and list for the matched `kind`. Confirmed `bun test` passes successfully for related sections.
