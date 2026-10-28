@@ -102,7 +102,7 @@ const StatsPage = () => {
     return maxes;
   }, [filtered, statKeys]);
 
-  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
+  const activeLeagueObj = useMemo(() => leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter), [leagueFilter]);
 
   return (
     <div className="min-h-screen">

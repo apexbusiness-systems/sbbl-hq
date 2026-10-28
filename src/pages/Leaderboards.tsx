@@ -102,7 +102,7 @@ const LeaderboardsPage = () => {
     return <span className="stat-numeral text-sm text-muted-foreground w-4 text-center">{i + 1}</span>;
   };
 
-  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
+  const activeLeagueObj = useMemo(() => leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter), [leagueFilter]);
 
   const activeCategoryLabel = useMemo(() => {
     return categories.find(c => c.key === activeCategory)?.label || '';
