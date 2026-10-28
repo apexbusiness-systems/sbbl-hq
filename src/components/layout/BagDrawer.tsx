@@ -8,6 +8,21 @@ import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 export const BagDrawer = () => {
+  const { bagOpen, setBagOpen } = useBag();
+
+  if (!bagOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60]">
+      <div className="absolute inset-0 bg-background/60 backdrop-blur-sm" onClick={() => setBagOpen(false)} />
+      <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-card border-l border-border animate-slide-in flex flex-col">
+        <BagDrawerContent />
+      </div>
+    </div>
+  );
+};
+
+const BagDrawerContent = () => {
   const { bagOpen, setBagOpen, bagItems, removeFromBag } = useBag();
   const { session } = useAuth();
   const [checkingOut, setCheckingOut] = useState(false);
@@ -74,9 +89,7 @@ export const BagDrawer = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-[60]">
-      <div className="absolute inset-0 bg-background/60 backdrop-blur-sm" onClick={() => setBagOpen(false)} />
-      <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-card border-l border-border animate-slide-in flex flex-col">
+    <>
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h3 className="font-display text-lg">Your Bag</h3>
           <button onClick={() => setBagOpen(false)} className="p-1 text-muted-foreground hover:text-foreground"><X className="w-5 h-5" /></button>
@@ -128,7 +141,6 @@ export const BagDrawer = () => {
             </button>
           </div>
         )}
-      </div>
-    </div>
+    </>
   );
 };
