@@ -7,8 +7,8 @@ import { Product } from '@/types';
 import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-export const BagDrawer = () => {
-  const { bagOpen, setBagOpen, bagItems, removeFromBag } = useBag();
+const BagDrawerContent = () => {
+  const { setBagOpen, bagItems, removeFromBag } = useBag();
   const { session } = useAuth();
   const [checkingOut, setCheckingOut] = useState(false);
 
@@ -27,12 +27,14 @@ export const BagDrawer = () => {
     }, {} as Record<string, typeof products[0]>);
   }, [products]);
 
-  if (!bagOpen) return null;
-
-  const subtotal = bagItems.reduce((sum, id) => {
-    const product = productMap[id];
-    return sum + (product?.price ?? 0);
-  }, 0);
+  // ⚡ Bolt Performance Optimization: Wrap subtotal reduce calculation in useMemo
+  // to avoid recalculating on every render, caching it based on bagItems and productMap
+  const subtotal = useMemo(() => {
+    return bagItems.reduce((sum, id) => {
+      const product = productMap[id];
+      return sum + (product?.price ?? 0);
+    }, 0);
+  }, [bagItems, productMap]);
 
   const handleCheckout = async () => {
     if (!session) { toast.error('Sign in to complete your purchase.'); return; }
@@ -131,4 +133,15 @@ export const BagDrawer = () => {
       </div>
     </div>
   );
+};
+
+export const BagDrawer = () => {
+  const { bagOpen } = useBag();
+
+  // ⚡ Bolt Performance Optimization: Extract content into conditionally rendered component.
+  // This prevents expensive hooks (like useQuery and useMemo) from executing in the background
+  // on every parent re-render when the drawer is not even visible.
+  if (!bagOpen) return null;
+
+  return <BagDrawerContent />;
 };

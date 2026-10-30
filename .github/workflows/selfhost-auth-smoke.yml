@@ -27,7 +27,7 @@ jobs:
   cors-static-check:
     name: kong.yml allows all required headers
     # Runs on PRs that touch Kong (and on schedule for belt-and-braces).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
@@ -90,7 +90,7 @@ jobs:
     # update production. Failing a PR because production has not yet
     # adopted the PR's change would be circular.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Verify OPTIONS preflight allows all required headers
