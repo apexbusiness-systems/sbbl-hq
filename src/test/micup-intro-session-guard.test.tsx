@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 /**
  * MicUpIntroSting — once-per-session-per-game guard.
  *
