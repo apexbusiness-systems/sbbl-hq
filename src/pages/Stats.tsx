@@ -102,7 +102,10 @@ const StatsPage = () => {
     return maxes;
   }, [filtered, statKeys]);
 
-  const activeLeagueObj = leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
+  // ⚡ Bolt Performance Optimization: Memoize the active league lookup to avoid O(N) find on every render
+  const activeLeagueObj = useMemo(() => {
+    return leagueFilter === 'all' ? null : LEAGUE_REGISTRY.find(l => l.id === leagueFilter);
+  }, [leagueFilter]);
 
   return (
     <div className="min-h-screen">
