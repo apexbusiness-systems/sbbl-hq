@@ -95,7 +95,10 @@ const MediaPage = () => {
     return allMedia.find(m => m.id === shareModal) ?? posterProjection.find(m => m.id === shareModal) ?? null;
   }, [shareModal, allMedia, posterProjection]);
 
-  const activeLeagueObj = leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
+  // ⚡ Bolt Performance Optimization: Memoize the active league lookup to avoid O(N) find on every render
+  const activeLeagueObj = useMemo(() => {
+    return leagueFilter !== 'all' ? LEAGUE_REGISTRY.find(l => l.id === leagueFilter) : null;
+  }, [leagueFilter]);
 
   const resolveAspectRatio = (id: string, mediaType: MediaAsset['type']) => {
     const orientation = assetOrientation[id];
