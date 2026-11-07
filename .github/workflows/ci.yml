@@ -22,7 +22,7 @@ jobs:
   # ── Job 1: Lint + Typecheck ────────────────────────────────────────────────
   lint:
     name: Lint & Typecheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 10
@@ -66,7 +66,7 @@ jobs:
       # ── Job 2: Unit & Integration Tests + Coverage ────────────────────────────
   test:
     name: Unit & Integration Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 30
@@ -111,7 +111,7 @@ jobs:
   # ── Job 3: Build + Bundle Regression Guard ────────────────────────────────
   build:
     name: Build & Bundle Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 15
@@ -191,7 +191,7 @@ jobs:
   # ── Job 4: Lighthouse LCP Budget ─────────────────────────────────────────
   lighthouse:
     name: Lighthouse LCP Budget
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 15
@@ -236,7 +236,7 @@ jobs:
   # ── Job 5: Playwright E2E ─────────────────────────────────────────────────
   e2e:
     name: Playwright E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 20
@@ -278,7 +278,7 @@ jobs:
   # ── Job 6: Broadcast Evidence Capture ──────────────────────────────────────
   broadcast-evidence:
     name: Broadcast Evidence Capture
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
     timeout-minutes: 25
