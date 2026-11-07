@@ -7,8 +7,8 @@ import { Product } from '@/types';
 import { X, Trash2, ShoppingBag, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 
-export const BagDrawer = () => {
-  const { bagOpen, setBagOpen, bagItems, removeFromBag } = useBag();
+const BagDrawerContent = () => {
+  const { setBagOpen, bagItems, removeFromBag } = useBag();
   const { session } = useAuth();
   const [checkingOut, setCheckingOut] = useState(false);
 
@@ -27,12 +27,11 @@ export const BagDrawer = () => {
     }, {} as Record<string, typeof products[0]>);
   }, [products]);
 
-  if (!bagOpen) return null;
-
-  const subtotal = bagItems.reduce((sum, id) => {
+  // ⚡ Bolt Performance Optimization: Wrap array reduce inside useMemo to prevent redundant O(N) traversal on every re-render
+  const subtotal = useMemo(() => bagItems.reduce((sum, id) => {
     const product = productMap[id];
     return sum + (product?.price ?? 0);
-  }, 0);
+  }, 0), [bagItems, productMap]);
 
   const handleCheckout = async () => {
     if (!session) { toast.error('Sign in to complete your purchase.'); return; }
@@ -74,8 +73,6 @@ export const BagDrawer = () => {
   };
 
   return (
-    <div className="fixed inset-0 z-[60]">
-      <div className="absolute inset-0 bg-background/60 backdrop-blur-sm" onClick={() => setBagOpen(false)} />
       <div className="absolute right-0 top-0 bottom-0 w-full max-w-md bg-card border-l border-border animate-slide-in flex flex-col">
         <div className="flex items-center justify-between p-4 border-b border-border">
           <h3 className="font-display text-lg">Your Bag</h3>
@@ -129,6 +126,18 @@ export const BagDrawer = () => {
           </div>
         )}
       </div>
+  );
+};
+
+export const BagDrawer = () => {
+  const { bagOpen, setBagOpen } = useBag();
+
+  if (!bagOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[60]">
+      <div className="absolute inset-0 bg-background/60 backdrop-blur-sm" onClick={() => setBagOpen(false)} />
+      <BagDrawerContent />
     </div>
   );
 };
