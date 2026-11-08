@@ -25,3 +25,6 @@
 ## 2026-05-21 - [React Rendering & Memory Optimization]
 **Learning:** Avoid using array spread syntax `[...a, ...b]` directly inside React render or hook dependencies when searching for elements via `.find()`, as it creates unnecessary O(N) array allocations on every render or dependency change.
 **Action:** Replace the spread and combined `.find()` with sequentially short-circuited searches (e.g., `a.find(...) ?? b.find(...)`) to save memory and CPU cycles.
+## 2024-05-15 - Ops.tsx Array Deduplication
+**Learning:** Found that multiple inline array `filter()` passes in render logs inside `src/pages/Ops.tsx` were duplicating identical CPU work each render (an O(N) cost that grows as offline queue builds). While React caches component renders, inline loops directly in JSX props/children are an easy miss.
+**Action:** Extract repeated structural iterations in JSX into a single `useMemo` computation block before the return statement.
